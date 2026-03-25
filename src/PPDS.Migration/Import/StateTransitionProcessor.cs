@@ -43,95 +43,112 @@ namespace PPDS.Migration.Import
             ImportContext context,
             CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(context);
-
             var transitions = context.StateTransitions;
-            var entityNames = transitions.GetEntityNames();
-            var allTransitions = new List<StateTransitionData>();
-
-            foreach (var entityName in entityNames)
+            if (transitions.Count == 0)
             {
-                allTransitions.AddRange(transitions.GetTransitions(entityName));
-            }
-
-            if (allTransitions.Count == 0)
-            {
-                _logger?.LogDebug("No state transitions to process -- skipping phase");
+                _logger?.LogInformation("No state transitions to process");
                 return PhaseResult.Skipped();
             }
 
-            // Report initial progress
-            context.Progress?.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.ProcessingStateTransitions,
-                Current = 0,
-                Total = allTransitions.Count,
-                Message = "Processing state transitions"
-            });
-
-            var sw = Stopwatch.StartNew();
+            var stopwatch = Stopwatch.StartNew();
             var successCount = 0;
             var failureCount = 0;
             var errors = new List<MigrationError>();
+            var entityNames = transitions.GetEntityNames().ToList();
+            var totalTransitions = transitions.Count;
+            var processed = 0;
 
-            foreach (var transition in allTransitions)
+            context.Progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.ProcessingStateTransitions,
+                Message = $"Processing {totalTransitions} state transitions across {entityNames.Count} entities..."
+            });
+
+            foreach (var entityName in entityNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var entityTransitions = transitions.GetTransitions(entityName);
 
-                // Map source record ID to target environment ID
-                var targetRecordId = transition.RecordId;
-                if (context.IdMappings.TryGetNewId(transition.EntityName, transition.RecordId, out var mappedId))
+                foreach (var transition in entityTransitions)
                 {
-                    targetRecordId = mappedId;
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    processed++;
 
-                try
-                {
-                    // Check if the record is already in the target state (AC-16)
-                    if (await IsRecordAlreadyInStateAsync(transition.EntityName, targetRecordId, cancellationToken).ConfigureAwait(false))
+                    try
                     {
-                        _logger?.LogDebug(
-                            "Record {EntityName}/{RecordId} already in statecode={StateCode}, skipping transition",
-                            transition.EntityName, transition.RecordId, transition.StateCode);
+                        // Resolve mapped record ID
+                        var targetId = transition.RecordId;
+                        if (context.IdMappings.TryGetNewId(entityName, transition.RecordId, out var mappedId))
+                        {
+                            targetId = mappedId;
+                        }
+
+                        await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                        // Check if record is already closed (AC-16)
+                        if (await IsRecordClosedAsync(client, entityName, targetId).ConfigureAwait(false))
+                        {
+                            _logger?.LogDebug("Skipping already-closed {Entity}/{Id}", entityName, targetId);
+                            successCount++; // Count as success - already in desired state
+                            continue;
+                        }
+
+                        if (transition.SdkMessage == null)
+                        {
+                            // Default path: SetStateRequest (AC-06)
+                            var request = new OrganizationRequest("SetState")
+                            {
+                                ["EntityMoniker"] = new EntityReference(entityName, targetId),
+                                ["State"] = new OptionSetValue(transition.StateCode),
+                                ["Status"] = new OptionSetValue(transition.StatusCode)
+                            };
+                            await client.ExecuteAsync(request).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            // Specialized SDK message (AC-07 through AC-15)
+                            var request = new OrganizationRequest(transition.SdkMessage);
+                            if (transition.MessageData != null)
+                            {
+                                foreach (var kvp in transition.MessageData)
+                                {
+                                    request[kvp.Key] = kvp.Value;
+                                }
+                            }
+                            await client.ExecuteAsync(request).ConfigureAwait(false);
+                        }
+
                         successCount++;
-                        continue;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        failureCount++;
+                        _logger?.LogWarning(ex, "State transition failed for {Entity}/{Id}", entityName, transition.RecordId);
+                        errors.Add(new MigrationError
+                        {
+                            Phase = MigrationPhase.ProcessingStateTransitions,
+                            EntityLogicalName = entityName,
+                            RecordId = transition.RecordId,
+                            Message = ex.Message
+                        });
                     }
 
-                    // Apply the transition
-                    if (!string.IsNullOrEmpty(transition.SdkMessage))
+                    if (processed % 50 == 0)
                     {
-                        await ExecuteSdkMessageAsync(transition, targetRecordId, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await ExecuteSetStateAsync(transition, targetRecordId, cancellationToken).ConfigureAwait(false);
-                    }
-
-                    successCount++;
-                }
-                catch (Exception ex)
-                {
-                    failureCount++;
-                    errors.Add(new MigrationError
-                    {
-                        EntityLogicalName = transition.EntityName,
-                        RecordId = transition.RecordId,
-                        Message = ex.Message,
-                        Phase = MigrationPhase.ProcessingStateTransitions
-                    });
-
-                    _logger?.LogWarning(ex,
-                        "Failed to apply state transition for {EntityName}/{RecordId}",
-                        transition.EntityName, transition.RecordId);
-
-                    if (!context.Options.ContinueOnError)
-                    {
-                        break;
+                        context.Progress?.Report(new ProgressEventArgs
+                        {
+                            Phase = MigrationPhase.ProcessingStateTransitions,
+                            Current = processed,
+                            Total = totalTransitions,
+                            Message = $"State transitions: {processed}/{totalTransitions}"
+                        });
                     }
                 }
             }
 
-            sw.Stop();
+            stopwatch.Stop();
+            _logger?.LogInformation("State transitions complete: {Success} succeeded, {Failed} failed in {Duration}",
+                successCount, failureCount, stopwatch.Elapsed);
 
             return new PhaseResult
             {
@@ -139,86 +156,36 @@ namespace PPDS.Migration.Import
                 RecordsProcessed = successCount + failureCount,
                 SuccessCount = successCount,
                 FailureCount = failureCount,
-                Duration = sw.Elapsed,
+                Duration = stopwatch.Elapsed,
                 Errors = errors
             };
         }
 
         /// <summary>
-        /// Checks if a record is already in the target state to avoid double-closing.
+        /// Checks if a record is already in a closed/non-active state.
         /// </summary>
-        private async Task<bool> IsRecordAlreadyInStateAsync(
-            string entityName,
-            Guid recordId,
-            CancellationToken cancellationToken)
+        /// <param name="client">The Dataverse client.</param>
+        /// <param name="entityName">The entity logical name.</param>
+        /// <param name="recordId">The record ID to check.</param>
+        /// <returns>True if the record is already closed (statecode != 0), false otherwise.</returns>
+        private static async Task<bool> IsRecordClosedAsync(
+            IPooledClient client, string entityName, Guid recordId)
         {
             try
             {
-                await using var client = await _connectionPool.GetClientAsync(
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                var retrieved = await client.RetrieveAsync(
-                    entityName,
-                    recordId,
-                    new ColumnSet("statecode"),
-                    cancellationToken).ConfigureAwait(false);
-
-                var currentState = retrieved.GetAttributeValue<OptionSetValue>("statecode");
-                return currentState != null && currentState.Value != 0;
-            }
-            catch (FaultException)
-            {
-                // If we can't retrieve the record, proceed with the transition
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Executes a SetStateRequest for the given transition (AC-06).
-        /// </summary>
-        private async Task ExecuteSetStateAsync(
-            StateTransitionData transition,
-            Guid targetRecordId,
-            CancellationToken cancellationToken)
-        {
-            var request = new OrganizationRequest("SetState")
-            {
-                ["EntityMoniker"] = new EntityReference(transition.EntityName, targetRecordId),
-                ["State"] = new OptionSetValue(transition.StateCode),
-                ["Status"] = new OptionSetValue(transition.StatusCode)
-            };
-
-            await _connectionPool.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-
-            _logger?.LogDebug(
-                "Applied SetState for {EntityName}/{RecordId}: state={StateCode}, status={StatusCode}",
-                transition.EntityName, transition.RecordId,
-                transition.StateCode, transition.StatusCode);
-        }
-
-        /// <summary>
-        /// Executes an SDK message for the given transition (e.g., WinOpportunity, LoseOpportunity).
-        /// </summary>
-        private async Task ExecuteSdkMessageAsync(
-            StateTransitionData transition,
-            Guid targetRecordId,
-            CancellationToken cancellationToken)
-        {
-            var request = new OrganizationRequest(transition.SdkMessage!);
-
-            if (transition.MessageData != null)
-            {
-                foreach (var kvp in transition.MessageData)
+                var request = new RetrieveRequest
                 {
-                    request[kvp.Key] = kvp.Value;
-                }
+                    Target = new EntityReference(entityName, recordId),
+                    ColumnSet = new ColumnSet("statecode")
+                };
+                var response = (RetrieveResponse)await client.ExecuteAsync(request).ConfigureAwait(false);
+                var stateCode = response.Entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
+                return stateCode != 0;
             }
-
-            await _connectionPool.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-
-            _logger?.LogDebug(
-                "Applied SDK message '{SdkMessage}' for {EntityName}/{RecordId}",
-                transition.SdkMessage, transition.EntityName, transition.RecordId);
+            catch
+            {
+                return false; // If we cannot check, proceed with the transition
+            }
         }
     }
 }
