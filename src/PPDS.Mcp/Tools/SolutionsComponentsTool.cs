@@ -35,12 +35,12 @@ public sealed class SolutionsComponentsTool : McpToolBase
         int? componentType = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(solutionId), solutionId)).ConfigureAwait(false);
-
         if (!Guid.TryParse(solutionId, out var id))
         {
             throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(solutionId), solutionId)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<ISolutionService>();
 
         var components = await service.GetComponentsAsync(

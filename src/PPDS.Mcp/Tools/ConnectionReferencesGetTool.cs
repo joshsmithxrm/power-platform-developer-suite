@@ -36,7 +36,7 @@ public sealed class ConnectionReferencesGetTool : McpToolBase
         var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
 
         var reference = await service.GetAsync(logicalName, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Connection reference '{logicalName}' not found.");
+            ?? throw new KeyNotFoundException($"Connection reference '{logicalName}' not found.");
 
         var flows = await service.GetFlowsUsingAsync(logicalName, cancellationToken).ConfigureAwait(false);
 

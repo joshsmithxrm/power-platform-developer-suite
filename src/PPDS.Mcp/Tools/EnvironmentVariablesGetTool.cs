@@ -36,7 +36,7 @@ public sealed class EnvironmentVariablesGetTool : McpToolBase
         var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
 
         var variable = await service.GetAsync(schemaName, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Environment variable '{schemaName}' not found.");
+            ?? throw new KeyNotFoundException($"Environment variable '{schemaName}' not found.");
 
         return new EnvironmentVariablesGetResult
         {

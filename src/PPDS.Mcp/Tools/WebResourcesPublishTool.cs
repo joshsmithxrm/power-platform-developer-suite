@@ -32,7 +32,13 @@ public sealed class WebResourcesPublishTool : McpToolBase
         string[] ids,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(ids), ids)).ConfigureAwait(false);
+        if (Context.IsReadOnly)
+        {
+            throw new InvalidOperationException(
+                "Cannot publish web resources: this MCP session is read-only.");
+        }
+
+        ArgumentNullException.ThrowIfNull(ids);
 
         if (ids.Length == 0)
         {
@@ -48,6 +54,8 @@ public sealed class WebResourcesPublishTool : McpToolBase
             }
             parsedIds.Add(parsed);
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(ids), ids)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var count = await service.PublishAsync(parsedIds, cancellationToken).ConfigureAwait(false);

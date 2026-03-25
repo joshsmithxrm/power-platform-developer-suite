@@ -35,16 +35,16 @@ public sealed class WebResourcesGetTool : McpToolBase
         bool published = false,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
-
         if (!Guid.TryParse(id, out var resourceId))
         {
             throw new ArgumentException($"Invalid web resource ID: '{id}'. Must be a valid GUID.");
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var content = await service.GetContentAsync(resourceId, published, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Web resource '{id}' not found.");
+            ?? throw new KeyNotFoundException($"Web resource '{id}' not found.");
 
         var info = new WebResourceInfo(
             content.Id, content.Name, null, content.WebResourceType,

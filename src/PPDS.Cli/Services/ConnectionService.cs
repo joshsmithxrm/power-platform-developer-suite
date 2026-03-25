@@ -16,7 +16,7 @@ namespace PPDS.Cli.Services;
 /// <summary>
 /// Service for Power Platform connection operations via the Power Apps Admin API.
 /// </summary>
-public class ConnectionService : IConnectionService
+public class ConnectionService : IConnectionService, IDisposable
 {
     private readonly IPowerPlatformTokenProvider _tokenProvider;
     private readonly CloudEnvironment _cloud;
@@ -41,12 +41,30 @@ public class ConnectionService : IConnectionService
         CloudEnvironment cloud,
         string environmentId,
         ILogger<ConnectionService> logger)
+        : this(tokenProvider, cloud, environmentId, logger, new HttpClient())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConnectionService"/> class with a custom HTTP client.
+    /// </summary>
+    /// <param name="tokenProvider">The Power Platform token provider.</param>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <param name="environmentId">The environment ID.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="httpClient">The HTTP client to use for API requests.</param>
+    internal ConnectionService(
+        IPowerPlatformTokenProvider tokenProvider,
+        CloudEnvironment cloud,
+        string environmentId,
+        ILogger<ConnectionService> logger,
+        HttpClient httpClient)
     {
         _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
         _cloud = cloud;
         _environmentId = environmentId ?? throw new ArgumentNullException(nameof(environmentId));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _httpClient = new HttpClient();
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     }
 
     /// <inheritdoc />
@@ -176,6 +194,13 @@ public class ConnectionService : IConnectionService
         // Name format: /providers/Microsoft.PowerApps/connections/{connectionId}
         var parts = name.Split('/');
         return parts.Length > 0 ? parts[^1] : name;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     #region API Response Models

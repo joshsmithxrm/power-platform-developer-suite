@@ -29,7 +29,7 @@ public sealed class PluginsListTool : McpToolBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of plugin assemblies with types and steps.</returns>
     [McpServerTool(Name = "ppds_plugins_list")]
-    [Description("List registered plugin assemblies in the Dataverse environment. Shows plugin types and their registered steps (message/entity combinations). By default excludes hidden system assemblies and Microsoft.* assemblies.")]
+    [Description("List registered plugin assemblies in the Dataverse environment. Shows plugin types and their registered steps (message/entity/stage combinations). By default excludes hidden system assemblies and Microsoft.* assemblies.")]
     public async Task<PluginsListResult> ExecuteAsync(
         [Description("Filter by assembly name (partial match)")]
         string? nameFilter = null,
@@ -46,52 +46,66 @@ public sealed class PluginsListTool : McpToolBase
         await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
-        // Query plugin assemblies.
-        var assemblyQuery = BuildAssemblyQuery(nameFilter, maxRows, includeHidden, includeMicrosoft);
-        var assemblyResult = await queryExecutor.ExecuteFetchXmlAsync(
-            assemblyQuery, null, null, false, cancellationToken).ConfigureAwait(false);
+        // Single query with link-entity joins: assembly -> type -> step -> message.
+        var query = BuildJoinedQuery(nameFilter, maxRows, includeHidden, includeMicrosoft);
+        var result = await queryExecutor.ExecuteFetchXmlAsync(
+            query, null, null, false, cancellationToken).ConfigureAwait(false);
 
-        var assemblies = new List<PluginAssemblyResult>();
+        // Flatten the joined rows back into the assembly -> type -> step hierarchy.
+        var assemblyMap = new Dictionary<Guid, PluginAssemblyResult>();
+        var typeMap = new Dictionary<Guid, PluginTypeResult>();
 
-        foreach (var record in assemblyResult.Records)
+        foreach (var record in result.Records)
         {
             var assemblyId = record.GetGuid("pluginassemblyid");
             if (assemblyId == Guid.Empty) continue;
 
-            var assembly = new PluginAssemblyResult
+            if (!assemblyMap.TryGetValue(assemblyId, out var assembly))
             {
-                Id = assemblyId,
-                Name = record.GetString("name"),
-                Version = record.GetString("version"),
-                PublicKeyToken = record.GetString("publickeytoken"),
-                IsolationMode = record.GetFormatted("isolationmode"),
-                SourceType = record.GetFormatted("sourcetype"),
-                Types = []
-            };
+                assembly = new PluginAssemblyResult
+                {
+                    Id = assemblyId,
+                    Name = record.GetString("name"),
+                    Version = record.GetString("version"),
+                    PublicKeyToken = record.GetString("publickeytoken"),
+                    IsolationMode = record.GetFormatted("isolationmode"),
+                    SourceType = record.GetFormatted("sourcetype"),
+                    Types = []
+                };
+                assemblyMap[assemblyId] = assembly;
+            }
 
-            // Query types for this assembly.
-            var typesQuery = BuildTypesQuery(assemblyId);
-            var typesResult = await queryExecutor.ExecuteFetchXmlAsync(
-                typesQuery, null, null, false, cancellationToken).ConfigureAwait(false);
+            var typeId = record.GetGuid("pt.plugintypeid");
+            if (typeId == Guid.Empty) continue;
 
-            foreach (var typeRecord in typesResult.Records)
+            if (!typeMap.TryGetValue(typeId, out var pluginType))
             {
-                var typeId = typeRecord.GetGuid("plugintypeid");
-
-                var pluginType = new PluginTypeResult
+                pluginType = new PluginTypeResult
                 {
                     Id = typeId,
-                    TypeName = typeRecord.GetString("typename"),
-                    FriendlyName = typeRecord.GetString("friendlyname"),
+                    TypeName = record.GetString("pt.typename"),
+                    FriendlyName = record.GetString("pt.friendlyname"),
                     Steps = []
                 };
-
+                typeMap[typeId] = pluginType;
                 assembly.Types.Add(pluginType);
             }
 
-            assemblies.Add(assembly);
+            var stepName = record.GetString("step.name");
+            if (!string.IsNullOrEmpty(stepName))
+            {
+                pluginType.Steps.Add(new PluginStepResult
+                {
+                    Name = stepName,
+                    Message = record.GetString("msg.name"),
+                    Entity = record.GetString("step.primaryobjecttypecode"),
+                    Stage = record.GetFormatted("step.stage"),
+                    IsEnabled = record.GetString("step.statecode") == "0"
+                });
+            }
         }
 
+        var assemblies = assemblyMap.Values.ToList();
         return new PluginsListResult
         {
             Assemblies = assemblies,
@@ -100,7 +114,7 @@ public sealed class PluginsListTool : McpToolBase
         };
     }
 
-    private static string BuildAssemblyQuery(string? nameFilter, int maxRows, bool includeHidden = false, bool includeMicrosoft = false)
+    private static string BuildJoinedQuery(string? nameFilter, int maxRows, bool includeHidden, bool includeMicrosoft)
     {
         var conditions = new System.Text.StringBuilder();
 
@@ -129,6 +143,8 @@ public sealed class PluginsListTool : McpToolBase
                 </filter>";
         }
 
+        // Use top on the outer entity to limit assemblies. The link-entity joins
+        // bring in types and steps in a single round-trip, avoiding N+1 queries.
         return $@"
             <fetch top=""{maxRows}"">
                 <entity name=""pluginassembly"">
@@ -141,22 +157,21 @@ public sealed class PluginsListTool : McpToolBase
                     {filterXml}
                     {microsoftFilter}
                     <order attribute=""name"" />
-                </entity>
-            </fetch>";
-    }
-
-    private static string BuildTypesQuery(Guid assemblyId)
-    {
-        return $@"
-            <fetch top=""100"">
-                <entity name=""plugintype"">
-                    <attribute name=""plugintypeid"" />
-                    <attribute name=""typename"" />
-                    <attribute name=""friendlyname"" />
-                    <filter type=""and"">
-                        <condition attribute=""pluginassemblyid"" operator=""eq"" value=""{assemblyId}"" />
-                    </filter>
-                    <order attribute=""typename"" />
+                    <link-entity name=""plugintype"" from=""pluginassemblyid"" to=""pluginassemblyid"" link-type=""outer"" alias=""pt"">
+                        <attribute name=""plugintypeid"" />
+                        <attribute name=""typename"" />
+                        <attribute name=""friendlyname"" />
+                        <order attribute=""typename"" />
+                        <link-entity name=""sdkmessageprocessingstep"" from=""plugintypeid"" to=""plugintypeid"" link-type=""outer"" alias=""step"">
+                            <attribute name=""name"" />
+                            <attribute name=""stage"" />
+                            <attribute name=""statecode"" />
+                            <attribute name=""primaryobjecttypecode"" />
+                            <link-entity name=""sdkmessage"" from=""sdkmessageid"" to=""sdkmessageid"" link-type=""outer"" alias=""msg"">
+                                <attribute name=""name"" />
+                            </link-entity>
+                        </link-entity>
+                    </link-entity>
                 </entity>
             </fetch>";
     }

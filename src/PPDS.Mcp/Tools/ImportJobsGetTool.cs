@@ -32,16 +32,16 @@ public sealed class ImportJobsGetTool : McpToolBase
         string id,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
-
         if (!Guid.TryParse(id, out var importJobId))
         {
             throw new ArgumentException($"Invalid import job ID: '{id}'. Must be a valid GUID.");
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IImportJobService>();
 
         var job = await service.GetAsync(importJobId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Import job '{id}' not found.");
+            ?? throw new KeyNotFoundException($"Import job '{id}' not found.");
 
         var data = await service.GetDataAsync(importJobId, cancellationToken).ConfigureAwait(false);
 

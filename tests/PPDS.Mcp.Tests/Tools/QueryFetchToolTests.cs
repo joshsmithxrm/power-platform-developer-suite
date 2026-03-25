@@ -11,6 +11,7 @@ namespace PPDS.Mcp.Tests.Tools;
 /// <summary>
 /// Unit tests for <see cref="QueryFetchTool"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class QueryFetchToolTests
 {
     #region Constructor Tests

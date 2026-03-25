@@ -1,8 +1,10 @@
+using System.Net;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Moq.Protected;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
-using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using Xunit;
 
@@ -21,6 +23,26 @@ public class ConnectionServiceTests
         _mockLogger = new Mock<ILogger<ConnectionService>>();
         _environmentId = "test-environment-id";
         _cloud = CloudEnvironment.Public;
+    }
+
+    /// <summary>
+    /// Creates an <see cref="HttpClient"/> backed by a mock handler that returns the given response.
+    /// </summary>
+    private static HttpClient CreateMockHttpClient(HttpStatusCode statusCode, string jsonContent)
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = statusCode,
+                Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+            });
+
+        return new HttpClient(handler.Object);
     }
 
     #region Constructor Tests
@@ -84,22 +106,21 @@ public class ConnectionServiceTests
                 Resource = "https://service.powerapps.com"
             });
 
+        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, """{"value":[]}""");
+
         var service = new ConnectionService(
             _mockTokenProvider.Object,
             _cloud,
             _environmentId,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            httpClient);
 
-        // Act & Assert (will fail due to HTTP call, but we verify the token was requested)
-        try
-        {
-            await service.ListAsync();
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException)
-        {
-            // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
-        }
+        // Act
+        var result = await service.ListAsync();
 
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
         _mockTokenProvider.Verify(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -120,22 +141,20 @@ public class ConnectionServiceTests
                 Resource = "https://service.powerapps.com"
             });
 
+        var httpClient = CreateMockHttpClient(HttpStatusCode.NotFound, "");
+
         var service = new ConnectionService(
             _mockTokenProvider.Object,
             _cloud,
             _environmentId,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            httpClient);
 
-        // Act & Assert (will fail due to HTTP call, but we verify the token was requested)
-        try
-        {
-            await service.GetAsync("test-connection-id");
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException)
-        {
-            // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
-        }
+        // Act
+        var result = await service.GetAsync("test-connection-id");
 
+        // Assert — 404 returns null, no exception thrown
+        Assert.Null(result);
         _mockTokenProvider.Verify(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 

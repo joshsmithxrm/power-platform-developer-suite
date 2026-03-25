@@ -32,12 +32,12 @@ public sealed class PluginTracesTimelineTool : McpToolBase
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(correlationId), correlationId)).ConfigureAwait(false);
-
         if (!Guid.TryParse(correlationId, out var id))
         {
             throw new ArgumentException($"Invalid correlation ID format: '{correlationId}'. Expected a GUID.", nameof(correlationId));
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(correlationId), correlationId)).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         var timeline = await traceService.BuildTimelineAsync(id, cancellationToken).ConfigureAwait(false);

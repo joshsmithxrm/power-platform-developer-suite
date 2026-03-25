@@ -44,16 +44,8 @@ public sealed class QuerySqlTool : McpToolBase
         await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(sql), sql)).ConfigureAwait(false);
 
         // Parse and transpile SQL to FetchXML.
-        TSqlStatement stmt;
-        try
-        {
-            var parser = new QueryParser();
-            stmt = parser.ParseStatement(sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new InvalidOperationException($"SQL parse error: {ex.Message}", ex);
-        }
+        var parser = new QueryParser();
+        var stmt = parser.ParseStatement(sql);
 
         // Block DML operations in read-only sessions.
         if (Context.IsReadOnly && stmt is not SelectStatement)
@@ -62,9 +54,10 @@ public sealed class QuerySqlTool : McpToolBase
                 "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only.");
         }
 
-        // Apply row limit.
+        // Apply row limit only if the user hasn't already specified a TOP clause.
         if (stmt is SelectStatement selectStmt
-            && selectStmt.QueryExpression is QuerySpecification querySpec)
+            && selectStmt.QueryExpression is QuerySpecification querySpec
+            && querySpec.TopRowFilter == null)
         {
             querySpec.TopRowFilter = new TopRowFilter
             {

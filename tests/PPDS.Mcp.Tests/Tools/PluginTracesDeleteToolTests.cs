@@ -32,35 +32,35 @@ public sealed class PluginTracesDeleteToolTests
     #region Parameter Validation Tests
 
     [Fact]
-    public async Task ExecuteAsync_NoParameters_ReturnsError()
+    public async Task ExecuteAsync_NoParameters_ThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
         var tool = new PluginTracesDeleteTool(context);
 
         // Act
-        var result = await tool.ExecuteAsync();
+        Func<Task> act = () => tool.ExecuteAsync();
 
         // Assert
-        result.Error.Should().NotBeNullOrWhiteSpace();
-        result.Error.Should().Contain("At least one parameter is required");
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*At least one parameter is required*");
     }
 
     [Fact]
-    public async Task ExecuteAsync_MultipleModesProvided_ReturnsError()
+    public async Task ExecuteAsync_MultipleModesProvided_ThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
         var tool = new PluginTracesDeleteTool(context);
 
-        // Act — provide both ids and olderThanDays
-        var result = await tool.ExecuteAsync(
+        // Act
+        Func<Task> act = () => tool.ExecuteAsync(
             ids: new[] { Guid.NewGuid().ToString() },
             olderThanDays: 7);
 
         // Assert
-        result.Error.Should().NotBeNullOrWhiteSpace();
-        result.Error.Should().Contain("Only one deletion mode");
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Only one deletion mode*");
     }
 
     #endregion

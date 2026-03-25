@@ -32,19 +32,19 @@ public sealed class PluginTracesGetTool : McpToolBase
         string traceId,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(traceId), traceId)).ConfigureAwait(false);
-
         if (!Guid.TryParse(traceId, out var id))
         {
             throw new ArgumentException($"Invalid trace ID format: '{traceId}'. Expected a GUID.", nameof(traceId));
         }
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(traceId), traceId)).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         var trace = await traceService.GetAsync(id, cancellationToken).ConfigureAwait(false);
 
         if (trace == null)
         {
-            throw new InvalidOperationException($"Trace with ID '{traceId}' not found.");
+            throw new KeyNotFoundException($"Trace with ID '{traceId}' not found.");
         }
 
         return new PluginTraceDetailResult

@@ -11,6 +11,7 @@ namespace PPDS.Mcp.Tests.Tools;
 /// <summary>
 /// Unit tests for <see cref="DataSchemaTool"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DataSchemaToolTests
 {
     #region Constructor Tests

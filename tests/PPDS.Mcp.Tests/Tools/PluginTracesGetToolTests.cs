@@ -42,8 +42,8 @@ public sealed class PluginTracesGetToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentNullException>()
-            .WithParameterName("traceId");
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Invalid*traceId*");
     }
 
     [Fact]

@@ -41,9 +41,10 @@ public sealed class DataAnalyzeTool : McpToolBase
         var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         // Get record count.
+        var escapedEntityName = QueryValueExtensions.EscapeXml(entityName);
         var countQuery = $@"
             <fetch aggregate=""true"">
-                <entity name=""{entityName}"">
+                <entity name=""{escapedEntityName}"">
                     <attribute name=""{entity.PrimaryIdAttribute}"" alias=""count"" aggregate=""count"" />
                 </entity>
             </fetch>";
@@ -82,7 +83,7 @@ public sealed class DataAnalyzeTool : McpToolBase
         var attributeXml = string.Join("\n", sampleAttributes.Distinct().Select(a => $@"<attribute name=""{a}"" />"));
         var sampleQuery = $@"
             <fetch top=""5"">
-                <entity name=""{entityName}"">
+                <entity name=""{escapedEntityName}"">
                     {attributeXml}
                     <order attribute=""createdon"" descending=""true"" />
                 </entity>
