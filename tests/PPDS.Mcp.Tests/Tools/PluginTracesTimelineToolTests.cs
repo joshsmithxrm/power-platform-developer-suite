@@ -42,9 +42,8 @@ public sealed class PluginTracesTimelineToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("correlationId")
-            .WithMessage("*'correlationId' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("correlationId");
     }
 
     [Fact]

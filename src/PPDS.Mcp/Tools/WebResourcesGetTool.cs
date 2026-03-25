@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets web resource content for viewing or analysis.
 /// </summary>
 [McpServerToolType]
-public sealed class WebResourcesGetTool
+public sealed class WebResourcesGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="WebResourcesGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public WebResourcesGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public WebResourcesGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets web resource content for viewing or analysis.
@@ -40,12 +35,12 @@ public sealed class WebResourcesGetTool
         bool published = false,
         CancellationToken cancellationToken = default)
     {
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
+
         if (!Guid.TryParse(id, out var resourceId))
         {
             throw new ArgumentException($"Invalid web resource ID: '{id}'. Must be a valid GUID.");
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var content = await service.GetContentAsync(resourceId, published, cancellationToken).ConfigureAwait(false)

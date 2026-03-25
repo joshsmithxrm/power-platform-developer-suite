@@ -11,10 +11,8 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists Dataverse service endpoints and webhooks.
 /// </summary>
 [McpServerToolType]
-public sealed class ServiceEndpointsListTool
+public sealed class ServiceEndpointsListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     // Contract option set values
     private const int ContractOneWay = 1;
     private const int ContractQueue = 2;
@@ -44,10 +42,7 @@ public sealed class ServiceEndpointsListTool
     /// Initializes a new instance of the <see cref="ServiceEndpointsListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ServiceEndpointsListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ServiceEndpointsListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all service endpoints and webhooks in the environment.
@@ -79,7 +74,7 @@ public sealed class ServiceEndpointsListTool
                 </entity>
             </fetch>";
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         var result = await queryExecutor.ExecuteFetchXmlAsync(fetchXml, null, null, false, cancellationToken).ConfigureAwait(false);

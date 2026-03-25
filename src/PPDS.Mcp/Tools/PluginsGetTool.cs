@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that retrieves detailed information for a single plugin registration entity.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginsGetTool
+public sealed class PluginsGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginsGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginsGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginsGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets detailed information for a specific plugin registration entity.
@@ -40,10 +35,14 @@ public sealed class PluginsGetTool
         string nameOrId,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        string[] validTypes = ["assembly", "package", "type", "step", "image"];
+        var typeLower = (type ?? throw new ArgumentNullException(nameof(type))).ToLowerInvariant();
+        if (!validTypes.Contains(typeLower))
+            throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}");
+
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(nameOrId), nameOrId)).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
-        var typeLower = type.ToLowerInvariant();
         return typeLower switch
         {
             "assembly" => await GetAssemblyAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
@@ -51,7 +50,7 @@ public sealed class PluginsGetTool
             "type" => await GetPluginTypeAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
             "step" => await GetStepAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
             "image" => await GetImageAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            _ => throw new ArgumentException($"Invalid type '{type}'. Must be one of: assembly, package, type, step, image")
+            _ => throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}")
         };
     }
 

@@ -42,9 +42,8 @@ public sealed class PluginTracesGetToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("traceId")
-            .WithMessage("*'traceId' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("traceId");
     }
 
     [Fact]

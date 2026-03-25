@@ -46,9 +46,8 @@ public sealed class QueryFetchToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("fetchXml")
-            .WithMessage("*'fetchXml' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("fetchXml");
     }
 
     [Fact]

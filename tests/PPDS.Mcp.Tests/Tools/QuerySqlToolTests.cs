@@ -46,9 +46,8 @@ public sealed class QuerySqlToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("sql")
-            .WithMessage("*'sql' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("sql");
     }
 
     [Fact]

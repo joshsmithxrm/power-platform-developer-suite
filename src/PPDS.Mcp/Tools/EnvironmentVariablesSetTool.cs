@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that sets the current value of an environment variable.
 /// </summary>
 [McpServerToolType]
-public sealed class EnvironmentVariablesSetTool
+public sealed class EnvironmentVariablesSetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EnvironmentVariablesSetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public EnvironmentVariablesSetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public EnvironmentVariablesSetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Sets the current value of an environment variable.
@@ -40,18 +35,13 @@ public sealed class EnvironmentVariablesSetTool
         string value,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(schemaName))
-        {
-            throw new ArgumentException("schemaName is required.", nameof(schemaName));
-        }
-
-        if (_context.IsReadOnly)
+        if (Context.IsReadOnly)
         {
             throw new InvalidOperationException(
                 "Cannot set environment variable value: this MCP session is read-only.");
         }
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName), (nameof(value), value)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
 
         var success = await service.SetValueAsync(schemaName, value, cancellationToken).ConfigureAwait(false);

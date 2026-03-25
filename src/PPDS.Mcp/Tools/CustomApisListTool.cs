@@ -11,10 +11,8 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists Dataverse Custom APIs with their parameters.
 /// </summary>
 [McpServerToolType]
-public sealed class CustomApisListTool
+public sealed class CustomApisListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     // BindingType option set values
     private const int BindingTypeGlobal = 0;
     private const int BindingTypeEntity = 1;
@@ -44,10 +42,7 @@ public sealed class CustomApisListTool
     /// Initializes a new instance of the <see cref="CustomApisListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public CustomApisListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public CustomApisListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all Custom APIs in the environment with their parameters.
@@ -114,7 +109,7 @@ public sealed class CustomApisListTool
                 </entity>
             </fetch>";
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Execute all three queries sequentially (parallel would require .Result which is blocked by PPDS012)

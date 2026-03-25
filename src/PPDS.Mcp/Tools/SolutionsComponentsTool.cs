@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets components for a Dataverse solution.
 /// </summary>
 [McpServerToolType]
-public sealed class SolutionsComponentsTool
+public sealed class SolutionsComponentsTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="SolutionsComponentsTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public SolutionsComponentsTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public SolutionsComponentsTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets the components of a specific solution.
@@ -40,12 +35,12 @@ public sealed class SolutionsComponentsTool
         int? componentType = null,
         CancellationToken cancellationToken = default)
     {
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(solutionId), solutionId)).ConfigureAwait(false);
+
         if (!Guid.TryParse(solutionId, out var id))
         {
             throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<ISolutionService>();
 
         var components = await service.GetComponentsAsync(

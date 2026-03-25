@@ -42,9 +42,8 @@ public sealed class DataAnalyzeToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("entityName")
-            .WithMessage("*'entityName' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("entityName");
     }
 
     [Fact]

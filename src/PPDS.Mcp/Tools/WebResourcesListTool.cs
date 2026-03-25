@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists web resources in a Dataverse environment.
 /// </summary>
 [McpServerToolType]
-public sealed class WebResourcesListTool
+public sealed class WebResourcesListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="WebResourcesListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public WebResourcesListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public WebResourcesListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists web resources in the current environment, optionally filtered by solution.
@@ -51,7 +46,7 @@ public sealed class WebResourcesListTool
             parsedSolutionId = parsed;
         }
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var result = await service.ListAsync(parsedSolutionId, textOnly, cancellationToken).ConfigureAwait(false);

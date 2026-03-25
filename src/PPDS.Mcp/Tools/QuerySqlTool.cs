@@ -13,18 +13,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that executes SQL queries against Dataverse.
 /// </summary>
 [McpServerToolType]
-public sealed class QuerySqlTool
+public sealed class QuerySqlTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="QuerySqlTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public QuerySqlTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public QuerySqlTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Executes a SQL query against Dataverse.
@@ -42,13 +37,11 @@ public sealed class QuerySqlTool
         int maxRows = 100,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(sql))
-        {
-            throw new ArgumentException("The 'sql' parameter is required.", nameof(sql));
-        }
-
         // Cap maxRows to prevent runaway queries.
         maxRows = Math.Clamp(maxRows, 1, 5000);
+
+        // Validate required params and create service provider.
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(sql), sql)).ConfigureAwait(false);
 
         // Parse and transpile SQL to FetchXML.
         TSqlStatement stmt;
@@ -63,7 +56,7 @@ public sealed class QuerySqlTool
         }
 
         // Block DML operations in read-only sessions.
-        if (_context.IsReadOnly && stmt is not SelectStatement)
+        if (Context.IsReadOnly && stmt is not SelectStatement)
         {
             throw new InvalidOperationException(
                 "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only.");
@@ -82,8 +75,6 @@ public sealed class QuerySqlTool
         var generator = new FetchXmlGenerator();
         var fetchXml = generator.Generate(stmt);
 
-        // Execute query.
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         var result = await queryExecutor.ExecuteFetchXmlAsync(

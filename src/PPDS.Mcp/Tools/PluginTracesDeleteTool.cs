@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that deletes plugin trace logs.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginTracesDeleteTool
+public sealed class PluginTracesDeleteTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginTracesDeleteTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginTracesDeleteTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginTracesDeleteTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Deletes plugin trace logs by specific IDs, by age threshold, or by filter criteria.
@@ -74,7 +69,7 @@ public sealed class PluginTracesDeleteTool
             };
         }
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         if (ids != null)

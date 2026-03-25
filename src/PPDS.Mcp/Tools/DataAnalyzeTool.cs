@@ -12,18 +12,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that analyzes entity data.
 /// </summary>
 [McpServerToolType]
-public sealed class DataAnalyzeTool
+public sealed class DataAnalyzeTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="DataAnalyzeTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public DataAnalyzeTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public DataAnalyzeTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Analyzes data for a Dataverse entity.
@@ -38,12 +33,7 @@ public sealed class DataAnalyzeTool
         string entityName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(entityName))
-        {
-            throw new ArgumentException("The 'entityName' parameter is required.", nameof(entityName));
-        }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
         var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 

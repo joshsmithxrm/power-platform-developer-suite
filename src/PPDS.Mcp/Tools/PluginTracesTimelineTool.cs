@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that builds a plugin execution timeline.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginTracesTimelineTool
+public sealed class PluginTracesTimelineTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginTracesTimelineTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginTracesTimelineTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginTracesTimelineTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Builds an execution timeline from plugin traces with the same correlation ID.
@@ -37,17 +32,12 @@ public sealed class PluginTracesTimelineTool
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(correlationId))
-        {
-            throw new ArgumentException("The 'correlationId' parameter is required.", nameof(correlationId));
-        }
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(correlationId), correlationId)).ConfigureAwait(false);
 
         if (!Guid.TryParse(correlationId, out var id))
         {
             throw new ArgumentException($"Invalid correlation ID format: '{correlationId}'. Expected a GUID.", nameof(correlationId));
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         var timeline = await traceService.BuildTimelineAsync(id, cancellationToken).ConfigureAwait(false);

@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists Dataverse solutions.
 /// </summary>
 [McpServerToolType]
-public sealed class SolutionsListTool
+public sealed class SolutionsListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="SolutionsListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public SolutionsListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public SolutionsListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists Dataverse solutions for the current environment.
@@ -40,7 +35,7 @@ public sealed class SolutionsListTool
         bool includeManaged = false,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<ISolutionService>();
 
         var result = await service.ListAsync(

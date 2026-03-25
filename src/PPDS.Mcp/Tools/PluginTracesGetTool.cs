@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets detailed plugin trace information.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginTracesGetTool
+public sealed class PluginTracesGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginTracesGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginTracesGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginTracesGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets detailed information about a specific plugin trace.
@@ -37,17 +32,12 @@ public sealed class PluginTracesGetTool
         string traceId,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(traceId))
-        {
-            throw new ArgumentException("The 'traceId' parameter is required.", nameof(traceId));
-        }
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(traceId), traceId)).ConfigureAwait(false);
 
         if (!Guid.TryParse(traceId, out var id))
         {
             throw new ArgumentException($"Invalid trace ID format: '{traceId}'. Expected a GUID.", nameof(traceId));
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         var trace = await traceService.GetAsync(id, cancellationToken).ConfigureAwait(false);

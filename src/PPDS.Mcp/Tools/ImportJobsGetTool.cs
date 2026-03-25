@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets full details of a specific import job.
 /// </summary>
 [McpServerToolType]
-public sealed class ImportJobsGetTool
+public sealed class ImportJobsGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ImportJobsGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ImportJobsGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ImportJobsGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets full details of a specific import job including the XML import log.
@@ -37,12 +32,12 @@ public sealed class ImportJobsGetTool
         string id,
         CancellationToken cancellationToken = default)
     {
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
+
         if (!Guid.TryParse(id, out var importJobId))
         {
             throw new ArgumentException($"Invalid import job ID: '{id}'. Must be a valid GUID.");
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IImportJobService>();
 
         var job = await service.GetAsync(importJobId, cancellationToken).ConfigureAwait(false)

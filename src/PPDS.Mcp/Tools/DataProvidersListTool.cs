@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists virtual entity data sources and data providers.
 /// </summary>
 [McpServerToolType]
-public sealed class DataProvidersListTool
+public sealed class DataProvidersListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="DataProvidersListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public DataProvidersListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public DataProvidersListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all virtual entity data sources and data providers in the environment.
@@ -61,7 +56,7 @@ public sealed class DataProvidersListTool
                 </entity>
             </fetch>";
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Execute queries sequentially (parallel would require .Result which is blocked by PPDS012)

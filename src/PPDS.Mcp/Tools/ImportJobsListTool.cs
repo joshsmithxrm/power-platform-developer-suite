@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists recent solution import jobs.
 /// </summary>
 [McpServerToolType]
-public sealed class ImportJobsListTool
+public sealed class ImportJobsListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ImportJobsListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ImportJobsListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ImportJobsListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists recent solution import jobs for the current environment.
@@ -35,7 +30,7 @@ public sealed class ImportJobsListTool
     public async Task<ImportJobsListResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IImportJobService>();
 
         var result = await service.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);

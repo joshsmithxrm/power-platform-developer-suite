@@ -47,8 +47,8 @@ public sealed class WebResourcesPublishToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithMessage("*At least one web resource ID is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("ids");
     }
 
     [Fact]

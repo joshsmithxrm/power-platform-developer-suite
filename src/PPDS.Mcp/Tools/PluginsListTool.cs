@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists registered plugins in the environment.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginsListTool
+public sealed class PluginsListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginsListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginsListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginsListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists registered plugin assemblies in the environment.
@@ -48,7 +43,7 @@ public sealed class PluginsListTool
     {
         maxRows = Math.Clamp(maxRows, 1, 200);
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Query plugin assemblies.

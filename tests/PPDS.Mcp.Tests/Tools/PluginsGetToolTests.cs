@@ -32,13 +32,9 @@ public sealed class PluginsGetToolTests
     #region Parameter Validation Tests
 
     [Fact]
-    public async Task ExecuteAsync_NullType_ThrowsDueToMissingNullGuard()
+    public async Task ExecuteAsync_NullType_ThrowsArgumentNullException()
     {
         // Arrange
-        // BUG: Production code calls type.ToLowerInvariant() without a null guard,
-        // so null type causes a NullReferenceException instead of ArgumentNullException.
-        // This test documents current behavior. When a null guard is added, update
-        // this test to expect ArgumentNullException with parameterName "type".
         var context = CreateContext();
         var tool = new PluginsGetTool(context);
 
@@ -46,7 +42,8 @@ public sealed class PluginsGetToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!, "test-name");
 
         // Assert
-        await act.Should().ThrowAsync<NullReferenceException>();
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("type");
     }
 
     [Fact]

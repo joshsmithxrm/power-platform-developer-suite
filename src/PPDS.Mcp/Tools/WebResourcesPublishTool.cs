@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that publishes specific web resources to make changes live.
 /// </summary>
 [McpServerToolType]
-public sealed class WebResourcesPublishTool
+public sealed class WebResourcesPublishTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="WebResourcesPublishTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public WebResourcesPublishTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public WebResourcesPublishTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Publishes specific web resources to make changes live.
@@ -37,7 +32,9 @@ public sealed class WebResourcesPublishTool
         string[] ids,
         CancellationToken cancellationToken = default)
     {
-        if (ids == null || ids.Length == 0)
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(ids), ids)).ConfigureAwait(false);
+
+        if (ids.Length == 0)
         {
             throw new ArgumentException("At least one web resource ID is required.");
         }
@@ -51,8 +48,6 @@ public sealed class WebResourcesPublishTool
             }
             parsedIds.Add(parsed);
         }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var count = await service.PublishAsync(parsedIds, cancellationToken).ConfigureAwait(false);
