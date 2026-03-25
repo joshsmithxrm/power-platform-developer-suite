@@ -1,6 +1,6 @@
 """PreToolUse hook: block Edit/Write on main branch.
 
-Forces worktree workflow — all implementation changes must happen on a feature branch.
+Forces worktree workflow — all changes must happen on a feature branch.
 Exceptions: .plans/ (ephemeral, gitignored), temp directories.
 """
 
@@ -36,8 +36,6 @@ def is_allowed_path(file_path: str) -> bool:
         normalized = normalized[len(project_dir) + 1:]
     allowed_prefixes = [
         ".plans/",
-        # specs/ allowed � design artifacts committed to main
-        "specs/",
     ]
     allowed_substrings = [
         "/tmp/",
