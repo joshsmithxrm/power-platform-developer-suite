@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using PPDS.Cli.Tui.Infrastructure;
 using Xunit;
 
@@ -14,8 +15,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(faultedTask, "TestContext");
 
-        // Allow ContinueWith to execute
-        await Task.Delay(100);
+        await WaitForErrors(errorService, count: 1);
 
         Assert.Single(errorService.RecentErrors);
         Assert.Contains("TestContext", errorService.RecentErrors[0].Context);
@@ -28,6 +28,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(Task.CompletedTask, "TestContext");
 
+        // No error expected — short delay is sufficient for the successful path
         await Task.Delay(50);
 
         Assert.Empty(errorService.RecentErrors);
@@ -42,7 +43,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(faultedTask, "AggregateTest");
 
-        await Task.Delay(100);
+        await WaitForErrors(errorService, count: 1);
 
         Assert.Single(errorService.RecentErrors);
     }
@@ -55,5 +56,19 @@ public sealed class AsyncHelperTests
             errorService.FireAndForget(Task.FromException(new Exception("boom")), "Sync"));
 
         Assert.Null(exception);
+    }
+
+    private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 2000)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (errorService.RecentErrors.Count < count && stopwatch.ElapsedMilliseconds < timeoutMs)
+        {
+            await Task.Delay(25);
+        }
+
+        if (errorService.RecentErrors.Count < count)
+        {
+            Assert.Fail($"Timed out after {timeoutMs}ms waiting for {count} error(s), but only found {errorService.RecentErrors.Count}.");
+        }
     }
 }
