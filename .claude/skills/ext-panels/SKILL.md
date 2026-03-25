@@ -13,6 +13,15 @@ description: Building or modifying VS Code webview panels and multi-surface pane
 
 VS Code silently drops inline `<script>` tags exceeding ~32KB. External scripts have no size limit.
 
+## Panel Discovery
+
+Do NOT rely on the listing below as the source of truth for which panels exist. Discover panels dynamically:
+- Host panels: `glob src/PPDS.Extension/src/panels/*Panel.ts` (excludes WebviewPanelBase)
+- Webview entries: `glob src/PPDS.Extension/src/panels/webview/*-panel.ts`
+- Styles: `glob src/PPDS.Extension/src/panels/styles/*-panel.css`
+
+The listing below is a reference for architecture understanding, not an authoritative registry.
+
 ## Architecture
 
 ```
@@ -25,6 +34,7 @@ src/panels/
   MetadataBrowserPanel.ts          ← host-side panel
   PluginTracesPanel.ts             ← host-side panel
   WebResourcesPanel.ts             ← host-side panel
+  PluginsPanel.ts                  ← host-side panel (plugin registration)
   WebviewPanelBase.ts              ← abstract base: lifecycle, env picker, Maker URL, clipboard
   environmentPicker.ts             ← shared HTML generator + QuickPick helper
   monacoUtils.ts                   ← detectLanguage, mapCompletionKind, mapCompletionItems
@@ -42,6 +52,7 @@ src/panels/
     metadata-browser-panel.ts      ← Metadata Browser Panel webview entry point
     plugin-traces-panel.ts         ← Plugin Traces Panel webview entry point
     web-resources-panel.ts         ← Web Resources Panel webview entry point
+    plugins-panel.ts               ← Plugin Registration Panel webview entry point
     shared/
       message-types.ts             ← discriminated unions for ALL panel messages
       dom-utils.ts                 ← escapeHtml, escapeAttr, cssEscape, formatDate, sanitizeValue
@@ -50,6 +61,7 @@ src/panels/
       data-table.ts                ← reusable DataTable<T> — sorting, selection, status formatting
       solution-filter.ts           ← SolutionFilter component — solution picker with persistence
       selection-utils.ts           ← getSelectionRect, isSingleCell, sanitizeValue, buildTsv
+      selection-manager.ts           ← row/item selection state management
       vscode-api.ts                ← typed getVsCodeApi<T>() wrapper
       assert-never.ts              ← exhaustive switch helper
 
@@ -63,6 +75,7 @@ src/panels/
     metadata-browser-panel.css     ← @import './shared.css' + Metadata Browser specific
     plugin-traces-panel.css        ← @import './shared.css' + Plugin Traces specific
     web-resources-panel.css        ← @import './shared.css' + Web Resources specific
+    plugins-panel.css              ← @import './shared.css' + Plugin Registration specific
 
 esbuild.js                         ← builds host + webview TS + CSS entry points
 dist/
@@ -218,11 +231,11 @@ Add both to the `watch()`, `rebuild()`, and `dispose()` arrays.
 
 | File | Convention | Example |
 |---|---|---|
-| Host panel class | `{Name}Panel.ts` | `PluginTracePanel.ts` |
-| Webview entry | `src/panels/webview/{name}-panel.ts` | `plugin-trace-panel.ts` |
-| Panel CSS | `src/panels/styles/{name}-panel.css` | `plugin-trace-panel.css` |
-| Built JS output | `dist/{name}-panel.js` | `dist/plugin-trace-panel.js` |
-| Built CSS output | `dist/{name}-panel.css` | `dist/plugin-trace-panel.css` |
+| Host panel class | `{Name}Panel.ts` | `PluginTracesPanel.ts` |
+| Webview entry | `src/panels/webview/{name}-panel.ts` | `plugin-traces-panel.ts` |
+| Panel CSS | `src/panels/styles/{name}-panel.css` | `plugin-traces-panel.css` |
+| Built JS output | `dist/{name}-panel.js` | `dist/plugin-traces-panel.js` |
+| Built CSS output | `dist/{name}-panel.css` | `dist/plugin-traces-panel.css` |
 
 ## What Goes Where
 

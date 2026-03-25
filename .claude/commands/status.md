@@ -72,3 +72,5 @@ Include the overall pipeline duration and plan file path from the first log entr
 
 - This command does NOT write to `.workflow/state.json`. It is read-only.
 - On `main` branch: output "On main branch — workflow enforcement applies to feature branches only."
+- **Simple factual output only.** Do not add suggestions, analysis, or "would you like to..." prompts. Just show the state and stop.
+- When pipeline is running, the most useful info is: which stage is active and how long it has been running. Lead with that.

@@ -233,6 +233,26 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash(git checkout:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/checkout-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gh issue create:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/review-guard.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -253,6 +273,18 @@
           {
             "type": "command",
             "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start-workflow.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/notify.py\"",
             "timeout": 10
           }
         ]

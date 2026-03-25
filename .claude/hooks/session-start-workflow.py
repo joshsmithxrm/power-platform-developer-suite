@@ -2,6 +2,16 @@
 """
 SessionStart hook: injects workflow state into AI context.
 Outputs current workflow status so the AI knows what's been done and what's pending.
+
+TODO: Wire up as post-compaction context re-injection hook.
+  Attempted SessionStart(compact), PreCompact, and PostCompact matchers in
+  settings.json — none fired on /compact in Claude Code v2.1.83. The script
+  works standalone (writes to stdout for compact, stderr for normal). When
+  Claude Code adds compaction hook support, add a compact matcher to
+  SessionStart in settings.json and use source=="compact" from stdin JSON
+  to switch output to stdout (context injection requires stdout, not stderr).
+  See also: Windows encoding issue — stdout needs io.TextIOWrapper with
+  encoding="utf-8" to handle unicode chars (arrows, checkmarks) on cp1252.
 """
 import json
 import os
@@ -33,7 +43,7 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # On main: show active worktrees and /start guidance
+    # On main: show active worktrees and /design guidance
     if branch in ("main", "master"):
         _show_main_guidance(project_dir)
         sys.exit(0)
@@ -150,7 +160,7 @@ def main():
 
 
 def _show_main_guidance(project_dir):
-    """Show active worktrees and /start guidance when on main."""
+    """Show active worktrees and /design guidance when on main."""
     lines = ["You are on main."]
 
     # List active worktrees (exclude the main worktree itself)

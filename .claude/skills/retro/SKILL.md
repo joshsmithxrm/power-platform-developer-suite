@@ -5,199 +5,167 @@ description: Conduct a structured retrospective on recent work sessions. Use whe
 
 # Retrospective
 
-Structured analysis of recent work sessions to identify patterns, trace root causes, and recommend improvements.
+Structured analysis of recent work sessions. Collects evidence and presents it to the user — the USER provides judgment, not the AI.
 
 ## Quality Bar (READ BEFORE STARTING)
 
-A retrospective is NOT adequate if it only analyzes commit messages. Commit messages are the AI's self-reported summary — exactly the thing that needs verification. A proper retrospective reads diffs, reads transcripts, and quotes the user directly.
+- Commit messages are the AI's self-reported summary — exactly the thing that needs verification.
+- Do NOT grade sessions (no letter grades, no "successful" labels). Present evidence, let the user decide.
+- Do NOT delegate transcript reading to agents. Agents reported "zero user corrections" when the user was furious. Read transcripts yourself.
+- Do NOT use grep for JSONL transcripts — lines are too long on Windows, results get "[Omitted]". Use the python extraction approach.
 
-If your subagents return analysis based only on commit subjects and bodies, **reject their output and re-dispatch with explicit diff-reading instructions.**
+## Mode Detection
 
-## When to Use
+Detect automatically based on context:
 
-- End of a feature branch before PR
-- After a multi-day sprint
-- When the user asks to review recent work quality
-- After a particularly rough session (thrashing, rework)
+**Pipeline mode** (CWD is a worktree AND `.workflow/pipeline.log` exists AND running via `claude -p`):
+→ Jump to Pipeline Retro section below.
 
-## Process
+**Interactive mode** (user is present in conversation):
+→ Follow the full Interactive Retro process below.
 
-### 1. Gather Raw Data
+---
+
+## Interactive Retro
+
+### 1. Previous Retro Review
+
+Before analyzing anything new, check what happened last time:
+
+1. Look for `.workflow/retro-findings.json` in the current worktree or recent worktrees
+2. If found, check which findings are still open vs resolved:
+   - For `issue-only` findings: check if the GitHub issues are still open
+   - For `auto-fix`/`draft-fix` findings: check if the referenced files were changed
+3. Report: "Last retro found N issues. M resolved, K still open: [list]"
+
+If no previous retro found, skip this step.
+
+### 2. Gather Raw Data
 
 **Determine the scope** from $ARGUMENTS:
 
 - `/retro latest` or `/retro` (no args) → find the latest session (most recent 30+ minute gap)
-- `/retro 6h` or `/retro 2d` → explicit time window (hours or days)
+- `/retro 6h` or `/retro 2d` → explicit time window
 - `/retro abc123..def456` → explicit commit range
-- `/retro "2 days"` → explicit since-style window
-
-**Default behavior (no args):** Find the latest session, NOT "2 days ago". This prevents accidentally pulling in multiple sessions when the user wants to review just the most recent one.
+- `/retro the last 2 PRs` → find by PR number
 
 ```bash
-# Step 1: Get recent commits to find session boundaries
 git log --since="2 days ago" --format="%H %ai" --no-merges
-
-# Step 2: Identify the most recent 30+ minute gap
-# Everything after that gap = the latest session
-
-# Step 3: Fetch full details for ONLY the scoped commits
-git log {start}..{end} --format="COMMIT:%H%nDATE:%ai%nSUBJECT:%s%nBODY:%b%n---" --no-merges
 ```
 
-**Commit count guard:** If the scope contains more than 25 commits, warn the user and suggest narrowing. High-volume retros produce shallow analysis.
+**Commit count guard:** If scope contains more than 25 commits, warn and suggest narrowing.
 
-Identify session boundaries: gaps of 30+ minutes between commits = new session.
+### 3. Find ALL Relevant Transcripts
 
-### 2. Discover Transcript Paths
+This is where the old retro failed. The interactive session (main repo) is where the real user interaction happens. The worktree transcripts are headless pipeline sessions with zero user input.
 
-Before dispatching session agents, find the conversation transcripts:
+**Search main repo transcripts by PR number or branch name:**
 
-1. Determine which branch(es) the commits came from (from git log output in step 1)
-2. Compute the encoded project directory: take the worktree absolute path, replace `\` and `/` with `-`, strip `:`
-   Example: `C:\VS\ppdsw\ppds\.worktrees\v1-bugs` → `C--VS-ppdsw-ppds--worktrees-v1-bugs`
-3. Handle encoding inconsistency: search BOTH patterns using Bash:
-   ```bash
-   ls -d ~/.claude/projects/*ppdsw-ppds*worktrees-<name>*
-   ```
-   Also check the main repo path: `ls -d ~/.claude/projects/*ppdsw-ppds/`
-4. Find .jsonl files matching the date range:
-   ```bash
-   ls -lt <project-dir>/*.jsonl
-   ```
-   Filter to files modified within the session's date range.
-5. Pass the **absolute file path(s)** to each session agent in step 3.
+```bash
+# Find main repo transcript directory
+ls -d ~/.claude/projects/*ppdsw-ppds/
 
-If no transcript paths are found, note it and continue — transcript search becomes optional for those sessions.
-
-### 2.5. Dispatch Agents
-
-Launch ALL of these simultaneously — do NOT proceed until all are dispatched:
-
-- [ ] **One agent per session** for deep dives (step 3). Do NOT batch multiple sessions into one agent — each session gets its own agent with a focused scope.
-- [ ] **One agent for skills/tools audit** (step 4)
-- [ ] **One agent for memory cross-reference** (step 5) — only if memory is enabled (see step 5)
-
-### 3. Deep Dive Each Session (one agent per session)
-
-Use the prompt template below for EACH session. Do NOT batch sessions — each gets its own agent.
-
-#### Subagent Prompt Template
-
-> Analyze the work session from {start_hash} to {end_hash} ({date_range}, {N} commits).
->
-> Commits in this session:
-> {paste the commit subjects for this session}
->
-> You MUST do all of the following:
->
-> 1. **Read the full diff** for this session:
->    ```bash
->    git diff {start_hash}~1 {end_hash} --stat
->    ```
->    Then read file-level diffs for the most-changed files.
->
-> 2. **For any feat→fix chain** (a feat commit followed by fix commits
->    for the same thing), run:
->    ```bash
->    git diff {feat_hash} {fix_hash} -- <relevant-files>
->    ```
->    Explain what was wrong in the original feat commit.
->
-> 3. **For thrashing** (3+ commits attempting the same fix), read each
->    successive diff and explain what changed between attempts and why
->    the earlier attempts failed.
->
-> 4. **Read conversation transcripts** for user corrections.
->
->    Transcripts for this session are at:
->    {orchestrator inserts absolute paths here, or "No transcripts found — skip this step"}
->
->    Search for correction patterns using Grep (NOT bash grep) on the provided files:
->    - Corrections: `"role":"user".*(that's not what|I never said|I didn't ask|not what I meant|who said|where did you get)`
->    - Frustration: `"role":"user".*(fuck|shit|damn|wtf|what the hell|frustrated|half.ass)`
->    - Redirections: `"role":"user".*(you missed|why didn't you|I already told you|I said|read it again|look at the)`
->
->    Lines are long (one JSON record per line). Use the Read tool with
->    offset/limit to read specific user messages. Extract direct quotes.
->
-> 5. **Return structured output:**
->    - Session summary (2-3 sentences)
->    - Feat-then-fix chains with commit hashes and diff evidence
->    - Thrashing incidents with diff evidence
->    - Direct user quotes (if transcripts found)
->    - Root cause chain per incident (5-Whys)
->    - What went well
-
-#### Root Cause Analysis (5-Whys)
-
-For each incident, trace the root cause chain instead of assigning blame labels:
-
-```
-Incident: AI skipped real verification
-  → /verify language is ambiguous about what "verify" means
-    → Skill was written assuming AI would interpret "use the product" literally
-      → No artifact requirement to prove verification happened
-        → Root cause: /verify needs screenshot/output evidence gate
+# Search for PR numbers or branch names in those transcripts
+grep -l "#NNN\|branch-name" ~/.claude/projects/*ppdsw-ppds/*.jsonl
 ```
 
-The final "why" becomes the action item directly. Capture the full chain in `retro-findings.json` as `root_cause_chain`.
+**Also find worktree transcripts** for headless session analysis:
 
-Do NOT use blame categories (AI/Process/Tooling/User). They describe symptoms, not causes.
+```bash
+ls -d ~/.claude/projects/*ppdsw-ppds*worktrees-<name>*
+ls -lt <project-dir>/*.jsonl
+```
 
-### 4. Audit Skills and Tools (parallel agent)
+### 4. Extract User Messages via Python
 
-Dispatch one agent with this concrete checklist:
+Do NOT use grep on JSONL — lines are too long. Use this python approach:
 
-1. **Path verification:** For every file path mentioned in any skill/command, run Glob to verify it exists
-2. **Command/skill references:** For every `/command` or skill name referenced, verify it exists in `.claude/commands/` or `.claude/skills/`
-3. **Tool references:** For every tool name referenced (Bash, Edit, Glob, etc.), verify it matches the current tool catalog
-4. **Trigger accuracy:** For each skill's `description` frontmatter, assess: would this trigger on the intended scenario? Would it false-positive on unrelated scenarios?
-5. **Conflicts:** Check for overlapping scopes or contradictory instructions between skills
-6. **Convention compliance:** Verify worktree paths, commit message formats, and other conventions match CLAUDE.md
-7. **Missing skills:** Identify repeated manual behaviors that should be codified as skills
+```bash
+python -c "
+import json
+path = r'<transcript-path>'
+with open(path, 'r', encoding='utf-8') as f:
+    for i, line in enumerate(f, 1):
+        try:
+            obj = json.loads(line)
+            if obj.get('type') == 'user' and 'message' in obj:
+                msg = obj['message']
+                content = msg.get('content', '')
+                if isinstance(content, str) and len(content) < 2000:
+                    print(f'LINE {i}: {content[:500]}')
+                    print('---')
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get('type') == 'text' and len(item.get('text','')) < 2000:
+                            print(f'LINE {i}: {item[\"text\"][:500]}')
+                            print('---')
+        except Exception:
+            pass
+"
+```
 
-### 5. Cross-Reference Memory (conditional — check before dispatching)
+Run this for EACH relevant transcript. Read the output YOURSELF — do not delegate to agents.
 
-Before dispatching: check if auto-memory is enabled (read CLAUDE.md for "Auto-memory is OFF").
-If auto-memory is OFF and no memory files exist under `~/.claude/memory/`, **skip this step entirely**.
-Do not dispatch an agent that will just report "nothing found."
+### 5. Severity Heuristic
 
-If memory IS enabled, dispatch one agent with this scope:
+Count from the extracted user messages:
+- User interrupts (`[Request interrupted by user]`)
+- Profanity or frustration indicators
+- Session crashes (transcripts with < 10 lines or very short duration)
+- Wrong-branch incidents (git branch in transcript metadata shows `main` during implementation)
 
-- Read all memory files
-- Flag any memory entries that contradict the current codebase
-- Flag architecture decisions that were reversed but not updated
-- Flag ephemeral task tracking masquerading as memory
+If any count > 0, this is a **rough session**. Analyze at full depth.
+If all counts are 0, this is a **clean session**. Lighter analysis is fine.
 
-### 6. Synthesize
+### 6. Analyze
 
-After ALL agents return, compile findings into:
+For each session in scope:
 
-**Aggregate Stats:**
-- Total commits, feat/fix ratio, thrashing incidents count
-- Root cause distribution (which root causes recur across sessions)
+**Mechanical metrics** (from git):
+- Commit count, feat/fix ratio
+- Thrashing (3+ commits on same fix)
+- Feat-then-fix chains (feat followed by fix commits)
+- Pipeline stage timing (from pipeline.log if available)
+- Sessions-to-success (how many crashed sessions before one succeeded)
 
-**Per-Session Analysis:**
-- Time range, scope, what went well, what went wrong
-- Direct user quotes where available
-- Feat-then-fix chains with specific commit hashes and diff evidence
+**User voice** (from transcripts):
+- Direct quotes of corrections, frustrations, redirections
+- Timeline of what the user asked for vs what happened
+- Points where the AI deviated from instructions
 
-**Skills/Tools Audit:**
-- Stale/broken items (P0)
-- Missing content (P1)
-- Improvements (P2+)
+**Contributing factors** (replace single 5-Whys):
+For each incident, list ALL contributing factors:
+```
+Incident: AI worked on main instead of worktree
+Contributing factors:
+  - No hook blocked file writes on main (tooling)
+  - AI ignored worktree convention despite CLAUDE.md (behavior)
+  - Session launched from main folder, not worktree (setup)
+  - /design skill didn't explicitly say "never edit on main" (skill gap)
+```
 
-**Recommendations:**
-- Specific, actionable items ranked by priority
-- Distinguish between "existing skill covers this" vs "needs a new skill or skill update"
+### 7. Present to User
 
-## Output
+Present evidence organized as:
+- **Timeline:** What happened, in order
+- **User quotes:** Direct quotes showing corrections/frustrations
+- **Metrics:** Commits, feat/fix ratio, sessions-to-success, stage timing
+- **Contributing factors:** Per incident
+- **What worked:** Genuine positives
 
-Present findings to the user for discussion — do NOT save to `.plans/` or create an action plan. Wait for the user's input before proposing changes.
+Do NOT rate or grade. Do NOT say "overall this was successful." Present the facts and let the user react.
 
-## Structured Output
+### 8. Skills/Tools Audit (optional — only if user requests or scope warrants)
 
-In addition to the conversational analysis, write `.workflow/retro-findings.json`:
+If the scope includes process problems (skills not followed, hooks not working):
+1. Verify file paths in skills exist
+2. Check for stale references to removed features
+3. Flag overlapping or conflicting skill triggers
+4. Identify missing skills for repeated manual behaviors
+
+### 9. Structured Output
+
+After discussing with the user, write `.workflow/retro-findings.json`:
 
 ```json
 {
@@ -206,7 +174,10 @@ In addition to the conversational analysis, write `.workflow/retro-findings.json
   "stats": {
     "total_commits": 0,
     "feat_fix_ratio": "N/M",
-    "thrashing_incidents": 0
+    "thrashing_incidents": 0,
+    "sessions_to_success": 0,
+    "user_interrupts": 0,
+    "severity": "rough|clean"
   },
   "findings": [
     {
@@ -215,15 +186,30 @@ In addition to the conversational analysis, write `.workflow/retro-findings.json
       "description": "What is wrong",
       "files": ["path/to/affected/file"],
       "fix_description": "What to do about it",
-      "root_cause_chain": ["surface problem", "why 1", "why 2", "why 3", "root cause"]
+      "contributing_factors": [
+        {"factor": "description", "type": "tooling|behavior|skill|setup"}
+      ]
     }
   ]
 }
 ```
 
 Tier definitions:
-- **auto-fix**: Stale references, typos, hardcoded values, known hook bugs. Safe to auto-implement.
-- **draft-fix**: Spec template additions, skill wording improvements, checklist gaps. Auto-PR but flag for review.
-- **issue-only**: Architectural changes, new skills, process redesigns. Create GitHub issue, needs /design session.
+- **auto-fix**: Stale references, typos, hardcoded values. Safe to auto-implement.
+- **draft-fix**: Skill wording, checklist gaps. Auto-PR but flag for review.
+- **issue-only**: Architectural changes, new skills. Create GitHub issue, needs /design.
 
-The pipeline orchestrator reads this file to drive auto-heal behavior after the retro completes.
+---
+
+## Pipeline Retro
+
+When running as a pipeline stage (headless, no user present):
+
+1. Read `.workflow/pipeline.log` — extract stage timing, failures, retries
+2. Read worktree transcripts — count sessions, extract basic metrics
+3. Read git log — commit count, feat/fix ratio
+4. Write `.workflow/retro-findings.json` with mechanical metrics ONLY
+5. No grading, no judgment, no root cause analysis — just data
+6. **Crash detection:** If this retro runs for less than 5 minutes and produces zero findings, log a warning in retro-findings.json
+
+The pipeline orchestrator reads this file for auto-heal decisions.

@@ -2,7 +2,7 @@
 
 Rules for issue tracking, labels, milestones, and triage.
 
-## Label Taxonomy (24 labels)
+## Label Taxonomy (23 labels)
 
 ### `type:` — What kind of work
 
@@ -49,7 +49,6 @@ Epics track initiatives that span areas. They close when the initiative is done.
 | Label | Color | Description |
 |-------|-------|-------------|
 | `status:backlog` | #d4c5f9 | Triaged, deliberately parked — pull forward when ready |
-| `status:needs-design` | #d4c5f9 | Needs architecture/UI/API design before work can start |
 | `status:needs-evaluation` | #d4c5f9 | Needs investigation or evaluation before work can begin |
 
 ### Other
@@ -74,7 +73,6 @@ Epics track initiatives that span areas. They close when the initiative is done.
 |-----------|-------------|---------|
 | Any milestone | (none needed) | Committed to that release |
 | None | `status:backlog` | Triaged, deliberately parked |
-| None | `status:needs-design` | Blocked on design work |
 | None | `status:needs-evaluation` | Blocked on investigation |
 | None | (no status label) | **Untriaged inbox** — needs a decision |
 
@@ -84,14 +82,14 @@ Epics track initiatives that span areas. They close when the initiative is done.
 2. **Inbox zero:** No milestone + no `status:` label = untriaged. The inbox should be empty.
 3. **Monthly review:** Check inbox is empty. Review `status:backlog` + `priority:high` for promotion to a milestone.
 4. **Epics vs milestones:** Epics track initiatives across areas. Milestones track releases. An issue can have both.
-5. **Staleness:** Close issues >6 months with no activity and no milestone, unless they have `priority:high` or above.
+5. **Validity over staleness:** There is no time-based staleness rule. Issues are valid or invalid based on whether their premise still matches the codebase, not their age. Validate during triage.
 6. **Pipeline-created issues** land in the inbox unlabeled. The pipeline retro stage files issues for findings but cannot reliably assign `type:` or `area:`. These issues are triaged during the next `/backlog triage` pass.
 
 ## Useful Queries
 
 ```bash
 # Untriaged inbox (should be empty)
-gh issue list --state open --no-milestone --json number,labels --jq '[.[] | select(.labels | map(.name) | any(startswith("status:")) | not)] | .[].number'
+gh issue list --state open --limit 200 --json number,labels,milestone,title --jq '[.[] | select(.milestone == null) | select(.labels | map(.name) | any(startswith("status:")) | not)]'
 
 # High-priority backlog candidates for promotion
 gh issue list --search 'is:open label:"status:backlog" (label:"priority:high" OR label:"priority:critical")' --json number,title

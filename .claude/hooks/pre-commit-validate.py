@@ -33,7 +33,7 @@ def main():
         )
         if branch_result.returncode == 0 and branch_result.stdout.strip() in ("main", "master"):
             print(
-                "❌ Cannot commit to main. Use /start <name> to create a feature worktree.",
+                "❌ Cannot commit to main. Create a worktree: git worktree add .worktrees/<name> -b <branch>",
                 file=sys.stderr,
             )
             sys.exit(2)
