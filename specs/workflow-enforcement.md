@@ -1,8 +1,8 @@
 # Workflow Enforcement
 
-**Status:** Draft
-**Version:** 1.0
-**Last Updated:** 2026-03-16
+**Status:** Implemented
+**Version:** 2.0
+**Last Updated:** 2026-03-25
 **Code:** [.claude/](.claude/) | [scripts/hooks/](../scripts/hooks/)
 
 ---

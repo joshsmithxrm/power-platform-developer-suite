@@ -33,7 +33,7 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # On main: show active worktrees and /start guidance
+    # On main: show active worktrees and /design guidance
     if branch in ("main", "master"):
         _show_main_guidance(project_dir)
         sys.exit(0)
@@ -150,7 +150,7 @@ def main():
 
 
 def _show_main_guidance(project_dir):
-    """Show active worktrees and /start guidance when on main."""
+    """Show active worktrees and /design guidance when on main."""
     lines = ["You are on main."]
 
     # List active worktrees (exclude the main worktree itself)

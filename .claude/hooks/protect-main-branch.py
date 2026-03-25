@@ -37,7 +37,10 @@ def is_allowed_path(file_path: str) -> bool:
         "/tmp/",
         "/temp/",
         "appdata/local/temp",
+        ".worktrees/",
     ]
+    # specs/ allowed — design artifacts committed to main
+    allowed_prefixes.append("specs/")
     return any(normalized.startswith(p) for p in allowed_prefixes) or any(
         s in normalized for s in allowed_substrings
     )

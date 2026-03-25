@@ -89,7 +89,7 @@ python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
 | `/review` | `set review.passed now` + `set review.findings {count}` |
 | `/implement` | `set branch {name}` + `set spec {path}` + `set plan {path}` + `set started now` |
 | `/pr` | `set pr.url {url}` + `set pr.created now` |
-| `/start` | `init {branch-name}` (creates fresh state file) |
+
 | `/converge` | `set-null gates.passed` + `set-null gates.commit_ref` |
 | `/reset` | `delete` (removes state file) |
 

@@ -27,7 +27,15 @@ Key tools and skills used throughout:
 ## Input
 $ARGUMENTS = path to the plan file (e.g., `.plans/2026-02-08-query-engine-v3-design.md`)
 
+If no $ARGUMENTS is provided, look for the spec referenced in `.workflow/state.json` (the `spec` field). Read the spec and generate an implementation plan as Step 0, saving it to `.plans/` in the current worktree. Then proceed with Step 1 using the generated plan.
+
 ## Process
+
+### Step 0: Generate Plan from Spec (only if no plan argument)
+- Read the spec file from `specs/` (identified via workflow state or by scanning `specs/` for the most recently modified spec)
+- Generate a phased implementation plan following the spec's acceptance criteria
+- Save to `.plans/{date}-{spec-name}.md`
+- Continue to Step 1 with the generated plan
 
 ### Step 1: Read & Analyze the Plan
 - Read the plan file at $ARGUMENTS (resolve relative to repo root if needed)
