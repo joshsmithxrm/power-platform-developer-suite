@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists all entities (tables) in a Dataverse environment.
 /// </summary>
 [McpServerToolType]
-public sealed class MetadataEntitiesListTool
+public sealed class MetadataEntitiesListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="MetadataEntitiesListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public MetadataEntitiesListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public MetadataEntitiesListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all entities (tables) in the connected Dataverse environment.
@@ -38,8 +33,7 @@ public sealed class MetadataEntitiesListTool
         [Description("Optional filter pattern to match entity logical names. Supports * wildcard (e.g., 'account*', '*custom*').")] string? filter = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context
-            .CreateServiceProviderAsync(cancellationToken)
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken)
             .ConfigureAwait(false);
 
         var metadataService = serviceProvider

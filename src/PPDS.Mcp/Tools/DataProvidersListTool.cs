@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists virtual entity data sources and data providers.
 /// </summary>
 [McpServerToolType]
-public sealed class DataProvidersListTool
+public sealed class DataProvidersListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="DataProvidersListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public DataProvidersListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public DataProvidersListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all virtual entity data sources and data providers in the environment.
@@ -61,7 +56,7 @@ public sealed class DataProvidersListTool
                 </entity>
             </fetch>";
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Execute queries sequentially (parallel would require .Result which is blocked by PPDS012)
@@ -70,23 +65,23 @@ public sealed class DataProvidersListTool
 
         var dataSources = dataSourceResult.Records.Select(record => new DataSourceSummary
         {
-            Id = GetGuid(record, "entitydatasourceid"),
-            Name = GetString(record, "name") ?? ""
+            Id = record.GetGuid("entitydatasourceid"),
+            Name = record.GetString("name") ?? ""
         }).ToList();
 
         var dataProviders = dataProviderResult.Records.Select(record => new DataProviderSummary
         {
-            Id = GetGuid(record, "entitydataproviderid"),
-            Name = GetString(record, "name") ?? "",
-            DataSourceName = GetString(record, "datasourcelogicalname"),
-            RetrievePlugin = GetGuidNullable(record, "retrieveplugin"),
-            RetrieveMultiplePlugin = GetGuidNullable(record, "retrievemultipleplugin"),
-            CreatePlugin = GetGuidNullable(record, "createplugin"),
-            UpdatePlugin = GetGuidNullable(record, "updateplugin"),
-            DeletePlugin = GetGuidNullable(record, "deleteplugin"),
-            IsManaged = GetBool(record, "ismanaged"),
-            CreatedOn = GetDateTime(record, "createdon"),
-            ModifiedOn = GetDateTime(record, "modifiedon")
+            Id = record.GetGuid("entitydataproviderid"),
+            Name = record.GetString("name") ?? "",
+            DataSourceName = record.GetString("datasourcelogicalname"),
+            RetrievePlugin = record.GetGuidNullable("retrieveplugin"),
+            RetrieveMultiplePlugin = record.GetGuidNullable("retrievemultipleplugin"),
+            CreatePlugin = record.GetGuidNullable("createplugin"),
+            UpdatePlugin = record.GetGuidNullable("updateplugin"),
+            DeletePlugin = record.GetGuidNullable("deleteplugin"),
+            IsManaged = record.GetBool("ismanaged"),
+            CreatedOn = record.GetDateTime("createdon"),
+            ModifiedOn = record.GetDateTime("modifiedon")
         }).ToList();
 
         return new DataProvidersListResult
@@ -98,54 +93,6 @@ public sealed class DataProvidersListTool
         };
     }
 
-    // Value extraction helpers
-
-    private static Guid GetGuid(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static Guid? GetGuidNullable(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.Value?.ToString();
-        return null;
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is bool b) return b;
-            if (bool.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return false;
-    }
-
-    private static DateTime? GetDateTime(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is DateTime dt) return dt;
-            if (DateTime.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
 }
 
 /// <summary>

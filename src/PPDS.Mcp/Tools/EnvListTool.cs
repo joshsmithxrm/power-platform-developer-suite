@@ -10,18 +10,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists available Dataverse environments.
 /// </summary>
 [McpServerToolType]
-public sealed class EnvListTool
+public sealed class EnvListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EnvListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public EnvListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public EnvListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists available Dataverse environments for the current profile.
@@ -36,7 +31,7 @@ public sealed class EnvListTool
         string? filter = null,
         CancellationToken cancellationToken = default)
     {
-        var profile = await _context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
+        var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
         using var gds = GlobalDiscoveryService.FromProfile(profile);
         var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken).ConfigureAwait(false);

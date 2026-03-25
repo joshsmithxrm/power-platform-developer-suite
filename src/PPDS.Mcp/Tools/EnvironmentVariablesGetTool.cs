@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets full details of a specific environment variable.
 /// </summary>
 [McpServerToolType]
-public sealed class EnvironmentVariablesGetTool
+public sealed class EnvironmentVariablesGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EnvironmentVariablesGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public EnvironmentVariablesGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public EnvironmentVariablesGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets full details of a specific environment variable including description, type, and values.
@@ -37,16 +32,11 @@ public sealed class EnvironmentVariablesGetTool
         string schemaName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(schemaName))
-        {
-            throw new ArgumentException("schemaName is required.", nameof(schemaName));
-        }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
 
         var variable = await service.GetAsync(schemaName, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Environment variable '{schemaName}' not found.");
+            ?? throw new KeyNotFoundException($"Environment variable '{schemaName}' not found.");
 
         return new EnvironmentVariablesGetResult
         {

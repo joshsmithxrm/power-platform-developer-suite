@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists environment variable definitions and their current values.
 /// </summary>
 [McpServerToolType]
-public sealed class EnvironmentVariablesListTool
+public sealed class EnvironmentVariablesListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EnvironmentVariablesListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public EnvironmentVariablesListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public EnvironmentVariablesListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists environment variable definitions and their current values.
@@ -37,7 +32,7 @@ public sealed class EnvironmentVariablesListTool
         string? solutionId = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
 
         var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);

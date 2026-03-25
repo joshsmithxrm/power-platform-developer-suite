@@ -11,10 +11,8 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists Dataverse Custom APIs with their parameters.
 /// </summary>
 [McpServerToolType]
-public sealed class CustomApisListTool
+public sealed class CustomApisListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     // BindingType option set values
     private const int BindingTypeGlobal = 0;
     private const int BindingTypeEntity = 1;
@@ -44,10 +42,7 @@ public sealed class CustomApisListTool
     /// Initializes a new instance of the <see cref="CustomApisListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public CustomApisListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public CustomApisListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists all Custom APIs in the environment with their parameters.
@@ -114,7 +109,7 @@ public sealed class CustomApisListTool
                 </entity>
             </fetch>";
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Execute all three queries sequentially (parallel would require .Result which is blocked by PPDS012)
@@ -124,18 +119,18 @@ public sealed class CustomApisListTool
 
         // Group parameters and properties by API ID
         var requestParamsByApi = reqResult.Records
-            .GroupBy(r => GetGuid(r, "customapiid"))
+            .GroupBy(r => r.GetGuid("customapiid"))
             .ToDictionary(g => g.Key, g => g.ToList());
 
         var responsePropertiesByApi = respResult.Records
-            .GroupBy(r => GetGuid(r, "customapiid"))
+            .GroupBy(r => r.GetGuid("customapiid"))
             .ToDictionary(g => g.Key, g => g.ToList());
 
         var apis = apiResult.Records.Select(record =>
         {
-            var apiId = GetGuid(record, "customapiid");
-            var bindingRaw = GetInt(record, "bindingtype");
-            var stepTypeRaw = GetInt(record, "allowedcustomprocessingsteptype");
+            var apiId = record.GetGuid("customapiid");
+            var bindingRaw = record.GetInt("bindingtype");
+            var stepTypeRaw = record.GetInt("allowedcustomprocessingsteptype");
 
             var requestParams = requestParamsByApi.TryGetValue(apiId, out var reqList)
                 ? reqList.Select(r => MapParameter(r, "customapirequestparameterid", isOptionalAvailable: true)).ToList()
@@ -148,20 +143,20 @@ public sealed class CustomApisListTool
             return new CustomApiSummary
             {
                 Id = apiId,
-                UniqueName = GetString(record, "uniquename") ?? "",
-                DisplayName = GetString(record, "displayname") ?? "",
-                Name = GetString(record, "name"),
-                Description = GetString(record, "description"),
-                PluginTypeId = GetGuidNullable(record, "plugintypeid"),
+                UniqueName = record.GetString("uniquename") ?? "",
+                DisplayName = record.GetString("displayname") ?? "",
+                Name = record.GetString("name"),
+                Description = record.GetString("description"),
+                PluginTypeId = record.GetGuidNullable("plugintypeid"),
                 BindingType = MapBindingType(bindingRaw),
-                BoundEntity = GetString(record, "boundentitylogicalname"),
+                BoundEntity = record.GetString("boundentitylogicalname"),
                 AllowedProcessingStepType = MapProcessingStepType(stepTypeRaw),
-                IsFunction = GetBool(record, "isfunction"),
-                IsPrivate = GetBool(record, "isprivate"),
-                ExecutePrivilegeName = GetString(record, "executeprivilegename"),
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon"),
+                IsFunction = record.GetBool("isfunction"),
+                IsPrivate = record.GetBool("isprivate"),
+                ExecutePrivilegeName = record.GetString("executeprivilegename"),
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon"),
                 RequestParameters = requestParams,
                 ResponseProperties = responseProps
             };
@@ -179,18 +174,18 @@ public sealed class CustomApisListTool
         string idField,
         bool isOptionalAvailable)
     {
-        var typeRaw = GetInt(record, "type");
+        var typeRaw = record.GetInt("type");
         return new CustomApiParameterSummary
         {
-            Id = GetGuid(record, idField),
-            UniqueName = GetString(record, "uniquename") ?? "",
-            DisplayName = GetString(record, "displayname") ?? "",
-            Name = GetString(record, "name"),
-            Description = GetString(record, "description"),
+            Id = record.GetGuid(idField),
+            UniqueName = record.GetString("uniquename") ?? "",
+            DisplayName = record.GetString("displayname") ?? "",
+            Name = record.GetString("name"),
+            Description = record.GetString("description"),
             Type = MapParameterType(typeRaw),
-            LogicalEntityName = GetString(record, "logicalentityname"),
-            IsOptional = isOptionalAvailable && GetBool(record, "isoptional"),
-            IsManaged = GetBool(record, "ismanaged")
+            LogicalEntityName = record.GetString("logicalentityname"),
+            IsOptional = isOptionalAvailable && record.GetBool("isoptional"),
+            IsManaged = record.GetBool("ismanaged")
         };
     }
 
@@ -228,64 +223,6 @@ public sealed class CustomApisListTool
         _ => value.ToString()
     };
 
-    // Value extraction helpers
-
-    private static Guid GetGuid(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static Guid? GetGuidNullable(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.Value?.ToString();
-        return null;
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is bool b) return b;
-            if (bool.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return false;
-    }
-
-    private static int GetInt(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is int i) return i;
-            if (int.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return 0;
-    }
-
-    private static DateTime? GetDateTime(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is DateTime dt) return dt;
-            if (DateTime.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
 }
 
 /// <summary>

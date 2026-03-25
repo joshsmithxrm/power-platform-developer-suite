@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that deletes plugin trace logs.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginTracesDeleteTool
+public sealed class PluginTracesDeleteTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginTracesDeleteTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginTracesDeleteTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginTracesDeleteTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Deletes plugin trace logs by specific IDs, by age threshold, or by filter criteria.
@@ -52,6 +47,12 @@ public sealed class PluginTracesDeleteTool
         bool? errorsOnly = null,
         CancellationToken cancellationToken = default)
     {
+        if (Context.IsReadOnly)
+        {
+            throw new InvalidOperationException(
+                "Cannot delete plugin traces: this MCP session is read-only.");
+        }
+
         var hasFilter = typeName != null || messageName != null || primaryEntity != null || errorsOnly == true;
 
         int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
@@ -60,21 +61,17 @@ public sealed class PluginTracesDeleteTool
 
         if (modeCount == 0)
         {
-            return new PluginTracesDeleteResult
-            {
-                Error = "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion."
-            };
+            throw new ArgumentException(
+                "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion.");
         }
 
         if (modeCount > 1)
         {
-            return new PluginTracesDeleteResult
-            {
-                Error = "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly)."
-            };
+            throw new ArgumentException(
+                "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly).");
         }
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         if (ids != null)
@@ -97,10 +94,7 @@ public sealed class PluginTracesDeleteTool
     {
         if (ids.Length == 0)
         {
-            return new PluginTracesDeleteResult
-            {
-                Error = "The 'ids' array must contain at least one trace ID."
-            };
+            throw new ArgumentException("The 'ids' array must contain at least one trace ID.", nameof(ids));
         }
 
         var guids = new List<Guid>(ids.Length);
@@ -108,10 +102,7 @@ public sealed class PluginTracesDeleteTool
         {
             if (!Guid.TryParse(id, out var guid))
             {
-                return new PluginTracesDeleteResult
-                {
-                    Error = $"Invalid trace ID format: '{id}'. Expected a GUID."
-                };
+                throw new ArgumentException($"Invalid trace ID format: '{id}'. Expected a GUID.", nameof(ids));
             }
 
             guids.Add(guid);
@@ -132,10 +123,7 @@ public sealed class PluginTracesDeleteTool
     {
         if (olderThanDays < 1)
         {
-            return new PluginTracesDeleteResult
-            {
-                Error = "The 'olderThanDays' parameter must be at least 1."
-            };
+            throw new ArgumentException("The 'olderThanDays' parameter must be at least 1.", nameof(olderThanDays));
         }
 
         var olderThan = TimeSpan.FromDays(olderThanDays);
@@ -182,11 +170,4 @@ public sealed class PluginTracesDeleteResult
     /// </summary>
     [JsonPropertyName("deletedCount")]
     public int DeletedCount { get; set; }
-
-    /// <summary>
-    /// Error message if the operation failed validation.
-    /// </summary>
-    [JsonPropertyName("error")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Error { get; set; }
 }

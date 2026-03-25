@@ -55,8 +55,8 @@ When the design is approved:
 ### 6. Transition
 
 After user approves the written spec:
-1. Write an implementation plan to `.plans/`
-2. Commit the spec and plan
+1. Write an implementation plan to `.plans/` (ephemeral, gitignored — do NOT commit)
+2. Commit the spec (specs are living documents; plans are consumed by implementation per Constitution SL2)
 3. Present the plan path and pipeline command:
 
 > Plan saved to `.plans/<filename>.md`.

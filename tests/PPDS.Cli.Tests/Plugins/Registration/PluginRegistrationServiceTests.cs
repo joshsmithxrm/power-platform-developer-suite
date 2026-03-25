@@ -3,6 +3,8 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
@@ -15,6 +17,7 @@ using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Registration;
 
+[Trait("Category", "Unit")]
 public class PluginRegistrationServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _mockPool;
@@ -1857,6 +1860,658 @@ public class PluginRegistrationServiceTests
         Assert.NotNull(_updatedEntity);
         Assert.Equal((int)sdkmessageprocessingstep_invocationsource.Child,
             _updatedEntity!.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource)?.Value);
+    }
+
+    #endregion
+
+    #region Unregister
+
+    [Fact]
+    public async Task UnregisterAssemblyAsync_DeletesAssembly_WhenFound()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "TestAssembly",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        assembly[PluginAssembly.Fields.IsManaged] = false;
+        entities.Entities.Add(assembly);
+
+        // GetAssemblyByIdAsync returns the assembly, then ListTypesForAssemblyAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return entities; // GetAssemblyByIdAsync
+                return new EntityCollection(); // ListTypesForAssemblyAsync
+            });
+
+        // Act
+        var result = await _sut.UnregisterAssemblyAsync(assemblyId);
+
+        // Assert
+        Assert.Equal("TestAssembly", result.EntityName);
+        Assert.Equal("Assembly", result.EntityType);
+        Assert.Equal(1, result.AssembliesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterAssemblyAsync_ThrowsUnregisterException_WhenNotFound()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<UnregisterException>(
+            () => _sut.UnregisterAssemblyAsync(assemblyId));
+
+        Assert.Equal(ErrorCodes.Plugin.NotFound, exception.ErrorCode);
+        Assert.Contains(assemblyId.ToString(), exception.Message);
+    }
+
+    [Fact]
+    public async Task UnregisterPackageAsync_DeletesPackage_WhenFound()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        var packageEntities = new EntityCollection();
+        var package = new PluginPackage
+        {
+            Id = packageId,
+            Name = "TestPackage",
+            UniqueName = "TestPackage",
+            Version = "1.0.0.0"
+        };
+        package[PluginPackage.Fields.IsManaged] = false;
+        packageEntities.Entities.Add(package);
+
+        // GetPackageByIdAsync returns package, then ListAssembliesForPackageAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return packageEntities; // GetPackageByIdAsync
+                return new EntityCollection(); // ListAssembliesForPackageAsync
+            });
+
+        // Act
+        var result = await _sut.UnregisterPackageAsync(packageId);
+
+        // Assert
+        Assert.Equal("TestPackage", result.EntityName);
+        Assert.Equal("Package", result.EntityType);
+        Assert.Equal(1, result.PackagesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginPackage.EntityLogicalName, packageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterPackageAsync_ThrowsUnregisterException_WhenNotFound()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<UnregisterException>(
+            () => _sut.UnregisterPackageAsync(packageId));
+
+        Assert.Equal(ErrorCodes.Plugin.NotFound, exception.ErrorCode);
+        Assert.Contains(packageId.ToString(), exception.Message);
+    }
+
+    [Fact]
+    public async Task UnregisterPluginTypeAsync_DeletesType_WhenFound()
+    {
+        // Arrange
+        var typeId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        var typeEntities = new EntityCollection();
+        var pluginType = new PluginType
+        {
+            Id = typeId,
+            TypeName = "TestNamespace.TestPlugin",
+            FriendlyName = "TestPlugin"
+        };
+        pluginType[PluginType.Fields.IsManaged] = false;
+        pluginType[PluginType.Fields.PluginAssemblyId] = new EntityReference(PluginAssembly.EntityLogicalName, assemblyId);
+        pluginType[$"assembly.{PluginAssembly.Fields.Name}"] = new AliasedValue(PluginAssembly.EntityLogicalName, PluginAssembly.Fields.Name, "TestAssembly");
+        typeEntities.Entities.Add(pluginType);
+
+        // GetPluginTypeByNameOrIdAsync returns type, then ListStepsForTypeAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return typeEntities; // GetPluginTypeByNameOrIdAsync
+                return new EntityCollection(); // ListStepsForTypeAsync
+            });
+
+        // Act
+        var result = await _sut.UnregisterPluginTypeAsync(typeId);
+
+        // Assert
+        Assert.Equal("TestNamespace.TestPlugin", result.EntityName);
+        Assert.Equal("Type", result.EntityType);
+        Assert.Equal(1, result.TypesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginType.EntityLogicalName, typeId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterStepAsync_DeletesStep_WhenFound()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var stepEntities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestPlugin: Create of account",
+            Stage = sdkmessageprocessingstep_stage.Preoperation,
+            Mode = sdkmessageprocessingstep_mode.Synchronous,
+            Rank = 1,
+            StateCode = sdkmessageprocessingstep_statecode.Enabled
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        step["message.name"] = new AliasedValue(SdkMessage.EntityLogicalName, SdkMessage.Fields.Name, "Create");
+        step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
+        stepEntities.Entities.Add(step);
+
+        // GetStepByNameOrIdAsync returns step, then ListImagesForStepAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return stepEntities; // GetStepByNameOrIdAsync
+                return new EntityCollection(); // ListImagesForStepAsync
+            });
+
+        // Act
+        var result = await _sut.UnregisterStepAsync(stepId);
+
+        // Assert
+        Assert.Equal("TestPlugin: Create of account", result.EntityName);
+        Assert.Equal("Step", result.EntityType);
+        Assert.Equal(1, result.StepsDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterStepAsync_ThrowsUnregisterException_WhenStepIsManaged()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var stepEntities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "ManagedStep: Create of account",
+            Stage = sdkmessageprocessingstep_stage.Preoperation,
+            Mode = sdkmessageprocessingstep_mode.Synchronous,
+            Rank = 1,
+            StateCode = sdkmessageprocessingstep_statecode.Enabled
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = true;
+        step["message.name"] = new AliasedValue(SdkMessage.EntityLogicalName, SdkMessage.Fields.Name, "Create");
+        step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
+        stepEntities.Entities.Add(step);
+
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stepEntities);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<UnregisterException>(
+            () => _sut.UnregisterStepAsync(stepId));
+
+        Assert.Equal(ErrorCodes.Plugin.ManagedComponent, exception.ErrorCode);
+        Assert.Contains("is managed", exception.Message);
+    }
+
+    [Fact]
+    public async Task UnregisterImageAsync_DeletesImage_WhenFound()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        var imageEntities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "PreImage"
+        };
+        image[SdkMessageProcessingStepImage.Fields.IsManaged] = false;
+        imageEntities.Entities.Add(image);
+
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(imageEntities);
+
+        // Act
+        var result = await _sut.UnregisterImageAsync(imageId);
+
+        // Assert
+        Assert.Equal("PreImage", result.EntityName);
+        Assert.Equal("Image", result.EntityType);
+        Assert.Equal(1, result.ImagesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
+    #region Delete
+
+    [Fact]
+    public async Task DeleteStepAsync_SendsDeleteRequest()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection(); // ListImagesForStepAsync returns empty
+
+        // Act
+        await _sut.DeleteStepAsync(stepId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeletePluginTypeAsync_SendsDeleteRequest()
+    {
+        // Arrange
+        var typeId = Guid.NewGuid();
+
+        // Act
+        await _sut.DeletePluginTypeAsync(typeId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginType.EntityLogicalName, typeId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteImageAsync_SendsDeleteRequest()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+
+        // Act
+        await _sut.DeleteImageAsync(imageId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
+    #region Get/List
+
+    [Fact]
+    public async Task GetAssemblyByNameAsync_ReturnsAssembly_WhenFound()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "MyPlugin",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        entities.Entities.Add(assembly);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetAssemblyByNameAsync("MyPlugin");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(assemblyId, result!.Id);
+        Assert.Equal("MyPlugin", result.Name);
+    }
+
+    [Fact]
+    public async Task GetAssemblyByNameAsync_ReturnsNull_WhenNotFound()
+    {
+        // Arrange
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act
+        var result = await _sut.GetAssemblyByNameAsync("NonExistentAssembly");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetAssemblyByIdAsync_ReturnsAssembly_WhenFound()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "MyPlugin",
+            Version = "2.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        entities.Entities.Add(assembly);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetAssemblyByIdAsync(assemblyId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(assemblyId, result!.Id);
+        Assert.Equal("MyPlugin", result.Name);
+        Assert.Equal("2.0.0.0", result.Version);
+    }
+
+    [Fact]
+    public async Task GetPackageByNameAsync_ReturnsPackage_WhenFound()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var package = new PluginPackage
+        {
+            Id = packageId,
+            Name = "MyPackage",
+            UniqueName = "MyPackage",
+            Version = "1.0.0.0"
+        };
+        entities.Entities.Add(package);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetPackageByNameAsync("MyPackage");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(packageId, result!.Id);
+        Assert.Equal("MyPackage", result.Name);
+    }
+
+    [Fact]
+    public async Task GetPackageByIdAsync_ReturnsPackage_WhenFound()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var package = new PluginPackage
+        {
+            Id = packageId,
+            Name = "MyPackage",
+            UniqueName = "MyPackage",
+            Version = "3.0.0.0"
+        };
+        entities.Entities.Add(package);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetPackageByIdAsync(packageId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(packageId, result!.Id);
+        Assert.Equal("MyPackage", result.Name);
+        Assert.Equal("3.0.0.0", result.Version);
+    }
+
+    [Fact]
+    public async Task GetPluginTypeByNameAsync_ReturnsType_WhenFound()
+    {
+        // Arrange
+        var typeId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var pluginType = new PluginType
+        {
+            Id = typeId,
+            TypeName = "MyNamespace.MyPlugin",
+            FriendlyName = "MyPlugin"
+        };
+        entities.Entities.Add(pluginType);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetPluginTypeByNameAsync("MyNamespace.MyPlugin");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(typeId, result!.Id);
+        Assert.Equal("MyNamespace.MyPlugin", result.TypeName);
+    }
+
+    [Fact]
+    public async Task GetStepByNameAsync_ReturnsStep_WhenFound()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestPlugin: Create of account",
+            Stage = sdkmessageprocessingstep_stage.Preoperation,
+            Mode = sdkmessageprocessingstep_mode.Synchronous,
+            Rank = 1,
+            StateCode = sdkmessageprocessingstep_statecode.Enabled
+        };
+        step["message.name"] = new AliasedValue(SdkMessage.EntityLogicalName, SdkMessage.Fields.Name, "Create");
+        step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetStepByNameAsync("TestPlugin: Create of account");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(stepId, result!.Id);
+        Assert.Equal("TestPlugin: Create of account", result.Name);
+        Assert.Equal("Create", result.Message);
+    }
+
+    [Fact]
+    public async Task GetSdkMessageFilterIdAsync_ReturnsId_WhenFound()
+    {
+        // Arrange
+        var filterId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var filter = new SdkMessageFilter { Id = filterId };
+        entities.Entities.Add(filter);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetSdkMessageFilterIdAsync(messageId, "account");
+
+        // Assert
+        Assert.Equal(filterId, result);
+    }
+
+    [Fact]
+    public async Task GetSdkMessageFilterIdAsync_ReturnsNull_WhenNotFound()
+    {
+        // Arrange
+        var messageId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act
+        var result = await _sut.GetSdkMessageFilterIdAsync(messageId, "nonexistententity");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ListTypesForAssemblyAsync_ReturnsTypes()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var pluginType = new PluginType
+        {
+            Id = typeId,
+            TypeName = "MyNamespace.MyPlugin",
+            FriendlyName = "MyPlugin"
+        };
+        entities.Entities.Add(pluginType);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.ListTypesForAssemblyAsync(assemblyId);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("MyNamespace.MyPlugin", result[0].TypeName);
+    }
+
+    [Fact]
+    public async Task ListTypesForPackageAsync_ReturnsTypes()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        // First query: ListAssembliesForPackageAsync returns one assembly
+        // Second query: ListTypesForAssemblyAsync returns one type
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1)
+                {
+                    var assemblyEntities = new EntityCollection();
+                    var assembly = new PluginAssembly
+                    {
+                        Id = assemblyId,
+                        Name = "TestAssembly",
+                        Version = "1.0.0.0",
+                        IsolationMode = pluginassembly_isolationmode.Sandbox
+                    };
+                    assemblyEntities.Entities.Add(assembly);
+                    return assemblyEntities;
+                }
+                else
+                {
+                    var typeEntities = new EntityCollection();
+                    var pluginType = new PluginType
+                    {
+                        Id = typeId,
+                        TypeName = "MyNamespace.MyPlugin",
+                        FriendlyName = "MyPlugin"
+                    };
+                    typeEntities.Entities.Add(pluginType);
+                    return typeEntities;
+                }
+            });
+
+        // Act
+        var result = await _sut.ListTypesForPackageAsync(packageId);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("MyNamespace.MyPlugin", result[0].TypeName);
+    }
+
+    [Fact]
+    public async Task ListImagesForStepAsync_ReturnsImages()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "PreImage",
+            EntityAlias = "PreImage",
+            ImageType = sdkmessageprocessingstepimage_imagetype.PreImage,
+            Attributes1 = "name,accountnumber"
+        };
+        entities.Entities.Add(image);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.ListImagesForStepAsync(stepId);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("PreImage", result[0].Name);
+        Assert.Equal("name,accountnumber", result[0].Attributes);
+    }
+
+    [Fact]
+    public async Task ListMessagesAsync_ReturnsMessages()
+    {
+        // Arrange
+        var entities = new EntityCollection();
+        var message1 = new SdkMessage { Id = Guid.NewGuid() };
+        message1[SdkMessage.Fields.Name] = "Create";
+        var message2 = new SdkMessage { Id = Guid.NewGuid() };
+        message2[SdkMessage.Fields.Name] = "Update";
+        entities.Entities.Add(message1);
+        entities.Entities.Add(message2);
+        entities.MoreRecords = false;
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.ListMessagesAsync(null);
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Contains("Create", result);
+        Assert.Contains("Update", result);
+    }
+
+    [Fact]
+    public async Task ListEntityAttributesAsync_ReturnsAttributes()
+    {
+        // Arrange
+        var metadata = new EntityMetadata();
+        var attr1 = new StringAttributeMetadata("name") { LogicalName = "name" };
+        attr1.DisplayName = new Label("Name", 1033);
+        var attr2 = new StringAttributeMetadata("accountnumber") { LogicalName = "accountnumber" };
+        attr2.DisplayName = new Label("Account Number", 1033);
+
+        // Use reflection to set the read-only Attributes property on EntityMetadata
+        var attributesProperty = typeof(EntityMetadata).GetProperty("Attributes");
+        attributesProperty!.SetValue(metadata, new AttributeMetadata[] { attr1, attr2 });
+
+        var response = new RetrieveEntityResponse();
+        response.Results["EntityMetadata"] = metadata;
+
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        // Act
+        var result = await _sut.ListEntityAttributesAsync("account");
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, a => a.LogicalName == "accountnumber");
+        Assert.Contains(result, a => a.LogicalName == "name");
     }
 
     #endregion

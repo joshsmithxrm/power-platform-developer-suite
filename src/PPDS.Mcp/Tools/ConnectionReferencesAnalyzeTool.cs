@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that analyzes connection references for orphaned references and flows.
 /// </summary>
 [McpServerToolType]
-public sealed class ConnectionReferencesAnalyzeTool
+public sealed class ConnectionReferencesAnalyzeTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionReferencesAnalyzeTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ConnectionReferencesAnalyzeTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ConnectionReferencesAnalyzeTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Analyzes connection references for orphaned references and orphaned flows.
@@ -34,7 +29,7 @@ public sealed class ConnectionReferencesAnalyzeTool
     public async Task<ConnectionReferencesAnalyzeResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
 
         var analysis = await service.AnalyzeAsync(cancellationToken: cancellationToken).ConfigureAwait(false);

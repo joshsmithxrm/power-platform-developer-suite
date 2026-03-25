@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists connection references in the current environment.
 /// </summary>
 [McpServerToolType]
-public sealed class ConnectionReferencesListTool
+public sealed class ConnectionReferencesListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionReferencesListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ConnectionReferencesListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ConnectionReferencesListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists connection references in the current environment.
@@ -37,7 +32,7 @@ public sealed class ConnectionReferencesListTool
         string? solutionId = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
 
         var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);

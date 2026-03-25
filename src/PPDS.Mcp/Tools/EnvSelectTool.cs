@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that selects a Dataverse environment.
 /// </summary>
 [McpServerToolType]
-public sealed class EnvSelectTool
+public sealed class EnvSelectTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="EnvSelectTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public EnvSelectTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public EnvSelectTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Selects a Dataverse environment for subsequent queries.
@@ -37,12 +32,9 @@ public sealed class EnvSelectTool
         string environment,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(environment))
-        {
-            throw new ArgumentException("The 'environment' parameter is required.", nameof(environment));
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
-        var collection = await _context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
+        var collection = await Context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
 
         var profile = collection.ActiveProfile
             ?? throw new InvalidOperationException("No active profile configured. Run 'ppds auth create' first.");
@@ -61,17 +53,17 @@ public sealed class EnvSelectTool
         var resolved = result.Environment!;
 
         // Validate environment switch against session allowlist
-        _context.ValidateEnvironmentSwitch(resolved.Url);
+        Context.ValidateEnvironmentSwitch(resolved.Url);
 
         // Invalidate cached pool for the old environment.
         if (profile.Environment != null)
         {
-            _context.InvalidateEnvironment(profile.Environment.Url);
+            Context.InvalidateEnvironment(profile.Environment.Url);
         }
 
         // Update profile with new environment.
         profile.Environment = resolved;
-        await _context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
+        await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
 
         return new EnvSelectResult
         {

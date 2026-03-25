@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that retrieves detailed entity metadata.
 /// </summary>
 [McpServerToolType]
-public sealed class MetadataEntityTool
+public sealed class MetadataEntityTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="MetadataEntityTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public MetadataEntityTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public MetadataEntityTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets detailed metadata for a Dataverse entity.
@@ -43,12 +38,7 @@ public sealed class MetadataEntityTool
         bool includeRelationships = false,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(entityName))
-        {
-            throw new ArgumentException("The 'entityName' parameter is required.", nameof(entityName));
-        }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
         var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
 
         var entity = await metadataService.GetEntityAsync(

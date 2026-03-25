@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that lists plugin trace logs.
 /// </summary>
 [McpServerToolType]
-public sealed class PluginTracesListTool
+public sealed class PluginTracesListTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginTracesListTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public PluginTracesListTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public PluginTracesListTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Lists plugin trace logs with optional filtering.
@@ -59,7 +54,7 @@ public sealed class PluginTracesListTool
             HasException = errorsOnly ? true : null
         };
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
         var result = await traceService.ListAsync(filter, maxRows, cancellationToken).ConfigureAwait(false);

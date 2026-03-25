@@ -11,6 +11,7 @@ namespace PPDS.Mcp.Tests.Tools;
 /// <summary>
 /// Unit tests for <see cref="QuerySqlTool"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class QuerySqlToolTests
 {
     #region Constructor Tests
@@ -46,9 +47,8 @@ public sealed class QuerySqlToolTests
         Func<Task> act = () => tool.ExecuteAsync(null!);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithParameterName("sql")
-            .WithMessage("*'sql' parameter is required*");
+        await act.Should().ThrowAsync<ArgumentNullException>()
+            .WithParameterName("sql");
     }
 
     [Fact]

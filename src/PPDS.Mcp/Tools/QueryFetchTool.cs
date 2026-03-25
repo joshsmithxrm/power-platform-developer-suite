@@ -10,18 +10,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that executes FetchXML queries against Dataverse.
 /// </summary>
 [McpServerToolType]
-public sealed class QueryFetchTool
+public sealed class QueryFetchTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="QueryFetchTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public QueryFetchTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public QueryFetchTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Executes a FetchXML query against Dataverse.
@@ -39,19 +34,15 @@ public sealed class QueryFetchTool
         int maxRows = 100,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(fetchXml))
-        {
-            throw new ArgumentException("The 'fetchXml' parameter is required.", nameof(fetchXml));
-        }
-
         // Cap maxRows to prevent runaway queries.
         maxRows = Math.Clamp(maxRows, 1, 5000);
+
+        // Validate required params and create service provider.
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(fetchXml), fetchXml)).ConfigureAwait(false);
 
         // Inject top attribute if not already present.
         var query = InjectTopAttribute(fetchXml, maxRows);
 
-        // Execute query.
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // FetchXML is inherently read-only — no DML guard needed.

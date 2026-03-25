@@ -82,7 +82,7 @@ def run_claude(worktree_path, prompt, logger, stage):
         result = subprocess.run(
             ["claude", "-p", prompt, "--verbose"],
             cwd=worktree_path,
-            timeout=1800,  # 30 minute timeout per stage
+            timeout=3600,  # Safety net: 1 hour max per stage to prevent infinite hangs
         )
         duration = int(time.time() - start)
         log(logger, stage, "DONE", exit=result.returncode, duration=f"{duration}s")
@@ -90,6 +90,10 @@ def run_claude(worktree_path, prompt, logger, stage):
     except subprocess.TimeoutExpired:
         duration = int(time.time() - start)
         log(logger, stage, "TIMEOUT", duration=f"{duration}s")
+        print(
+            f"\nERROR: '{stage}' stage timed out after 3600s.",
+            file=sys.stderr,
+        )
         return 1
     except FileNotFoundError:
         log(logger, stage, "ERROR", reason="claude command not found")
@@ -350,7 +354,11 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "pipeline.log")
 
-    # Append mode for resume
+    # Append mode for resume.
+    # NOTE: A `with` statement is impractical here because the log file may be
+    # relocated mid-pipeline when the worktree is created (lines below copy the
+    # log to the worktree's .workflow/ directory and reopen it). The file is
+    # closed in the `finally` block at the end of main() instead.
     mode = "a" if args.from_stage else "w"
     logger = open(log_path, mode)
 

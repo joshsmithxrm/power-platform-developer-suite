@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets full details of a specific connection reference.
 /// </summary>
 [McpServerToolType]
-public sealed class ConnectionReferencesGetTool
+public sealed class ConnectionReferencesGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectionReferencesGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public ConnectionReferencesGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public ConnectionReferencesGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets full details of a specific connection reference including dependent flows.
@@ -37,16 +32,11 @@ public sealed class ConnectionReferencesGetTool
         string logicalName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(logicalName))
-        {
-            throw new ArgumentException("logicalName is required.", nameof(logicalName));
-        }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(logicalName), logicalName)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
 
         var reference = await service.GetAsync(logicalName, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Connection reference '{logicalName}' not found.");
+            ?? throw new KeyNotFoundException($"Connection reference '{logicalName}' not found.");
 
         var flows = await service.GetFlowsUsingAsync(logicalName, cancellationToken).ConfigureAwait(false);
 

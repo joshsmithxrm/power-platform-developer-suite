@@ -72,9 +72,10 @@ The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabil
 | `Program.cs` | Entry point, DI registration, stdout→stderr redirection |
 | `IMcpConnectionPoolManager` | Caches connection pools by profile+environment key |
 | `McpConnectionPoolManager` | Race-safe pool creation with `Lazy<Task<T>>` pattern |
+| `McpToolBase` | Abstract base class for all tools: parameter validation before service provider |
 | `McpToolContext` | Unified context for tools: profiles, pools, service provider |
 | `ProfileConnectionSourceAdapter` | Bridges `ProfileConnectionSource` → `IConnectionSource` |
-| 13 Tool classes | Individual MCP tool implementations |
+| 32 Tool classes | Individual MCP tool implementations (all inherit `McpToolBase`) |
 
 ### Dependencies
 
@@ -233,23 +234,23 @@ public sealed class McpToolContext
 
 ```csharp
 [McpServerToolType]
-public sealed class ExampleTool
+public sealed class ExampleTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
-    public ExampleTool(McpToolContext context) => _context = context;
+    public ExampleTool(McpToolContext context) : base(context) { }
 
     [McpServerTool(Name = "ppds_example")]
     public async Task<ExampleResult> ExecuteAsync(
         [Description("parameter description")] string param,
         CancellationToken ct = default)
     {
-        await using var sp = await _context.CreateServiceProviderAsync(ct);
+        await using var sp = await CreateScopeAsync(ct, (nameof(param), param));
         var service = sp.GetRequiredService<IExampleService>();
         return await service.DoWorkAsync(param, ct);
     }
 }
 ```
+
+`CreateScopeAsync` validates required parameters (null/empty throws) before creating the service provider. Tools with no required params call `CreateScopeAsync(ct)` with no param tuples.
 
 ---
 
@@ -406,19 +407,16 @@ Response:
 
 1. **Create tool class** in `src/PPDS.Mcp/Tools/`
 2. **Add attributes**: `[McpServerToolType]` on class, `[McpServerTool]` on method
-3. **Inject context**: Constructor takes `McpToolContext`
+3. **Inherit `McpToolBase`**: Constructor calls `base(context)`
 4. **Define result type**: JSON-serializable class with `[JsonPropertyName]`
 
 **Example skeleton:**
 
 ```csharp
 [McpServerToolType]
-public sealed class NewOperationTool
+public sealed class NewOperationTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
-    public NewOperationTool(McpToolContext context)
-        => _context = context;
+    public NewOperationTool(McpToolContext context) : base(context) { }
 
     [McpServerTool(Name = "ppds_new_operation")]
     [Description("Description of what this tool does")]
@@ -426,7 +424,8 @@ public sealed class NewOperationTool
         [Description("Parameter description")] string param,
         CancellationToken cancellationToken = default)
     {
-        await using var sp = await _context.CreateServiceProviderAsync(cancellationToken);
+        await using var sp = await CreateScopeAsync(cancellationToken,
+            (nameof(param), param));
         // Implementation
         return new NewOperationResult { /* ... */ };
     }

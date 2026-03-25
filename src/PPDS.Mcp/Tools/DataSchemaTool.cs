@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that retrieves entity schema information.
 /// </summary>
 [McpServerToolType]
-public sealed class DataSchemaTool
+public sealed class DataSchemaTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="DataSchemaTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public DataSchemaTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public DataSchemaTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets the schema (fields/attributes) for a Dataverse entity.
@@ -37,12 +32,7 @@ public sealed class DataSchemaTool
         string entityName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(entityName))
-        {
-            throw new ArgumentException("The 'entityName' parameter is required.", nameof(entityName));
-        }
-
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
         var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
 
         var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);

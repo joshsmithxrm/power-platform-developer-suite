@@ -11,18 +11,13 @@ namespace PPDS.Mcp.Tools;
 /// MCP tool that gets web resource content for viewing or analysis.
 /// </summary>
 [McpServerToolType]
-public sealed class WebResourcesGetTool
+public sealed class WebResourcesGetTool : McpToolBase
 {
-    private readonly McpToolContext _context;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="WebResourcesGetTool"/> class.
     /// </summary>
     /// <param name="context">The MCP tool context.</param>
-    public WebResourcesGetTool(McpToolContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    public WebResourcesGetTool(McpToolContext context) : base(context) { }
 
     /// <summary>
     /// Gets web resource content for viewing or analysis.
@@ -45,11 +40,11 @@ public sealed class WebResourcesGetTool
             throw new ArgumentException($"Invalid web resource ID: '{id}'. Must be a valid GUID.");
         }
 
-        await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
+        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
         var content = await service.GetContentAsync(resourceId, published, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Web resource '{id}' not found.");
+            ?? throw new KeyNotFoundException($"Web resource '{id}' not found.");
 
         var info = new WebResourceInfo(
             content.Id, content.Name, null, content.WebResourceType,
