@@ -137,9 +137,11 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 - Both MUST show 0 errors / 0 failures
 - If build errors exist, dispatch a fix agent with the specific errors
 - If test failures exist, dispatch a fix agent with the failing test names and error messages
-- If specs with ACs are relevant to this phase, check: do the AC test methods pass?
-  Run: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
-  for each AC referenced by this phase's tasks
+- **AC coverage gate (Constitution I6):** For every AC in the relevant spec(s) that this phase claims to implement, verify:
+  1. The spec AC table `Test` column is filled in (not empty, not "❌ no test yet")
+  2. The referenced test method exists in the codebase
+  3. The test passes: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
+  If any AC is missing a test, the phase gate FAILS. Do not proceed — dispatch an agent to write the missing tests. This is not optional — Constitution I6 makes untested ACs a defect.
 - If the phase touches extension code (`src/PPDS.Extension/` directory):
   Invoke `/verify extension` to check daemon status, tree views, and panel state.
   Then invoke `/qa extension` to dispatch a blind verifier agent that tests the UI without seeing source code.

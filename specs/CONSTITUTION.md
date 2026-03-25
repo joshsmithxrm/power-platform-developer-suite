@@ -40,6 +40,8 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 **I5.** Extension panel names use the plural noun for collection views (Solutions, Plugin Traces) and a descriptive tool name for interactive tools (Data Explorer, Plugin Registration, Metadata Browser). Test: if "list of {name}" makes sense, it's a collection — use the noun. If the panel has its own interaction model beyond listing, use a descriptive name.
 
+**I6.** Every spec AC must have a corresponding passing test before implementation is complete. The spec AC table `Test` column must reference the test method; the `Status` column must show ✅. Untested ACs are incomplete implementations — not tech debt, not follow-up items.
+
 ## Session Laws
 
 **SS1.** Running sessions are independent — changing the active profile or environment in one surface (CLI, TUI, Extension, MCP) does not affect other running surfaces. The persisted active profile is a default for new sessions, not a live binding.

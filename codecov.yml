@@ -14,7 +14,9 @@ coverage:
     patch:
       default:
         target: 80%
-        informational: true  # Don't block PRs (visibility only for now)
+        threshold: 5%
+        informational: false  # ENFORCED — blocks PRs with <80% new-code coverage
+        after_n_builds: 1
 
   # Per-package thresholds using component system
   # These match the targets defined in issue #55

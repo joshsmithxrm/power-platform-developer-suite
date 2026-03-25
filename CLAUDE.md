@@ -42,6 +42,24 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Extension E2E: `npm run ext:test:e2e`
 - TUI snapshots: `npm run tui:test`
 
+### Test Conventions
+
+| Area | Test Type | Trait / Framework | Notes |
+|------|-----------|-------------------|-------|
+| Application Services | Unit (mocked deps) | `Unit` | Mock IDataverseConnectionPool, IProgressReporter |
+| Dataverse SDK logic | FakeXrmEasy | `Unit` | Use FakeXrmEasyTestsBase for SDK behavior |
+| Query engine | Unit (pure functions) | `Unit` | Deterministic transforms |
+| Import orchestration | Unit + FakeXrmEasy | `Unit` | Mock pool, bulk executor |
+| CLI commands | Unit (mock services) | `Unit` | Commands are thin wrappers — test services |
+| TUI extracted logic | Unit | `TuiUnit` | Business logic, not Terminal.Gui rendering |
+| Extension panels | Vitest | N/A | Message contracts + handler behavior |
+| MCP tools | Unit (mock services) | `Unit` | Param validation + basic execution |
+| Live Dataverse | Integration | `Integration` | Needs test-dataverse environment |
+
+- **Coverage bar:** 80% on new code (patch), enforced by Codecov
+- **AC mapping:** every spec AC must have a corresponding test (Constitution I6)
+- **File placement:** `tests/{Project}.Tests/{mirror source path}/{ClassName}Tests.cs`
+
 ## Specs
 
 - Constitution: `specs/CONSTITUTION.md` — read before any work (includes Spec Laws SL1–SL5)
@@ -57,7 +75,10 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 
 ## Git Hooks
 
-Pre-commit hook (`scripts/hooks/`) runs dotnet build, dotnet test, and extension typecheck + eslint. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
+Pre-commit hook (`scripts/hooks/`) runs:
+- **C# staged:** `dotnet build` + `dotnet test` (unit only)
+- **TS staged:** typecheck + eslint
+Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
 
 ## Backlog
 
