@@ -57,9 +57,8 @@ When the design is approved:
 ### 6. Transition
 
 After user approves the written spec:
-1. Write an implementation plan to `.plans/` (ephemeral, gitignored — do NOT commit plans)
-2. Push the spec branch and create a PR: `git -C .worktrees/spec-<name> push -u origin spec/<name>` then `gh pr create`
-3. Present the pipeline command for implementation:
+1. Push the spec branch and create a PR: `git -C .worktrees/spec-<name> push -u origin spec/<name>` then `gh pr create`
+2. Present the pipeline command for implementation:
 
 > Spec PR created: `<url>`
 >
@@ -73,7 +72,7 @@ python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>
 ```
 Run this in the background so the user can check `/status` while it runs.
 
-If deferring, note the plan path for the next session.
+If deferring, note the spec path for the next session.
 
 ## Key Principles
 
