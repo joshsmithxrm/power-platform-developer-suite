@@ -30,8 +30,14 @@ def get_current_branch() -> str:
 
 def is_allowed_path(file_path: str) -> bool:
     normalized = file_path.replace("\\", "/").lower()
+    # Strip project dir prefix so absolute paths work the same as relative ones
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").replace("\\", "/").lower().rstrip("/")
+    if project_dir and normalized.startswith(project_dir + "/"):
+        normalized = normalized[len(project_dir) + 1:]
     allowed_prefixes = [
         ".plans/",
+        # specs/ allowed — design artifacts committed to main
+        "specs/",
     ]
     allowed_substrings = [
         "/tmp/",
@@ -39,12 +45,9 @@ def is_allowed_path(file_path: str) -> bool:
         "appdata/local/temp",
         ".worktrees/",
     ]
-    # specs/ allowed â€” design artifacts committed to main
-    allowed_prefixes.append("specs/")
     return any(normalized.startswith(p) for p in allowed_prefixes) or any(
         s in normalized for s in allowed_substrings
     )
-
 
 def main() -> None:
     branch = get_current_branch()
