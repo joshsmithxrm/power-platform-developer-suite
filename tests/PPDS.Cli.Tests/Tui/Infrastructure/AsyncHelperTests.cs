@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using PPDS.Cli.Tui.Infrastructure;
 using Xunit;
 
@@ -59,10 +60,15 @@ public sealed class AsyncHelperTests
 
     private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 2000)
     {
-        var deadline = Environment.TickCount64 + timeoutMs;
-        while (errorService.RecentErrors.Count < count && Environment.TickCount64 < deadline)
+        var stopwatch = Stopwatch.StartNew();
+        while (errorService.RecentErrors.Count < count && stopwatch.ElapsedMilliseconds < timeoutMs)
         {
             await Task.Delay(25);
+        }
+
+        if (errorService.RecentErrors.Count < count)
+        {
+            Assert.Fail($"Timed out after {timeoutMs}ms waiting for {count} error(s), but only found {errorService.RecentErrors.Count}.");
         }
     }
 }
