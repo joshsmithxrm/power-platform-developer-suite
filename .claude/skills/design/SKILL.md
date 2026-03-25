@@ -46,28 +46,30 @@ Ask clarifying questions **one at a time**:
 ### 5. Write Spec
 
 When the design is approved:
-1. Write the spec to `specs/<name>.md` on main using the spec template
-2. Include numbered acceptance criteria (Constitution I3)
-3. Commit the spec directly to main (`specs/` is allowed by protect-main-branch hook)
-4. Present the spec path for user review
+1. Create a worktree: `git worktree add .worktrees/spec-<name> -b spec/<name>`
+2. Write the spec to `.worktrees/spec-<name>/specs/<name>.md` using the spec template
+3. Include numbered acceptance criteria (Constitution I3)
+4. Commit the spec in the worktree: `git -C .worktrees/spec-<name> add specs/ && git -C .worktrees/spec-<name> commit -m "spec: <name>"`
+5. Present the spec path for user review
+
+**Why a worktree?** You stay on main, ready for the next design session. The spec lives in its own branch without switching context. GitHub branch protection blocks direct pushes to main, so specs go through PRs like everything else.
 
 ### 6. Transition
 
 After user approves the written spec:
 1. Write an implementation plan to `.plans/` (ephemeral, gitignored — do NOT commit plans)
-2. Present the plan path and pipeline command:
+2. Push the spec branch and create a PR: `git -C .worktrees/spec-<name> push -u origin spec/<name>` then `gh pr create`
+3. Present the pipeline command for implementation:
 
-> Plan saved to `.plans/<filename>.md`.
+> Spec PR created: `<url>`
 >
-> To execute: `python scripts/pipeline.py --plan .plans/<filename>.md --branch <branch-name>`
->
-> Or with spec only: `python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>`
+> To implement: `python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>`
 >
 > Or say "run it" and I'll invoke the pipeline from here.
 
 If the user wants to proceed immediately, invoke the pipeline:
 ```bash
-python scripts/pipeline.py --plan .plans/<filename>.md --branch <branch-name>
+python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>
 ```
 Run this in the background so the user can check `/status` while it runs.
 
