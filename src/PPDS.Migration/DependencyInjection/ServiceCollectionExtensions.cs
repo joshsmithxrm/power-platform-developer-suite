@@ -6,6 +6,7 @@ using PPDS.Migration.Analysis;
 using PPDS.Migration.Export;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
+using PPDS.Migration.Import.Handlers;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
 
@@ -62,6 +63,30 @@ namespace PPDS.Migration.DependencyInjection
             services.AddTransient<BulkOperationProber>();
             services.AddTransient<DeferredFieldProcessor>();
             services.AddTransient<RelationshipProcessor>();
+
+            // Import - Handlers
+            services.AddTransient<IRecordFilter, SystemUserHandler>();
+            services.AddTransient<IRecordFilter, ActivityPointerHandler>();
+            services.AddTransient<IRecordFilter, ProductHandler>();
+            services.AddTransient<IRecordTransformer, BusinessUnitHandler>();
+            services.AddTransient<IRecordTransformer, OpportunityHandler>();
+            services.AddTransient<IRecordTransformer, IncidentHandler>();
+            services.AddTransient<IRecordTransformer, QuoteHandler>();
+            services.AddTransient<IRecordTransformer, SalesOrderHandler>();
+            services.AddTransient<IRecordTransformer, LeadHandler>();
+            services.AddTransient<IRecordTransformer, DuplicateRuleHandler>();
+            services.AddTransient<IStateTransitionHandler, OpportunityHandler>();
+            services.AddTransient<IStateTransitionHandler, IncidentHandler>();
+            services.AddTransient<IStateTransitionHandler, QuoteHandler>();
+            services.AddTransient<IStateTransitionHandler, SalesOrderHandler>();
+            services.AddTransient<IStateTransitionHandler, LeadHandler>();
+            services.AddTransient<IStateTransitionHandler, ProductHandler>();
+            services.AddTransient<IPostImportHandler, DuplicateRuleHandler>();
+
+            // Import - Components
+            services.AddTransient<StateTransitionProcessor>();
+            services.AddTransient<EntityReferenceMapper>();
+            services.AddTransient<FileColumnTransferHelper>();
 
             // Import - Orchestration
             services.AddTransient<IPluginStepManager, PluginStepManager>();

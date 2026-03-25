@@ -1,22 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.ServiceModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Pooling;
-using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Import
 {
     /// <summary>
-    /// Processes Phase 3 of import: applies state/status transitions to records
-    /// that were imported in their default (active) state but need to be set to
-    /// a non-default state (e.g., closed, won, lost, cancelled).
+    /// Processes Phase 3 of the import pipeline: applying state transitions
+    /// collected during Phase 1 entity import.
     /// </summary>
     public class StateTransitionProcessor : IImportPhaseProcessor
     {
@@ -29,7 +28,7 @@ namespace PPDS.Migration.Import
         /// <summary>
         /// Initializes a new instance of the <see cref="StateTransitionProcessor"/> class.
         /// </summary>
-        /// <param name="connectionPool">The connection pool.</param>
+        /// <param name="connectionPool">The connection pool for Dataverse operations.</param>
         /// <param name="logger">Optional logger.</param>
         public StateTransitionProcessor(
             IDataverseConnectionPool connectionPool,
@@ -61,6 +60,15 @@ namespace PPDS.Migration.Import
                 return PhaseResult.Skipped();
             }
 
+            // Report initial progress
+            context.Progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.ProcessingStateTransitions,
+                Current = 0,
+                Total = allTransitions.Count,
+                Message = "Processing state transitions"
+            });
+
             var sw = Stopwatch.StartNew();
             var successCount = 0;
             var failureCount = 0;
@@ -70,10 +78,17 @@ namespace PPDS.Migration.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Map source record ID to target environment ID
+                var targetRecordId = transition.RecordId;
+                if (context.IdMappings.TryGetNewId(transition.EntityName, transition.RecordId, out var mappedId))
+                {
+                    targetRecordId = mappedId;
+                }
+
                 try
                 {
                     // Check if the record is already in the target state (AC-16)
-                    if (await IsRecordAlreadyInStateAsync(transition, cancellationToken).ConfigureAwait(false))
+                    if (await IsRecordAlreadyInStateAsync(transition.EntityName, targetRecordId, cancellationToken).ConfigureAwait(false))
                     {
                         _logger?.LogDebug(
                             "Record {EntityName}/{RecordId} already in statecode={StateCode}, skipping transition",
@@ -85,11 +100,11 @@ namespace PPDS.Migration.Import
                     // Apply the transition
                     if (!string.IsNullOrEmpty(transition.SdkMessage))
                     {
-                        await ExecuteSdkMessageAsync(transition, cancellationToken).ConfigureAwait(false);
+                        await ExecuteSdkMessageAsync(transition, targetRecordId, cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        await ExecuteSetStateAsync(transition, cancellationToken).ConfigureAwait(false);
+                        await ExecuteSetStateAsync(transition, targetRecordId, cancellationToken).ConfigureAwait(false);
                     }
 
                     successCount++;
@@ -133,7 +148,8 @@ namespace PPDS.Migration.Import
         /// Checks if a record is already in the target state to avoid double-closing.
         /// </summary>
         private async Task<bool> IsRecordAlreadyInStateAsync(
-            StateTransitionData transition,
+            string entityName,
+            Guid recordId,
             CancellationToken cancellationToken)
         {
             try
@@ -142,13 +158,13 @@ namespace PPDS.Migration.Import
                     cancellationToken: cancellationToken).ConfigureAwait(false);
 
                 var retrieved = await client.RetrieveAsync(
-                    transition.EntityName,
-                    transition.RecordId,
+                    entityName,
+                    recordId,
                     new ColumnSet("statecode"),
                     cancellationToken).ConfigureAwait(false);
 
                 var currentState = retrieved.GetAttributeValue<OptionSetValue>("statecode");
-                return currentState?.Value == transition.StateCode;
+                return currentState != null && currentState.Value != 0;
             }
             catch (FaultException)
             {
@@ -162,11 +178,12 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task ExecuteSetStateAsync(
             StateTransitionData transition,
+            Guid targetRecordId,
             CancellationToken cancellationToken)
         {
             var request = new OrganizationRequest("SetState")
             {
-                ["EntityMoniker"] = new EntityReference(transition.EntityName, transition.RecordId),
+                ["EntityMoniker"] = new EntityReference(transition.EntityName, targetRecordId),
                 ["State"] = new OptionSetValue(transition.StateCode),
                 ["Status"] = new OptionSetValue(transition.StatusCode)
             };
@@ -184,6 +201,7 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task ExecuteSdkMessageAsync(
             StateTransitionData transition,
+            Guid targetRecordId,
             CancellationToken cancellationToken)
         {
             var request = new OrganizationRequest(transition.SdkMessage!);

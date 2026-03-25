@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using PPDS.Migration.Import;
 using PPDS.Migration.Models;
 
 namespace PPDS.Migration.Formats
@@ -115,6 +116,8 @@ namespace PPDS.Migration.Formats
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
             var disablePlugins = ParseBool(element.Attribute("disableplugins")?.Value);
+            var importModeAttr = element.Attribute("importMode")?.Value;
+            var importMode = ParseImportMode(importModeAttr);
 
             var fields = new List<FieldSchema>();
             var fieldsElement = element.Element("fields");
@@ -157,6 +160,7 @@ namespace PPDS.Migration.Formats
                 PrimaryNameField = primaryNameField,
                 DisablePlugins = disablePlugins,
                 ObjectTypeCode = objectTypeCode,
+                ImportMode = importMode,
                 Fields = fields,
                 Relationships = relationships,
                 FetchXmlFilter = fetchXmlFilter
@@ -180,6 +184,8 @@ namespace PPDS.Migration.Formats
             // Parse validity flags - default to true for backwards compatibility
             var isValidForCreate = ParseBool(element.Attribute("isValidForCreate")?.Value, defaultValue: true);
             var isValidForUpdate = ParseBool(element.Attribute("isValidForUpdate")?.Value, defaultValue: true);
+            var dateModeAttr = element.Attribute("dateMode")?.Value;
+            var dateMode = ParseDateMode(dateModeAttr);
 
             return new FieldSchema
             {
@@ -192,6 +198,7 @@ namespace PPDS.Migration.Formats
                 IsPrimaryKey = isPrimaryKey,
                 IsValidForCreate = isValidForCreate,
                 IsValidForUpdate = isValidForUpdate,
+                DateMode = dateMode,
                 MaxLength = ParseInt(element.Attribute("maxlength")?.Value),
                 Precision = ParseInt(element.Attribute("precision")?.Value)
             };
@@ -276,6 +283,39 @@ namespace PPDS.Migration.Formats
             }
 
             return DateTime.TryParse(value, out var result) ? result : null;
+        }
+
+        private static DateMode ParseDateMode(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return DateMode.Absolute;
+            }
+
+            return value.ToLowerInvariant() switch
+            {
+                "relative" => DateMode.Relative,
+                "relativedaily" => DateMode.RelativeDaily,
+                "relativeexact" => DateMode.RelativeExact,
+                _ => DateMode.Absolute
+            };
+        }
+
+        private static ImportMode? ParseImportMode(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+
+            return value.ToLowerInvariant() switch
+            {
+                "create" => ImportMode.Create,
+                "update" => ImportMode.Update,
+                "upsert" => ImportMode.Upsert,
+                "skip" => ImportMode.Skip,
+                _ => null
+            };
         }
     }
 }

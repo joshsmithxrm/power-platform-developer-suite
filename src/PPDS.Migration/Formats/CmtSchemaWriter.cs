@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using Microsoft.Extensions.Logging;
+using PPDS.Migration.Import;
 using PPDS.Migration.Models;
 
 namespace PPDS.Migration.Formats
@@ -93,6 +94,23 @@ namespace PPDS.Migration.Formats
             await writer.WriteAttributeStringAsync(null, "primarynamefield", null, entity.PrimaryNameField).ConfigureAwait(false);
             await writer.WriteAttributeStringAsync(null, "disableplugins", null, entity.DisablePlugins.ToString().ToLowerInvariant()).ConfigureAwait(false);
 
+            // Write importMode if set
+            if (entity.ImportMode.HasValue)
+            {
+                var importModeStr = entity.ImportMode.Value switch
+                {
+                    ImportMode.Create => "create",
+                    ImportMode.Update => "update",
+                    ImportMode.Upsert => "upsert",
+                    ImportMode.Skip => "skip",
+                    _ => null
+                };
+                if (importModeStr != null)
+                {
+                    await writer.WriteAttributeStringAsync(null, "importMode", null, importModeStr).ConfigureAwait(false);
+                }
+            }
+
             // Write fields
             await writer.WriteStartElementAsync(null, "fields", null).ConfigureAwait(false);
             foreach (var field in entity.Fields)
@@ -148,6 +166,22 @@ namespace PPDS.Migration.Formats
             if (!field.IsValidForUpdate)
             {
                 await writer.WriteAttributeStringAsync(null, "isValidForUpdate", null, "false").ConfigureAwait(false);
+            }
+
+            // Write dateMode if not Absolute (Absolute is the default)
+            if (field.DateMode != DateMode.Absolute)
+            {
+                var dateModeStr = field.DateMode switch
+                {
+                    DateMode.Relative => "relative",
+                    DateMode.RelativeDaily => "relativedaily",
+                    DateMode.RelativeExact => "relativeexact",
+                    _ => null
+                };
+                if (dateModeStr != null)
+                {
+                    await writer.WriteAttributeStringAsync(null, "dateMode", null, dateModeStr).ConfigureAwait(false);
+                }
             }
 
             await writer.WriteEndElementAsync().ConfigureAwait(false); // field
