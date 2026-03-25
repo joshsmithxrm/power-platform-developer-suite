@@ -46,19 +46,19 @@ Ask clarifying questions **one at a time**:
 ### 5. Write Spec
 
 When the design is approved:
-1. Create a `spec/<name>` branch from main: `git checkout -b spec/<name>`
-2. Write the spec to `specs/<name>.md` using the spec template
+1. Create a worktree: `git worktree add .worktrees/spec-<name> -b spec/<name>`
+2. Write the spec to `.worktrees/spec-<name>/specs/<name>.md` using the spec template
 3. Include numbered acceptance criteria (Constitution I3)
-4. Commit the spec on the branch
+4. Commit the spec in the worktree: `git -C .worktrees/spec-<name> add specs/ && git -C .worktrees/spec-<name> commit -m "spec: <name>"`
 5. Present the spec path for user review
 
-**Why a branch?** GitHub branch protection blocks direct pushes to main. Specs go through PRs like everything else.
+**Why a worktree?** You stay on main, ready for the next design session. The spec lives in its own branch without switching context. GitHub branch protection blocks direct pushes to main, so specs go through PRs like everything else.
 
 ### 6. Transition
 
 After user approves the written spec:
 1. Write an implementation plan to `.plans/` (ephemeral, gitignored — do NOT commit plans)
-2. Push the spec branch and create a PR for the spec
+2. Push the spec branch and create a PR: `git -C .worktrees/spec-<name> push -u origin spec/<name>` then `gh pr create`
 3. Present the pipeline command for implementation:
 
 > Spec PR created: `<url>`
