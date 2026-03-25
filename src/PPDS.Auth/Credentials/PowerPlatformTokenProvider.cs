@@ -133,16 +133,25 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
     public static PowerPlatformTokenProvider FromProfileWithSecret(AuthProfile profile, string clientSecret)
     {
         if (profile.AuthMethod != AuthMethod.ClientSecret)
-            throw new ArgumentException($"Profile auth method must be ClientSecret, got {profile.AuthMethod}", nameof(profile));
+            throw new AuthenticationException(
+                $"Profile auth method must be ClientSecret, got {profile.AuthMethod}.",
+                "Auth.InvalidCredentials");
 
         if (string.IsNullOrWhiteSpace(profile.ApplicationId))
-            throw new ArgumentException("Profile ApplicationId is required", nameof(profile));
+            throw new AuthenticationException(
+                "Profile ApplicationId is required for ClientSecret authentication.",
+                "Auth.InvalidCredentials");
 
         if (string.IsNullOrWhiteSpace(profile.TenantId))
-            throw new ArgumentException("Profile TenantId is required", nameof(profile));
+            throw new AuthenticationException(
+                "Profile TenantId is required for ClientSecret authentication.",
+                "Auth.InvalidCredentials");
 
         if (string.IsNullOrWhiteSpace(clientSecret))
-            throw new ArgumentException("Client secret is required", nameof(clientSecret));
+            throw new AuthenticationException(
+                "Client secret is required for ClientSecret authentication. " +
+                "Run 'ppds auth create' to recreate the profile with credentials.",
+                "Auth.InvalidCredentials");
 
         return new PowerPlatformTokenProvider(profile.ApplicationId, clientSecret, profile.TenantId, profile.Cloud);
     }

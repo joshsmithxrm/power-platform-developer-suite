@@ -129,7 +129,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, "secret");
 
-        act.Should().Throw<ArgumentException>()
+        act.Should().Throw<AuthenticationException>()
             .WithMessage("*must be ClientSecret*");
     }
 
@@ -145,7 +145,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, "secret");
 
-        act.Should().Throw<ArgumentException>()
+        act.Should().Throw<AuthenticationException>()
             .WithMessage("*ApplicationId is required*");
     }
 
@@ -161,7 +161,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, "secret");
 
-        act.Should().Throw<ArgumentException>()
+        act.Should().Throw<AuthenticationException>()
             .WithMessage("*TenantId is required*");
     }
 
@@ -178,8 +178,8 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, null!);
 
-        act.Should().Throw<ArgumentException>()
-            .WithParameterName("clientSecret");
+        act.Should().Throw<AuthenticationException>()
+            .WithMessage("*Client secret is required*");
     }
 
     [Fact]

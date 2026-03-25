@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using Xunit;
 
@@ -94,9 +95,9 @@ public class ConnectionServiceTests
         {
             await service.ListAsync();
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException or PpdsAuthException)
         {
-            // Expected - no mock HTTP client (may throw HttpRequestException or InvalidOperationException for auth)
+            // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
         }
 
         _mockTokenProvider.Verify(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -130,9 +131,9 @@ public class ConnectionServiceTests
         {
             await service.GetAsync("test-connection-id");
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException or PpdsAuthException)
         {
-            // Expected - no mock HTTP client (may throw HttpRequestException or InvalidOperationException for auth)
+            // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
         }
 
         _mockTokenProvider.Verify(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()), Times.Once);
