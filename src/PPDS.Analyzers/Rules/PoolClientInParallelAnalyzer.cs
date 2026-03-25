@@ -50,13 +50,18 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
 
         var variableName = declarator.Identifier.Text;
 
+        // Resolve the declared symbol for semantic comparison
+        var declaredSymbol = context.SemanticModel.GetDeclaredSymbol(declarator, context.CancellationToken);
+
         // Find the enclosing block
         var enclosingBlock = localDecl.Parent;
         if (enclosingBlock is null)
             return;
 
         // Count await expressions where this variable is the receiver
-        var awaitCount = CountAwaitsOnVariable(enclosingBlock, variableName, localDecl.SpanStart);
+        var awaitCount = CountAwaitsOnVariable(
+            enclosingBlock, variableName, declaredSymbol, context.SemanticModel,
+            localDecl.SpanStart, context.CancellationToken);
 
         if (awaitCount > 1)
         {
@@ -113,7 +118,13 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    private static int CountAwaitsOnVariable(SyntaxNode scope, string variableName, int afterPosition)
+    private static int CountAwaitsOnVariable(
+        SyntaxNode scope,
+        string variableName,
+        ISymbol? declaredSymbol,
+        SemanticModel semanticModel,
+        int afterPosition,
+        System.Threading.CancellationToken cancellationToken)
     {
         var count = 0;
 
@@ -121,6 +132,10 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         {
             // Only count awaits after the declaration
             if (awaitExpr.SpanStart <= afterPosition)
+                continue;
+
+            // Skip awaits inside nested lambdas/local functions (different execution scope)
+            if (IsInsideNestedScope(awaitExpr, scope))
                 continue;
 
             // Check if the awaited invocation uses our variable as receiver
@@ -137,8 +152,17 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
             if (expression is InvocationExpressionSyntax invocation &&
                 invocation.Expression is MemberAccessExpressionSyntax memberAccess)
             {
-                if (memberAccess.Expression is IdentifierNameSyntax identifier &&
-                    identifier.Identifier.Text == variableName)
+                if (memberAccess.Expression is not IdentifierNameSyntax identifier)
+                    continue;
+
+                // Prefer semantic comparison when available, fall back to name
+                if (declaredSymbol is not null)
+                {
+                    var referencedSymbol = semanticModel.GetSymbolInfo(identifier, cancellationToken).Symbol;
+                    if (SymbolEqualityComparer.Default.Equals(referencedSymbol, declaredSymbol))
+                        count++;
+                }
+                else if (identifier.Identifier.Text == variableName)
                 {
                     count++;
                 }
@@ -146,5 +170,23 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         }
 
         return count;
+    }
+
+    private static bool IsInsideNestedScope(SyntaxNode node, SyntaxNode boundary)
+    {
+        var current = node.Parent;
+        while (current is not null && current != boundary)
+        {
+            if (current is LambdaExpressionSyntax or
+                AnonymousMethodExpressionSyntax or
+                LocalFunctionStatementSyntax)
+            {
+                return true;
+            }
+
+            current = current.Parent;
+        }
+
+        return false;
     }
 }

@@ -24,15 +24,6 @@ public sealed class UseStructuredExceptionsAnalyzer : DiagnosticAnalyzer
                      "instead of raw exceptions. Raw exceptions prevent programmatic error handling. " +
                      "See Constitution D4.");
 
-    private static readonly string[] FlaggedTypeNames =
-    {
-        "System.Exception",
-        "System.InvalidOperationException",
-        "System.ArgumentException",
-        "System.ArgumentNullException",
-        "System.NotImplementedException",
-    };
-
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Rule);
 
@@ -52,21 +43,20 @@ public sealed class UseStructuredExceptionsAnalyzer : DiagnosticAnalyzer
         if (throwStatement.Expression is null)
             return;
 
-        AnalyzeThrowExpression(context, throwStatement.Expression, throwStatement.GetLocation());
+        AnalyzeThrowExpression(context, throwStatement.Expression);
     }
 
     private static void AnalyzeThrowExpression(SyntaxNodeAnalysisContext context)
     {
         var throwExpression = (ThrowExpressionSyntax)context.Node;
-        AnalyzeThrowExpression(context, throwExpression.Expression, throwExpression.GetLocation());
+        AnalyzeThrowExpression(context, throwExpression.Expression);
     }
 
     private static void AnalyzeThrowExpression(
         SyntaxNodeAnalysisContext context,
-        ExpressionSyntax expression,
-        Location location)
+        ExpressionSyntax expression)
     {
-        // Only flag in Application Services (files with Services/ in path)
+        // Only flag in Application Services (PPDS.Cli/Services/ path)
         var filePath = context.Node.SyntaxTree.FilePath;
         if (!IsServicesPath(filePath))
             return;
@@ -84,9 +74,8 @@ public sealed class UseStructuredExceptionsAnalyzer : DiagnosticAnalyzer
         if (DerivesFromPpdsException(type))
             return;
 
-        // Check if the type is one of the flagged exception types
-        var fullName = type.ToDisplayString();
-        if (Array.IndexOf(FlaggedTypeNames, fullName) < 0)
+        // Flag any exception type that derives from System.Exception but not PpdsException
+        if (!DerivesFromSystemException(type))
             return;
 
         var diagnostic = Diagnostic.Create(
@@ -102,7 +91,7 @@ public sealed class UseStructuredExceptionsAnalyzer : DiagnosticAnalyzer
         if (string.IsNullOrEmpty(filePath))
             return false;
 
-        return filePath.Contains("Services/") || filePath.Contains("Services\\");
+        return filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
     }
 
     private static bool DerivesFromPpdsException(ITypeSymbol? type)
@@ -112,6 +101,23 @@ public sealed class UseStructuredExceptionsAnalyzer : DiagnosticAnalyzer
         {
             if (current.Name == "PpdsException")
                 return true;
+            current = current.BaseType;
+        }
+
+        return false;
+    }
+
+    private static bool DerivesFromSystemException(ITypeSymbol? type)
+    {
+        var current = type;
+        while (current is not null)
+        {
+            if (current.Name == "Exception" &&
+                current.ContainingNamespace?.ToDisplayString() == "System")
+            {
+                return true;
+            }
+
             current = current.BaseType;
         }
 
