@@ -65,6 +65,11 @@ namespace PPDS.Migration.Models
         public int? Precision { get; set; }
 
         /// <summary>
+        /// Gets or sets the date shifting mode for date/time fields.
+        /// </summary>
+        public DateMode DateMode { get; set; } = DateMode.Absolute;
+
+        /// <summary>
         /// Gets whether this field is a lookup type.
         /// </summary>
         public bool IsLookup => Type.Equals("entityreference", StringComparison.OrdinalIgnoreCase) ||

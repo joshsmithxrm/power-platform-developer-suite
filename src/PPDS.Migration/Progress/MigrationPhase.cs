@@ -17,6 +17,9 @@ namespace PPDS.Migration.Progress
         /// <summary>Processing deferred lookup fields.</summary>
         ProcessingDeferredFields,
 
+        /// <summary>Processing state/status transitions on imported records.</summary>
+        ProcessingStateTransitions,
+
         /// <summary>Processing many-to-many relationships.</summary>
         ProcessingRelationships,
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PPDS.Migration.Import;
 
 namespace PPDS.Migration.Models
 {
@@ -47,6 +48,12 @@ namespace PPDS.Migration.Models
         /// Gets or sets the relationship definitions.
         /// </summary>
         public IReadOnlyList<RelationshipSchema> Relationships { get; set; } = Array.Empty<RelationshipSchema>();
+
+        /// <summary>
+        /// Gets or sets the per-entity import mode override.
+        /// When null, the global <see cref="ImportOptions.Mode"/> is used.
+        /// </summary>
+        public ImportMode? ImportMode { get; set; }
 
         /// <summary>
         /// Gets or sets the FetchXML filter for export (optional).

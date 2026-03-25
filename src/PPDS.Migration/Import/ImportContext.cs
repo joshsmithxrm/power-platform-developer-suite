@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
@@ -69,9 +70,35 @@ namespace PPDS.Migration.Import
         public IProgressReporter? Progress { get; }
 
         /// <summary>
+        /// Gets or sets the target environment's root business unit ID.
+        /// Used by BusinessUnitHandler to remap the root BU during import.
+        /// </summary>
+        public Guid? TargetRootBusinessUnitId { get; set; }
+
+        /// <summary>
         /// Gets or sets the optional output manager for checkpoint logging.
         /// When set, tier starts, entity completions, and phase transitions are logged to the progress file.
         /// </summary>
         public ImportOutputManager? OutputManager { get; set; }
+
+        /// <summary>
+        /// Gets the collection of state transitions to apply after record import.
+        /// Thread-safe for concurrent access during parallel import.
+        /// </summary>
+        public StateTransitionCollection StateTransitions { get; } = new();
+
+        /// <summary>
+        /// Gets or sets the source Entity Type Code to logical name mapping.
+        /// Used by DuplicateRuleHandler to remap baseentitytypecode and matchingentitytypecode fields.
+        /// Key is the source ETC (int), value is the entity logical name.
+        /// </summary>
+        public Dictionary<int, string>? SourceEntityTypeCodes { get; set; }
+
+        /// <summary>
+        /// Gets or sets the target logical name to Entity Type Code mapping.
+        /// Used by DuplicateRuleHandler to remap baseentitytypecode and matchingentitytypecode fields.
+        /// Key is the entity logical name, value is the target ETC (int).
+        /// </summary>
+        public Dictionary<string, int>? TargetEntityTypeCodes { get; set; }
     }
 }
