@@ -69,6 +69,13 @@ csharp_new_line_before_else = true
 csharp_new_line_before_catch = true
 csharp_new_line_before_finally = true
 
+# PPDS Analyzers — new rules start as suggestion to avoid breaking builds
+# with TreatWarningsAsErrors. Promote to warning after existing violations are fixed.
+dotnet_diagnostic.PPDS004.severity = suggestion
+dotnet_diagnostic.PPDS007.severity = suggestion
+dotnet_diagnostic.PPDS008.severity = suggestion
+dotnet_diagnostic.PPDS011.severity = suggestion
+
 # Generated code - relax rules that are noisy for auto-generated files
 [**/Generated/**.cs]
 # Disable naming warnings (generated code may not follow conventions)
