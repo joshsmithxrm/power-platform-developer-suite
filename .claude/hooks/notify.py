@@ -22,7 +22,7 @@ def get_pr_url(cwd):
         with open(state_path) as f:
             state = json.load(f)
         return (state.get("pr") or {}).get("url")
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return None
 
 
@@ -35,7 +35,7 @@ def main():
 
     try:
         data = json.load(sys.stdin)
-    except Exception:
+    except json.JSONDecodeError:
         return
 
     cwd = data.get("cwd", ".")

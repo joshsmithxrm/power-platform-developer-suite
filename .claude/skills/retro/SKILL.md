@@ -81,7 +81,7 @@ ls -lt <project-dir>/*.jsonl
 Do NOT use grep on JSONL — lines are too long. Use this python approach:
 
 ```bash
-python3 -c "
+python -c "
 import json
 path = r'<transcript-path>'
 with open(path, 'r', encoding='utf-8') as f:

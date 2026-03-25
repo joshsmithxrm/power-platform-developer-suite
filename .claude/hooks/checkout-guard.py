@@ -15,24 +15,17 @@ def is_main_repo(project_dir: str) -> bool:
     """Check if project_dir is the main repo root (not a worktree)."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
+            ["git", "rev-parse", "--git-dir", "--git-common-dir"],
             cwd=project_dir,
             capture_output=True,
             text=True,
             timeout=5,
+            check=True,
         )
-        git_common = result.stdout.strip().replace("\\", "/")
-        result2 = subprocess.run(
-            ["git", "rev-parse", "--git-dir"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        git_dir = result2.stdout.strip().replace("\\", "/")
+        git_dir, git_common = result.stdout.strip().splitlines()
         # In a worktree, git-dir != git-common-dir
-        return git_common == git_dir
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return git_dir.replace("\\", "/") == git_common.replace("\\", "/")
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
         return False
 
 
