@@ -759,9 +759,9 @@ public class TieredImporterTests
         // (in this case IDs are preserved since TieredImporter maps oldId -> oldId)
         capturedContact.Should().NotBeNull();
         capturedContact!.Contains("parentcustomerid").Should().BeTrue();
-        var lookup = capturedContact["parentcustomerid"] as EntityReference;
-        lookup.Should().NotBeNull();
-        lookup!.LogicalName.Should().Be("account");
+        var lookup = capturedContact["parentcustomerid"] as EntityReference
+            ?? throw new InvalidOperationException("parentcustomerid should be an EntityReference");
+        lookup.LogicalName.Should().Be("account");
         lookup.Id.Should().Be(accountId);
     }
 
@@ -894,9 +894,9 @@ public class TieredImporterTests
         result.RecordsImported.Should().Be(1);
         capturedEntity.Should().NotBeNull();
         capturedEntity!.Contains("ownerid").Should().BeTrue();
-        var ownerRef = capturedEntity["ownerid"] as EntityReference;
-        ownerRef.Should().NotBeNull();
-        ownerRef!.Id.Should().Be(targetUserId, "user mapping should remap ownerid to the target user");
+        var ownerRef = capturedEntity["ownerid"] as EntityReference
+            ?? throw new InvalidOperationException("ownerid should be an EntityReference");
+        ownerRef.Id.Should().Be(targetUserId, "user mapping should remap ownerid to the target user");
     }
 
     [Fact]
@@ -957,9 +957,9 @@ public class TieredImporterTests
         // Assert
         result.RecordsImported.Should().Be(1);
         capturedEntity.Should().NotBeNull();
-        var ownerRef = capturedEntity!["ownerid"] as EntityReference;
-        ownerRef.Should().NotBeNull();
-        ownerRef!.Id.Should().Be(currentUserId, "should fall back to current user when no explicit mapping exists");
+        var ownerRef = capturedEntity!["ownerid"] as EntityReference
+            ?? throw new InvalidOperationException("ownerid should be an EntityReference");
+        ownerRef.Id.Should().Be(currentUserId, "should fall back to current user when no explicit mapping exists");
         ownerRef.LogicalName.Should().Be("systemuser");
     }
 

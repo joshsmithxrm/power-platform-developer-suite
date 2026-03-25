@@ -79,8 +79,6 @@ public class DeferredFieldProcessorTests
             .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
             {
                 var list = entities.ToList();
-                // Verify the entity has the remapped reference
-                var updateEntity = list[0];
                 return new BulkOperationResult
                 {
                     SuccessCount = list.Count,
@@ -142,41 +140,42 @@ public class DeferredFieldProcessorTests
             },
             idMappings: idMappings);
 
-        // Probe record succeeds, remaining records succeed
-        _bulkExecutor.SetupSequence(x => x.UpdateMultipleAsync(
+        // Capture all entities passed to UpdateMultipleAsync regardless of batching strategy
+        var allUpdatedEntities = new List<Entity>();
+        _bulkExecutor.Setup(x => x.UpdateMultipleAsync(
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BulkOperationResult
+            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
             {
-                SuccessCount = 1,
-                FailureCount = 0,
-                Errors = Array.Empty<BulkOperationError>()
-            })
-            .ReturnsAsync(new BulkOperationResult
-            {
-                SuccessCount = 4,
-                FailureCount = 0,
-                Errors = Array.Empty<BulkOperationError>()
+                var batch = entities.ToList();
+                allUpdatedEntities.AddRange(batch);
+                return new BulkOperationResult
+                {
+                    SuccessCount = batch.Count,
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>()
+                };
             });
 
         // Act
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
 
-        // Assert
+        // Assert — verify outcome (all 5 records updated) not call count
         result.Success.Should().BeTrue();
         result.SuccessCount.Should().Be(5);
         result.FailureCount.Should().Be(0);
+        allUpdatedEntities.Should().HaveCount(5, "all 5 deferred field records should be updated via bulk path");
 
-        // UpdateMultipleAsync should be called twice: probe (1 record) + remaining (4 records)
+        // Verify bulk path was used (at least once — don't prescribe exact batching)
         _bulkExecutor.Verify(x => x.UpdateMultipleAsync(
             "account",
             It.IsAny<IEnumerable<Entity>>(),
             It.IsAny<BulkOperationOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
-            It.IsAny<CancellationToken>()), Times.Exactly(2));
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     #endregion
