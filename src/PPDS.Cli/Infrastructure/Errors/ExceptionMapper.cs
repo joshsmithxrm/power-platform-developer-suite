@@ -30,7 +30,8 @@ public static class ExceptionMapper
         var (code, target) = MapExceptionToCode(ex);
         var details = BuildDetails(context, ex, debug);
 
-        return StructuredError.Create(code, ex.Message, details, target, debug);
+        var message = ex is PpdsException ppdsEx ? ppdsEx.UserMessage : ex.Message;
+        return StructuredError.Create(code, message, details, target, debug);
     }
 
     /// <summary>
@@ -70,6 +71,7 @@ public static class ExceptionMapper
             PpdsValidationException => ExitCodes.InvalidArguments,
             PpdsAuthException => ExitCodes.AuthError,
             PpdsThrottleException => ExitCodes.ConnectionError,
+            PpdsException { ErrorCode: ErrorCodes.Operation.Timeout } => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: var code } when code.StartsWith("Plugin.") => ExitCodes.Failure,
             PpdsException { ErrorCode: var code } when code.StartsWith("Validation.") => ExitCodes.InvalidArguments,
             PpdsException { ErrorCode: var code } when code.StartsWith("Auth.") => ExitCodes.AuthError,

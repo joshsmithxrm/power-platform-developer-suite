@@ -143,11 +143,11 @@ public static class ServiceRegistration
 
             if (profile.AuthMethod == AuthMethod.ClientSecret)
             {
-                // SPN - need secret from credential store (keyed by ApplicationId)
                 if (string.IsNullOrEmpty(profile.ApplicationId))
                 {
-                    throw new InvalidOperationException(
-                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.");
+                    throw new AuthenticationException(
+                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.",
+                        "Auth.InvalidCredentials");
                 }
 
                 // DI factory delegates are synchronous; GetAsync is safe here because
@@ -155,13 +155,7 @@ public static class ServiceRegistration
 #pragma warning disable PPDS012 // Sync-over-async: DI factory cannot be async
                 var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
-                if (storedCredential?.ClientSecret == null)
-                {
-                    throw new InvalidOperationException(
-                        $"Client secret not found for application '{profile.ApplicationId}'. " +
-                        "Run 'ppds auth create' to recreate the profile with credentials.");
-                }
-                tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential.ClientSecret);
+                tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential?.ClientSecret ?? "");
             }
             else
             {

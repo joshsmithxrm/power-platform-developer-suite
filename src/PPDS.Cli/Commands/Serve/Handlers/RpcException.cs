@@ -95,6 +95,50 @@ public class RpcErrorData
     /// </summary>
     [JsonPropertyName("target")]
     public string? Target { get; set; }
+
+    /// <summary>
+    /// Whether the user needs to re-authenticate (from PpdsAuthException).
+    /// </summary>
+    [JsonPropertyName("requiresReauthentication")]
+    public bool? RequiresReauthentication { get; set; }
+
+    /// <summary>
+    /// Seconds to wait before retrying (from PpdsThrottleException).
+    /// </summary>
+    [JsonPropertyName("retryAfterSeconds")]
+    public double? RetryAfterSeconds { get; set; }
+
+    /// <summary>
+    /// List of validation errors (from PpdsValidationException).
+    /// </summary>
+    [JsonPropertyName("validationErrors")]
+    public List<RpcValidationError>? ValidationErrors { get; set; }
+
+    /// <summary>
+    /// The type of resource that was not found (from PpdsNotFoundException).
+    /// </summary>
+    [JsonPropertyName("resourceType")]
+    public string? ResourceType { get; set; }
+
+    /// <summary>
+    /// The identifier of the resource that was not found (from PpdsNotFoundException).
+    /// </summary>
+    [JsonPropertyName("resourceId")]
+    public string? ResourceId { get; set; }
+}
+
+/// <summary>
+/// A single validation error for RPC responses.
+/// </summary>
+public class RpcValidationError
+{
+    /// <summary>The field that failed validation.</summary>
+    [JsonPropertyName("field")]
+    public string Field { get; set; } = "";
+
+    /// <summary>The validation error message.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
 }
 
 /// <summary>

@@ -121,7 +121,33 @@ public static class Program
         // No manual CancelKeyPress handler is needed.
 
         var parseResult = rootCommand.Parse(args);
-        return await parseResult.InvokeAsync();
+
+        try
+        {
+            return await parseResult.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            return ExitCodes.Success;
+        }
+        catch (Exception ex)
+        {
+            var debug = args.Any(a => a == "--debug");
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex, debug: debug);
+
+            if (debug)
+            {
+                Console.Error.WriteLine(ex.ToString());
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {error.Message}");
+                if (error.Details != null)
+                    Console.Error.WriteLine(error.Details);
+            }
+
+            return exitCode;
+        }
     }
 
     /// <summary>

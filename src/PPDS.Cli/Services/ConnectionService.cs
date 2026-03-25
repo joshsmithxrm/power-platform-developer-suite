@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Services;
 
@@ -83,13 +84,15 @@ public class ConnectionService : IConnectionService
             if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
                 response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
-                throw new InvalidOperationException(
+                throw new PpdsAuthException(
+                    ErrorCodes.Auth.InsufficientPermissions,
                     $"Cannot access connections API. Status: {response.StatusCode}. " +
                     "Service principals have limited access to the Connections API. " +
-                    "Use interactive or device code authentication for full functionality.");
+                    "Use interactive or device code authentication for full functionality.")
+                { RequiresReauthentication = true };
             }
 
-            throw new HttpRequestException($"Power Apps Admin API error: {response.StatusCode} - {errorContent}");
+            throw new PpdsException(ErrorCodes.External.ServiceUnavailable, $"Power Apps Admin API error: {response.StatusCode} - {errorContent}");
         }
 
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -134,7 +137,7 @@ public class ConnectionService : IConnectionService
         {
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("Power Apps Admin API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
-            throw new HttpRequestException($"Power Apps Admin API error: {response.StatusCode}");
+            throw new PpdsException(ErrorCodes.External.ServiceUnavailable, $"Power Apps Admin API error: {response.StatusCode}");
         }
 
         var content = await response.Content.ReadAsStringAsync(cancellationToken);

@@ -22,12 +22,14 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Security;
 using PPDS.Dataverse.Services;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
 using PPDS.Query.Intellisense;
+using PPDS.Query.Parsing;
 using System.Threading;
 using StreamJsonRpc;
 
@@ -173,9 +175,9 @@ public class RpcMethodHandler : IDisposable
                 using var provider = CredentialProviderFactory.Create(profile);
                 tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors - token info will be null
+                _logger.LogDebug(ex, "Failed to get cached token info");
             }
         }
 
@@ -1819,7 +1821,7 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
                 }
             }
 
@@ -1920,17 +1922,17 @@ public class RpcMethodHandler : IDisposable
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
             {
-                throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
             {
                 throw new RpcException(
                     ErrorCodes.Query.DmlConfirmationRequired,
-                    ex.Message,
+                    ex.UserMessage,
                     new DmlSafetyErrorData
                     {
                         Code = ErrorCodes.Query.DmlConfirmationRequired,
-                        Message = ex.Message,
+                        Message = ex.UserMessage,
                         DmlConfirmationRequired = true,
                     });
             }
@@ -1938,25 +1940,25 @@ public class RpcMethodHandler : IDisposable
             {
                 throw new RpcException(
                     ErrorCodes.Query.DmlBlocked,
-                    ex.Message,
+                    ex.UserMessage,
                     new DmlSafetyErrorData
                     {
                         Code = ErrorCodes.Query.DmlBlocked,
-                        Message = ex.Message,
+                        Message = ex.UserMessage,
                         DmlBlocked = true,
                     });
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
             {
-                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.Message);
+                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.UserMessage);
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsConnectionFailed)
             {
-                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.Message);
+                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.UserMessage);
             }
             catch (PpdsException ex)
             {
-                throw new RpcException(ErrorCodes.Query.ExecutionFailed, ex.Message);
+                throw MapPpdsToRpcException(ex);
             }
         }, cancellationToken);
 
@@ -2093,7 +2095,7 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
                 }
             }
 
@@ -2182,8 +2184,9 @@ public class RpcMethodHandler : IDisposable
                 };
             }
             catch (OperationCanceledException) { throw; }
-            catch
+            catch (Exception ex) when (ex is PpdsException or QueryExecutionException or QueryParseException)
             {
+                _logger.LogWarning(ex, "Query plan building failed, falling back to FetchXML");
                 // Fall back to just the transpiled FetchXML if plan building fails
                 try
                 {
@@ -2195,9 +2198,9 @@ public class RpcMethodHandler : IDisposable
                         FetchXml = fetchXml
                     };
                 }
-                catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+                catch (PpdsException parseEx) when (parseEx.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, parseEx.UserMessage);
                 }
             }
         }, cancellationToken);
@@ -2348,6 +2351,36 @@ public class RpcMethodHandler : IDisposable
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
     }
 
+    /// <summary>
+    /// Maps a PpdsException (or subclass) to an RpcException with structured error data.
+    /// Preserves subclass-specific properties (RequiresReauthentication, RetryAfter, etc.).
+    /// </summary>
+    private static RpcException MapPpdsToRpcException(PpdsException ex)
+    {
+        var data = new RpcErrorData { Code = ex.ErrorCode, Message = ex.UserMessage };
+
+        switch (ex)
+        {
+            case PpdsAuthException authEx:
+                data.RequiresReauthentication = authEx.RequiresReauthentication;
+                break;
+            case PpdsThrottleException throttleEx:
+                data.RetryAfterSeconds = throttleEx.RetryAfter.TotalSeconds;
+                break;
+            case PpdsValidationException validationEx:
+                data.ValidationErrors = validationEx.Errors
+                    .Select(e => new RpcValidationError { Field = e.Field, Message = e.Message })
+                    .ToList();
+                break;
+            case PpdsNotFoundException notFoundEx:
+                data.ResourceType = notFoundEx.ResourceType;
+                data.ResourceId = notFoundEx.ResourceId;
+                break;
+        }
+
+        return new RpcException(ex.ErrorCode, ex.UserMessage, data);
+    }
+
     private static QueryResultResponse MapToResponse(QueryResult result, string? fetchXml)
     {
         return new QueryResultResponse
@@ -2469,7 +2502,7 @@ public class RpcMethodHandler : IDisposable
             var config = await configStore.GetConfigAsync(url, ct);
             if (config?.Label != null) return config.Label;
         }
-        catch { /* config lookup is best-effort */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Config label lookup failed for {Url}", url); }
         return fallbackDisplayName;
     }
 
@@ -2622,21 +2655,28 @@ public class RpcMethodHandler : IDisposable
             Password = password,
         };
 
-        var profileService = _authServices.GetRequiredService<IProfileService>();
-        var result = await profileService.CreateProfileAsync(
-            request,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            beforeInteractiveAuth: null,
-            cancellationToken: cancellationToken);
-
-        return new ProfileCreateResponse
+        try
         {
-            Index = result.Index,
-            Name = result.Name,
-            Identity = result.Identity,
-            AuthMethod = result.AuthMethod.ToString(),
-            Environment = result.EnvironmentUrl,
-        };
+            var profileService = _authServices.GetRequiredService<IProfileService>();
+            var result = await profileService.CreateProfileAsync(
+                request,
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                beforeInteractiveAuth: null,
+                cancellationToken: cancellationToken);
+
+            return new ProfileCreateResponse
+            {
+                Index = result.Index,
+                Name = result.Name,
+                Identity = result.Identity,
+                AuthMethod = result.AuthMethod.ToString(),
+                Environment = result.EnvironmentUrl,
+            };
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
     }
 
     /// <summary>
@@ -2664,14 +2704,21 @@ public class RpcMethodHandler : IDisposable
         }
 
         var nameOrIndex = index != null ? index.Value.ToString() : name!;
-        var profileService = _authServices.GetRequiredService<IProfileService>();
-        var deleted = await profileService.DeleteProfileAsync(nameOrIndex, cancellationToken);
-
-        return new ProfileDeleteResponse
+        try
         {
-            Deleted = deleted,
-            ProfileName = nameOrIndex,
-        };
+            var profileService = _authServices.GetRequiredService<IProfileService>();
+            var deleted = await profileService.DeleteProfileAsync(nameOrIndex, cancellationToken);
+
+            return new ProfileDeleteResponse
+            {
+                Deleted = deleted,
+                ProfileName = nameOrIndex,
+            };
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
     }
 
     /// <summary>
@@ -2698,18 +2745,25 @@ public class RpcMethodHandler : IDisposable
                 "The 'newName' parameter is required");
         }
 
-        var profileService = _authServices.GetRequiredService<IProfileService>();
-        var result = await profileService.UpdateProfileAsync(
-            currentName,
-            newName: newName,
-            cancellationToken: cancellationToken);
-
-        return new ProfileRenameResponse
+        try
         {
-            Index = result.Index,
-            PreviousName = currentName,
-            NewName = result.Name ?? newName,
-        };
+            var profileService = _authServices.GetRequiredService<IProfileService>();
+            var result = await profileService.UpdateProfileAsync(
+                currentName,
+                newName: newName,
+                cancellationToken: cancellationToken);
+
+            return new ProfileRenameResponse
+            {
+                Index = result.Index,
+                PreviousName = currentName,
+                NewName = result.Name ?? newName,
+            };
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
     }
 
     #endregion

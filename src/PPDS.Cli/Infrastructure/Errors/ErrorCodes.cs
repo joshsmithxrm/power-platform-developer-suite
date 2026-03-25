@@ -186,6 +186,9 @@ public static class ErrorCodes
 
         /// <summary>TDS Endpoint connection failed (endpoint may be disabled on environment).</summary>
         public const string TdsConnectionFailed = "Query.TdsConnectionFailed";
+
+        /// <summary>Subquery returned more than one row.</summary>
+        public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
     }
 
     /// <summary>
