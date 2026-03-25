@@ -1,7 +1,7 @@
 # Roslyn Analyzers
 
-**Status:** Partial (3 of 13 rules implemented)
-**Last Updated:** 2026-01-27
+**Status:** Complete (13 of 13 rules implemented)
+**Last Updated:** 2026-03-25
 **Code:** [src/PPDS.Analyzers/](../src/PPDS.Analyzers/)
 **Surfaces:** N/A
 
@@ -42,8 +42,8 @@ PPDS.Analyzers is a Roslyn-based static code analysis package that enforces arch
           ▼
 ┌─────────────────────┐
 │  PPDS.Analyzers     │  ← DiagnosticAnalyzer implementations
-│   (3 implemented,   │
-│    10 planned)      │
+│   (13 implemented)  │
+│                     │
 └─────────┬───────────┘
           │
           ▼
@@ -58,9 +58,19 @@ PPDS.Analyzers is a Roslyn-based static code analysis package that enforces arch
 | Component | Responsibility |
 |-----------|----------------|
 | `DiagnosticIds` | Central registry of all diagnostic codes and categories |
+| `NoDirectFileIoInUiAnalyzer` | Flags direct File I/O in presentation layer |
+| `NoConsoleInServicesAnalyzer` | Flags Console usage in Application Services |
+| `NoUiFrameworkInServicesAnalyzer` | Flags Terminal.Gui/Spectre.Console in Services |
+| `UseStructuredExceptionsAnalyzer` | Flags raw exceptions in Application Services |
+| `NoSdkInPresentationAnalyzer` | Flags direct SDK access in presentation layer |
+| `UseEarlyBoundEntitiesAnalyzer` | Flags string literals in QueryExpression |
+| `PoolClientInParallelAnalyzer` | Flags pool clients held across multiple awaits |
+| `UseBulkOperationsAnalyzer` | Flags individual CRUD calls inside loops |
+| `UseAggregateForCountAnalyzer` | Flags RetrieveMultiple used only for counting |
+| `ValidateTopCountAnalyzer` | Flags unbounded QueryExpression without TopCount |
+| `PropagateCancellationAnalyzer` | Flags async methods that drop CancellationToken |
 | `NoSyncOverAsyncAnalyzer` | Detects sync-over-async patterns that cause deadlocks |
 | `NoFireAndForgetInCtorAnalyzer` | Detects unawaited async calls in constructors |
-| `UseEarlyBoundEntitiesAnalyzer` | Flags string literals in QueryExpression |
 
 ### Dependencies
 
@@ -231,20 +241,23 @@ public class MyView
 
 ---
 
-## Planned Rules
+## All Rules (Complete)
 
-| ID | Name | Category | Description | Source |
-|----|------|----------|-------------|--------|
-| PPDS001 | NoDirectFileIoInUi | Architecture | UI layer using File.Read/Write directly | — |
-| PPDS002 | NoConsoleInServices | Architecture | Service using Console.WriteLine | — |
-| PPDS003 | NoUiFrameworkInServices | Architecture | Service referencing Spectre/Terminal.Gui | — |
-| PPDS004 | UseStructuredExceptions | Architecture | Service throwing raw Exception | — |
-| PPDS005 | NoSdkInPresentation | Architecture | CLI command calling ServiceClient directly | — |
-| PPDS007 | PoolClientInParallel | Architecture | Pool client acquired outside parallel loop | — |
-| PPDS008 | UseBulkOperations | Performance | Loop with single Create/Update/Delete calls | Gemini PR#243 |
-| PPDS009 | UseAggregateForCount | Performance | RetrieveMultiple used just for counting | — |
-| PPDS010 | ValidateTopCount | Performance | Unbounded TopCount in query | — |
-| PPDS011 | PropagateCancellation | Correctness | Async method not passing CancellationToken | Gemini PR#242 |
+| ID | Name | Category | Description |
+|----|------|----------|-------------|
+| PPDS001 | NoDirectFileIoInUi | Architecture | UI layer using File.Read/Write directly |
+| PPDS002 | NoConsoleInServices | Architecture | Service using Console.WriteLine |
+| PPDS003 | NoUiFrameworkInServices | Architecture | Service referencing Spectre/Terminal.Gui |
+| PPDS004 | UseStructuredExceptions | Architecture | Service throwing raw Exception |
+| PPDS005 | NoSdkInPresentation | Architecture | CLI command calling ServiceClient directly |
+| PPDS006 | UseEarlyBoundEntities | Style | String literal in QueryExpression constructor |
+| PPDS007 | PoolClientInParallel | Architecture | Pool client held across multiple awaits |
+| PPDS008 | UseBulkOperations | Performance | Loop with single Create/Update/Delete calls |
+| PPDS009 | UseAggregateForCount | Performance | RetrieveMultiple used just for counting |
+| PPDS010 | ValidateTopCount | Performance | Unbounded QueryExpression without TopCount |
+| PPDS011 | PropagateCancellation | Correctness | Async method not passing CancellationToken |
+| PPDS012 | NoSyncOverAsync | Correctness | Sync-over-async (.Result, .Wait(), GetAwaiter) |
+| PPDS013 | NoFireAndForgetInCtor | Correctness | Unawaited async calls in constructors |
 
 ---
 
@@ -457,11 +470,10 @@ public async Task PPDS012_TaskResult_ReportsWarning()
 | Date | Change |
 |------|--------|
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
+| 2026-03-25 | All 13 rules implemented (PPDS001-013) |
 
 ## Roadmap
 
 - Code fix providers for auto-remediation
-- PPDS001-005: Architectural layer enforcement
-- PPDS007-011: Performance and correctness rules
 - Integration with `ppds lint` command for batch analysis
 - VS Code extension integration for real-time diagnostics
