@@ -20,7 +20,7 @@ Service endpoints enable event-driven integration by delivering Dataverse pipeli
 
 - Azure Event Grid, Managed Data Lake, Container Storage (future contract types)
 - Plugin profiler integration (deferred)
-- Step registration on service endpoints (covered by step registration in [plugins.md](./plugins.md) — steps bind to `serviceendpoint` as event handler)
+- Step registration on service endpoints (covered by step registration in [plugins.md](./plugins.md) — use `--event-handler-type serviceEndpoint` with `ppds plugins register step`, or `eventHandlerType: "serviceEndpoint"` in RPC `plugins/registerStep`)
 
 ---
 
@@ -739,7 +739,7 @@ Response:
 | AC-19 | RPC: `serviceEndpoints/unregister` with force deletes endpoint and children | `ServiceEndpointRpcTests.Unregister_CascadeDeletes` | 🔲 |
 | AC-20 | TUI: Service endpoints appear as root nodes alongside packages and assemblies | `PluginRegistrationScreenTests.TreeShowsServiceEndpoints` | 🔲 |
 | AC-21 | MCP: `serviceEndpoints_list` returns all endpoints (read-only) | `McpServiceEndpointTests.List_ReturnsAll` | 🔲 |
-| AC-22 | No managed component gatekeeping — all operations available on managed endpoints | `ServiceEndpointServiceTests.ManagedEndpoint_OperationsNotBlocked` | 🔲 |
+| AC-22 | No managed component gatekeeping — all operations available on managed endpoints; no IsManaged check before update/unregister. Dataverse is the authority. | `ServiceEndpointServiceTests.ManagedEndpoint_OperationsNotBlocked` | 🔲 |
 
 ### Edge Cases
 
@@ -871,6 +871,7 @@ public async Task Unregister_WithChildren_NoForce_ThrowsCascadeError()
 
 | Date | Change |
 |------|--------|
+| 2026-03-26 | v1 completion: remove IsManaged gatekeeping (#660), clarify step registration cross-reference (#65) |
 | 2026-03-23 | Initial spec |
 
 ---
