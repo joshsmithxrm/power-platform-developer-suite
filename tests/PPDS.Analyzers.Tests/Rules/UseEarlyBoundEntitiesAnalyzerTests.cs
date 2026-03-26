@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class UseEarlyBoundEntitiesAnalyzerTests
 {
     /// <summary>PPDS006: String literal in QueryExpression ctor should flag.</summary>

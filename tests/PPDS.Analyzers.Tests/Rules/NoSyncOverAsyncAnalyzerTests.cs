@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class NoSyncOverAsyncAnalyzerTests
 {
     /// <summary>PPDS012: task.Result should flag.</summary>

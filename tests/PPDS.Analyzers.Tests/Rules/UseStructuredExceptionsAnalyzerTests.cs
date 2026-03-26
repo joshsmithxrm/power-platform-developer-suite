@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class UseStructuredExceptionsAnalyzerTests
 {
     /// <summary>AC-01: Flags throw new Exception("msg") in Services/ path.</summary>

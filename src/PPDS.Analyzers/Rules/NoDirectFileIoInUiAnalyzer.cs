@@ -105,10 +105,10 @@ public sealed class NoDirectFileIoInUiAnalyzer : DiagnosticAnalyzer
         if (string.IsNullOrEmpty(filePath))
             return false;
 
-        // Must be in Tui/ or Commands/, but NOT in Services/
-        bool isTui = filePath.Contains("Tui/") || filePath.Contains("Tui\\");
-        bool isCommands = filePath.Contains("Commands/") || filePath.Contains("Commands\\");
-        bool isServices = filePath.Contains("Services/") || filePath.Contains("Services\\");
+        // Must be in PPDS.Cli/Tui/ or PPDS.Cli/Commands/, but NOT in PPDS.Cli/Services/
+        bool isTui = filePath.Contains("PPDS.Cli/Tui/") || filePath.Contains("PPDS.Cli\\Tui\\");
+        bool isCommands = filePath.Contains("PPDS.Cli/Commands/") || filePath.Contains("PPDS.Cli\\Commands\\");
+        bool isServices = filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
 
         return (isTui || isCommands) && !isServices;
     }

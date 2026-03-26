@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class NoConsoleInServicesAnalyzerTests
 {
     /// <summary>Console.WriteLine() in Services/ should flag.</summary>

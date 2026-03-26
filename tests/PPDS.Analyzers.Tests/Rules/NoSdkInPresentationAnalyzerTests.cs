@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class NoSdkInPresentationAnalyzerTests
 {
     /// <summary>new ServiceClient() in Commands/ should flag.</summary>
@@ -66,7 +67,7 @@ public class NoSdkInPresentationAnalyzerTests
             """;
 
         var diagnostics = await AnalyzerTestHelper
-            .GetDiagnosticsAsync<NoSdkInPresentationAnalyzer>(code, "/src/PPDS.Tui/Tui/MyScreen.cs");
+            .GetDiagnosticsAsync<NoSdkInPresentationAnalyzer>(code, "/src/PPDS.Cli/Tui/MyScreen.cs");
 
         diagnostics.Should().NotBeEmpty();
         diagnostics.Should().AllSatisfy(d => d.Id.Should().Be("PPDS005"));
@@ -162,5 +163,36 @@ public class NoSdkInPresentationAnalyzerTests
             .GetDiagnosticsAsync<NoSdkInPresentationAnalyzer>(code, "/src/PPDS.Cli/Commands/MyCommand.cs");
 
         diagnostics.Should().BeEmpty();
+    }
+
+    /// <summary>SDK types in non-PPDS.Cli project Commands/ should NOT flag (path scoping).</summary>
+    [Fact]
+    public async Task PPDS005_SdkInNonPpdsCommands_NoDiagnostic()
+    {
+        const string code = """
+            namespace Microsoft.PowerPlatform.Dataverse.Client
+            {
+                public class ServiceClient
+                {
+                    public ServiceClient(string conn) { }
+                }
+            }
+
+            namespace MyApp
+            {
+                class MyCommand
+                {
+                    void Execute()
+                    {
+                        var client = new Microsoft.PowerPlatform.Dataverse.Client.ServiceClient("conn");
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoSdkInPresentationAnalyzer>(code, "/src/OtherProject/Commands/MyCommand.cs");
+
+        diagnostics.Should().BeEmpty("only PPDS.Cli presentation paths should trigger the analyzer");
     }
 }

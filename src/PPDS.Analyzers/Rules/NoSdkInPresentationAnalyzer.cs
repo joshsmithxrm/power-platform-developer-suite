@@ -101,12 +101,17 @@ public sealed class NoSdkInPresentationAnalyzer : DiagnosticAnalyzer
             return false;
 
         // Commands/Serve/ is excluded (MCP server exception)
-        bool isServe = filePath.Contains("Commands/Serve/") || filePath.Contains("Commands\\Serve\\");
+        bool isServe = filePath.Contains("PPDS.Cli/Commands/Serve/") || filePath.Contains("PPDS.Cli\\Commands\\Serve\\");
         if (isServe)
             return false;
 
-        bool isTui = filePath.Contains("Tui/") || filePath.Contains("Tui\\");
-        bool isCommands = filePath.Contains("Commands/") || filePath.Contains("Commands\\");
+        // Services/ is excluded — consistent with PPDS001
+        bool isServices = filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
+        if (isServices)
+            return false;
+
+        bool isTui = filePath.Contains("PPDS.Cli/Tui/") || filePath.Contains("PPDS.Cli\\Tui\\");
+        bool isCommands = filePath.Contains("PPDS.Cli/Commands/") || filePath.Contains("PPDS.Cli\\Commands\\");
 
         return isTui || isCommands;
     }

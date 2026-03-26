@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class PropagateCancellationAnalyzerTests
 {
     /// <summary>AC-13: Flags awaited call missing CancellationToken when overload exists.</summary>

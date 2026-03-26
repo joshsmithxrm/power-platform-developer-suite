@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class PoolClientInParallelAnalyzerTests
 {
     /// <summary>AC-07: Flags pooled client used across 2+ await calls.</summary>

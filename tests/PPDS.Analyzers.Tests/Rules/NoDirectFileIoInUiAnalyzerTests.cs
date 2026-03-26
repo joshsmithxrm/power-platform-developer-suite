@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Analyzers.Tests.Rules;
 
+[Trait("Category", "Unit")]
 public class NoDirectFileIoInUiAnalyzerTests
 {
     /// <summary>File.ReadAllText() in Commands/ path should flag.</summary>
@@ -134,5 +135,26 @@ public class NoDirectFileIoInUiAnalyzerTests
             .GetDiagnosticsAsync<NoDirectFileIoInUiAnalyzer>(code, "/src/PPDS.Cli/Commands/MyCommand.cs");
 
         diagnostics.Should().BeEmpty();
+    }
+
+    /// <summary>File I/O in non-PPDS.Cli project Commands/ should NOT flag (path scoping).</summary>
+    [Fact]
+    public async Task PPDS001_FileIoInNonPpdsCommands_NoDiagnostic()
+    {
+        const string code = """
+            using System.IO;
+            class MyCommand
+            {
+                void Execute()
+                {
+                    var text = File.ReadAllText("config.json");
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoDirectFileIoInUiAnalyzer>(code, "/src/OtherProject/Commands/MyCommand.cs");
+
+        diagnostics.Should().BeEmpty("only PPDS.Cli presentation paths should trigger the analyzer");
     }
 }
