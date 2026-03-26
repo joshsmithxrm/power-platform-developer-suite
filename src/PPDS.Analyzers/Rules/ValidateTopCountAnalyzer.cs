@@ -119,8 +119,11 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
         // Resolve the argument to its symbol for accurate matching (handles shadowed variables)
         var argSymbol = context.SemanticModel.GetSymbolInfo(variableName, context.CancellationToken).Symbol;
 
-        // Find the enclosing block
-        var enclosingBlock = argument.FirstAncestorOrSelf<BlockSyntax>();
+        // Find the enclosing method/ctor body (not just the nearest block) so that
+        // declarations and assignments in parent scopes are found (e.g., variable
+        // declared outside an if/try block where the call occurs)
+        var enclosingBlock = argument.FirstAncestorOrSelf<BaseMethodDeclarationSyntax>()?.Body
+            ?? argument.FirstAncestorOrSelf<BlockSyntax>();
         if (enclosingBlock is null)
             return false;
 

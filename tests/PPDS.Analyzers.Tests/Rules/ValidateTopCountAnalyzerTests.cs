@@ -350,6 +350,58 @@ public class ValidateTopCountAnalyzerTests
     }
 
     [Fact]
+    public async Task PPDS010_VariableDeclaredInOuterBlock_UsedInIf_NoDiagnostic()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                    public int? TopCount { get; set; }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    void DoWork(bool flag)
+                    {
+                        var qe = new QueryExpression("account");
+                        qe.TopCount = 50;
+                        if (flag)
+                        {
+                            _svc.RetrieveMultiple(qe);
+                        }
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<ValidateTopCountAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty("TopCount set in outer scope should be found when call is in nested block");
+    }
+
+    [Fact]
     public async Task PPDS010_NonQueryExpressionArg_NoDiagnostic()
     {
         const string code = """
