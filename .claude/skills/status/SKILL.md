@@ -1,3 +1,8 @@
+---
+name: status
+description: Status
+---
+
 # Status
 
 Display current workflow enforcement state for the active branch.

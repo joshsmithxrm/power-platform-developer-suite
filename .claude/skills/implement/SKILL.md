@@ -1,3 +1,8 @@
+---
+name: implement
+description: Implement Plan
+---
+
 # Implement Plan
 
 ## Pipeline Mode Detection
@@ -74,7 +79,7 @@ with a spec or constitution principle, STOP and report the conflict
 to the orchestrator — do not silently deviate.
 ```
 
-**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec’s `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
+**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec's `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
 
 ### Step 3: Assess Current State
 - Check git status and current branch

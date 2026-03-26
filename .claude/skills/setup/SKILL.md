@@ -1,3 +1,8 @@
+---
+name: setup
+description: Setup
+---
+
 # Setup
 
 Set up a complete PPDS development environment on a new machine, or refresh an existing one after pulling new code.

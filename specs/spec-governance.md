@@ -327,16 +327,16 @@ Session 2 applies the governance rules to restructure the existing specs. Not al
 | AC-04 | `specs/SPEC-TEMPLATE.md` Code: guidance explicitly requires grep-friendly path prefixes | Read file, verify guidance text | 🔲 |
 | AC-05 | `specs/README.md` contains `<!-- AUTO-GENERATED -->` comment and lists all specs on disk | Read file, compare spec count to `ls specs/*.md` count (excluding CONSTITUTION, TEMPLATE, README) | 🔲 |
 | AC-06 | `specs/README.md` includes Status, Surfaces, Code, and Purpose columns | Read file, verify table structure | 🔲 |
-| AC-07 | `/spec` skill Step 1 greps spec frontmatter instead of reading `specs/README.md` as index | Read `.claude/commands/spec.md`, verify no README reference for discovery | 🔲 |
-| AC-08 | `/spec-audit` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/commands/spec-audit.md`, verify no README reference for discovery | 🔲 |
-| AC-09 | `/gates` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/commands/gates.md`, verify no README reference for discovery | 🔲 |
-| AC-10 | `/review` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/commands/review.md`, verify no README reference for discovery | 🔲 |
-| AC-11 | `/implement` skill greps spec frontmatter instead of reading `specs/README.md` and has no hardcoded code-path-to-spec mappings | Read `.claude/commands/implement.md`, verify no README reference and no hardcoded mappings | 🔲 |
+| AC-07 | `/spec` skill Step 1 greps spec frontmatter instead of reading `specs/README.md` as index | Read `.claude/skills/spec/SKILL.md`, verify no README reference for discovery | 🔲 |
+| AC-08 | `/spec-audit` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/skills/spec-audit/SKILL.md`, verify no README reference for discovery | 🔲 |
+| AC-09 | `/gates` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/skills/gates/SKILL.md`, verify no README reference for discovery | 🔲 |
+| AC-10 | `/review` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/skills/review/SKILL.md`, verify no README reference for discovery | 🔲 |
+| AC-11 | `/implement` skill greps spec frontmatter instead of reading `specs/README.md` and has no hardcoded code-path-to-spec mappings | Read `.claude/skills/implement/SKILL.md`, verify no README reference and no hardcoded mappings | 🔲 |
 | AC-12 | `ext-panels` skill greps spec frontmatter instead of reading `specs/README.md` | Read `.claude/skills/ext-panels/SKILL.md`, verify no README reference for discovery | 🔲 |
-| AC-13 | `/spec` skill documents three modes: forward (create), update, and reconcile | Read `.claude/commands/spec.md`, verify all three modes described | 🔲 |
-| AC-14 | `/spec` reconcile mode includes member-count verification step | Read `.claude/commands/spec.md`, verify member-count check described | 🔲 |
-| AC-15 | `/spec` regenerates `specs/README.md` after create, update, or reconcile | Read `.claude/commands/spec.md`, verify README generation step | 🔲 |
-| AC-16 | `/implement` skill includes instruction to update spec `**Code:**` frontmatter when creating new code paths | Read `.claude/commands/implement.md`, verify instruction present | 🔲 |
+| AC-13 | `/spec` skill documents three modes: forward (create), update, and reconcile | Read `.claude/skills/spec/SKILL.md`, verify all three modes described | 🔲 |
+| AC-14 | `/spec` reconcile mode includes member-count verification step | Read `.claude/skills/spec/SKILL.md`, verify member-count check described | 🔲 |
+| AC-15 | `/spec` regenerates `specs/README.md` after create, update, or reconcile | Read `.claude/skills/spec/SKILL.md`, verify README generation step | 🔲 |
+| AC-16 | `/implement` skill includes instruction to update spec `**Code:**` frontmatter when creating new code paths | Read `.claude/skills/implement/SKILL.md`, verify instruction present | 🔲 |
 | AC-17 | `CLAUDE.md` Specs section points to `specs/CONSTITUTION.md` Spec Laws and removes reference to `specs/README.md` as "Index" | Read `CLAUDE.md`, verify updated references | 🔲 |
 
 ### Edge Cases

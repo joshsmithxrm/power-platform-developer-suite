@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-15
-**Code:** [.claude/commands/setup.md](../.claude/commands/setup.md)
+**Code:** [.claude/skills/setup/SKILL.md](../.claude/skills/setup/SKILL.md)
 
 ---
 

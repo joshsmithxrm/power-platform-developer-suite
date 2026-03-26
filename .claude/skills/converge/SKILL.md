@@ -1,3 +1,8 @@
+---
+name: converge
+description: Converge
+---
+
 # Converge
 
 Orchestration loop that converges to PR-ready code. Runs gates, then impartial review, then fix, then repeat until clean. Tracks issue counts per cycle to prove convergence — if counts aren't decreasing, something is wrong.

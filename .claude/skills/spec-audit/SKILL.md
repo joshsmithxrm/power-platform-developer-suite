@@ -1,3 +1,8 @@
+---
+name: spec-audit
+description: Spec Audit
+---
+
 # Spec Audit
 
 Compare specifications against reality. Find drift, gaps, and undocumented behavior. Produces actionable findings — does not auto-fix.

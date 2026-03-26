@@ -36,11 +36,7 @@ Skills go in `.claude/skills/<name>/SKILL.md`:
     example.py         # Optional — code examples or scripts
 ```
 
-Simple skills that need no supporting files can also be commands at `.claude/commands/<name>.md`. Both are invoked the same way with `/name`.
-
-**When to use skills/ vs commands/:**
-- Skill needs supporting files (reference docs, examples, scripts) → `skills/`
-- Skill is a simple prompt with no supporting files → either works, prefer `skills/` for new work
+All skills live in `.claude/skills/{name}/SKILL.md` with YAML frontmatter. The `.claude/commands/` directory has been deprecated and removed.
 
 ## Frontmatter
 

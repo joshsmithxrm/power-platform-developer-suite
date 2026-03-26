@@ -487,7 +487,7 @@ Create `.claude/skills/tui-verify/SKILL.md` with:
 
 ### Command: `/verify tui`
 
-Replace Section 4 ("TUI Mode") in `.claude/commands/verify.md`. The current content (lines 60-68) says "TUI interactive verification via MCP is not yet available. Use snapshot tests." Replace with:
+Replace Section 4 ("TUI Mode") in `.claude/skills/verify/SKILL.md`. The current content (lines 60-68) says "TUI interactive verification via MCP is not yet available. Use snapshot tests." Replace with:
 
 ```markdown
 ### 4. TUI Mode
@@ -535,7 +535,7 @@ See @tui-verify skill for full command reference and Terminal.Gui keyboard patte
 
 ### Command: `/qa tui`
 
-Add a "TUI Mode — Verifier Prompt" section to `.claude/commands/qa.md`, parallel to Extension Mode. The blind verifier prompt:
+Add a "TUI Mode — Verifier Prompt" section to `.claude/skills/qa/SKILL.md`, parallel to Extension Mode. The blind verifier prompt:
 
 ```markdown
 #### TUI Mode — Verifier Prompt
