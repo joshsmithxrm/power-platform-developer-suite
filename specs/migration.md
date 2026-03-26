@@ -3,7 +3,7 @@
 **Status:** Draft
 **Last Updated:** 2026-03-25
 **Surfaces:** CLI, TUI
-**Code:** [src/PPDS.Migration/](../src/PPDS.Migration/), TUI: [src/PPDS.Tui/Screens/MigrationScreen.cs](../src/PPDS.Tui/Screens/MigrationScreen.cs)
+**Code:** [src/PPDS.Migration/](../src/PPDS.Migration/), TUI: [src/PPDS.Cli/Tui/Screens/MigrationScreen.cs](../src/PPDS.Cli/Tui/Screens/MigrationScreen.cs)
 
 ---
 
