@@ -93,6 +93,28 @@ public class NoDirectFileIoInUiAnalyzerTests
             .Which.Id.Should().Be("PPDS001");
     }
 
+    /// <summary>Directory.GetFiles() in Commands/ should flag.</summary>
+    [Fact]
+    public async Task PPDS001_DirectoryGetFilesInCommand_ReportsWarning()
+    {
+        const string code = """
+            using System.IO;
+            class MyCommand
+            {
+                void Execute()
+                {
+                    var files = Directory.GetFiles(".");
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoDirectFileIoInUiAnalyzer>(code, "/src/PPDS.Cli/Commands/MyCommand.cs");
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS001");
+    }
+
     /// <summary>Non-IO code in Commands/ should NOT flag.</summary>
     [Fact]
     public async Task PPDS001_NonFileIoInCommand_NoDiagnostic()

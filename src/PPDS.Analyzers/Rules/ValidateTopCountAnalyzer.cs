@@ -34,6 +34,8 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
         "IOrganizationService",
         "IOrganizationServiceAsync",
         "IOrganizationServiceAsync2",
+        "IDataverseClient",
+        "IPooledClient",
     };
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
@@ -78,7 +80,7 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
             return;
 
         // Check if TopCount is set
-        if (HasTopCountAssigned(firstArg, context))
+        if (HasTopCountAssigned(firstArg, context, invocation))
             return;
 
         context.ReportDiagnostic(Diagnostic.Create(Rule, invocation.GetLocation()));
@@ -86,7 +88,8 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
 
     private static bool HasTopCountAssigned(
         ExpressionSyntax argument,
-        SyntaxNodeAnalysisContext context)
+        SyntaxNodeAnalysisContext context,
+        InvocationExpressionSyntax callSite)
     {
         // Case 1: Inline object creation with initializer — new QueryExpression("x") { TopCount = 10 }
         if (argument is ObjectCreationExpressionSyntax objectCreation)
@@ -107,20 +110,24 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        // Case 2: Variable passed as argument — check for variable.TopCount = ... before the call
+        // Case 2: Variable passed as argument — check for variable.TopCount = ... BEFORE the call
         if (argument is not IdentifierNameSyntax variableName)
-            return false;
+            return true; // Can't statically analyze method calls/fields — skip to avoid false positives
 
         var varName = variableName.Identifier.Text;
+        var callPosition = callSite.SpanStart;
 
         // Find the enclosing block
         var enclosingBlock = argument.FirstAncestorOrSelf<BlockSyntax>();
         if (enclosingBlock is null)
             return false;
 
-        // Search all assignment expressions in the block for varName.TopCount = ...
+        // Search assignment expressions BEFORE the call site for varName.TopCount = ...
         foreach (var assignment in enclosingBlock.DescendantNodes().OfType<AssignmentExpressionSyntax>())
         {
+            if (assignment.SpanStart >= callPosition)
+                continue; // Assignment is after the call — doesn't count
+
             if (assignment.Left is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.Text == "TopCount" &&
                 memberAccess.Expression is IdentifierNameSyntax target &&

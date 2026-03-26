@@ -7,7 +7,7 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace PPDS.Analyzers.Rules;
 
 /// <summary>
-/// PPDS001: Detects direct System.IO.File static method calls or StreamReader/StreamWriter/FileStream
+/// PPDS001: Detects direct System.IO.File/Directory static method calls or StreamReader/StreamWriter/FileStream
 /// constructor calls in presentation layer code (Tui/ or Commands/).
 /// File I/O should be delegated to Application Services.
 /// </summary>
@@ -23,6 +23,12 @@ public sealed class NoDirectFileIoInUiAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true,
         description: "Presentation layer code (Tui/, Commands/) must not perform direct file I/O. " +
                      "Move file operations to an Application Service.");
+
+    private static readonly string[] FlaggedStaticTypes =
+    {
+        "System.IO.File",
+        "System.IO.Directory",
+    };
 
     private static readonly string[] FlaggedStreamTypes =
     {
@@ -59,13 +65,13 @@ public sealed class NoDirectFileIoInUiAnalyzer : DiagnosticAnalyzer
             return;
 
         var fullTypeName = containingType.ToDisplayString();
-        if (fullTypeName != "System.IO.File")
+        if (Array.IndexOf(FlaggedStaticTypes, fullTypeName) < 0)
             return;
 
         var diagnostic = Diagnostic.Create(
             Rule,
             invocation.GetLocation(),
-            $"File.{symbol.Name}");
+            $"{containingType.Name}.{symbol.Name}");
 
         context.ReportDiagnostic(diagnostic);
     }

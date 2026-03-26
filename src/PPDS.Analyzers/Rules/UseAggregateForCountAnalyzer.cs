@@ -35,6 +35,8 @@ public sealed class UseAggregateForCountAnalyzer : DiagnosticAnalyzer
         "IOrganizationService",
         "IOrganizationServiceAsync",
         "IOrganizationServiceAsync2",
+        "IDataverseClient",
+        "IPooledClient",
     };
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

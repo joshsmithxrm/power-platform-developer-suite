@@ -76,11 +76,14 @@ dotnet_diagnostic.PPDS002.severity = suggestion
 dotnet_diagnostic.PPDS003.severity = suggestion
 dotnet_diagnostic.PPDS004.severity = suggestion
 dotnet_diagnostic.PPDS005.severity = suggestion
+dotnet_diagnostic.PPDS006.severity = suggestion
 dotnet_diagnostic.PPDS007.severity = suggestion
 dotnet_diagnostic.PPDS008.severity = suggestion
 dotnet_diagnostic.PPDS009.severity = suggestion
 dotnet_diagnostic.PPDS010.severity = suggestion
 dotnet_diagnostic.PPDS011.severity = suggestion
+dotnet_diagnostic.PPDS012.severity = suggestion
+dotnet_diagnostic.PPDS013.severity = suggestion
 
 # Generated code - relax rules that are noisy for auto-generated files
 [**/Generated/**.cs]
