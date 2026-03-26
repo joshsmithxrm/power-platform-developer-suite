@@ -1,7 +1,7 @@
 """PreToolUse hook: block Edit/Write on main branch.
 
 Forces worktree workflow — all changes must happen on a feature branch.
-Exceptions: .plans/ (ephemeral, gitignored), temp directories.
+Exceptions: temp directories, .worktrees/ paths.
 """
 
 import json
@@ -34,9 +34,7 @@ def is_allowed_path(file_path: str) -> bool:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").replace("\\", "/").lower().rstrip("/")
     if project_dir and normalized.startswith(project_dir + "/"):
         normalized = normalized[len(project_dir) + 1:]
-    allowed_prefixes = [
-        ".plans/",
-    ]
+    allowed_prefixes = []
     allowed_substrings = [
         "/tmp/",
         "/temp/",
@@ -66,10 +64,9 @@ def main() -> None:
 
     print(
         "BLOCKED: You are on the main branch. "
-        "Create a worktree before making changes."
+        "Use /start to create a feature worktree."
     )
-    print("  git worktree add .worktrees/<name> -b <branch>")
-    print("See CLAUDE.md worktree conventions.")
+    print("  Run /start from your Claude session on main.")
     sys.exit(2)
 
 

@@ -198,7 +198,7 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False):
             env=env,
             capture_output=True,  # P6: Capture stdout/stderr
             text=True,
-            timeout=3600,
+            timeout=None,  # No timeout — stages run until done
         )
         duration = int(time.time() - start)
 
