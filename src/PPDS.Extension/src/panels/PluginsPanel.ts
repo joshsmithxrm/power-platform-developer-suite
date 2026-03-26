@@ -593,7 +593,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
     ${getEnvironmentPickerHtml()}
 </div>
 
-<div class="panel-content">
+<div class="content">
     <div id="tree-container" class="tree-pane">
         <div class="empty-state" id="empty-state">Loading plugin registrations...</div>
     </div>

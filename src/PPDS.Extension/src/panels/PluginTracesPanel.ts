@@ -554,7 +554,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 </div>
 
 <!-- 6a: Side-by-side layout -->
-<div class="panel-content">
+<div class="content">
     <div id="table-pane" class="table-pane">
         <div class="empty-state" id="empty-state">Loading plugin traces...</div>
     </div>

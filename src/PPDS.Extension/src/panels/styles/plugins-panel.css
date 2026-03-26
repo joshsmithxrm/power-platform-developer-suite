@@ -90,7 +90,7 @@
 }
 
 /* ── Panel Content Layout ────────────────────────────────────────── */
-.panel-content {
+.content {
     display: flex;
     flex-direction: column;
     flex: 1;
