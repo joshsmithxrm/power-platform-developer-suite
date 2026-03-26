@@ -35,6 +35,12 @@
       "Bash(mv:*)",
       "Bash(move:*)",
       "Bash(xargs:*)",
+      "Bash(rm:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(del:*)",
+      "Bash(rmdir:*)",
+      "Bash(Remove-Item:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -169,12 +175,6 @@
       "Bash(ppds data truncate:*)"
     ],
     "ask": [
-      "Bash(rm -rf:*)",
-      "Bash(rm -fr:*)",
-      "Bash(rm:*)",
-      "Bash(del:*)",
-      "Bash(rmdir:*)",
-      "Bash(Remove-Item:*)",
       "Bash(git merge:*)",
       "Bash(git rebase:*)",
       "Bash(git reset:*)",
@@ -250,6 +250,46 @@
           {
             "type": "command",
             "command": "python \".claude/hooks/review-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rm:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(Remove-Item:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(del:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rmdir:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
