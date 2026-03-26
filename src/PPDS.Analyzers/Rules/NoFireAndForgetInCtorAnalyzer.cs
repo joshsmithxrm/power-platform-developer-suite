@@ -94,6 +94,15 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
             or MemberAccessExpressionSyntax
             or InvocationExpressionSyntax)
         {
+            // Check for synchronous blocking: .Result, .Wait(), .GetAwaiter().GetResult()
+            // These are NOT fire-and-forget — the ctor blocks on the result.
+            // (PPDS012/NoSyncOverAsync flags these separately.)
+            if (parent is MemberAccessExpressionSyntax memberAccess &&
+                memberAccess.Name.Identifier.Text is "Result" or "Wait" or "GetAwaiter")
+            {
+                return true;
+            }
+
             parent = parent.Parent;
         }
 

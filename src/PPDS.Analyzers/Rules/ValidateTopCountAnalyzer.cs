@@ -114,8 +114,10 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
         if (argument is not IdentifierNameSyntax variableName)
             return true; // Non-local expressions (method returns, property access, ternary, etc.) — skip to avoid false positives
 
-        var varName = variableName.Identifier.Text;
         var callPosition = callSite.SpanStart;
+
+        // Resolve the argument to its symbol for accurate matching (handles shadowed variables)
+        var argSymbol = context.SemanticModel.GetSymbolInfo(variableName, context.CancellationToken).Symbol;
 
         // Find the enclosing block
         var enclosingBlock = argument.FirstAncestorOrSelf<BlockSyntax>();
@@ -126,8 +128,20 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
         // e.g., var qe = new QueryExpression("x") { TopCount = 10 };
         foreach (var declarator in enclosingBlock.DescendantNodes().OfType<VariableDeclaratorSyntax>())
         {
-            if (declarator.Identifier.Text != varName || declarator.SpanStart >= callPosition)
+            if (declarator.SpanStart >= callPosition)
                 continue;
+
+            // Use semantic comparison when available, fall back to name
+            var declaredSymbol = context.SemanticModel.GetDeclaredSymbol(declarator, context.CancellationToken);
+            if (argSymbol is not null && declaredSymbol is not null)
+            {
+                if (!SymbolEqualityComparer.Default.Equals(argSymbol, declaredSymbol))
+                    continue;
+            }
+            else if (declarator.Identifier.Text != variableName.Identifier.Text)
+            {
+                continue;
+            }
 
             if (declarator.Initializer?.Value is ObjectCreationExpressionSyntax objCreation &&
                 objCreation.Initializer is not null)
@@ -152,10 +166,19 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
 
             if (assignment.Left is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.Text == "TopCount" &&
-                memberAccess.Expression is IdentifierNameSyntax target &&
-                target.Identifier.Text == varName)
+                memberAccess.Expression is IdentifierNameSyntax target)
             {
-                return true;
+                // Use semantic comparison when available
+                if (argSymbol is not null)
+                {
+                    var targetSymbol = context.SemanticModel.GetSymbolInfo(target, context.CancellationToken).Symbol;
+                    if (SymbolEqualityComparer.Default.Equals(argSymbol, targetSymbol))
+                        return true;
+                }
+                else if (target.Identifier.Text == variableName.Identifier.Text)
+                {
+                    return true;
+                }
             }
         }
 

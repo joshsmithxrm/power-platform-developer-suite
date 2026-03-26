@@ -147,6 +147,50 @@ public class NoFireAndForgetInCtorAnalyzerTests
         diagnostics.Should().BeEmpty();
     }
 
+    /// <summary>PPDS013: .Result blocking is NOT fire-and-forget — PPDS012 handles it.</summary>
+    [Fact]
+    public async Task PPDS013_SyncBlockingViaResult_NoDiagnostic()
+    {
+        const string code = """
+            using System.Threading.Tasks;
+            class MyView
+            {
+                public MyView()
+                {
+                    var x = LoadAsync().Result;
+                }
+                private Task<int> LoadAsync() => Task.FromResult(42);
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoFireAndForgetInCtorAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty("sync-over-async via .Result is not fire-and-forget");
+    }
+
+    /// <summary>PPDS013: .GetAwaiter().GetResult() blocking is NOT fire-and-forget.</summary>
+    [Fact]
+    public async Task PPDS013_SyncBlockingViaGetResult_NoDiagnostic()
+    {
+        const string code = """
+            using System.Threading.Tasks;
+            class MyView
+            {
+                public MyView()
+                {
+                    LoadAsync().GetAwaiter().GetResult();
+                }
+                private Task LoadAsync() => Task.CompletedTask;
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoFireAndForgetInCtorAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty("sync-over-async via .GetAwaiter().GetResult() is not fire-and-forget");
+    }
+
     /// <summary>PPDS013: FireAndForget helper wrapper should NOT flag.</summary>
     [Fact]
     public async Task PPDS013_FireAndForgetHelper_NoDiagnostic()
