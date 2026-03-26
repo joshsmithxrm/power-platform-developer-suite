@@ -209,7 +209,7 @@ public sealed class ConnectionResolver : IDisposable
 
         // Create credential provider using async factory (supports secure store lookups)
         using var provider = await CredentialProviderFactory.CreateAsync(
-            profile, _credentialStore, _deviceCodeCallback, beforeInteractiveAuth: null, cancellationToken)
+            profile, _credentialStore, _deviceCodeCallback, beforeInteractiveAuth: null, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         return await provider.CreateServiceClientAsync(envUrl, cancellationToken)

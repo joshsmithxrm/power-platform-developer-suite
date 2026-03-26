@@ -170,7 +170,7 @@ public sealed class ProfileConnectionSource : IDisposable
             try
             {
                 _provider = System.Threading.Tasks.Task.Run(() =>
-                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token))
+                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, cancellationToken: credCts.Token))
                     .WaitAsync(credCts.Token)
                     .GetAwaiter()
                     .GetResult();
