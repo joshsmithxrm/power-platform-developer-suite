@@ -42,6 +42,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         [SdkMessageProcessingStep.EntityLogicalName] = ComponentTypeSdkMessageProcessingStep
     };
 
+    // Entity logical name for secure configuration (no early-bound class generated)
+    private const string SecureConfigEntityName = "sdkmessageprocessingstepsecureconfig";
+
     // Pipeline stage values (from SDK Message Processing Step entity)
     private const int StagePreValidation = 10;
     private const int StagePreOperation = 20;
@@ -1349,7 +1352,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 if (existingSecureConfigRef != null)
                 {
                     // Update existing secure config entity
-                    var secureConfigUpdate = new Entity("sdkmessageprocessingstepsecureconfig")
+                    var secureConfigUpdate = new Entity(SecureConfigEntityName)
                     {
                         Id = existingSecureConfigRef.Id
                     };
@@ -1359,10 +1362,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 else
                 {
                     // Create new secure config entity and link to step
-                    var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                    var secureConfigEntity = new Entity(SecureConfigEntityName);
                     secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
                     var newSecureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", newSecureConfigId);
+                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, newSecureConfigId);
                 }
             }
 
@@ -1389,10 +1392,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             // Handle secure configuration for new step
             if (stepConfig.SecureConfiguration != null)
             {
-                var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                var secureConfigEntity = new Entity(SecureConfigEntityName);
                 secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
                 var secureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", secureConfigId);
+                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, secureConfigId);
             }
 
             stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
@@ -1724,7 +1727,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (secureConfigId.HasValue)
         {
             await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await DeleteAsync("sdkmessageprocessingstepsecureconfig", secureConfigId.Value, secureConfigClient, cancellationToken);
+            await DeleteAsync(SecureConfigEntityName, secureConfigId.Value, secureConfigClient, cancellationToken);
         }
     }
 
@@ -1919,7 +1922,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (secureConfigId.HasValue)
         {
             await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await DeleteAsync("sdkmessageprocessingstepsecureconfig", secureConfigId.Value, secureConfigClient, cancellationToken);
+            await DeleteAsync(SecureConfigEntityName, secureConfigId.Value, secureConfigClient, cancellationToken);
         }
 
         return result;

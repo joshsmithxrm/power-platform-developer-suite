@@ -2107,7 +2107,7 @@ public class PluginRegistrationServiceTests
         step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
         stepEntities.Entities.Add(step);
 
-        // GetStepByNameOrIdAsync returns step, then ListImagesForStepAsync returns empty
+        // GetStepByNameOrIdAsync returns step, then GetSecureConfigIdForStepAsync and ListImagesForStepAsync return empty
         var queryCount = 0;
         _mockPooledClient
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
@@ -2115,7 +2115,7 @@ public class PluginRegistrationServiceTests
             {
                 queryCount++;
                 if (queryCount == 1) return stepEntities; // GetStepByNameOrIdAsync
-                return new EntityCollection(); // ListImagesForStepAsync
+                return new EntityCollection(); // GetSecureConfigIdForStepAsync / ListImagesForStepAsync
             });
 
         // Act
@@ -2148,7 +2148,7 @@ public class PluginRegistrationServiceTests
         step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
         stepEntities.Entities.Add(step);
 
-        // GetStepByNameOrIdAsync returns step, then ListImagesForStepAsync returns empty
+        // GetStepByNameOrIdAsync returns step, then GetSecureConfigIdForStepAsync and ListImagesForStepAsync return empty
         var queryCount = 0;
         _mockPooledClient
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
@@ -2156,7 +2156,7 @@ public class PluginRegistrationServiceTests
             {
                 queryCount++;
                 if (queryCount == 1) return stepEntities; // GetStepByNameOrIdAsync
-                return new EntityCollection(); // ListImagesForStepAsync
+                return new EntityCollection(); // GetSecureConfigIdForStepAsync / ListImagesForStepAsync
             });
 
         // Act - should complete without throwing
