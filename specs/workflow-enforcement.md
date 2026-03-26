@@ -217,13 +217,13 @@ Run these before creating a PR.
 **Behavior:**
 1. Read `.workflow/state.json` if it exists.
 2. Check for uncommitted changes (`git status`).
-3. **Design-only bypass:** On worktree branches, if the only changed files (vs main) are under `specs/` and `.plans/`, skip workflow enforcement — this was a design session, not an implementation session. End cleanly. (Does not apply on main — main has no workflow state.)
+3. **Design-only bypass:** On worktree branches, if the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`), skip workflow enforcement — this was a design session, not an implementation session. End cleanly. (Does not apply on main — main has no workflow state.)
 4. Emit a workflow completion summary.
 5. **Cannot block session end.** The user always has the right to stop.
 
 **Output:**
 ```
-SESSION END — Workflow status for feature/import-jobs:
+SESSION END — Workflow status for feat/import-jobs:
   ✓ Gates passed
   ✓ Extension verified
   ✗ QA not completed — /qa was never run
@@ -264,7 +264,7 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 
 | Skill | Purpose | Key Behavior |
 |-------|---------|-------------|
-| `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec + plan. Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. |
+| `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. |
 | `/pr` | Rebase → PR → monitor → summarize. | Rebases on main. Creates PR with structured body. Polls CI status and Gemini reviews (every 30s for 2 min, then every 2 min, max 15 min total). When complete: triages Gemini comments (fix valid ones, dismiss invalid with rationale), replies to EACH comment individually on the PR with action taken, presents summary to user. On timeout: reports current status and what's still pending. Writes `pr.url` and `pr.created` to workflow state. |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
@@ -387,7 +387,7 @@ After all skills in this spec are implemented:
 | AC-15 | `/pr` responds to each Gemini comment individually on the PR | Manual: create PR with Gemini review, verify per-comment replies | 🔲 |
 | AC-16 | `/pr` includes summary of all review comments and actions in status report | Manual: create PR, verify summary output | 🔲 |
 | AC-17 | `/design` loads constitution + spec template + searches all `specs/*.md` for overlapping scope before brainstorming; if existing spec found, presents it and proposes update mode | Manual: run `/design` for domain with existing spec, verify search + update-mode proposal | 🔲 |
-| AC-18 | `/design` requires worktree (errors on main with "Run `/start` first"), commits spec + plan to worktree branch when approved | Manual: run `/design` on main → error; run in worktree → committed spec + plan | 🔲 |
+| AC-18 | `/design` requires worktree (errors on main with "Run `/start` first"), commits spec to worktree branch when approved (plan is gitignored) | Manual: run `/design` on main → error; run in worktree → committed spec + plan | 🔲 |
 | AC-19 | Superpowers is disabled for ppds repo after all skills are implemented | Verify `.claude/settings.json` contains `"superpowers@claude-plugins-official": false` | 🔲 |
 | AC-20 | `/debug` includes 4-phase systematic debugging process, 3-fix escalation, red flags table | Read `/debug` skill content, verify sections present | 🔲 |
 | AC-21 | All renamed skills (`/ext-verify`, `/ext-panels`, `/retro`) are discoverable by AI via natural language | Manual: say "test the extension", verify `/ext-verify` is loaded | 🔲 |
@@ -415,10 +415,10 @@ After all skills in this spec are implemented:
 | AC-43 | `/design` Step 3 writes spec, then runs `/review` against the spec before presenting to user | Manual: complete design brainstorm, verify review runs on spec draft | 🔲 |
 | AC-44 | `/design` Step 3 presents spec + review findings + fixes to user (shows what was caught and fixed, not just the clean result) | Manual: verify presentation includes review findings | 🔲 |
 | AC-45 | `/design` Step 4 writes implementation plan to `.plans/`, then runs `/review` against the plan before presenting to user | Manual: approve spec, verify plan is written and reviewed | 🔲 |
-| AC-46 | `/design` Step 5 presents plan + review findings to user; on approval, commits spec + plan to worktree branch | Manual: approve plan, verify commit in worktree | 🔲 |
+| AC-46 | `/design` Step 5 presents plan + review findings to user; on approval, commits spec to worktree branch (plan is ephemeral, gitignored) | Manual: approve plan, verify commit in worktree | 🔲 |
 | AC-47 | `/design` Step 6 (handoff) offers three options: invoke headless pipeline, continue interactively with `/implement`, or defer | Manual: complete design, verify three options presented | 🔲 |
 | AC-48 | `protect-main-branch.py` blocks ALL edits on main — `.plans/` removed from allowed prefixes; only temp dirs and `.worktrees/` writes allowed | Manual: attempt to edit `.plans/` file on main, verify blocked | 🔲 |
-| AC-49 | `session-stop-workflow.py` skips workflow enforcement on worktree branches when the only changed files (vs main) are under `specs/` and `.plans/` (design-only sessions end cleanly) | Manual: end design session in worktree with only spec changes, verify no enforcement | 🔲 |
+| AC-49 | `session-stop-workflow.py` skips workflow enforcement on worktree branches when the only changed files (vs main) are non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`) — design/config sessions end cleanly | Manual: end design session in worktree with only spec changes, verify no enforcement | 🔲 |
 | AC-50 | `/design` does not activate plan mode — uses its own incremental approval flow (one question at a time, section-by-section validation) | Manual: run `/design`, verify plan mode is not used | 🔲 |
 
 ### Edge Cases

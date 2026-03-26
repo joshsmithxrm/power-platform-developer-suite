@@ -33,7 +33,7 @@ If not on `main` or `master`: error with "You're already on branch `<name>`. Run
 From `$ARGUMENTS`, extract:
 
 **Name:** Derive a kebab-case worktree name from the key nouns in the input. Examples:
-- "env var auth and CSS fix" → `v1-polish` or `env-var-auth`
+- "env var auth and CSS fix" → `env-var-auth`
 - "plugin registration v1 completion" → `plugin-registration-v1`
 - "fix the CSS class inconsistency" → `css-fix`
 
