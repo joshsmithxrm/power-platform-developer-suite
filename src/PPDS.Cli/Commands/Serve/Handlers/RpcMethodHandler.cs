@@ -4422,6 +4422,35 @@ public class RpcMethodHandler : IDisposable
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Sets or clears the implementing plugin type on a Custom API.
+    /// Maps to: ppds custom-apis set-plugin --json
+    /// </summary>
+    [JsonRpcMethod("customApis/setPlugin")]
+    public async Task<CustomApisSetPluginResponse> CustomApisSetPluginAsync(
+        string nameOrId,
+        string? pluginTypeName = null,
+        string? assemblyName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(nameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var customApiService = sp.GetRequiredService<ICustomApiService>();
+
+            // Resolve Custom API
+            var api = await customApiService.GetAsync(nameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.CustomApi.NotFound, $"Custom API '{nameOrId}' not found.");
+
+            await customApiService.SetPluginTypeAsync(api.Id, pluginTypeName, assemblyName, ct);
+
+            return new CustomApisSetPluginResponse { Success = true };
+        }, cancellationToken);
+    }
+
     private static CustomApiDto MapCustomApiToDto(CustomApiInfo api) =>
         new()
         {
@@ -7381,6 +7410,12 @@ public class CustomApisUpdateParameterResponse
 }
 
 public class CustomApisRemoveParameterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisSetPluginResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

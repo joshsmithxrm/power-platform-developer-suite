@@ -94,8 +94,9 @@ public static class ServiceRegistration
         services.AddTransient<ICustomApiService>(sp =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var pluginRegistrationService = sp.GetRequiredService<IPluginRegistrationService>();
             var logger = sp.GetRequiredService<ILogger<CustomApiService>>();
-            return new CustomApiService(pool, logger);
+            return new CustomApiService(pool, pluginRegistrationService, logger);
         });
 
         // Data provider service - manages virtual entity data providers and data sources

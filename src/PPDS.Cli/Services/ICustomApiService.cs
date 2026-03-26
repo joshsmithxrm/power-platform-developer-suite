@@ -77,6 +77,19 @@ public interface ICustomApiService
     /// Removes a request parameter or response property by ID.
     /// </summary>
     Task RemoveParameterAsync(Guid parameterId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets or clears the implementing plugin type on a Custom API.
+    /// </summary>
+    /// <param name="customApiId">The Custom API ID.</param>
+    /// <param name="pluginTypeName">Plugin type name to set, or null to clear.</param>
+    /// <param name="assemblyName">Assembly name for disambiguation (optional, used only when pluginTypeName is not null).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task SetPluginTypeAsync(
+        Guid customApiId,
+        string? pluginTypeName,
+        string? assemblyName,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

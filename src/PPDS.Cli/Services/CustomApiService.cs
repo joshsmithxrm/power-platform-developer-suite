@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Dataverse.Generated;
+using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Services;
@@ -18,6 +19,7 @@ namespace PPDS.Cli.Services;
 public sealed class CustomApiService : ICustomApiService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly IPluginRegistrationService _pluginRegistrationService;
     private readonly ILogger<CustomApiService> _logger;
 
     // BindingType OptionSet values
@@ -48,9 +50,10 @@ public sealed class CustomApiService : ICustomApiService
     /// <summary>
     /// Creates a new instance of <see cref="CustomApiService"/>.
     /// </summary>
-    public CustomApiService(IDataverseConnectionPool pool, ILogger<CustomApiService> logger)
+    public CustomApiService(IDataverseConnectionPool pool, IPluginRegistrationService pluginRegistrationService, ILogger<CustomApiService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _pluginRegistrationService = pluginRegistrationService ?? throw new ArgumentNullException(nameof(pluginRegistrationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -358,6 +361,47 @@ public sealed class CustomApiService : ICustomApiService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteEntityAsync(existing.LogicalName, parameterId, client, cancellationToken);
+    }
+
+    #endregion
+
+    #region Set Plugin Type Operations
+
+    /// <inheritdoc />
+    public async Task SetPluginTypeAsync(
+        Guid customApiId,
+        string? pluginTypeName,
+        string? assemblyName,
+        CancellationToken cancellationToken = default)
+    {
+        var update = new Entity(CustomAPI.EntityLogicalName) { Id = customApiId };
+
+        if (pluginTypeName is null)
+        {
+            // Clear the plugin type
+            update[CustomAPI.Fields.PluginTypeId] = null;
+        }
+        else
+        {
+            // Resolve the plugin type by name
+            var pluginType = await _pluginRegistrationService.GetPluginTypeByNameAsync(pluginTypeName, cancellationToken);
+            if (pluginType is null)
+            {
+                throw new PpdsException(
+                    ErrorCodes.CustomApi.PluginTypeNotFound,
+                    $"Plugin type '{pluginTypeName}' not found.");
+            }
+
+            update[CustomAPI.Fields.PluginTypeId] = new EntityReference("plugintype", pluginType.Id);
+        }
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await UpdateEntityAsync(update, client, cancellationToken);
+
+        _logger.LogInformation(
+            "Set plugin type on Custom API {ApiId} to {PluginTypeName}",
+            customApiId,
+            pluginTypeName ?? "(cleared)");
     }
 
     #endregion

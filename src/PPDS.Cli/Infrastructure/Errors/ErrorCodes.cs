@@ -303,6 +303,9 @@ public static class ErrorCodes
 
         /// <summary>Parameter or response property not found by ID.</summary>
         public const string ParameterNotFound = "CustomApi.ParameterNotFound";
+
+        /// <summary>Plugin type not found by name.</summary>
+        public const string PluginTypeNotFound = "CustomApi.PluginTypeNotFound";
     }
 
     /// <summary>

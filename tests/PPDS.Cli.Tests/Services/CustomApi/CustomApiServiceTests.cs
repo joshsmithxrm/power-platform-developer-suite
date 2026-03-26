@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
+using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
@@ -16,6 +17,7 @@ public class CustomApiServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _mockPool;
     private readonly Mock<IPooledClient> _mockClient;
+    private readonly Mock<IPluginRegistrationService> _mockPluginRegistrationService;
     private readonly Mock<ILogger<CustomApiService>> _mockLogger;
     private readonly CustomApiService _sut;
 
@@ -116,7 +118,8 @@ public class CustomApiServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(_mockClient.Object);
 
-        _sut = new CustomApiService(_mockPool.Object, _mockLogger.Object);
+        _mockPluginRegistrationService = new Mock<IPluginRegistrationService>();
+        _sut = new CustomApiService(_mockPool.Object, _mockPluginRegistrationService.Object, _mockLogger.Object);
     }
 
     #region ListAsync

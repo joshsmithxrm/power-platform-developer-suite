@@ -423,6 +423,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         services.AddTransient<Services.ICustomApiService>(sp =>
             new Services.CustomApiService(
                 sp.GetRequiredService<IDataverseConnectionPool>(),
+                sp.GetRequiredService<IPluginRegistrationService>(),
                 sp.GetRequiredService<ILogger<Services.CustomApiService>>()));
         services.AddTransient<Services.IDataProviderService>(sp =>
             new Services.DataProviderService(
