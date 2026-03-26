@@ -1,4 +1,4 @@
-using System.CommandLine;
+﻿using System.CommandLine;
 using System.IO.Compression;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
@@ -415,6 +415,12 @@ public static class RegisterCommand
             Description = "Secure configuration string (write-only, not stored in source control)"
         };
 
+        var eventHandlerTypeOption = new Option<string>("--event-handler-type")
+        {
+            Description = "Event handler type: pluginType or serviceEndpoint",
+            DefaultValueFactory = _ => "pluginType"
+        };
+
         var command = new Command("step", "Register a processing step for a plugin type")
         {
             typeArgument,
@@ -426,6 +432,7 @@ public static class RegisterCommand
             filteringAttributesOption,
             nameOption,
             secureConfigOption,
+            eventHandlerTypeOption,
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption,
             PluginsCommandGroup.SolutionOption
@@ -444,12 +451,13 @@ public static class RegisterCommand
             var filteringAttributes = parseResult.GetValue(filteringAttributesOption);
             var name = parseResult.GetValue(nameOption);
             var secureConfig = parseResult.GetValue(secureConfigOption);
+            var eventHandlerType = parseResult.GetValue(eventHandlerTypeOption)!;
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var solution = parseResult.GetValue(PluginsCommandGroup.SolutionOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteStepAsync(typeName, message, entity, stage, mode, rank, filteringAttributes, name, secureConfig, profile, environment, solution, globalOptions, cancellationToken);
+            return await ExecuteStepAsync(typeName, message, entity, stage, mode, rank, filteringAttributes, name, secureConfig, eventHandlerType, profile, environment, solution, globalOptions, cancellationToken);
         });
 
         return command;
@@ -465,6 +473,7 @@ public static class RegisterCommand
         string? filteringAttributes,
         string? name,
         string? secureConfig,
+        string eventHandlerType,
         string? profile,
         string? environment,
         string? solution,
@@ -542,7 +551,7 @@ public static class RegisterCommand
                 SecureConfiguration = secureConfig
             };
 
-            var stepId = await registrationService.UpsertStepAsync(pluginType.Id, stepConfig, messageId.Value, filterId, solution, cancellationToken);
+            var stepId = await registrationService.UpsertStepAsync(pluginType.Id, eventHandlerType, stepConfig, messageId.Value, filterId, solution, cancellationToken);
 
             var result = new RegisterStepResult
             {

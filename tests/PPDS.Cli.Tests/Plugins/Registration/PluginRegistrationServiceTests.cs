@@ -1,4 +1,4 @@
-using System.ServiceModel;
+﻿using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -900,7 +900,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        var result = await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        var result = await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         Assert.Equal(expectedStepId, result);
@@ -934,7 +934,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - No SetStateRequest should be made for enabled new steps
         var setStateRequest = _executedRequests.OfType<SetStateRequest>().FirstOrDefault();
@@ -972,7 +972,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         var setStateRequest = _executedRequests.OfType<SetStateRequest>().FirstOrDefault();
@@ -1012,7 +1012,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         var setStateRequest = _executedRequests.OfType<SetStateRequest>().FirstOrDefault();
@@ -1052,7 +1052,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - No SetStateRequest when state already matches
         var setStateRequest = _executedRequests.OfType<SetStateRequest>().FirstOrDefault();
@@ -1087,7 +1087,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - Verify CreateAsync was called with correct ImpersonatingUserId
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1144,7 +1144,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - Verify CreateAsync was called with resolved user ID
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1187,7 +1187,7 @@ public class PluginRegistrationServiceTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId));
+            () => _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId));
 
         Assert.Equal(ErrorCodes.Plugin.UserNotFound, exception.ErrorCode);
         Assert.Contains("nonexistent@domain.com", exception.UserMessage);
@@ -1216,7 +1216,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - Verify CreateAsync was called without ImpersonatingUserId
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1326,7 +1326,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1360,7 +1360,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - CanBeBypassed attribute should not be set in the entity
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1394,7 +1394,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1430,7 +1430,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1465,7 +1465,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - Falls back to Parent (0) per spec default
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1509,7 +1509,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - secure config entity was created
         var secureConfigEntity = createdEntities.FirstOrDefault(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig");
@@ -1547,7 +1547,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - no secure config entity created
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1604,7 +1604,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - secure config entity was updated (not created)
         _mockPooledClient.Verify(s => s.CreateAsync(
@@ -1657,7 +1657,7 @@ public class PluginRegistrationServiceTests
         };
 
         // Act
-        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
 
         // Assert - secure config entity was created
         var secureConfigEntity = createdEntities.FirstOrDefault(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig");

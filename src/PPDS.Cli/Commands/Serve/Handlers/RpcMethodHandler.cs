@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -1028,11 +1028,12 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("plugins/registerStep")]
     public async Task<PluginsRegisterResponse> PluginsRegisterStepAsync(
-        string pluginTypeId,
+        string eventHandlerId,
         string message,
         string entity,
         string stage,
         string mode = "Synchronous",
+        string eventHandlerType = "pluginType",
         int executionOrder = 1,
         string? filteringAttributes = null,
         string? description = null,
@@ -1049,8 +1050,8 @@ public class RpcMethodHandler : IDisposable
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var typeId))
-            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(eventHandlerId) || !Guid.TryParse(eventHandlerId, out var typeId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'eventHandlerId' parameter must be a valid GUID");
         if (string.IsNullOrWhiteSpace(message))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'message' parameter is required");
         if (string.IsNullOrWhiteSpace(entity))
@@ -1090,7 +1091,7 @@ public class RpcMethodHandler : IDisposable
                 SecondaryEntity = secondaryEntity
             };
 
-            var stepId = await registrationService.UpsertStepAsync(typeId, stepConfig, messageId, filterId, solutionName, ct);
+            var stepId = await registrationService.UpsertStepAsync(typeId, eventHandlerType, stepConfig, messageId, filterId, solutionName, ct);
 
             return new PluginsRegisterResponse { Id = stepId.ToString() };
         }, cancellationToken);

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
@@ -1214,14 +1214,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Creates or updates a processing step.
     /// </summary>
-    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="eventHandlerId">The event handler ID (plugin type or service endpoint).</param>
+    /// <param name="eventHandlerType">The event handler type: "pluginType" or "serviceEndpoint".</param>
     /// <param name="stepConfig">The step configuration.</param>
     /// <param name="messageId">The SDK message ID.</param>
     /// <param name="filterId">Optional SDK message filter ID.</param>
     /// <param name="solutionName">Optional solution name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<Guid> UpsertStepAsync(
-        Guid pluginTypeId,
+        Guid eventHandlerId,
+        string eventHandlerType,
         PluginStepConfig stepConfig,
         Guid messageId,
         Guid? filterId,
@@ -1238,7 +1240,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             {
                 Conditions =
                 {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, pluginTypeId),
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
                     new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
                 }
             }
@@ -1251,7 +1253,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var entity = new SdkMessageProcessingStep
         {
             Name = stepConfig.Name,
-            EventHandler = new EntityReference(PluginType.EntityLogicalName, pluginTypeId),
+            EventHandler = new EntityReference(
+                    eventHandlerType == "serviceEndpoint" ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
+                    eventHandlerId),
             SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
             Stage = (sdkmessageprocessingstep_stage)MapStageToValue(stepConfig.Stage),
             Mode = (sdkmessageprocessingstep_mode)MapModeToValue(stepConfig.Mode),
