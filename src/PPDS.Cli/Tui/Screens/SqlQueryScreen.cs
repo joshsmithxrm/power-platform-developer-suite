@@ -1,4 +1,3 @@
-using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
 using PPDS.Cli.Infrastructure.Errors;
@@ -25,13 +24,8 @@ namespace PPDS.Cli.Tui.Screens;
 /// </summary>
 internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryScreenState>
 {
-    /// <summary>
-    /// Number of rows per streaming chunk. Results appear incrementally in batches
-    /// of this size, providing visual feedback while loading continues in the background.
-    /// </summary>
-    private const int StreamingChunkSize = 100;
-
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly SqlQueryPresenter _presenter;
 
     /// <summary>
     /// Minimum editor height in rows (including frame border).
@@ -58,17 +52,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// </summary>
     private int _editorHeight = DefaultEditorHeight;
 
-    private string? _lastSql;
-    private string? _lastPagingCookie;
-    private int _lastPageNumber = 1;
-    private bool _isExecuting;
-    private CancellationTokenSource? _queryCts;
     private string _statusText = "Ready";
-    private string? _lastErrorMessage;
-    private QueryPlanDescription? _lastExecutionPlan;
-    private long _lastExecutionTimeMs;
-    private bool _useTdsEndpoint;
-    private bool _confirmedDml;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -82,14 +66,15 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     {
         new MenuBarItem("_Query", new MenuItem[]
         {
-            new("Execute", "F5", () => _ = ExecuteQueryAsync()),
+            new("Execute", "F5", () => ErrorService.FireAndForget(
+                _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation), "ExecuteQuery")),
             new("Show FetchXML", "Ctrl+Shift+F / F9", ShowFetchXmlDialog),
             new("Show Execution Plan", "Ctrl+Shift+E / F7", ShowExecutionPlanDialog),
             new("History", "Ctrl+Shift+H / F8", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
             new("", "", () => {}, null, null, Key.Null), // Separator
-            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "F10", ToggleTdsEndpoint),
+            new(_presenter.UseTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "F10", ToggleTdsEndpoint),
         })
     };
 
@@ -102,6 +87,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         if (environmentDisplayName != null)
             EnvironmentDisplayName = environmentDisplayName;
         _deviceCodeCallback = deviceCodeCallback;
+
+        // Create presenter (contains all query orchestration logic, Terminal.Gui-free)
+        _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty);
 
         // Query input area
         _queryFrame = new FrameView("Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
@@ -128,9 +116,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             switch (e.KeyEvent.Key)
             {
                 case Key.Esc:
-                    if (_isExecuting && _queryCts is { } cts)
+                    if (_presenter.IsExecuting)
                     {
-                        cts.Cancel();
+                        _presenter.CancelQuery();
                         _statusSpinner!.Message = "Cancelling...";
                         e.Handled = true;
                     }
@@ -328,8 +316,173 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             }
         };
 
+        // Subscribe to presenter events — marshal all UI updates to the main thread
+        SubscribeToPresenterEvents();
+
         // Set up keyboard handling for context-dependent shortcuts
         SetupKeyboardHandling();
+    }
+
+    /// <summary>
+    /// Subscribes to all presenter events, wrapping each handler with
+    /// Application.MainLoop.Invoke() to marshal updates to the UI thread.
+    /// </summary>
+    private void SubscribeToPresenterEvents()
+    {
+        _presenter.StreamingColumnsReady += (columns, entityLogicalName) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.InitializeStreamingColumns(columns, entityLogicalName);
+                    NotifyMenuChanged();
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to display streaming columns", ex, "Presenter.StreamingColumnsReady");
+                }
+            });
+        };
+
+        _presenter.StreamingRowsReady += (rows, columns, isComplete, totalRowsSoFar) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.AppendStreamingRows(rows, columns);
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to display streaming results", ex, "Presenter.StreamingRowsReady");
+                }
+            });
+        };
+
+        _presenter.StatusChanged += (statusMessage) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Message = statusMessage;
+                _statusLabel.Text = statusMessage;
+            });
+        };
+
+        _presenter.ExecutionComplete += (statusText, elapsedMs, executionMode) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusText = statusText;
+                _statusSpinner.Stop();
+                _statusLabel.Text = _statusText;
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _presenter.AuthenticationRequired += (authEx) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Visible = true;
+
+                TuiDebugLog.Log($"Authentication error: {authEx.Message}");
+
+                var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
+                Application.Run(dialog);
+
+                if (dialog.ShouldReauthenticate)
+                {
+                    TuiDebugLog.Log("User chose to re-authenticate");
+                    try
+                    {
+                        _statusLabel.Text = "Re-authenticating...";
+                        ErrorService.FireAndForget(HandleReauthAndRetryAsync(), "ReauthAndRetry");
+                    }
+                    catch (Exception reAuthEx)
+                    {
+                        ErrorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
+                        _statusText = $"Re-authentication failed: {reAuthEx.Message}";
+                        _statusLabel.Text = _statusText;
+                    }
+                }
+                else
+                {
+                    TuiDebugLog.Log("User cancelled re-authentication");
+                    ErrorService.ReportError("Session expired", authEx, "ExecuteQuery");
+                    _statusText = $"Error: {authEx.Message}";
+                    _statusLabel.Text = _statusText;
+                }
+            });
+        };
+
+        _presenter.DmlConfirmationRequired += (dmlEx) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Visible = true;
+
+                var result = MessageBox.Query(
+                    "Confirm DML Operation",
+                    dmlEx.Message + "\n\nDo you want to proceed?",
+                    "Execute", "Cancel");
+
+                if (result == 0) // "Execute" button
+                {
+                    TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
+                    _statusLabel.Visible = false;
+                    _presenter.ConfirmDml();
+                    ErrorService.FireAndForget(
+                        _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation),
+                        "RetryDmlConfirmed");
+                }
+                else
+                {
+                    TuiDebugLog.Log("User cancelled DML operation");
+                    _statusText = "DML operation cancelled.";
+                    _statusLabel.Text = _statusText;
+                }
+            });
+        };
+
+        _presenter.QueryCancelled += () =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Text = "Query cancelled.";
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _presenter.ErrorOccurred += (errorMessage) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusText = $"Error: {errorMessage}";
+                _statusSpinner.Stop();
+                _statusLabel.Text = _statusText;
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _presenter.PageLoaded += (queryResult) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.AddPage(queryResult);
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
+                    TuiDebugLog.Log($"Error in LoadMore callback: {ex}");
+                }
+            });
+        };
     }
 
     /// <inheritdoc />
@@ -345,7 +498,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             else
                 _queryInput.SetFocus();
         });
-        RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
+        RegisterHotkey(registry, Key.F5, "Execute query", () => ErrorService.FireAndForget(
+            _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation), "ExecuteQuery"));
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
         // F10 instead of Ctrl+Shift+T: terminals cannot distinguish Ctrl+T from Ctrl+Shift+T
         // (they send the same keycode), so the global Ctrl+T (new tab) always wins. See #580.
@@ -477,15 +631,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         }
     }
 
-    private async Task ExecuteQueryAsync()
+    /// <summary>
+    /// Starts a query execution via the presenter with UI spinner management.
+    /// </summary>
+    private void StartPresenterExecution()
     {
         var sql = _queryInput.Text.ToString() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(sql))
-        {
-            _statusText = "Error: Query cannot be empty.";
-            _statusLabel.Text = _statusText;
-            return;
-        }
 
         if (EnvironmentUrl == null)
         {
@@ -494,370 +645,75 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             return;
         }
 
-        TuiDebugLog.Log($"Starting streaming query execution for: {EnvironmentUrl}");
-
-        // Create/reset query-level cancellation
-        _queryCts?.Cancel();
-        _queryCts?.Dispose();
-        _queryCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
-        var queryCt = _queryCts.Token;
-
-        _isExecuting = true;
-        _lastErrorMessage = null;
-
         // Show spinner, hide status label
         _statusLabel.Visible = false;
         _statusSpinner.Start("Executing query... (press Escape to cancel)");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var streamingStarted = false;
 
-        // Tick elapsed time on the spinner every second until streaming starts
+        // Tick elapsed time on the spinner every second
         var elapsedTimer = Application.MainLoop?.AddTimeout(TimeSpan.FromSeconds(1), (_) =>
         {
-            if (!_isExecuting) return false;
-            if (!streamingStarted)
-                _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s (press Escape to cancel)";
+            if (!_presenter.IsExecuting) return false;
+            _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s (press Escape to cancel)";
             return true;
         });
 
-        try
-        {
-        try
-        {
-            TuiDebugLog.Log($"Getting SQL query service for URL: {EnvironmentUrl}");
+        // Subscribe to completion to clean up the timer
+        void OnComplete(string s, long ms, QueryExecutionMode? m) => CleanUpTimer();
+        void OnCancel() => CleanUpTimer();
+        void OnError(string msg) => CleanUpTimer();
+        void OnAuth(DataverseAuthenticationException ex) => CleanUpTimer();
+        void OnDml(PpdsException ex) => CleanUpTimer();
 
-            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, queryCt);
-            TuiDebugLog.Log("Got service, executing streaming query...");
-
-            var isConfirmed = _confirmedDml;
-            _confirmedDml = false; // Reset after capturing — one-shot confirmation
-
-            var request = new SqlQueryRequest
-            {
-                Sql = sql,
-                PageNumber = null,
-                PagingCookie = null,
-                EnablePrefetch = true,
-                UseTdsEndpoint = _useTdsEndpoint,
-                DmlSafety = new DmlSafetyOptions
-                {
-                    IsConfirmed = isConfirmed,
-                    IsDryRun = false
-                }
-            };
-
-            IReadOnlyList<Dataverse.Query.QueryColumn>? columns = null;
-            var totalRows = 0;
-            var isFirstChunk = true;
-
-            QueryExecutionMode? executionMode = null;
-
-            await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, queryCt))
-            {
-                // Capture column metadata from first chunk
-                if (isFirstChunk && chunk.Columns != null)
-                {
-                    columns = chunk.Columns;
-                }
-
-                totalRows = chunk.TotalRowsSoFar;
-
-                // Marshal UI updates to the main thread
-                var chunkCapture = chunk;
-                var columnsCapture = columns;
-                var isFirst = isFirstChunk;
-
-                Application.MainLoop?.Invoke(() =>
-                {
-                    try
-                    {
-                        if (isFirst && columnsCapture != null)
-                        {
-                            _resultsTable.InitializeStreamingColumns(
-                                columnsCapture,
-                                chunkCapture.EntityLogicalName ?? "unknown");
-                            NotifyMenuChanged();
-                        }
-
-                        if (chunkCapture.Rows.Count > 0 && columnsCapture != null)
-                        {
-                            _resultsTable.AppendStreamingRows(chunkCapture.Rows, columnsCapture);
-                        }
-
-                        // Update spinner with progress
-                        streamingStarted = true;
-                        if (!chunkCapture.IsComplete)
-                        {
-                            _statusSpinner.Message = $"Loading... {chunkCapture.TotalRowsSoFar:N0} rows ({stopwatch.Elapsed.TotalSeconds:F1}s)";
-                        }
-
-                        if (chunkCapture.IsComplete && chunkCapture.ExecutionMode.HasValue)
-                        {
-                            executionMode = chunkCapture.ExecutionMode;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        ErrorService.ReportError("Failed to display streaming results", ex, "ExecuteQuery.StreamChunk");
-                        TuiDebugLog.Log($"Error in streaming chunk callback: {ex}");
-                    }
-                });
-
-                isFirstChunk = false;
-            }
-
-            stopwatch.Stop();
-            var elapsedMs = stopwatch.ElapsedMilliseconds;
-
-            TuiDebugLog.Log($"Streaming query complete: {totalRows} rows in {elapsedMs}ms");
-
-            Application.MainLoop?.Invoke(() =>
-            {
-                try
-                {
-                    _lastSql = sql;
-                    _lastPageNumber = 1;
-                    _lastPagingCookie = null;
-                    _lastExecutionTimeMs = elapsedMs;
-
-                    var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
-                    _statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
-                }
-                catch (Exception ex)
-                {
-                    ErrorService.ReportError("Failed to finalize query results", ex, "ExecuteQuery.Finalize");
-                    _lastErrorMessage = ex.Message;
-                    _statusText = $"Error finalizing results: {ex.Message}";
-                    TuiDebugLog.Log($"Error in ExecuteQuery finalize callback: {ex}");
-                }
-                finally
-                {
-                    _statusSpinner.Stop();
-                    _statusLabel.Text = _statusText;
-                    _statusLabel.Visible = true;
-                    _isExecuting = false;
-                }
-            });
-
-            // Save to history (fire-and-forget)
-            ErrorService.FireAndForget(
-                SaveToHistoryAsync(sql, totalRows, stopwatch.ElapsedMilliseconds),
-                "SaveHistory");
-
-            // Cache execution plan (fire-and-forget)
-            ErrorService.FireAndForget(
-                CacheExecutionPlanAsync(sql),
-                "CacheExecutionPlan");
-        }
-        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
-        {
-            // Stop spinner before showing dialog
-            _statusSpinner.Stop();
-            _statusLabel.Visible = true;
-
-            TuiDebugLog.Log($"Authentication error: {authEx.Message}");
-
-            // Show re-authentication dialog
-            var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
-            Application.Run(dialog);
-
-            if (dialog.ShouldReauthenticate)
-            {
-                TuiDebugLog.Log("User chose to re-authenticate");
-                try
-                {
-                    _statusLabel.Text = "Re-authenticating...";
-                    await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
-
-                    // Retry the query - ExecuteQueryAsync reads from _queryInput
-                    TuiDebugLog.Log("Re-authentication successful, retrying query");
-                    _statusLabel.Visible = false;
-                    ErrorService.FireAndForget(ExecuteQueryAsync(), "RetryQuery");
-                    return;
-                }
-                catch (Exception reAuthEx)
-                {
-                    ErrorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
-                    _lastErrorMessage = reAuthEx.Message;
-                    _statusText = $"Re-authentication failed: {reAuthEx.Message}";
-                    _statusLabel.Text = _statusText;
-                    _isExecuting = false;
-                }
-            }
-            else
-            {
-                TuiDebugLog.Log("User cancelled re-authentication");
-                ErrorService.ReportError("Session expired", authEx, "ExecuteQuery");
-                _lastErrorMessage = authEx.Message;
-                _statusText = $"Error: {authEx.Message}";
-                _statusLabel.Text = _statusText;
-                _isExecuting = false;
-            }
-        }
-        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !ScreenCancellation.IsCancellationRequested)
-        {
-            // Query was cancelled by user (Escape), not by screen closing
-            _statusSpinner.Stop();
-            _statusLabel.Text = "Query cancelled.";
-            _statusLabel.Visible = true;
-            _isExecuting = false;
-        }
-        catch (PpdsException dmlEx) when (dmlEx.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
-        {
-            // DML requires user confirmation — show dialog and retry if confirmed
-            _statusSpinner.Stop();
-            _statusLabel.Visible = true;
-
-            var result = MessageBox.Query(
-                "Confirm DML Operation",
-                dmlEx.Message + "\n\nDo you want to proceed?",
-                "Execute", "Cancel");
-
-            if (result == 0) // "Execute" button
-            {
-                TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
-                _statusLabel.Visible = false;
-                _isExecuting = false;
-                _confirmedDml = true;
-                ErrorService.FireAndForget(ExecuteQueryAsync(), "RetryDmlConfirmed");
-                return;
-            }
-            else
-            {
-                TuiDebugLog.Log("User cancelled DML operation");
-                _statusText = "DML operation cancelled.";
-                _statusLabel.Text = _statusText;
-                _isExecuting = false;
-            }
-        }
-        catch (Exception ex)
-        {
-            ErrorService.ReportError("Query execution failed", ex, "ExecuteQuery");
-            _lastErrorMessage = ex.Message;
-            _statusText = $"Error: {ex.Message}";
-
-            // Stop spinner, show error in status label
-            _statusSpinner.Stop();
-            _statusLabel.Text = _statusText;
-            _statusLabel.Visible = true;
-            _isExecuting = false;
-        }
-        }
-        finally
+        void CleanUpTimer()
         {
             if (elapsedTimer != null)
                 Application.MainLoop?.RemoveTimeout(elapsedTimer);
+
+            // Unsubscribe all one-shot timer cleanup handlers
+            _presenter.ExecutionComplete -= OnComplete;
+            _presenter.QueryCancelled -= OnCancel;
+            _presenter.ErrorOccurred -= OnError;
+            _presenter.AuthenticationRequired -= OnAuth;
+            _presenter.DmlConfirmationRequired -= OnDml;
         }
+
+        _presenter.ExecutionComplete += OnComplete;
+        _presenter.QueryCancelled += OnCancel;
+        _presenter.ErrorOccurred += OnError;
+        _presenter.AuthenticationRequired += OnAuth;
+        _presenter.DmlConfirmationRequired += OnDml;
+
+        ErrorService.FireAndForget(
+            _presenter.ExecuteAsync(sql, ScreenCancellation),
+            "ExecuteQuery");
     }
 
-    private async Task SaveToHistoryAsync(string sql, int rowCount, long executionTimeMs)
+    /// <summary>
+    /// Handles re-authentication and retries the query.
+    /// </summary>
+    private async Task HandleReauthAndRetryAsync()
     {
-        if (EnvironmentUrl == null) return;
+        await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
 
-        try
-        {
-            var historyService = await Session.GetQueryHistoryServiceAsync(EnvironmentUrl, ScreenCancellation);
-            await historyService.AddQueryAsync(EnvironmentUrl, sql, rowCount, executionTimeMs);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[TUI] Failed to save query to history: {ex.Message}");
-            TuiDebugLog.Log($"History save failed: {ex.Message}");
-        }
-    }
+        TuiDebugLog.Log("Re-authentication successful, retrying query");
 
-    private async Task CacheExecutionPlanAsync(string sql)
-    {
-        if (EnvironmentUrl == null) return;
-
-        try
+        Application.MainLoop?.Invoke(() =>
         {
-            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
-            var plan = await service.ExplainAsync(sql, ScreenCancellation);
-            _lastExecutionPlan = plan;
-        }
-        catch (Exception ex)
-        {
-            TuiDebugLog.Log($"Execution plan cache failed: {ex.Message}");
-        }
+            _statusLabel.Visible = false;
+            StartPresenterExecution();
+        });
     }
 
     private async Task OnLoadMoreRequested()
     {
-        if (_lastSql == null || EnvironmentUrl == null)
-            return;
-
-        try
-        {
-            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
-
-            var request = new SqlQueryRequest
-            {
-                Sql = _lastSql,
-                PageNumber = _lastPageNumber + 1,
-                PagingCookie = _lastPagingCookie,
-                EnablePrefetch = true
-            };
-
-            var result = await service.ExecuteAsync(request, ScreenCancellation);
-
-            Application.MainLoop?.Invoke(() =>
-            {
-                try
-                {
-                    _resultsTable.AddPage(result.Result);
-                    _lastPagingCookie = result.Result.PagingCookie;
-                    _lastPageNumber = result.Result.PageNumber;
-                }
-                catch (Exception ex)
-                {
-                    ErrorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
-                    TuiDebugLog.Log($"Error in LoadMore callback: {ex}");
-                }
-            });
-        }
-        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
-        {
-            TuiDebugLog.Log($"Authentication error during load more: {authEx.Message}");
-
-            // Show re-authentication dialog
-            var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
-            Application.Run(dialog);
-
-            if (dialog.ShouldReauthenticate)
-            {
-                try
-                {
-                    await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
-                    // Don't auto-retry load more - user can click the button again
-                }
-                catch (Exception reAuthEx)
-                {
-                    ErrorService.ReportError("Re-authentication failed", reAuthEx, "LoadMoreResults.ReAuth");
-                }
-            }
-            else
-            {
-                ErrorService.ReportError("Session expired", authEx, "LoadMoreResults");
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            ErrorService.ReportError("Failed to load more results", ex, "LoadMoreResults");
-        }
-        catch (HttpRequestException ex)
-        {
-            ErrorService.ReportError("Network error loading results", ex, "LoadMoreResults");
-        }
+        await _presenter.LoadMoreAsync(ScreenCancellation);
     }
 
     private void ToggleTdsEndpoint()
     {
-        _useTdsEndpoint = !_useTdsEndpoint;
-        _statusLabel.Text = _useTdsEndpoint
-            ? "Mode: TDS Read Replica (read-only, slight delay)"
-            : "Mode: Dataverse (real-time)";
+        _presenter.ToggleTds();
         _statusLabel.SetNeedsDisplay();
         NotifyMenuChanged();
     }
@@ -969,9 +825,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         }
 
         // If we have a cached plan from the last execution, show it immediately
-        if (_lastExecutionPlan != null && sql == _lastSql)
+        if (_presenter.LastExecutionPlan != null && sql == _presenter.LastSql)
         {
-            ShowPlanDialog(_lastExecutionPlan, _lastExecutionTimeMs);
+            ShowPlanDialog(_presenter.LastExecutionPlan, _presenter.LastExecutionTimeMs);
             return;
         }
 
@@ -1134,11 +990,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         var totalPages = pageSize > 0 && totalRows > 0
             ? (int)Math.Ceiling((double)totalRows / pageSize)
             : 0;
-        var currentPage = _lastPageNumber;
+        var currentPage = _presenter.LastPageNumber;
 
         return new SqlQueryScreenState(
             QueryText: _queryInput.Text?.ToString() ?? string.Empty,
-            IsExecuting: _isExecuting,
+            IsExecuting: _presenter.IsExecuting,
             StatusText: _statusText,
             ResultCount: totalRows > 0 ? totalRows : null,
             CurrentPage: totalRows > 0 ? currentPage : null,
@@ -1149,13 +1005,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             FilterText: _filterField.Text?.ToString() ?? string.Empty,
             FilterVisible: _filterFrame.Visible,
             CanExport: totalRows > 0,
-            ErrorMessage: _lastErrorMessage,
+            ErrorMessage: _presenter.LastErrorMessage,
             EditorHeight: _editorHeight);
     }
 
     protected override void OnDispose()
     {
-        _queryCts?.Cancel();
-        _queryCts?.Dispose();
+        _presenter.Dispose();
     }
 }

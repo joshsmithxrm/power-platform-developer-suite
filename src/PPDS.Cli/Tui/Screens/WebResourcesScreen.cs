@@ -76,7 +76,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
         RegisterHotkey(registry, Key.CtrlMask | Key.R, "Refresh", () => ErrorService.FireAndForget(LoadDataAsync(), "WebResources.Refresh"));
         RegisterHotkey(registry, Key.CtrlMask | Key.P, "Publish selected", () => ErrorService.FireAndForget(PublishSelectedAsync(), "WebResources.Publish"));
         RegisterHotkey(registry, Key.CtrlMask | Key.F, "Solution filter", () => ErrorService.FireAndForget(ShowSolutionFilterAsync(), "WebResources.Filter"));
-        RegisterHotkey(registry, Key.CtrlMask | Key.T, "Toggle text-only", ToggleTextOnly);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.T, "Toggle text-only", ToggleTextOnly);
         RegisterHotkey(registry, Key.CtrlMask | Key.O, "Open in Maker", OpenInMaker);
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.P, "Publish All", () =>
             ErrorService.FireAndForget(PublishAllAsync(), "WebResources.PublishAll"));
