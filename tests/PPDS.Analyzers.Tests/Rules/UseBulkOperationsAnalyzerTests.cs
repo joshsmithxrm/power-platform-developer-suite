@@ -14,19 +14,26 @@ public class UseBulkOperationsAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IOrganizationServiceAsync2
+            namespace Microsoft.Xrm.Sdk
             {
-                Task<Guid> CreateAsync(object entity);
-            }
-            class Service
-            {
-                private IOrganizationServiceAsync2 _client;
-                async Task DoWork()
+                public interface IOrganizationServiceAsync2
                 {
-                    var items = new object[10];
-                    for (int i = 0; i < items.Length; i++)
+                    Task<Guid> CreateAsync(object entity);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _client;
+                    async Task DoWork()
                     {
-                        await _client.CreateAsync(items[i]);
+                        var items = new object[10];
+                        for (int i = 0; i < items.Length; i++)
+                        {
+                            await _client.CreateAsync(items[i]);
+                        }
                     }
                 }
             }
@@ -47,18 +54,25 @@ public class UseBulkOperationsAnalyzerTests
             using System;
             using System.Collections.Generic;
             using System.Threading.Tasks;
-            interface IOrganizationServiceAsync2
+            namespace Microsoft.Xrm.Sdk
             {
-                Task DeleteAsync(string entityName, Guid id);
-            }
-            class Service
-            {
-                private IOrganizationServiceAsync2 _client;
-                async Task DoWork(List<Guid> ids)
+                public interface IOrganizationServiceAsync2
                 {
-                    foreach (var id in ids)
+                    Task DeleteAsync(string entityName, Guid id);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _client;
+                    async Task DoWork(List<Guid> ids)
                     {
-                        await _client.DeleteAsync("account", id);
+                        foreach (var id in ids)
+                        {
+                            await _client.DeleteAsync("account", id);
+                        }
                     }
                 }
             }
@@ -78,16 +92,23 @@ public class UseBulkOperationsAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IOrganizationServiceAsync2
+            namespace Microsoft.Xrm.Sdk
             {
-                Task<Guid> CreateAsync(object entity);
-            }
-            class Service
-            {
-                private IOrganizationServiceAsync2 _client;
-                async Task DoWork()
+                public interface IOrganizationServiceAsync2
                 {
-                    await _client.CreateAsync(new object());
+                    Task<Guid> CreateAsync(object entity);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _client;
+                    async Task DoWork()
+                    {
+                        await _client.CreateAsync(new object());
+                    }
                 }
             }
             """;
@@ -106,18 +127,25 @@ public class UseBulkOperationsAnalyzerTests
             using System;
             using System.Collections.Generic;
             using System.Threading.Tasks;
-            interface IOrganizationServiceAsync2
+            namespace Microsoft.Xrm.Sdk
             {
-                Task UpdateAsync(object entity);
-            }
-            class Service
-            {
-                private IOrganizationServiceAsync2 _client;
-                async Task DoWork(List<object> entities)
+                public interface IOrganizationServiceAsync2
                 {
-                    foreach (var entity in entities)
+                    Task UpdateAsync(object entity);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _client;
+                    async Task DoWork(List<object> entities)
                     {
-                        await _client.UpdateAsync(entity);
+                        foreach (var entity in entities)
+                        {
+                            await _client.UpdateAsync(entity);
+                        }
                     }
                 }
             }
@@ -135,20 +163,27 @@ public class UseBulkOperationsAnalyzerTests
     {
         const string code = """
             using System;
-            interface IOrganizationService
+            namespace Microsoft.Xrm.Sdk
             {
-                void Delete(string entityName, Guid id);
-            }
-            class Service
-            {
-                private IOrganizationService _client;
-                void DoWork()
+                public interface IOrganizationService
                 {
-                    int i = 0;
-                    while (i < 10)
+                    void Delete(string entityName, Guid id);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationService _client;
+                    void DoWork()
                     {
-                        _client.Delete("account", Guid.NewGuid());
-                        i++;
+                        int i = 0;
+                        while (i < 10)
+                        {
+                            _client.Delete("account", Guid.NewGuid());
+                            i++;
+                        }
                     }
                 }
             }
@@ -167,18 +202,29 @@ public class UseBulkOperationsAnalyzerTests
             using System;
             using System.Collections.Generic;
             using System.Threading.Tasks;
-            interface IOrganizationServiceAsync2
+            namespace Microsoft.Xrm.Sdk
             {
-                Task<Guid> CreateAsync(object entity);
-            }
-            interface IPooledClient : IOrganizationServiceAsync2, IAsyncDisposable { }
-            class Service
-            {
-                async Task DoWork(IPooledClient client, List<object> items)
+                public interface IOrganizationServiceAsync2
                 {
-                    foreach (var item in items)
+                    Task<Guid> CreateAsync(object entity);
+                }
+            }
+            namespace PPDS.Dataverse
+            {
+                using Microsoft.Xrm.Sdk;
+                public interface IPooledClient : IOrganizationServiceAsync2, IAsyncDisposable { }
+            }
+            namespace TestCode
+            {
+                using PPDS.Dataverse;
+                class Service
+                {
+                    async Task DoWork(IPooledClient client, List<object> items)
                     {
-                        await client.CreateAsync(item);
+                        foreach (var item in items)
+                        {
+                            await client.CreateAsync(item);
+                        }
                     }
                 }
             }

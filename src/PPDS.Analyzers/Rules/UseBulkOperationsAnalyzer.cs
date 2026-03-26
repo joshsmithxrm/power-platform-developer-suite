@@ -33,6 +33,8 @@ public sealed class UseBulkOperationsAnalyzer : DiagnosticAnalyzer
             ["UpdateAsync"] = "UpdateMultipleAsync",
             ["Delete"] = "DeleteMultipleAsync",
             ["DeleteAsync"] = "DeleteMultipleAsync",
+            ["Execute"] = "ExecuteMultiple",
+            ["ExecuteAsync"] = "ExecuteMultiple",
         };
 
     // Fully qualified interface names that declare CRUD operations
@@ -122,7 +124,11 @@ public sealed class UseBulkOperationsAnalyzer : DiagnosticAnalyzer
 
     private static bool MatchesKnownType(INamedTypeSymbol type)
     {
-        var name = type.Name;
-        return Array.IndexOf(CrudInterfaces, name) >= 0;
+        if (Array.IndexOf(CrudInterfaces, type.Name) < 0)
+            return false;
+
+        // Verify the namespace to avoid false positives on unrelated types with the same name
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        return ns is "Microsoft.Xrm.Sdk" or "Microsoft.PowerPlatform.Dataverse.Client" or "PPDS.Dataverse";
     }
 }

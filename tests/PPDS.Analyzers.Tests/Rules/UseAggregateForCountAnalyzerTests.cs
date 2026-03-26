@@ -242,6 +242,52 @@ public class UseAggregateForCountAnalyzerTests
     }
 
     [Fact]
+    public async Task PPDS009_RetrieveMultipleEntitiesCountLinq_ReportsWarning()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            using System.Linq;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    void DoWork()
+                    {
+                        var count = _svc.RetrieveMultiple(new QueryExpression("account")).Entities.Count();
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<UseAggregateForCountAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "PPDS009");
+    }
+
+    [Fact]
     public async Task PPDS009_NonRetrieveMultipleCount_NoDiagnostic()
     {
         const string code = """

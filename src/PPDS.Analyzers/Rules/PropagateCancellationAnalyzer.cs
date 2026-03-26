@@ -60,7 +60,9 @@ public sealed class PropagateCancellationAnalyzer : DiagnosticAnalyzer
         if (ctParamName is null)
             return;
 
-        // Find all awaited invocations in the method body
+        // Check awaited invocations in the method body.
+        // Non-awaited async calls (fire-and-forget, task variables) are intentionally excluded
+        // to avoid false positives on patterns like Task.WhenAll or stored tasks.
         foreach (var awaitExpr in body.DescendantNodes().OfType<AwaitExpressionSyntax>())
         {
             // Skip awaits inside nested lambdas/local functions (they have their own scope)

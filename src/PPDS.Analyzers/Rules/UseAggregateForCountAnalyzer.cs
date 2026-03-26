@@ -101,13 +101,22 @@ public sealed class UseAggregateForCountAnalyzer : DiagnosticAnalyzer
         if (firstName is "TotalRecordCount" or "TotalRecordCountLimitExceeded")
             return true;
 
-        // Pattern: .Entities.Count
+        // Pattern: .Entities.Count (property) or .Entities.Count() (LINQ extension method)
         if (firstName == "Entities" &&
             firstAccess.Parent is MemberAccessExpressionSyntax secondAccess)
         {
             var secondName = secondAccess.Name.Identifier.Text;
             if (secondName == "Count")
-                return true;
+            {
+                // .Entities.Count (property access)
+                if (secondAccess.Parent is not InvocationExpressionSyntax)
+                    return true;
+
+                // .Entities.Count() (LINQ method call — also an anti-pattern)
+                if (secondAccess.Parent is InvocationExpressionSyntax countInvocation &&
+                    countInvocation.ArgumentList.Arguments.Count <= 1)
+                    return true;
+            }
         }
 
         return false;
@@ -132,6 +141,11 @@ public sealed class UseAggregateForCountAnalyzer : DiagnosticAnalyzer
 
     private static bool MatchesKnownType(INamedTypeSymbol type)
     {
-        return Array.IndexOf(ServiceInterfaces, type.Name) >= 0;
+        if (Array.IndexOf(ServiceInterfaces, type.Name) < 0)
+            return false;
+
+        // Verify the namespace to avoid false positives on unrelated types with the same name
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        return ns is "Microsoft.Xrm.Sdk" or "Microsoft.PowerPlatform.Dataverse.Client" or "PPDS.Dataverse";
     }
 }

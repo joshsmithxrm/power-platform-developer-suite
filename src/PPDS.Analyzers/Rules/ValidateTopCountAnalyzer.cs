@@ -112,7 +112,7 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
 
         // Case 2: Variable passed as argument — check for variable.TopCount = ... BEFORE the call
         if (argument is not IdentifierNameSyntax variableName)
-            return true; // Can't statically analyze method calls/fields — skip to avoid false positives
+            return true; // Non-local expressions (method returns, property access, ternary, etc.) — skip to avoid false positives
 
         var varName = variableName.Identifier.Text;
         var callPosition = callSite.SpanStart;
@@ -159,6 +159,11 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
 
     private static bool MatchesKnownType(INamedTypeSymbol type)
     {
-        return Array.IndexOf(ServiceInterfaces, type.Name) >= 0;
+        if (Array.IndexOf(ServiceInterfaces, type.Name) < 0)
+            return false;
+
+        // Verify the namespace to avoid false positives on unrelated types with the same name
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        return ns is "Microsoft.Xrm.Sdk" or "Microsoft.PowerPlatform.Dataverse.Client" or "PPDS.Dataverse";
     }
 }

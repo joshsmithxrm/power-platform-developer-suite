@@ -32,6 +32,7 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSyntaxNodeAction(AnalyzeLocalDeclaration, SyntaxKind.LocalDeclarationStatement);
+        context.RegisterSyntaxNodeAction(AnalyzeUsingStatement, SyntaxKind.UsingStatement);
     }
 
     private static void AnalyzeLocalDeclaration(SyntaxNodeAnalysisContext context)
@@ -62,6 +63,42 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         var awaitCount = CountAwaitsOnVariable(
             enclosingBlock, variableName, declaredSymbol, context.SemanticModel,
             localDecl.SpanStart, context.CancellationToken);
+
+        if (awaitCount > 1)
+        {
+            var diagnostic = Diagnostic.Create(
+                Rule,
+                declarator.GetLocation(),
+                variableName);
+
+            context.ReportDiagnostic(diagnostic);
+        }
+    }
+
+    private static void AnalyzeUsingStatement(SyntaxNodeAnalysisContext context)
+    {
+        var usingStmt = (UsingStatementSyntax)context.Node;
+
+        // using (var client = ...) { } form
+        if (usingStmt.Declaration is null || usingStmt.Declaration.Variables.Count != 1)
+            return;
+
+        var declarator = usingStmt.Declaration.Variables[0];
+
+        if (!IsPoolClientAcquisition(declarator, context.SemanticModel, context.CancellationToken))
+            return;
+
+        var variableName = declarator.Identifier.Text;
+        var declaredSymbol = context.SemanticModel.GetDeclaredSymbol(declarator, context.CancellationToken);
+
+        // The scope is the using statement's body
+        var scope = usingStmt.Statement;
+        if (scope is null)
+            return;
+
+        var awaitCount = CountAwaitsOnVariable(
+            scope, variableName, declaredSymbol, context.SemanticModel,
+            usingStmt.SpanStart, context.CancellationToken);
 
         if (awaitCount > 1)
         {

@@ -105,11 +105,20 @@ public sealed class NoDirectFileIoInUiAnalyzer : DiagnosticAnalyzer
         if (string.IsNullOrEmpty(filePath))
             return false;
 
-        // Must be in PPDS.Cli/Tui/ or PPDS.Cli/Commands/, but NOT in PPDS.Cli/Services/
+        // Commands/Serve/ is excluded (MCP server exception) — consistent with PPDS005
+        bool isServe = filePath.Contains("PPDS.Cli/Commands/Serve/") || filePath.Contains("PPDS.Cli\\Commands\\Serve\\");
+        if (isServe)
+            return false;
+
+        // Services/ is excluded — services are allowed to do file I/O
+        bool isServices = filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
+        if (isServices)
+            return false;
+
+        // Must be in PPDS.Cli/Tui/ or PPDS.Cli/Commands/
         bool isTui = filePath.Contains("PPDS.Cli/Tui/") || filePath.Contains("PPDS.Cli\\Tui\\");
         bool isCommands = filePath.Contains("PPDS.Cli/Commands/") || filePath.Contains("PPDS.Cli\\Commands\\");
-        bool isServices = filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
 
-        return (isTui || isCommands) && !isServices;
+        return isTui || isCommands;
     }
 }

@@ -150,6 +150,34 @@ public class PropagateCancellationAnalyzerTests
     }
 
     [Fact]
+    public async Task FlagsMissingCancellationTokenWithConfigureAwait()
+    {
+        const string code = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            class Downstream
+            {
+                public Task<string> GetAsync() => Task.FromResult("a");
+                public Task<string> GetAsync(CancellationToken ct) => Task.FromResult("a");
+            }
+            class Service
+            {
+                private Downstream _d = new();
+                async Task DoWork(CancellationToken cancellationToken)
+                {
+                    await _d.GetAsync().ConfigureAwait(false);
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<PropagateCancellationAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS011");
+    }
+
+    [Fact]
     public async Task FlagsMethodWithDefaultCancellationTokenParam()
     {
         const string code = """
