@@ -81,6 +81,7 @@ class TestStartHook:
             text=True,
             env=env,
             cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
             timeout=10,
         )
         # The hook writes to stderr. In pipeline mode, it should NOT
