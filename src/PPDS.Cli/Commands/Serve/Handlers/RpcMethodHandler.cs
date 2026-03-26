@@ -1036,6 +1036,7 @@ public class RpcMethodHandler : IDisposable
         string eventHandlerType = "pluginType",
         int executionOrder = 1,
         string? filteringAttributes = null,
+        string? name = null,
         string? description = null,
         string? unsecureConfiguration = null,
         string? secureConfiguration = null,
@@ -1073,6 +1074,7 @@ public class RpcMethodHandler : IDisposable
 
             var stepConfig = new PluginStepConfig
             {
+                Name = name ?? $"{message} of {entity}",
                 Message = message,
                 Entity = entity,
                 Stage = stage,

@@ -392,6 +392,15 @@ public sealed class CustomApiService : ICustomApiService
                     $"Plugin type '{pluginTypeName}' not found.");
             }
 
+            // Verify assembly name matches when specified (disambiguation)
+            if (assemblyName is not null &&
+                !string.Equals(pluginType.AssemblyName, assemblyName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PpdsException(
+                    ErrorCodes.CustomApi.PluginTypeNotFound,
+                    $"Plugin type '{pluginTypeName}' was not found in assembly '{assemblyName}'. Found in assembly '{pluginType.AssemblyName}'.");
+            }
+
             update[CustomAPI.Fields.PluginTypeId] = new EntityReference("plugintype", pluginType.Id);
         }
 

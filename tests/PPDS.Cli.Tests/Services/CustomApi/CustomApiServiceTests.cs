@@ -964,6 +964,57 @@ public class CustomApiServiceTests
         Assert.Equal(pluginTypeId, pluginTypeRef.Id);
     }
 
+    [Fact]
+    public async Task SetPlugin_AssemblyName_Verified_WhenMatch()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+        var pluginTypeId = Guid.NewGuid();
+        var pluginTypeInfo = new PluginTypeInfo
+        {
+            Id = pluginTypeId,
+            TypeName = "TestNamespace.TestPlugin",
+            AssemblyName = "MyAssembly"
+        };
+
+        _mockPluginRegistrationService
+            .Setup(s => s.GetPluginTypeByNameAsync("TestNamespace.TestPlugin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pluginTypeInfo);
+
+        // Act — should succeed because assemblyName matches
+        await _sut.SetPluginTypeAsync(apiId, "TestNamespace.TestPlugin", "MyAssembly");
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        var pluginTypeRef = _updatedEntity!.GetAttributeValue<EntityReference>(CustomAPI.Fields.PluginTypeId);
+        Assert.NotNull(pluginTypeRef);
+        Assert.Equal(pluginTypeId, pluginTypeRef.Id);
+    }
+
+    [Fact]
+    public async Task SetPlugin_AssemblyName_ThrowsWhenMismatch()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+        var pluginTypeId = Guid.NewGuid();
+        var pluginTypeInfo = new PluginTypeInfo
+        {
+            Id = pluginTypeId,
+            TypeName = "TestNamespace.TestPlugin",
+            AssemblyName = "DifferentAssembly"
+        };
+
+        _mockPluginRegistrationService
+            .Setup(s => s.GetPluginTypeByNameAsync("TestNamespace.TestPlugin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pluginTypeInfo);
+
+        // Act & Assert — should throw because assemblyName doesn't match
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.SetPluginTypeAsync(apiId, "TestNamespace.TestPlugin", "MyAssembly"));
+        Assert.Equal(ErrorCodes.CustomApi.PluginTypeNotFound, ex.ErrorCode);
+        Assert.Contains("DifferentAssembly", ex.Message);
+    }
+
     #endregion
 
     #region Builder Helpers

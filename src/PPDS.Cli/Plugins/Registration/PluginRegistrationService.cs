@@ -1076,6 +1076,14 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 {
                     new ConditionExpression(PluginType.Fields.TypeName, ConditionOperator.Equal, typeName)
                 }
+            },
+            LinkEntities =
+            {
+                new LinkEntity(PluginType.EntityLogicalName, PluginAssembly.EntityLogicalName, PluginType.Fields.PluginAssemblyId, PluginAssembly.Fields.PluginAssemblyId, JoinOperator.LeftOuter)
+                {
+                    Columns = new ColumnSet(PluginAssembly.Fields.Name),
+                    EntityAlias = "assembly"
+                }
             }
         };
 
@@ -1090,7 +1098,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             Id = entity.Id,
             TypeName = entity.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
-            FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName)
+            FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName),
+            AssemblyId = entity.GetAttributeValue<EntityReference>(PluginType.Fields.PluginAssemblyId)?.Id,
+            AssemblyName = entity.GetAttributeValue<AliasedValue>($"assembly.{PluginAssembly.Fields.Name}")?.Value?.ToString()
         };
     }
 
@@ -1235,7 +1245,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             ColumnSet = new ColumnSet(
                 SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
-                SdkMessageProcessingStep.Fields.StateCode),
+                SdkMessageProcessingStep.Fields.StateCode,
+                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -1254,7 +1265,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             Name = stepConfig.Name,
             EventHandler = new EntityReference(
-                    eventHandlerType == "serviceEndpoint" ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
+                    string.Equals(eventHandlerType, "serviceEndpoint", StringComparison.OrdinalIgnoreCase) ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
                     eventHandlerId),
             SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
             Stage = (sdkmessageprocessingstep_stage)MapStageToValue(stepConfig.Stage),
@@ -1645,6 +1656,26 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return value?.Value ?? true; // Default to true (customizable) if not set
     }
 
+    private async Task<Guid?> GetSecureConfigIdForStepAsync(Guid stepId, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, stepId)
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entity = results.Entities.FirstOrDefault();
+        return entity?.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId)?.Id;
+    }
+
     #endregion
 
     #region Delete Operations
@@ -1667,6 +1698,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeleteStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
+        // Fetch secure config reference before deleting the step
+        var secureConfigId = await GetSecureConfigIdForStepAsync(stepId, cancellationToken);
+
         // Delete images first - fetch list and delete in parallel
         var images = await ListImagesForStepAsync(stepId, cancellationToken);
 
@@ -1685,6 +1719,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
         await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
+
+        // Clean up orphaned secure config record after step is deleted
+        if (secureConfigId.HasValue)
+        {
+            await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync("sdkmessageprocessingstepsecureconfig", secureConfigId.Value, secureConfigClient, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -1832,6 +1873,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 "Step",
                 ErrorCodes.Plugin.NotFound);
 
+        // Fetch secure config reference before deleting the step
+        var secureConfigId = await GetSecureConfigIdForStepAsync(stepId, cancellationToken);
+
         // Check for images
         var images = await ListImagesForStepAsync(stepId, cancellationToken);
 
@@ -1870,6 +1914,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
         result.StepsDeleted = 1;
+
+        // Clean up orphaned secure config record after step is deleted
+        if (secureConfigId.HasValue)
+        {
+            await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync("sdkmessageprocessingstepsecureconfig", secureConfigId.Value, secureConfigClient, cancellationToken);
+        }
 
         return result;
     }
