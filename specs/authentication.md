@@ -1,7 +1,7 @@
 # Authentication
 
-**Status:** Implemented
-**Last Updated:** 2026-01-23
+**Status:** Implemented (env var auth: draft)
+**Last Updated:** 2026-03-26
 **Code:** [src/PPDS.Auth/](../src/PPDS.Auth/)
 **Surfaces:** All
 
@@ -103,6 +103,7 @@ The authentication system provides secure credential management, multi-method au
 2. **Silent authentication preferred**: MSAL cache enables token reuse without user interaction
 3. **Environment binding optional**: Profiles work across environments; explicit binding enables per-environment switching
 4. **Multi-cloud support**: Single codebase supports Public, GCC, GCCHigh, DoD, and China clouds
+5. **Environment variable authentication**: Fully stateless auth via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL` — no profile on disk required
 
 ### Primary Flows
 
@@ -128,6 +129,14 @@ The authentication system provides secure credential management, multi-method au
 2. **Authenticate**: Interactive or silent via MSAL public client
 3. **Call Discovery API**: ServiceClient.DiscoverOnlineOrganizationsAsync
 4. **Map results**: DiscoveredEnvironment with Id, Name, Url, Region, Type
+
+**Environment Variable Authentication (Stateless):**
+
+1. **Check env vars**: `EnvironmentVariableAuth.TryCreateProfile()` checks for `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`
+2. **Partial detection**: If any of the four are set but not all, throw `PpdsException` with `Auth.IncompleteEnvironmentConfig` listing which vars are missing
+3. **Synthesize profile**: Construct an in-memory `AuthProfile` with `AuthMethod.ClientSecret`, bound environment — no disk I/O, no ProfileStore. Cloud defaults to `Public`; override via optional `PPDS_CLOUD` env var (values: `Public`, `UsGov`, `UsGovHigh`, `UsGovDod`, `China`)
+4. **Priority**: `ConnectionResolver` calls `EnvironmentVariableAuth.TryCreateProfile()` before `ProfileResolver`. Env vars take precedence over all profile-based auth
+5. **No side effects**: No profile written to disk, no MSAL cache interaction, no credential store interaction. The synthetic profile flows through `CredentialProviderFactory` → `ClientSecretCredentialProvider`. The env var secret bypasses the credential store via the same mechanism as `PPDS_SPN_SECRET`: `CredentialProviderFactory.GetSpnSecretFromEnvironment()` already returns env var secrets and `ShouldBypassCredentialStore()` gates store access. The synthetic profile sets `PPDS_SPN_SECRET` in-process (or the factory is extended to accept a direct secret parameter) so no credential store lookup occurs
 
 ### Constraints
 
@@ -395,6 +404,23 @@ if (provider.HomeAccountId != null && profile.HomeAccountId != provider.HomeAcco
 - Positive: Profile-aware connection creation
 - Negative: Adapter layer adds indirection
 
+### Why EnvironmentVariableAuth as a Separate Class?
+
+**Context:** Env var auth needs a home. Options: extend `ProfileResolver`, add to `CredentialProviderFactory`, or create a new class.
+
+**Decision:** New `EnvironmentVariableAuth` class with a single `TryCreateProfile()` method. Called from `ConnectionResolver` before `ProfileResolver`.
+
+**Alternatives considered:**
+- Extend `ProfileResolver` with a 4th tier: Works but changes ProfileResolver's responsibility from "resolve persisted profiles" to "resolve auth config from any source." Becomes a dumping ground if more auth sources appear.
+- Add to `CredentialProviderFactory`: Wrong layer — the factory creates credential providers from profiles, not profiles from env vars.
+- Full `IAuthSource` chain-of-responsibility: YAGNI — two sources don't justify an abstraction. If a third source appears, extract the interface then.
+
+**Consequences:**
+- Positive: Single responsibility — ProfileResolver resolves profiles, EnvironmentVariableAuth synthesizes from env vars
+- Positive: Testable in isolation — mock env vars, assert AuthProfile fields
+- Positive: Trivial to refactor into an interface if a third auth source appears
+- Negative: One more class in PPDS.Auth (minimal — it's small and focused)
+
 ### Why Timeout on Seed Client Creation?
 
 **Context:** Credential provider creation and Dataverse connection can hang on network issues, blocking callers indefinitely.
@@ -464,12 +490,19 @@ public class MyCredentialProvider : ICredentialProvider
 
 | Setting | Type | Required | Default | Description |
 |---------|------|----------|---------|-------------|
-| `PPDS_PROFILE` | env var | No | - | Override active profile |
+| `PPDS_CLIENT_ID` | env var | No* | - | Stateless auth: application (client) ID |
+| `PPDS_CLIENT_SECRET` | env var | No* | - | Stateless auth: client secret |
+| `PPDS_TENANT_ID` | env var | No* | - | Stateless auth: Entra tenant ID |
+| `PPDS_ENVIRONMENT_URL` | env var | No* | - | Stateless auth: Dataverse environment URL |
+| `PPDS_CLOUD` | env var | No | `Public` | Stateless auth: cloud environment (`Public`, `UsGov`, `UsGovHigh`, `UsGovDod`, `China`) |
+| `PPDS_PROFILE` | env var | No | - | Override active profile (profile-based auth) |
 | `PPDS_CONFIG_DIR` | env var | No | Platform default | Override data directory |
-| `PPDS_SPN_SECRET` | env var | No | - | ClientSecret override (CI/CD) |
+| `PPDS_SPN_SECRET` | env var | No | - | ClientSecret override for existing profile (CI/CD) |
 | Profile.Cloud | enum | No | Public | Cloud environment |
 | Profile.TenantId | string | Varies | - | Entra tenant ID |
 | Profile.ApplicationId | string | Varies | - | App registration client ID |
+
+\* All four `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL` must be set together. Setting 1–3 of 4 is a hard error (`Auth.IncompleteEnvironmentConfig`). `PPDS_CLOUD` is optional and defaults to `Public`.
 
 ### Storage Locations
 
@@ -491,12 +524,20 @@ public class MyCredentialProvider : ICredentialProvider
 
 ### Acceptance Criteria
 
-- [ ] All 9 auth methods create valid ServiceClient
-- [ ] Silent auth succeeds with cached HomeAccountId
-- [ ] Secrets retrieved from native credential store
-- [ ] Profile CRUD operations persist correctly
-- [ ] Cloud endpoints return correct URLs per environment
-- [ ] Global discovery returns accessible environments
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-01 | All 9 auth methods create valid ServiceClient | Integration tests | ✅ |
+| AC-02 | Silent auth succeeds with cached HomeAccountId | Integration tests | ✅ |
+| AC-03 | Secrets retrieved from native credential store | `NativeCredentialStoreTests` | ✅ |
+| AC-04 | Profile CRUD operations persist correctly | `ProfileStoreTests` | ✅ |
+| AC-05 | Cloud endpoints return correct URLs per environment | `CloudEndpointsTests` | ✅ |
+| AC-06 | Global discovery returns accessible environments | Integration tests | ✅ |
+| AC-07 | All four env vars set → `TryCreateProfile` returns synthetic `AuthProfile` with `AuthMethod.ClientSecret` and bound environment | `EnvironmentVariableAuthTests.AllVarsSet_ReturnsSyntheticProfile` | 🔲 |
+| AC-08 | No env vars set → `TryCreateProfile` returns null, profile resolution proceeds normally | `EnvironmentVariableAuthTests.NoVarsSet_ReturnsNull` | 🔲 |
+| AC-09 | Partial env vars (1-3 of 4) → throws `PpdsException` with `Auth.IncompleteEnvironmentConfig` listing missing vars | `EnvironmentVariableAuthTests.PartialVars_ThrowsWithMissingList` | 🔲 |
+| AC-10 | Env var auth takes precedence over `PPDS_PROFILE` and active profile | `EnvironmentVariableAuthTests.EnvVarAuth_TakesPrecedence` | 🔲 |
+| AC-11 | Synthetic profile produces working `ServiceClient` via `CredentialProviderFactory` | `EnvironmentVariableAuthTests.SyntheticProfile_CreatesProvider` | 🔲 |
+| AC-12 | No disk I/O: no profile written, no MSAL cache, no credential store access | `EnvironmentVariableAuthTests.NoSideEffects` | 🔲 |
 
 ### Edge Cases
 
@@ -507,6 +548,11 @@ public class MyCredentialProvider : ICredentialProvider
 | v1 profile file | Old format JSON | File deleted, empty collection returned |
 | Managed identity outside Azure | ManagedIdentity auth | `CredentialUnavailableException` |
 | Certificate thumbprint invalid | CertificateStore auth | Clear error with thumbprint |
+| All four env vars set | `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL` | Synthetic profile, no disk I/O |
+| Only `PPDS_CLIENT_ID` set | One of four vars | `PpdsException` listing 3 missing vars |
+| Env vars set + `--profile` flag | Both present | Env vars win (highest priority) |
+| `PPDS_ENVIRONMENT_URL` missing scheme | `myorg.crm.dynamics.com` | `PpdsException` with `Auth.InvalidEnvironmentUrl` — must be full URL with `https://` |
+| Env var values are whitespace | `PPDS_CLIENT_ID=" "` | Treated as not set (trimmed) |
 
 ### Test Examples
 
@@ -572,6 +618,7 @@ public void CloudEndpoints_ReturnsCorrectAuthority_ForEachCloud()
 
 | Date | Change |
 |------|--------|
+| 2026-03-26 | Added environment variable authentication (stateless auth via PPDS_CLIENT_ID/SECRET/TENANT_ID/ENVIRONMENT_URL) |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
