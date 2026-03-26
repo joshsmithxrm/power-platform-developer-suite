@@ -84,12 +84,18 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
 
     private static bool IsAwaited(InvocationExpressionSyntax invocation)
     {
-        // Check if parent is an await expression
+        // Check if parent is an await expression, walking through
+        // .ConfigureAwait(false) and parenthesized expressions.
+        // Pattern: await LoadAsync().ConfigureAwait(false)
+        // AST: AwaitExpression > Invocation(.ConfigureAwait) > MemberAccess > Invocation(LoadAsync)
         var parent = invocation.Parent;
 
-        // Handle parenthesized expressions
-        while (parent is ParenthesizedExpressionSyntax)
+        while (parent is ParenthesizedExpressionSyntax
+            or MemberAccessExpressionSyntax
+            or InvocationExpressionSyntax)
         {
+            if (parent is AwaitExpressionSyntax)
+                return true;
             parent = parent.Parent;
         }
 

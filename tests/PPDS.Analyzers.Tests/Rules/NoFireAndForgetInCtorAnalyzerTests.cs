@@ -123,6 +123,30 @@ public class NoFireAndForgetInCtorAnalyzerTests
         diagnostics.Should().BeEmpty();
     }
 
+    /// <summary>PPDS013: Awaited async with ConfigureAwait(false) in ctor lambda should NOT flag.</summary>
+    [Fact]
+    public async Task PPDS013_ConfigureAwaitInCtorLambda_NoDiagnostic()
+    {
+        const string code = """
+            using System;
+            using System.Threading.Tasks;
+            class MyView
+            {
+                public event EventHandler Loaded;
+                public MyView()
+                {
+                    Loaded += async (s, e) => await LoadAsync().ConfigureAwait(false);
+                }
+                private Task LoadAsync() => Task.CompletedTask;
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoFireAndForgetInCtorAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty();
+    }
+
     /// <summary>PPDS013: FireAndForget helper wrapper should NOT flag.</summary>
     [Fact]
     public async Task PPDS013_FireAndForgetHelper_NoDiagnostic()
