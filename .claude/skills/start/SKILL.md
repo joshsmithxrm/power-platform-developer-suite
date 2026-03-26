@@ -89,7 +89,7 @@ For each extracted issue number:
 python scripts/workflow-state.py append issues <N>
 ```
 
-Run these commands with `cwd` set to the worktree path (pass via `-C` flag or absolute path to `workflow-state.py`).
+Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
 
 ### Step 6: Open Terminal
 
