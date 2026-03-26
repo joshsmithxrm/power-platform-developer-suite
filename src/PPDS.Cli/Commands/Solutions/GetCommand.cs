@@ -83,7 +83,7 @@ public static class GetCommand
                 return ExitCodes.NotFoundError;
             }
 
-            var makerUrl = BuildMakerUrl(connectionInfo.EnvironmentUrl, solution.Id);
+            var makerUrl = DataverseUrlBuilder.BuildSolutionMakerUrl(connectionInfo.EnvironmentUrl, solution.Id);
 
             if (globalOptions.IsJsonMode)
             {
@@ -131,14 +131,6 @@ public static class GetCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    private static string BuildMakerUrl(string environmentUrl, Guid solutionId)
-    {
-        // Extract org from environment URL to build maker portal URL
-        var uri = new Uri(environmentUrl);
-        var orgName = uri.Host.Split('.')[0];
-        return $"https://make.powerapps.com/environments/Default-{orgName}/solutions/{solutionId}";
     }
 
     #region Output Models

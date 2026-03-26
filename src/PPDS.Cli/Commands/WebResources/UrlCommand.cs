@@ -100,7 +100,7 @@ public static class UrlCommand
             }
 
             var resource = resolveResult.Matches[0];
-            var makerUrl = BuildMakerUrl(connectionInfo.EnvironmentUrl, resource.Id);
+            var makerUrl = DataverseUrlBuilder.BuildWebResourceEditorUrl(connectionInfo.EnvironmentUrl, resource.Id);
 
             if (globalOptions.IsJsonMode)
             {
@@ -124,13 +124,6 @@ public static class UrlCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    private static string BuildMakerUrl(string environmentUrl, Guid webResourceId)
-    {
-        var uri = new Uri(environmentUrl);
-        // Web resource editor URL in the classic interface
-        return $"{uri.Scheme}://{uri.Host}/main.aspx?appid=&pagetype=webresourceedit&id={{{webResourceId}}}";
     }
 
     #region Output Models

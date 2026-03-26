@@ -86,19 +86,4 @@ internal static class QueryResultConverter
         };
     }
 
-    /// <summary>
-    /// Builds the Dynamics 365 record URL for a given entity and ID.
-    /// </summary>
-    public static string? BuildRecordUrl(string? environmentUrl, string? entityLogicalName, string? recordId)
-    {
-        if (string.IsNullOrEmpty(environmentUrl) ||
-            string.IsNullOrEmpty(entityLogicalName) ||
-            string.IsNullOrEmpty(recordId))
-        {
-            return null;
-        }
-
-        var baseUrl = environmentUrl.TrimEnd('/');
-        return $"{baseUrl}/main.aspx?etn={entityLogicalName}&id={recordId}&pagetype=entityrecord";
-    }
 }

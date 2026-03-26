@@ -525,8 +525,7 @@ internal sealed class QueryResultsTableView : FrameView
         if (string.IsNullOrEmpty(id)) return null;
 
         // Build Dynamics 365 record URL
-        var baseUrl = _environmentUrl.TrimEnd('/');
-        return $"{baseUrl}/main.aspx?etn={_lastResult.EntityLogicalName}&id={id}&pagetype=entityrecord";
+        return DataverseUrlBuilder.BuildRecordUrl(_environmentUrl, _lastResult.EntityLogicalName, id);
     }
 
     private void UpdateStatus()
