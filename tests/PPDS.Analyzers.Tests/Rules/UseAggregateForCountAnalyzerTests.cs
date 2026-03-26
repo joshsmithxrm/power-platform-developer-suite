@@ -195,6 +195,53 @@ public class UseAggregateForCountAnalyzerTests
     }
 
     [Fact]
+    public async Task PPDS009_AwaitedRetrieveMultipleAsyncEntitiesCount_ReportsWarning()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationServiceAsync2
+                {
+                    Task<EntityCollection> RetrieveMultipleAsync(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _svc;
+                    async Task DoWork()
+                    {
+                        var count = (await _svc.RetrieveMultipleAsync(new QueryExpression("account"))).Entities.Count;
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<UseAggregateForCountAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "PPDS009");
+    }
+
+    [Fact]
     public async Task PPDS009_NonRetrieveMultipleCount_NoDiagnostic()
     {
         const string code = """

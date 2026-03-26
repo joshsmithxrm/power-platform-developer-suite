@@ -81,22 +81,27 @@ public sealed class UseAggregateForCountAnalyzer : DiagnosticAnalyzer
 
     private static bool IsCountingAccess(InvocationExpressionSyntax invocation)
     {
-        // Walk up the parent chain to see if the result is accessed for counting.
-        // Pattern 1: svc.RetrieveMultiple(qe).Entities.Count
-        //   invocation -> MemberAccess(.Entities) -> MemberAccess(.Count)
-        // Pattern 2: svc.RetrieveMultiple(qe).TotalRecordCount
-        //   invocation -> MemberAccess(.TotalRecordCount)
+        // Walk up through await/parenthesized wrappers, then check for counting access.
+        // Sync:  svc.RetrieveMultiple(qe).Entities.Count
+        // Async: (await svc.RetrieveMultipleAsync(qe)).Entities.Count
+        SyntaxNode node = invocation;
 
-        if (invocation.Parent is not MemberAccessExpressionSyntax firstAccess)
+        // Unwrap await and parentheses to find the member access on the result
+        while (node.Parent is AwaitExpressionSyntax or ParenthesizedExpressionSyntax)
+        {
+            node = node.Parent;
+        }
+
+        if (node.Parent is not MemberAccessExpressionSyntax firstAccess)
             return false;
 
         var firstName = firstAccess.Name.Identifier.Text;
 
-        // Pattern 2: .TotalRecordCount or .TotalRecordCountLimitExceeded directly
+        // Pattern: .TotalRecordCount or .TotalRecordCountLimitExceeded directly
         if (firstName is "TotalRecordCount" or "TotalRecordCountLimitExceeded")
             return true;
 
-        // Pattern 1: .Entities.Count
+        // Pattern: .Entities.Count
         if (firstName == "Entities" &&
             firstAccess.Parent is MemberAccessExpressionSyntax secondAccess)
         {
