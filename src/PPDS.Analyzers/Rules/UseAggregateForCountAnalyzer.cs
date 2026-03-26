@@ -112,9 +112,10 @@ public sealed class UseAggregateForCountAnalyzer : DiagnosticAnalyzer
                 if (secondAccess.Parent is not InvocationExpressionSyntax)
                     return true;
 
-                // .Entities.Count() (LINQ method call — also an anti-pattern)
+                // .Entities.Count() no-arg LINQ — same anti-pattern as .Count property
+                // Skip Count(predicate) — filtered counts are a different operation
                 if (secondAccess.Parent is InvocationExpressionSyntax countInvocation &&
-                    countInvocation.ArgumentList.Arguments.Count <= 1)
+                    countInvocation.ArgumentList.Arguments.Count == 0)
                     return true;
             }
         }
