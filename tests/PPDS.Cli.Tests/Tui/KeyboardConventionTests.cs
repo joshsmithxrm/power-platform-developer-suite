@@ -61,6 +61,32 @@ public class KeyboardConventionTests
         Assert.Contains("Key.F6", content);
     }
 
+    [Fact]
+    public void CtrlShiftO_OpensInBrowser()
+    {
+        var srcDir = FindSrcDirectory();
+        var file = Path.Combine(srcDir, "PPDS.Cli", "Tui", "Views", "QueryResultsTableView.cs");
+        var lines = File.ReadAllLines(file);
+        var violations = new List<string>();
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            // Match "Key.CtrlMask | Key.O" but NOT "Key.CtrlMask | Key.ShiftMask | Key.O"
+            if (line.Contains("Key.CtrlMask | Key.O") && !line.Contains("Key.ShiftMask"))
+            {
+                violations.Add($"Line {i + 1}: {line.Trim()}");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            $"QueryResultsTableView still registers Ctrl+O (should be Ctrl+Shift+O):\n{string.Join("\n", violations)}");
+
+        // Must contain the new Ctrl+Shift+O
+        var content = File.ReadAllText(file);
+        Assert.Contains("Key.CtrlMask | Key.ShiftMask | Key.O", content);
+    }
+
     private static string FindSrcDirectory()
     {
         var dir = AppContext.BaseDirectory;

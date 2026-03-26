@@ -390,7 +390,7 @@ internal sealed class QueryResultsTableView : FrameView
                     e.Handled = true;
                     break;
 
-                case Key.CtrlMask | Key.O:
+                case Key.CtrlMask | Key.ShiftMask | Key.O:
                     OpenInBrowser();
                     e.Handled = true;
                     break;
