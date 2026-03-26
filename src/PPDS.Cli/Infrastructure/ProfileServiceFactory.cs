@@ -129,7 +129,7 @@ public static class ProfileServiceFactory
         };
 
         var source = new ProfileConnectionSource(
-            profile, envUrl, 52, deviceCodeCallback, beforeInteractiveAuth, envDisplayName, credentialStore, onProfileUpdated);
+            profile, envUrl, 52, deviceCodeCallback, beforeInteractiveAuth, envDisplayName, credentialStore, clientSecretOverride: null, onProfileUpdated);
         var adapter = new ProfileConnectionSourceAdapter(source);
 
         var connectionInfo = new ResolvedConnectionInfo

@@ -29,6 +29,7 @@ public sealed class ProfileConnectionSource : IDisposable
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private readonly ISecureCredentialStore? _credentialStore;
+    private readonly string? _clientSecretOverride;
     private readonly Action<AuthProfile>? _onProfileUpdated;
     private readonly int _maxPoolSize;
 
@@ -69,6 +70,7 @@ public sealed class ProfileConnectionSource : IDisposable
     /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="environmentDisplayName">Optional environment display name for connection naming.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
+    /// <param name="clientSecretOverride">Optional client secret override (bypasses env var and store lookups).</param>
     /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
     public ProfileConnectionSource(
         AuthProfile profile,
@@ -78,6 +80,7 @@ public sealed class ProfileConnectionSource : IDisposable
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         string? environmentDisplayName = null,
         ISecureCredentialStore? credentialStore = null,
+        string? clientSecretOverride = null,
         Action<AuthProfile>? onProfileUpdated = null)
     {
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
@@ -91,6 +94,7 @@ public sealed class ProfileConnectionSource : IDisposable
         _beforeInteractiveAuth = beforeInteractiveAuth;
         _environmentDisplayName = environmentDisplayName;
         _credentialStore = credentialStore;
+        _clientSecretOverride = clientSecretOverride;
         _onProfileUpdated = onProfileUpdated;
 
         // Format: "identity@environment" when environment name is available
@@ -139,6 +143,7 @@ public sealed class ProfileConnectionSource : IDisposable
             beforeInteractiveAuth,
             profile.Environment.DisplayName,
             credentialStore,
+            clientSecretOverride: null,
             onProfileUpdated);
     }
 
@@ -170,7 +175,7 @@ public sealed class ProfileConnectionSource : IDisposable
             try
             {
                 _provider = System.Threading.Tasks.Task.Run(() =>
-                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, cancellationToken: credCts.Token))
+                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, _clientSecretOverride, credCts.Token))
                     .WaitAsync(credCts.Token)
                     .GetAwaiter()
                     .GetResult();
