@@ -1,8 +1,8 @@
 # TUI
 
 **Status:** Implemented
-**Last Updated:** 2026-01-23
-**Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
+**Last Updated:** 2026-03-26
+**Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/), [src/PPDS.Cli/Infrastructure/](../src/PPDS.Cli/Infrastructure/)
 **Surfaces:** TUI
 
 ---
@@ -71,6 +71,9 @@ The PPDS TUI provides an interactive terminal interface for Power Platform devel
 | `IHotkeyRegistry` | Context-aware keyboard shortcut management |
 | `ITuiThemeService` | Environment detection and color scheme selection |
 | `ITuiErrorService` | Thread-safe error collection with event notification |
+| `SqlQueryPresenter` | Query execution orchestration, state, history — no Terminal.Gui deps ([`Tui/Screens/SqlQueryPresenter.cs`](../src/PPDS.Cli/Tui/Screens/SqlQueryPresenter.cs)) |
+| `AuthMethodFormModel` | Auth method validation, visibility rules, request building — no Terminal.Gui deps ([`Tui/Dialogs/AuthMethodFormModel.cs`](../src/PPDS.Cli/Tui/Dialogs/AuthMethodFormModel.cs)) |
+| `DataverseUrlBuilder` | Centralized URL construction for Dynamics 365 record, Maker, and Power Automate URLs ([`Infrastructure/DataverseUrlBuilder.cs`](../src/PPDS.Cli/Infrastructure/DataverseUrlBuilder.cs)) |
 
 ### Dependencies
 
@@ -593,6 +596,276 @@ public void ErrorService_StoresRecent_NewestFirst()
 
 ---
 
+## Presenter/Model Extraction Pattern
+
+### Problem
+
+Three TUI files mix untestable Terminal.Gui code with business logic that should be unit-testable:
+
+| File | Lines | Extractable Logic |
+|------|-------|-------------------|
+| `SqlQueryScreen.cs` | 1,161 | ~500 lines — query execution, state management, history, plans |
+| `ProfileCreationDialog.cs` | 667 | ~150 lines — validation, request building, visibility rules |
+| `QueryResultsTableView.cs` | 655 | ~60 lines — URL construction (duplicated, moved to shared helper) |
+
+Other large TUI files (`TuiShell` 1,014 lines, `PluginRegistrationScreen` 994 lines, `SyntaxHighlightedTextView` 811 lines) were audited and found cohesive — their size comes from inherently complex UI concerns, not trapped business logic.
+
+### Pattern
+
+```
+┌─────────────────────────┐         ┌─────────────────────────┐
+│     UI Shell (View)     │         │  Extracted Class         │
+│                         │  owns   │  (Presenter/Model)       │
+│  - Layout construction  │────────▶│                         │
+│  - Terminal.Gui lifecycle│        │  - Business logic        │
+│  - View event wiring    │◀───────│  - State management      │
+│  - Focus management     │ events │  - Validation            │
+│  - Dispose cleanup      │        │  - Data transformation   │
+└─────────────────────────┘         └─────────────────────────┘
+```
+
+**Rules:**
+
+1. Extracted class has **zero Terminal.Gui dependencies** — no `using Terminal.Gui;`
+2. Communication via **C# events and return values** — presenter raises events, shell subscribes
+3. Extracted class is a **plain C# class** — testable without Terminal.Gui initialization
+4. UI shell becomes a **thin adapter** — translates Terminal.Gui events to presenter calls, presenter events to UI updates
+5. All `Application.MainLoop.Invoke()` calls stay in the UI shell
+
+**When NOT to extract:** If a file is large but its logic is inherently Terminal.Gui-coupled (layout, rendering, tree management, custom drawing), extraction would just move UI code to another class with UI dependencies. Size alone is not a reason to extract.
+
+**File placement:** Same directory as source file (`Tui/Screens/SqlQueryPresenter.cs`, `Tui/Dialogs/AuthMethodFormModel.cs`). Shared utilities used by both TUI and CLI go in `src/PPDS.Cli/Infrastructure/` (e.g., `DataverseUrlBuilder`).
+
+### SqlQueryPresenter
+
+Extracted from `SqlQueryScreen` (1,161 → ~450 lines screen + ~500 lines presenter).
+
+**Moves to presenter:**
+- `ExecuteAsync` — streaming query orchestration
+- `SaveToHistoryAsync`, `CacheExecutionPlanAsync`
+- `LoadMoreAsync` — next-page fetching
+- `TranspileSqlAsync`, `GetExecutionPlanAsync`
+- `ToggleTds`, `ConfirmDml`
+- State: `LastSql`, `LastPagingCookie`, `LastPageNumber`, `IsExecuting`, `LastErrorMessage`, `LastExecutionPlan`, `LastExecutionTimeMs`, `UseTdsEndpoint`
+
+**Stays in screen:**
+- Layout construction (editor, splitter, filter, results table, status)
+- Keyboard handling (editor shortcuts, context navigation, word deletion)
+- Filter show/hide, editor resize, splitter drag
+- Visual focus indicators, IntelliSense wiring
+- State capture, dispose
+
+**Events:**
+
+```csharp
+event Action<string> StatusChanged;
+event Action<IReadOnlyList<QueryColumn>, string> StreamingColumnsReady;
+event Action<IReadOnlyList<IReadOnlyDictionary<string, QueryValue>>, IReadOnlyList<QueryColumn>> StreamingRowsReady;
+event Action<int, long, QueryExecutionMode?> ExecutionComplete;
+event Action<QueryResult> PageLoaded;
+event Action<string> ErrorOccurred;
+event Action<string> AuthenticationRequired;
+event Action<string> DmlConfirmationRequired;
+```
+
+**Constructor:** Takes `InteractiveSession` + `environmentUrl`. Uses session's existing service resolution pattern.
+
+### AuthMethodFormModel
+
+Extracted from `ProfileCreationDialog` (667 → ~450 lines dialog + ~200 lines model).
+
+**Moves to model:**
+- `AvailableMethods` — platform-aware auth method list (CertificateStore Windows-only)
+- `GetVisibleFields(AuthMethod)` → `FieldVisibility` record (which fields to show per method)
+- `GetStatusText(AuthMethod)` → hint text per method
+- `Validate(AuthMethod, AuthMethodFieldValues)` → error string or null
+- `BuildRequest(AuthMethod, AuthMethodFieldValues)` → `ProfileCreateRequest`
+
+**Stays in dialog:**
+- Layout construction (all TextFields, RadioGroup, frames, buttons)
+- Auth method change handler (calls model, updates field visibility)
+- Authenticate click handler (collects field values, calls model.Validate, kicks off auth)
+- Async auth flow, device code callback, environment selector
+- State capture, dispose
+
+**`AuthMethodFieldValues` record:** Flat record holding all field values as strings. Dialog populates from TextFields, passes to model. No two-way binding.
+
+```csharp
+public record AuthMethodFieldValues(
+    string? ProfileName, string? EnvironmentUrl,
+    string? AppId, string? TenantId, string? ClientSecret,
+    string? CertPath, string? CertPassword, string? Thumbprint,
+    string? Username, string? Password);
+```
+
+### DataverseUrlBuilder
+
+Consolidates duplicated URL construction from 6+ locations into `src/PPDS.Cli/Infrastructure/DataverseUrlBuilder.cs`.
+
+**Record URL** (replaces inline construction in `QueryResultsTableView.GetCurrentRecordUrl` and duplicate in `QueryResultConverter.BuildRecordUrl`):
+
+```csharp
+public static string? BuildRecordUrl(string environmentUrl, string entityLogicalName, string? recordId)
+```
+
+Pattern: `{baseUrl}/main.aspx?etn={entity}&id={id}&pagetype=entityrecord`
+
+**Maker URL** (replaces duplicate `BuildMakerUrl` methods in `Solutions/UrlCommand`, `Solutions/GetCommand`, `EnvironmentVariables/UrlCommand`, `EnvironmentVariables/GetCommand`, `ImportJobs/UrlCommand`, `ImportJobs/GetCommand`, `EnvironmentSelectorDialog`):
+
+```csharp
+public static string BuildMakerUrl(string environmentUrl, string? path = "/solutions")
+public static string BuildSolutionMakerUrl(string environmentUrl, Guid solutionId)
+public static string BuildEnvironmentVariableMakerUrl(string environmentUrl, Guid definitionId)
+public static string BuildImportJobMakerUrl(string environmentUrl, Guid importJobId)
+```
+
+Base pattern: `https://make.powerapps.com/environments/Default-{orgName}{path}`
+
+Typed overloads prevent callers from constructing path strings manually. Example: `BuildSolutionMakerUrl(envUrl, solutionId)` produces `https://make.powerapps.com/environments/Default-contoso/solutions/{solutionId}`.
+
+**Entity List URL** (replaces inline in `MetadataExplorerScreen.OpenInMaker`):
+
+```csharp
+public static string BuildEntityListUrl(string environmentUrl, string entityLogicalName)
+```
+
+Pattern: `{baseUrl}/main.aspx?pagetype=entitylist&etn={entity}`
+
+**Web Resource URL** (replaces `WebResources/UrlCommand.BuildMakerUrl`):
+
+```csharp
+public static string BuildWebResourceEditorUrl(string environmentUrl, Guid webResourceId)
+```
+
+**Power Automate URL** (replaces inline in `Flows/UrlCommand`):
+
+```csharp
+public static string BuildFlowUrl(string environmentId, Guid flowId)
+```
+
+Pattern: `https://make.powerautomate.com/environments/{environmentId}/flows/{flowId}/details`
+
+---
+
+## Keyboard Shortcut Convention
+
+### Layers
+
+| Layer | Modifier | Dispatch | Rationale |
+|-------|----------|----------|-----------|
+| **Global** | Alt+Letter, F1, F12 | `HotkeyRegistry` Global scope | Alt avoids conflict with Ctrl screen shortcuts |
+| **Tab management** | Ctrl+T/W/Tab/PgUp/PgDn | `HotkeyRegistry` Global scope | Exception — Ctrl used because Alt+T conflicts with Terminal.Gui menu bar |
+| **Screen actions** | Ctrl+Letter | `HotkeyRegistry` Screen scope | Standard app shortcut convention |
+| **Screen actions (alt)** | F5–F10 | `HotkeyRegistry` Screen scope | Linux-friendly alternatives for Ctrl+Shift combos |
+| **Table context** | Single letter (`/`, `q`) | `Content.KeyPress` with focus guard | Vim-style, only when text input not focused |
+| **Table actions** | Ctrl+Letter | `Content.KeyPress` with focus guard | Standard modifier convention |
+| **Text editing** | Ctrl+A/Z/C/V | `KeyPress` on TextView | Platform standard |
+| **Dialog buttons** | Alt+Letter | Terminal.Gui underscore convention | Built-in framework behavior |
+
+### Priority
+
+Dialog scope > Screen scope > Global scope (documented in `HotkeyRegistry`).
+
+Table-level `KeyPress` handlers fire at a different dispatch level than `HotkeyRegistry`. If a screen registers a key at Screen scope, the table `KeyPress` handler for the same key **never fires** — the registry consumes the event first.
+
+### Common Screen Keys
+
+| Key | Convention | Screens Using |
+|-----|-----------|---------------|
+| Ctrl+R | Refresh | All data screens |
+| Ctrl+F | Filter/Search | PluginTraces, WebResources, ConnectionReferences, EnvironmentVariables, Metadata |
+| Ctrl+O | Open in Maker | WebResources, Metadata, ImportJobs, ConnectionReferences, EnvironmentVariables, Solutions |
+| Ctrl+E | Export | SqlQuery, PluginTraces, EnvironmentVariables |
+
+### Conflict Resolutions
+
+**Ctrl+O (Open in browser vs Open in Maker):** QueryResultsTableView used Ctrl+O for "Open in browser" at KeyPress level, but 6 screens register Ctrl+O at Screen scope for "Open in Maker". Screen scope wins — the table handler never fires. **Fix:** Change table "Open in browser" to **Ctrl+Shift+O**. This aligns with the Ctrl+Shift convention for secondary actions (Ctrl+C copy / Ctrl+Shift+C copy with headers).
+
+**Ctrl+T (New tab vs screen actions):** WebResourcesScreen uses Ctrl+T for "Toggle text-only", PluginTracesScreen uses Ctrl+T for "Timeline". Both shadow the global Ctrl+T "New tab". **Fix:** WebResources "Toggle text-only" → **Ctrl+Shift+T**. PluginTraces "Timeline" → **F6** (Ctrl+Shift+L conflicts with existing Ctrl+L "Trace Level"; F6 matches the "toggle view" convention from SqlQuery's F6 "toggle focus").
+
+---
+
+## Bug Fixes
+
+Issues discovered during audit, fixed alongside the extractions.
+
+### SqlQueryScreen
+
+**Double try-catch nesting (line 524-526):** Outer `try` has no catches, only `finally` for timer cleanup. Inner `try` has all exception handlers. **Fix:** Flatten to single `try` with catches and `finally`.
+
+**Inconsistent fire-and-forget:** Menu items use `_ = ExecuteQueryAsync()` (unmonitored). **Fix:** Use `ErrorService.FireAndForget()` consistently.
+
+**`_confirmedDml` race condition:** Flag set true, could be consumed by a concurrent execute. **Fix:** Capture and reset atomically at the start of `ExecuteAsync`.
+
+### ProfileCreationDialog
+
+**CTS closure bug:** Device code callback captures `_authCompleteCts` by reference. If re-auth disposes and replaces the CTS, the callback references the disposed instance. **Fix:** Capture `_authCompleteCts` value in a local variable before passing to the lambda.
+
+### QueryResultsTableView
+
+**DataTable resource leak:** `DataTable` implements `IDisposable`. New DataTables are created on every `LoadResults`, `ApplyFilter`, `ClearData` — old instances are never disposed. **Fix:** Implement `IDisposable` on `QueryResultsTableView` (Constitution R1). Dispose old `DataTable` before replacing. Dispose `_unfilteredDataTable` when filter is cleared.
+
+**Inline URL construction:** `GetCurrentRecordUrl()` builds record URL inline when `QueryResultConverter.BuildRecordUrl()` already exists. **Fix:** Replace with `DataverseUrlBuilder.BuildRecordUrl()`.
+
+---
+
+## Acceptance Criteria
+
+### AuthMethodFormModel
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-01 | `AuthMethodFormModel` has zero Terminal.Gui dependencies (no `using Terminal.Gui`) | `AuthMethodFormModelTests.NoTerminalGuiDependency` | 🔲 |
+| AC-02 | `Validate()` returns error for missing required fields per auth method (6 methods × field combinations) | `AuthMethodFormModelTests.Validate_*` | 🔲 |
+| AC-03 | `BuildRequest()` produces correct `ProfileCreateRequest` for all 6 auth methods | `AuthMethodFormModelTests.BuildRequest_*` | 🔲 |
+| AC-04 | `GetVisibleFields()` returns correct visibility for each auth method | `AuthMethodFormModelTests.GetVisibleFields_*` | 🔲 |
+| AC-05 | `GetAvailableMethods()` excludes CertificateStore on non-Windows | `AuthMethodFormModelTests.AvailableMethods_*` | 🔲 |
+
+### SqlQueryPresenter
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-06 | `SqlQueryPresenter` has zero Terminal.Gui dependencies | `SqlQueryPresenterTests.NoTerminalGuiDependency` | 🔲 |
+| AC-07 | `ExecuteAsync()` raises `StreamingColumnsReady` and `StreamingRowsReady` events | `SqlQueryPresenterTests.ExecuteAsync_RaisesStreamingEvents` | 🔲 |
+| AC-08 | `ExecuteAsync()` raises `AuthenticationRequired` on `DataverseAuthenticationException` | `SqlQueryPresenterTests.ExecuteAsync_AuthError_RaisesEvent` | 🔲 |
+| AC-09 | `ExecuteAsync()` raises `DmlConfirmationRequired` on DML confirmation error | `SqlQueryPresenterTests.ExecuteAsync_DmlConfirmation_RaisesEvent` | 🔲 |
+| AC-10 | `LoadMoreAsync()` raises `PageLoaded` with next page results | `SqlQueryPresenterTests.LoadMoreAsync_RaisesPageLoaded` | 🔲 |
+| AC-11 | `ToggleTds()` toggles `UseTdsEndpoint` and raises `StatusChanged` | `SqlQueryPresenterTests.ToggleTds_TogglesState` | 🔲 |
+| AC-12 | `ExecuteAsync()` saves to history via `IQueryHistoryService` on success | `SqlQueryPresenterTests.ExecuteAsync_SavesHistory` | 🔲 |
+| AC-13 | `ExecuteAsync()` atomically captures and resets DML confirmation flag | `SqlQueryPresenterTests.ExecuteAsync_CapturesAndResetsDmlFlag` | 🔲 |
+
+### DataverseUrlBuilder
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-14 | `BuildRecordUrl()` produces correct URL for entity + ID | `DataverseUrlBuilderTests.BuildRecordUrl_*` | 🔲 |
+| AC-15 | `BuildMakerUrl()` produces correct URL with org name extraction | `DataverseUrlBuilderTests.BuildMakerUrl_*` | 🔲 |
+| AC-16 | `BuildSolutionMakerUrl()`, `BuildEnvironmentVariableMakerUrl()`, `BuildImportJobMakerUrl()` produce correct entity-specific URLs | `DataverseUrlBuilderTests.BuildTypedMakerUrl_*` | 🔲 |
+| AC-17 | `BuildEntityListUrl()` produces correct entity list URL | `DataverseUrlBuilderTests.BuildEntityListUrl_*` | 🔲 |
+| AC-18 | `BuildWebResourceEditorUrl()` produces correct web resource editor URL | `DataverseUrlBuilderTests.BuildWebResourceEditorUrl_*` | 🔲 |
+| AC-19 | `BuildFlowUrl()` produces correct Power Automate flow URL | `DataverseUrlBuilderTests.BuildFlowUrl_*` | 🔲 |
+| AC-20 | No inline URL construction remains in C# production code (all callers use `DataverseUrlBuilder`) | `DataverseUrlBuilderTests.NoInlineUrlConstruction` | 🔲 |
+
+### Bug Fixes
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-21 | `QueryResultsTableView` implements `IDisposable` and disposes `DataTable` instances | `QueryResultsTableViewTests.Dispose_CleansUpDataTables` | 🔲 |
+| AC-22 | Old `DataTable` disposed before replacement in `LoadResults`, `ApplyFilter`, `ClearData` | `QueryResultsTableViewTests.LoadResults_DisposesOldDataTable` | 🔲 |
+| AC-23 | Device code callback captures CTS value in local variable, not field reference | `ProfileCreationDialogTests.DeviceCodeCallback_CapturesCtsValue` | 🔲 |
+| AC-24 | `SqlQueryScreen.ExecuteQueryAsync` error handling works for all exception types (auth, DML, cancellation, general) after flattening double try-catch | `SqlQueryPresenterTests.ExecuteAsync_*` (covered by AC-07 through AC-09) | 🔲 |
+| AC-25 | Menu item fire-and-forget uses `ErrorService.FireAndForget` (no unmonitored `_ = Task`) | `SqlQueryScreenTests.MenuItems_UseFireAndForget` | 🔲 |
+
+### Keyboard Convention
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-26 | Ctrl+O in QueryResultsTableView changed to Ctrl+Shift+O for "Open in browser" | `KeyboardConventionTests.CtrlShiftO_OpensInBrowser` | 🔲 |
+| AC-27 | WebResourcesScreen does not register Ctrl+T (uses Ctrl+Shift+T instead) | `KeyboardConventionTests.WebResources_NoCtrlT` | 🔲 |
+| AC-28 | PluginTracesScreen does not register Ctrl+T (uses F6 instead) | `KeyboardConventionTests.PluginTraces_NoCtrlT` | 🔲 |
+
+---
+
 ## Related Specs
 
 - [architecture.md](./architecture.md) - Application Services that TUI delegates to
@@ -608,6 +881,7 @@ public void ErrorService_StoresRecent_NewestFirst()
 
 | Date | Change |
 |------|--------|
+| 2026-03-26 | Presenter/Model extraction pattern, keyboard convention, DataverseUrlBuilder, bug fixes (#434-437) |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
@@ -616,3 +890,4 @@ public void ErrorService_StoresRecent_NewestFirst()
 - Vim-style keybindings option
 - Multi-environment dashboard view
 - Query result visualization (charts)
+- Consolidate TypeScript URL duplication (Extension panels — `buildRecordUrl` in query-panel.ts and notebookResultRenderer.ts)
