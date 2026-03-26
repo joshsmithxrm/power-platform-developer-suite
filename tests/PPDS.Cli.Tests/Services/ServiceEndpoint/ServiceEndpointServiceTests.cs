@@ -365,8 +365,9 @@ public class ServiceEndpointServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsync_ThrowsManagedComponent_WhenEndpointIsManaged()
+    public async Task Update_ManagedComponent_NotBlocked()
     {
+        // Arrange - managed endpoint should NOT be blocked from updates
         var id = Guid.NewGuid();
         var entity = new Entity(global::PPDS.Dataverse.Generated.ServiceEndpoint.EntityLogicalName)
         {
@@ -380,9 +381,12 @@ public class ServiceEndpointServiceTests
         };
         _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpdateAsync(id, new ServiceEndpointUpdateRequest(Name: "Changed")));
-        Assert.Equal(ErrorCodes.ServiceEndpoint.ManagedComponent, ex.ErrorCode);
+        // Act - should complete without throwing
+        await _sut.UpdateAsync(id, new ServiceEndpointUpdateRequest(Name: "Changed"));
+
+        // Assert - update was applied
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal("Changed", _updatedEntity!.GetAttributeValue<string>(global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Name));
     }
 
     [Fact]

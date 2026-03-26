@@ -672,9 +672,9 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
-    public async Task UpdateStepAsync_ThrowsPpdsException_WhenStepIsManagedAndNotCustomizable()
+    public async Task UpdateStep_ManagedComponent_NotBlocked()
     {
-        // Arrange
+        // Arrange - managed step should NOT be blocked from updates
         var stepId = Guid.NewGuid();
         var entities = new EntityCollection();
         var step = new SdkMessageProcessingStep
@@ -687,12 +687,12 @@ public class PluginRegistrationServiceTests
         entities.Entities.Add(step);
         _retrieveMultipleResult = entities;
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
+        // Act - should complete without throwing
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous"));
 
-        Assert.Equal(ErrorCodes.Plugin.ManagedComponent, exception.ErrorCode);
-        Assert.Contains("is managed", exception.Message);
+        // Assert - update was applied
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(stepId, _updatedEntity!.Id);
     }
 
     [Fact]
@@ -787,9 +787,9 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
-    public async Task UpdateImageAsync_ThrowsInvalidOperationException_WhenImageIsManagedAndNotCustomizable()
+    public async Task UpdateImage_ManagedComponent_NotBlocked()
     {
-        // Arrange
+        // Arrange - managed image should NOT be blocked from updates
         var imageId = Guid.NewGuid();
         var entities = new EntityCollection();
         var image = new SdkMessageProcessingStepImage
@@ -802,11 +802,12 @@ public class PluginRegistrationServiceTests
         entities.Entities.Add(image);
         _retrieveMultipleResult = entities;
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name")));
+        // Act - should complete without throwing
+        await _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name"));
 
-        Assert.Contains("is managed", exception.Message);
+        // Assert - update was applied
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(imageId, _updatedEntity!.Id);
     }
 
     [Fact]
@@ -1864,6 +1865,83 @@ public class PluginRegistrationServiceTests
 
     #endregion
 
+    #region UpsertStepAsync EventHandler Type Tests
+
+    [Fact]
+    public async Task UpsertStep_ServiceEndpointHandler_SetsCorrectEntityReference()
+    {
+        // Arrange
+        var serviceEndpointId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection(); // No existing step
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestWebhook: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PostOperation",
+            Mode = "Asynchronous"
+        };
+
+        // Act
+        var result = await _sut.UpsertStepAsync(serviceEndpointId, "serviceEndpoint", stepConfig, messageId, filterId);
+
+        // Assert
+        Assert.Equal(expectedStepId, result);
+
+
+        // Verify the created entity had serviceendpoint as the EventHandler logical name
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler) != null &&
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler).LogicalName == "serviceendpoint" &&
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler).Id == serviceEndpointId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStep_PluginTypeHandler_SetsCorrectEntityReference()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection(); // No existing step
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous"
+        };
+
+        // Act
+        var result = await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
+
+        // Assert
+        Assert.Equal(expectedStepId, result);
+
+        // Verify the created entity had plugintype as the EventHandler logical name
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler) != null &&
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler).LogicalName == "plugintype" &&
+                e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler).Id == pluginTypeId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
     #region Unregister
 
     [Fact]
@@ -2051,9 +2129,9 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
-    public async Task UnregisterStepAsync_ThrowsUnregisterException_WhenStepIsManaged()
+    public async Task UnregisterStep_ManagedComponent_NotBlocked()
     {
-        // Arrange
+        // Arrange - managed step should NOT be blocked from unregistration
         var stepId = Guid.NewGuid();
         var stepEntities = new EntityCollection();
         var step = new SdkMessageProcessingStep
@@ -2070,16 +2148,25 @@ public class PluginRegistrationServiceTests
         step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
         stepEntities.Entities.Add(step);
 
+        // GetStepByNameOrIdAsync returns step, then ListImagesForStepAsync returns empty
+        var queryCount = 0;
         _mockPooledClient
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(stepEntities);
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return stepEntities; // GetStepByNameOrIdAsync
+                return new EntityCollection(); // ListImagesForStepAsync
+            });
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<UnregisterException>(
-            () => _sut.UnregisterStepAsync(stepId));
+        // Act - should complete without throwing
+        var result = await _sut.UnregisterStepAsync(stepId);
 
-        Assert.Equal(ErrorCodes.Plugin.ManagedComponent, exception.ErrorCode);
-        Assert.Contains("is managed", exception.Message);
+        // Assert
+        Assert.Equal("ManagedStep: Create of account", result.EntityName);
+        Assert.Equal("Step", result.EntityType);
+        Assert.Equal(1, result.StepsDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -2108,6 +2195,147 @@ public class PluginRegistrationServiceTests
         Assert.Equal("Image", result.EntityType);
         Assert.Equal(1, result.ImagesDeleted);
         _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterImage_ManagedComponent_NotBlocked()
+    {
+        // Arrange - managed image should NOT be blocked from unregistration
+        var imageId = Guid.NewGuid();
+        var imageEntities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "ManagedImage"
+        };
+        image[SdkMessageProcessingStepImage.Fields.IsManaged] = true;
+        imageEntities.Entities.Add(image);
+
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(imageEntities);
+
+        // Act - should complete without throwing
+        var result = await _sut.UnregisterImageAsync(imageId);
+
+        // Assert
+        Assert.Equal("ManagedImage", result.EntityName);
+        Assert.Equal("Image", result.EntityType);
+        Assert.Equal(1, result.ImagesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterPluginType_ManagedComponent_NotBlocked()
+    {
+        // Arrange - managed plugin type should NOT be blocked from unregistration
+        var typeId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        var typeEntities = new EntityCollection();
+        var pluginType = new PluginType
+        {
+            Id = typeId,
+            TypeName = "TestNamespace.ManagedPlugin",
+            FriendlyName = "ManagedPlugin"
+        };
+        pluginType[PluginType.Fields.IsManaged] = true;
+        pluginType[PluginType.Fields.PluginAssemblyId] = new EntityReference(PluginAssembly.EntityLogicalName, assemblyId);
+        pluginType[$"assembly.{PluginAssembly.Fields.Name}"] = new AliasedValue(PluginAssembly.EntityLogicalName, PluginAssembly.Fields.Name, "TestAssembly");
+        typeEntities.Entities.Add(pluginType);
+
+        // GetPluginTypeByNameOrIdAsync returns type, then ListStepsForTypeAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return typeEntities;
+                return new EntityCollection();
+            });
+
+        // Act - should complete without throwing
+        var result = await _sut.UnregisterPluginTypeAsync(typeId);
+
+        // Assert
+        Assert.Equal("TestNamespace.ManagedPlugin", result.EntityName);
+        Assert.Equal("Type", result.EntityType);
+        Assert.Equal(1, result.TypesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginType.EntityLogicalName, typeId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterAssembly_ManagedComponent_NotBlocked()
+    {
+        // Arrange - managed assembly should NOT be blocked from unregistration
+        var assemblyId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "ManagedAssembly",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        assembly[PluginAssembly.Fields.IsManaged] = true;
+        entities.Entities.Add(assembly);
+
+        // GetAssemblyByIdAsync returns the assembly, then ListTypesForAssemblyAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return entities;
+                return new EntityCollection();
+            });
+
+        // Act - should complete without throwing
+        var result = await _sut.UnregisterAssemblyAsync(assemblyId);
+
+        // Assert
+        Assert.Equal("ManagedAssembly", result.EntityName);
+        Assert.Equal("Assembly", result.EntityType);
+        Assert.Equal(1, result.AssembliesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterPackage_ManagedComponent_NotBlocked()
+    {
+        // Arrange - managed package should NOT be blocked from unregistration
+        var packageId = Guid.NewGuid();
+        var packageEntities = new EntityCollection();
+        var package = new PluginPackage
+        {
+            Id = packageId,
+            Name = "ManagedPackage",
+            UniqueName = "ManagedPackage",
+            Version = "1.0.0.0"
+        };
+        package[PluginPackage.Fields.IsManaged] = true;
+        packageEntities.Entities.Add(package);
+
+        // GetPackageByIdAsync returns package, then ListAssembliesForPackageAsync returns empty
+        var queryCount = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                queryCount++;
+                if (queryCount == 1) return packageEntities;
+                return new EntityCollection();
+            });
+
+        // Act - should complete without throwing
+        var result = await _sut.UnregisterPackageAsync(packageId);
+
+        // Assert
+        Assert.Equal("ManagedPackage", result.EntityName);
+        Assert.Equal("Package", result.EntityType);
+        Assert.Equal(1, result.PackagesDeleted);
+        _mockPooledClient.Verify(s => s.DeleteAsync(PluginPackage.EntityLogicalName, packageId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion

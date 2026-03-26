@@ -507,15 +507,19 @@ public class CustomApiServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsync_ThrowsManagedComponent_WhenApiIsManaged()
+    public async Task Update_ManagedComponent_NotBlocked()
     {
+        // Arrange - managed Custom API should NOT be blocked from updates
         var id = Guid.NewGuid();
         var entity = BuildApiEntity(id, "ManagedApi", "Managed API", isManaged: true);
         _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpdateAsync(id, new CustomApiUpdateRequest(DisplayName: "Changed")));
-        Assert.Equal(ErrorCodes.CustomApi.ManagedComponent, ex.ErrorCode);
+        // Act - should complete without throwing
+        await _sut.UpdateAsync(id, new CustomApiUpdateRequest(DisplayName: "Changed"));
+
+        // Assert - update was applied
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal("Changed", _updatedEntity!.GetAttributeValue<string>(CustomAPI.Fields.DisplayName));
     }
 
     [Fact]
@@ -855,15 +859,109 @@ public class CustomApiServiceTests
     }
 
     [Fact]
-    public async Task RemoveParameterAsync_ThrowsManagedComponent_WhenParameterIsManaged()
+    public async Task RemoveParameter_ManagedComponent_NotBlocked()
     {
+        // Arrange - managed parameter should NOT be blocked from removal
         var paramId = Guid.NewGuid();
         var apiId = Guid.NewGuid();
         var param = BuildRequestParamEntity(paramId, apiId, "Param1", "Param Name", 10, isManaged: true);
         _retrieveMultipleResult = new EntityCollection { Entities = { param } };
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => _sut.RemoveParameterAsync(paramId));
-        Assert.Equal(ErrorCodes.CustomApi.ManagedComponent, ex.ErrorCode);
+        // Act - should complete without throwing
+        await _sut.RemoveParameterAsync(paramId);
+
+        // Assert - delete was called
+        Assert.Single(_deletedEntities);
+        Assert.Equal(paramId, _deletedEntities[0].Id);
+    }
+
+    #endregion
+
+    #region SetPluginTypeAsync
+
+    [Fact]
+    public async Task SetPlugin_SetsPluginTypeId()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+        var pluginTypeId = Guid.NewGuid();
+        var pluginTypeInfo = new PluginTypeInfo
+        {
+            Id = pluginTypeId,
+            TypeName = "TestNamespace.TestPlugin"
+        };
+
+        _mockPluginRegistrationService
+            .Setup(s => s.GetPluginTypeByNameAsync("TestNamespace.TestPlugin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pluginTypeInfo);
+
+        // Act
+        await _sut.SetPluginTypeAsync(apiId, "TestNamespace.TestPlugin", null);
+
+        // Assert - update entity should set PluginTypeId
+        Assert.NotNull(_updatedEntity);
+        var pluginTypeRef = _updatedEntity!.GetAttributeValue<EntityReference>(CustomAPI.Fields.PluginTypeId);
+        Assert.NotNull(pluginTypeRef);
+        Assert.Equal(pluginTypeId, pluginTypeRef.Id);
+    }
+
+    [Fact]
+    public async Task SetPlugin_None_ClearsPluginTypeId()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+
+        // Act - pass null to clear the plugin type
+        await _sut.SetPluginTypeAsync(apiId, null, null);
+
+        // Assert - update entity should set PluginTypeId to null
+        Assert.NotNull(_updatedEntity);
+        Assert.True(_updatedEntity!.Attributes.ContainsKey(CustomAPI.Fields.PluginTypeId));
+        Assert.Null(_updatedEntity.GetAttributeValue<EntityReference>(CustomAPI.Fields.PluginTypeId));
+    }
+
+    [Fact]
+    public async Task SetPlugin_InvalidType_ThrowsNotFound()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+
+        _mockPluginRegistrationService
+            .Setup(s => s.GetPluginTypeByNameAsync("NonExistent.Plugin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PluginTypeInfo?)null);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.SetPluginTypeAsync(apiId, "NonExistent.Plugin", null));
+        Assert.Equal(ErrorCodes.CustomApi.PluginTypeNotFound, ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task SetPlugin_SameType_IdempotentSuccess()
+    {
+        // Arrange
+        var apiId = Guid.NewGuid();
+        var pluginTypeId = Guid.NewGuid();
+        var pluginTypeInfo = new PluginTypeInfo
+        {
+            Id = pluginTypeId,
+            TypeName = "TestNamespace.TestPlugin"
+        };
+
+        _mockPluginRegistrationService
+            .Setup(s => s.GetPluginTypeByNameAsync("TestNamespace.TestPlugin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pluginTypeInfo);
+
+        // Act - call twice with same type
+        await _sut.SetPluginTypeAsync(apiId, "TestNamespace.TestPlugin", null);
+        _updatedEntity = null; // Reset to capture second call
+        await _sut.SetPluginTypeAsync(apiId, "TestNamespace.TestPlugin", null);
+
+        // Assert - second call also succeeds
+        Assert.NotNull(_updatedEntity);
+        var pluginTypeRef = _updatedEntity!.GetAttributeValue<EntityReference>(CustomAPI.Fields.PluginTypeId);
+        Assert.NotNull(pluginTypeRef);
+        Assert.Equal(pluginTypeId, pluginTypeRef.Id);
     }
 
     #endregion
