@@ -23,6 +23,11 @@ from _pathfix import get_project_dir
 
 
 def main():
+    # Pipeline mode: skip all git/state subprocess calls for efficiency.
+    # The pipeline orchestrator provides its own context via HEADLESS_PREAMBLE.
+    if os.environ.get("PPDS_PIPELINE"):
+        sys.exit(0)
+
     # Read stdin
     try:
         json.load(sys.stdin)

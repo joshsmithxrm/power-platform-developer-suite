@@ -276,8 +276,8 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
         proc.terminate()
         proc.wait()
         raise
-
-    stage_log_file.close()
+    finally:
+        stage_log_file.close()
     duration = int(time.time() - start)
 
     # Read last 20 lines of stage log for pipeline.log

@@ -37,11 +37,21 @@ def extract_paths_from_command(command: str) -> list[str]:
         # Skip the command itself
         if i == 0:
             continue
-        # Skip flags
+        # Skip flags (but NOT their values — values are paths that need checking)
         if token.startswith("-"):
-            # PowerShell -Path takes a value
-            if token.lower() in ("-path", "-literalpath", "-include", "-exclude", "-filter"):
+            # PowerShell flags that DON'T take path values — just skip them
+            if token.lower() in ("-recurse", "-force", "-r", "-f", "-rf", "-fr",
+                                  "-v", "-i", "--recursive", "--force", "--verbose"):
+                continue
+            # PowerShell -Include/-Exclude/-Filter take patterns, not target paths — skip both
+            if token.lower() in ("-include", "-exclude", "-filter"):
                 skip_next = True
+                continue
+            # -Path and -LiteralPath take target paths — the NEXT token is the path
+            # Do NOT skip it — let the next iteration pick it up as a path to check
+            if token.lower() in ("-path", "-literalpath"):
+                continue
+            # Unknown flags — skip
             continue
         # Everything else is a path argument (shlex already stripped quotes)
         if token:
