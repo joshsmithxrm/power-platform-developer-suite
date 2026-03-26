@@ -50,8 +50,8 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 ┌──────────────────────────────────────────────────────┐
 │     .workflow/state.json (gitignored)                 │
 │                                                       │
-│  .workflow/state.json (gitignored)                    │
 │  Tracks: gates, verify, qa, review, pr timestamps    │
+│  Invalidates on new commits (gates must re-run)      │
 └──────────────────┬───────────────────────────────────┘
                    │
                    ▼
