@@ -14,6 +14,10 @@ from _pathfix import get_project_dir
 
 
 def main():
+    # Pipeline mode: orchestrator handles stage sequencing
+    if os.environ.get("PPDS_PIPELINE"):
+        sys.exit(0)
+
     # Read stdin
     hook_input = {}
     try:

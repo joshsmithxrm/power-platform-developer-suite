@@ -1,3 +1,8 @@
+---
+name: verify
+description: Verify
+---
+
 # Verify
 
 AI self-verification of implemented work using MCP tools. Goes beyond unit tests to verify that code actually works in its runtime environment.

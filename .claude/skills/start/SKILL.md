@@ -16,17 +16,23 @@ Bootstrap a feature worktree for new work. Parses freeform input to extract a na
 
 ## Prerequisites
 
-- Must be on `main` branch. If on a feature branch, you're already in a worktree — just run `/design` or `/implement`.
+- Git repository with worktree support. Works from main or any feature branch/worktree.
 
 ## Process
 
-### Step 1: Validate Branch
+### Step 1: Determine Repo Root
 
 ```bash
 git rev-parse --abbrev-ref HEAD
 ```
 
-If not on `main` or `master`: error with "You're already on branch `<name>`. Run `/design` or `/implement` from here."
+If on `main` or `master`: proceed normally (create worktree from current directory).
+
+If on a feature branch or in a worktree: resolve the main repo root:
+```bash
+git worktree list --porcelain
+```
+Parse the first entry's `worktree` line — that's the main repo root. Run all worktree creation commands from that root directory (pass as `cwd` to Bash tool).
 
 ### Step 2: Parse Input
 
@@ -136,7 +142,7 @@ Then run `/design` to start.
 
 ## Rules
 
-1. **Main branch only** — refuse to run on feature branches.
+1. **Works from any branch** — if on a feature branch, resolves main repo root automatically.
 2. **Always confirm** — propose name and issues, wait for user approval.
 3. **No duplicate worktrees** — check before creating, offer resume.
 4. **Platform detection** — use `uname -s`, not hardcoded assumptions.

@@ -1,14 +1,20 @@
+---
+name: implement
+description: Implement Plan
+---
+
 # Implement Plan
 
 ## Pipeline Mode Detection
 
-If `.workflow/pipeline.log` exists and has an active pipeline entry, this skill is being
-invoked by the pipeline orchestrator. In pipeline mode:
+If the environment variable `PPDS_PIPELINE=1` is set, this skill is being invoked by the
+pipeline orchestrator. In pipeline mode:
 - Execute Steps 1-5 only (plan analysis through phase execution)
-- Skip Step 6 (Mandatory Tail) — the pipeline handles gates/verify/review/pr
+- Skip Step 6 (Mandatory Tail) — the pipeline orchestrator runs gates/verify/qa/review
+  as separate `claude -p` sessions with their own timeouts and monitoring
 - Exit cleanly after all phases are committed
 
-In interactive mode (no pipeline.log or no active entry), execute the full process including Step 6.
+In interactive mode (`PPDS_PIPELINE` not set), execute the full process including Step 6.
 
 ---
 
@@ -74,7 +80,7 @@ with a spec or constitution principle, STOP and report the conflict
 to the orchestrator — do not silently deviate.
 ```
 
-**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec’s `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
+**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec's `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
 
 ### Step 3: Assess Current State
 - Check git status and current branch

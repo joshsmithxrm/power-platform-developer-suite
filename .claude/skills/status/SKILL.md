@@ -1,3 +1,8 @@
+---
+name: status
+description: Status
+---
+
 # Status
 
 Display current workflow enforcement state for the active branch.
@@ -67,6 +72,28 @@ PIPELINE STATUS:
 - `✗` = failed (DONE with non-zero exit)
 
 Include the overall pipeline duration and plan file path from the first log entry.
+
+### Stage Logs
+
+If `.workflow/stages/` directory exists, show the most recently modified stage log:
+- File name (indicates which stage)
+- File size
+- Last 5 lines of output
+
+If a stage shows `→` (in progress) and a stage log exists for it:
+- Show last 10 lines of the stage log for real-time visibility
+
+### Heartbeat Data
+
+When showing in-progress stages, parse `pipeline.log` for the most recent `HEARTBEAT` entry for that stage. Show:
+- Elapsed time
+- Activity status (active/idle)
+- Output bytes
+
+Example with heartbeat:
+```
+  → verify       (running for 2m 30s) — active, 102KB output, pid 12345
+```
 
 ## Notes
 

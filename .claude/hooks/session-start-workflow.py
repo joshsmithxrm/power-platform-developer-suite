@@ -23,6 +23,11 @@ from _pathfix import get_project_dir
 
 
 def main():
+    # Pipeline mode: skip all git/state subprocess calls for efficiency.
+    # The pipeline orchestrator provides its own context via HEADLESS_PREAMBLE.
+    if os.environ.get("PPDS_PIPELINE"):
+        sys.exit(0)
+
     # Read stdin
     try:
         json.load(sys.stdin)
@@ -55,14 +60,15 @@ def main():
 
     if not os.path.exists(state_path):
         # No state file — inject workflow reminder
-        print(
+        msg = (
             f"WORKFLOW ENFORCEMENT ACTIVE on branch {branch}:\n"
             "  No workflow state tracked yet.\n"
             "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
-            "  For bug fixes: /gates → /verify (if UI changed) → /pr\n"
-            + _behavioral_rules(),
-            file=sys.stderr,
+            "  For bug fixes: /gates → /verify (if UI changed) → /pr"
         )
+        if not os.environ.get("PPDS_PIPELINE"):
+            msg += _behavioral_rules()
+        print(msg, file=sys.stderr)
         sys.exit(0)
 
     try:
@@ -153,10 +159,11 @@ def main():
     if not review.get("passed"):
         missing.append("/review")
 
-    if missing:
-        lines.append(f"  Required before PR: {', '.join(missing)}")
+    if not os.environ.get("PPDS_PIPELINE"):
+        if missing:
+            lines.append(f"  Required before PR: {', '.join(missing)}")
 
-    lines.append(_behavioral_rules())
+        lines.append(_behavioral_rules())
 
     print("\n".join(lines), file=sys.stderr)
     sys.exit(0)

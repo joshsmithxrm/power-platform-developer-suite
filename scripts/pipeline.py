@@ -37,6 +37,7 @@ STAGES = [
     "implement",
     "gates",
     "verify",
+    "qa",
     "review",
     "converge",
     "pr",
@@ -54,8 +55,20 @@ STAGE_OUTCOMES = {
     "implement": "new_commits",
     "gates": "gates_passed",
     "verify": "verify_timestamp",
+    "qa": "qa_done",
     "review": "review_results",
     "pr": "pr_url",
+}
+
+STAGE_TIMEOUTS = {
+    "implement": 2700,  # 45 min
+    "gates": 900,       # 15 min
+    "verify": 1200,     # 20 min
+    "qa": 1200,         # 20 min
+    "review": 900,      # 15 min
+    "converge": 900,    # 15 min per round
+    "pr": 600,          # 10 min
+    "retro": 600,       # 10 min
 }
 
 
@@ -132,6 +145,9 @@ def verify_outcome(worktree_path, stage, pre_commit_count):
     elif expected == "verify_timestamp":
         verify = state.get("verify", {})
         return any(v for v in verify.values() if v)
+    elif expected == "qa_done":
+        qa = state.get("qa", {})
+        return any(v for v in qa.values() if v)
     elif expected == "review_results":
         review = state.get("review", {})
         return bool(review.get("passed")) or bool(review.get("findings"))
@@ -161,6 +177,8 @@ def find_last_completed_stage(log_path):
                         stage_name = "converge"
                     elif stage_name.startswith("verify-r"):
                         stage_name = "converge"
+                    elif stage_name.startswith("qa-"):
+                        stage_name = "qa"
                     elif stage_name.startswith("review-r"):
                         stage_name = "converge"
                     if stage_name in STAGES:
@@ -170,65 +188,109 @@ def find_last_completed_stage(log_path):
     return last_done
 
 
-def run_claude(worktree_path, prompt, logger, stage, dry_run=False):
-    """Run `claude -p` in the worktree directory. Returns exit code."""
+def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None):
+    """Run `claude -p` in the worktree directory. Returns (exit_code, logger)."""
     full_prompt = HEADLESS_PREAMBLE + prompt
 
-    # Close logger before subprocess to release file handle (P2)
-    logger.flush()
-
     log(logger, stage, "START")
-    logger.close()
 
     if dry_run:
         time.sleep(0.1)  # Simulate
-        # Reopen logger
-        logger_new = open_logger(logger.name)
-        log(logger_new, stage, "DONE", exit=0, duration="0s", mode="dry-run")
-        return 0, logger_new
+        log(logger, stage, "DONE", exit=0, duration="0s", mode="dry-run")
+        return 0, logger
 
     start = time.time()
     env = os.environ.copy()
-    env["MSYS_NO_PATHCONV"] = "1"  # P1: Prevent Git Bash path expansion
-    # P7: Set CLAUDE_PROJECT_DIR to Windows-native path — prevents MSYS
-    # path mangling (/c/VS/... → C:\c\VS\...) in hook command expansion
+    env["MSYS_NO_PATHCONV"] = "1"
+    env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree_path).resolve())
 
+    # Create stage log directory and file
+    stage_log_dir = os.path.join(worktree_path, ".workflow", "stages")
+    os.makedirs(stage_log_dir, exist_ok=True)
+    stage_log_path = os.path.join(stage_log_dir, f"{stage}.log")
+
     try:
-        result = subprocess.run(
+        stage_log_file = open(stage_log_path, "w")
+    except OSError as e:
+        log(logger, stage, "ERROR", reason=f"Cannot open stage log: {e}")
+        return 1, logger
+
+    try:
+        proc = subprocess.Popen(
             ["claude", "-p", full_prompt, "--verbose"],
             cwd=worktree_path,
             env=env,
-            capture_output=True,  # P6: Capture stdout/stderr
-            text=True,
-            timeout=None,  # No timeout — stages run until done
+            stdout=stage_log_file,
+            stderr=subprocess.STDOUT,
         )
-        duration = int(time.time() - start)
-
-        # Reopen logger after subprocess (P2)
-        logger_new = open_logger(logger.name)
-
-        # P6: Write captured output to log
-        if result.stdout:
-            for line in result.stdout.strip().split("\n")[-20:]:  # Last 20 lines
-                log(logger_new, stage, "STDOUT", line=line[:200])
-        if result.stderr:
-            for line in result.stderr.strip().split("\n")[-10:]:
-                log(logger_new, stage, "STDERR", line=line[:200])
-
-        log(logger_new, stage, "DONE", exit=result.returncode, duration=f"{duration}s")
-        return result.returncode, logger_new
-    except subprocess.TimeoutExpired:
-        duration = int(time.time() - start)
-        logger_new = open_logger(logger.name)
-        log(logger_new, stage, "TIMEOUT", duration=f"{duration}s")
-        print(f"\nERROR: '{stage}' stage timed out after 3600s.", file=sys.stderr)
-        return 1, logger_new
     except FileNotFoundError:
-        logger_new = open_logger(logger.name)
-        log(logger_new, stage, "ERROR", reason="claude command not found")
+        stage_log_file.close()
+        log(logger, stage, "ERROR", reason="claude command not found")
         print("\nERROR: 'claude' command not found. Is Claude Code installed and on PATH?", file=sys.stderr)
-        return 1, logger_new
+        return 1, logger
+    except Exception:
+        stage_log_file.close()
+        raise
+
+    # Polling loop — no threading, just poll + sleep
+    last_heartbeat = start
+    last_log_size = 0
+    exit_code = None
+
+    try:
+        while True:
+            exit_code = proc.poll()
+            if exit_code is not None:
+                break
+
+            elapsed = time.time() - start
+
+            # Timeout check
+            if timeout is not None and elapsed > timeout:
+                log(logger, stage, "TIMEOUT", elapsed=f"{int(elapsed)}s", timeout=f"{timeout}s")
+                proc.terminate()
+                try:
+                    proc.wait(30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                exit_code = -1
+                break
+
+            # Heartbeat every 60s
+            if time.time() - last_heartbeat >= 60:
+                try:
+                    current_size = os.path.getsize(stage_log_path)
+                except OSError:
+                    current_size = 0
+                activity = "active" if current_size > last_log_size else "idle"
+                last_log_size = current_size
+                log(logger, stage, "HEARTBEAT",
+                    elapsed=f"{int(elapsed)}s", pid=proc.pid,
+                    output_bytes=current_size, activity=activity)
+                last_heartbeat = time.time()
+
+            time.sleep(5)
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.wait()
+        raise
+    finally:
+        stage_log_file.close()
+    duration = int(time.time() - start)
+
+    # Read last 20 lines of stage log for pipeline.log
+    try:
+        with open(stage_log_path, "r", errors="replace") as f:
+            lines = f.readlines()
+            for line in lines[-20:]:
+                log(logger, stage, "OUTPUT", line=line.strip()[:200])
+    except OSError:
+        pass
+
+    log(logger, stage, "DONE", exit=exit_code, duration=f"{duration}s")
+    return exit_code, logger
 
 
 def derive_name(path):
@@ -401,6 +463,7 @@ def main():
     parser.add_argument("--worktree", help="Use existing worktree instead of creating one")
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
+    parser.add_argument("--stage-timeout", type=int, help="Override all stage timeouts (seconds)")
     args = parser.parse_args()
 
     # Handle backward compat: positional plan arg
@@ -547,7 +610,8 @@ def main():
                     prompt = f"/implement {plan_rel}"
                 else:
                     prompt = "/implement"  # Will generate plan from spec
-                exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run)
+                timeout = args.stage_timeout or STAGE_TIMEOUTS.get("implement")
+                exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run, timeout)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="implement")
                     sys.exit(1)
@@ -555,7 +619,7 @@ def main():
                 # P4: Outcome verification + retry
                 if not verify_outcome(worktree_path, "implement", pre_commits) and not args.dry_run:
                     log(logger, "implement", "OUTCOME_MISS", reason="no new commits, retrying")
-                    exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run, timeout)
                     if exit_code != 0 or not verify_outcome(worktree_path, "implement", pre_commits):
                         log(logger, "pipeline", "FAILED", failed_stage="implement", reason="outcome verification failed")
                         sys.exit(1)
@@ -563,9 +627,10 @@ def main():
                 # P8: Copy plan artifact back to main
                 copy_plan_to_main(worktree_path, repo_root, logger)
 
-            elif stage in ("gates", "verify", "review"):
+            elif stage in ("gates", "verify", "qa", "review"):
                 prompt = f"/{stage}"
-                exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run)
+                timeout = args.stage_timeout or STAGE_TIMEOUTS.get(stage)
+                exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run, timeout)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage=stage)
                     sys.exit(1)
@@ -573,7 +638,7 @@ def main():
                 # P4: Outcome verification + retry
                 if not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
                     log(logger, stage, "OUTCOME_MISS", reason="expected state not set, retrying")
-                    exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run, timeout)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage=stage)
                         sys.exit(1)
@@ -583,25 +648,31 @@ def main():
                     log(logger, "converge", "SKIPPED", reason="review already passed")
                     continue
 
+                timeout = args.stage_timeout or STAGE_TIMEOUTS.get("converge")
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
 
-                    exit_code, logger = run_claude(worktree_path, "/converge", logger, f"converge-r{round_num + 1}", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/converge", logger, f"converge-r{round_num + 1}", args.dry_run, timeout)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="converge")
                         sys.exit(1)
 
-                    exit_code, logger = run_claude(worktree_path, "/gates", logger, f"gates-r{round_num + 1}", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/gates", logger, f"gates-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("gates"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="gates-reconverge")
                         sys.exit(1)
 
-                    exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("verify"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
                         sys.exit(1)
 
-                    exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/qa", logger, f"qa-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("qa"))
+                    if exit_code != 0:
+                        log(logger, "pipeline", "FAILED", failed_stage="qa-reconverge")
+                        sys.exit(1)
+
+                    exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("review"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="review-reconverge")
                         sys.exit(1)
@@ -616,14 +687,14 @@ def main():
                     sys.exit(1)
 
             elif stage == "pr":
-                exit_code, logger = run_claude(worktree_path, "/pr", logger, "pr", args.dry_run)
+                exit_code, logger = run_claude(worktree_path, "/pr", logger, "pr", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("pr"))
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="pr")
                     sys.exit(1)
                 pr_url = check_pr_created(worktree_path)
 
             elif stage == "retro":
-                exit_code, logger = run_claude(worktree_path, "/retro", logger, "retro", args.dry_run)
+                exit_code, logger = run_claude(worktree_path, "/retro", logger, "retro", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("retro"))
                 if exit_code != 0:
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
