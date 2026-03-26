@@ -84,12 +84,25 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
 
     private static bool IsAwaited(InvocationExpressionSyntax invocation)
     {
-        // Check if parent is an await expression
+        // Walk through .ConfigureAwait(false) and parenthesized wrappers
+        // to find an enclosing AwaitExpressionSyntax.
+        // Pattern: await LoadAsync().ConfigureAwait(false)
+        // AST: AwaitExpression > Invocation(.ConfigureAwait) > MemberAccess > Invocation(LoadAsync)
         var parent = invocation.Parent;
 
-        // Handle parenthesized expressions
-        while (parent is ParenthesizedExpressionSyntax)
+        while (parent is ParenthesizedExpressionSyntax
+            or MemberAccessExpressionSyntax
+            or InvocationExpressionSyntax)
         {
+            // Check for synchronous blocking: .Result, .Wait(), .GetAwaiter().GetResult()
+            // These are NOT fire-and-forget — the ctor blocks on the result.
+            // (PPDS012/NoSyncOverAsync flags these separately.)
+            if (parent is MemberAccessExpressionSyntax memberAccess &&
+                memberAccess.Name.Identifier.Text is "Result" or "Wait" or "GetAwaiter")
+            {
+                return true;
+            }
+
             parent = parent.Parent;
         }
 
@@ -146,30 +159,11 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
     {
         // Check if this invocation is part of a .ContinueWith() chain
         // Pattern: _ = SomeAsync().ContinueWith(...)
+        // AST: SomeAsync() invocation's parent is MemberAccessExpression(.ContinueWith)
         var parent = invocation.Parent;
 
-        // The invocation might be the expression in a member access like SomeAsync().ContinueWith
-        if (parent is MemberAccessExpressionSyntax memberAccess &&
-            memberAccess.Name.Identifier.Text == "ContinueWith")
-        {
-            return true;
-        }
-
-        // Also check if the entire statement is a discard assignment with ContinueWith
-        // Pattern: _ = SomeAsync().ContinueWith(t => { ... });
-        // In this case, the invocation is SomeAsync(), and we need to check if it's
-        // the object of a .ContinueWith() call
-        if (parent is MemberAccessExpressionSyntax outerMemberAccess)
-        {
-            var grandparent = outerMemberAccess.Parent;
-            if (grandparent is InvocationExpressionSyntax &&
-                outerMemberAccess.Name.Identifier.Text == "ContinueWith")
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return parent is MemberAccessExpressionSyntax memberAccess &&
+               memberAccess.Name.Identifier.Text == "ContinueWith";
     }
 
     private static bool IsArgumentToFireAndForget(InvocationExpressionSyntax invocation)

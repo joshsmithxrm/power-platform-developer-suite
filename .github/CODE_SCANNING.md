@@ -47,26 +47,23 @@ Based on PR feedback analysis:
 
 Compile-time enforcement of architectural patterns. Analyzers run during build and show as warnings in IDE.
 
-### Implemented Rules
+### Implemented Rules (All 13)
 
 | ID | Name | Description | Severity |
 |----|------|-------------|----------|
+| PPDS001 | NoDirectFileIoInUi | Flags direct File I/O in presentation layer | Warning |
+| PPDS002 | NoConsoleInServices | Flags Console usage in Application Services | Warning |
+| PPDS003 | NoUiFrameworkInServices | Flags Terminal.Gui/Spectre.Console in Services | Warning |
+| PPDS004 | UseStructuredExceptions | Flags raw exception throws in Application Services | Warning |
+| PPDS005 | NoSdkInPresentation | Flags direct SDK access in presentation layer | Warning |
 | PPDS006 | UseEarlyBoundEntities | Flags string literals in QueryExpression | Warning |
+| PPDS007 | PoolClientInParallel | Flags pooled clients held across multiple awaits | Warning |
+| PPDS008 | UseBulkOperations | Flags individual CRUD calls inside loops | Warning |
+| PPDS009 | UseAggregateForCount | Flags RetrieveMultiple used only for counting | Warning |
+| PPDS010 | ValidateTopCount | Flags unbounded QueryExpression without TopCount | Warning |
+| PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Warning |
 | PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Warning |
 | PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Warning |
-
-### Planned Rules
-
-| ID | Name | Description | Source |
-|----|------|-------------|--------|
-| PPDS001 | NoDirectFileIoInUi | UI layer using File.Read/Write directly | Architecture |
-| PPDS002 | NoConsoleInServices | Service using Console.WriteLine | Architecture |
-| PPDS003 | NoUiFrameworkInServices | Service referencing Spectre/Terminal.Gui | Architecture |
-| PPDS004 | UseStructuredExceptions | Service throwing raw Exception | Architecture |
-| PPDS005 | NoSdkInPresentation | CLI command calling ServiceClient directly | Architecture |
-| PPDS007 | PoolClientInParallel | Pool client acquired outside parallel loop | Architecture |
-| PPDS008 | UseBulkOperations | Loop with single Delete/Update calls | Gemini PR#243 |
-| PPDS011 | PropagateCancellation | Async method not passing CancellationToken | Gemini PR#242 |
 
 ### Suppressing Analyzer Warnings
 
