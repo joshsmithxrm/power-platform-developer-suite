@@ -1486,16 +1486,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Step with ID '{stepId}' not found.");
         }
 
-        // Check managed state
-        var isManaged = existingStep.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false;
-        var isCustomizable = GetBooleanManagedProperty(existingStep, SdkMessageProcessingStep.Fields.IsCustomizable);
-
-        if (isManaged && !isCustomizable)
-        {
-            var stepName = existingStep.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name);
-            throw new PpdsException(ErrorCodes.Plugin.ManagedComponent, $"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
-        }
-
         // Build update entity with only changed properties
         var entity = new SdkMessageProcessingStep { Id = stepId };
         var hasChanges = false;
@@ -1574,16 +1564,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (existingImage == null)
         {
             throw new InvalidOperationException($"Image with ID '{imageId}' not found.");
-        }
-
-        // Check managed state
-        var isManaged = existingImage.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
-        var isCustomizable = GetBooleanManagedProperty(existingImage, SdkMessageProcessingStepImage.Fields.IsCustomizable);
-
-        if (isManaged && !isCustomizable)
-        {
-            var imageName = existingImage.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name);
-            throw new InvalidOperationException($"Cannot update: {imageName} is managed. Managed components cannot be modified in this environment.");
         }
 
         // Build update entity with only changed properties
@@ -1825,17 +1805,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 ErrorCodes.Plugin.NotFound);
 
         var name = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty;
-        var isManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
-
-        if (isManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {name} is managed. Managed components cannot be deleted in this environment.",
-                name,
-                "Image",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
-
         await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
 
         return new UnregisterResult
@@ -1858,15 +1827,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 stepId.ToString(),
                 "Step",
                 ErrorCodes.Plugin.NotFound);
-
-        if (step.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {step.Name} is managed. Managed components cannot be deleted in this environment.",
-                step.Name,
-                "Step",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Check for images
         var images = await ListImagesForStepAsync(stepId, cancellationToken);
@@ -1923,15 +1883,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 "Type",
                 ErrorCodes.Plugin.NotFound);
 
-        if (pluginType.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {pluginType.TypeName} is managed. Managed components cannot be deleted in this environment.",
-                pluginType.TypeName,
-                "Type",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
-
         // Check for steps
         var steps = await ListStepsForTypeAsync(pluginTypeId, options: null, cancellationToken);
 
@@ -1978,15 +1929,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 assemblyId.ToString(),
                 "Assembly",
                 ErrorCodes.Plugin.NotFound);
-
-        if (assembly.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {assembly.Name} is managed. Managed components cannot be deleted in this environment.",
-                assembly.Name,
-                "Assembly",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Get types and their steps
         var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
@@ -2042,15 +1984,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 packageId.ToString(),
                 "Package",
                 ErrorCodes.Plugin.NotFound);
-
-        if (package.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {package.Name} is managed. Managed components cannot be deleted in this environment.",
-                package.Name,
-                "Package",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Get assemblies
         var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);

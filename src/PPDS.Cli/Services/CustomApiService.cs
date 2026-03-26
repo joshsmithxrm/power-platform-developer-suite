@@ -183,13 +183,6 @@ public sealed class CustomApiService : ICustomApiService
                 $"Custom API with ID '{id}' was not found.");
         }
 
-        if (existing.IsManaged)
-        {
-            throw new PpdsException(
-                ErrorCodes.CustomApi.ManagedComponent,
-                $"Cannot update managed Custom API '{existing.UniqueName}'.");
-        }
-
         var update = new Entity(CustomAPI.EntityLogicalName) { Id = id };
         var hasChanges = false;
 
@@ -361,13 +354,6 @@ public sealed class CustomApiService : ICustomApiService
             throw new PpdsException(
                 ErrorCodes.CustomApi.ParameterNotFound,
                 $"Custom API parameter with ID '{parameterId}' was not found.");
-        }
-
-        if (existing.GetAttributeValue<bool?>(CustomAPIRequestParameter.Fields.IsManaged) == true)
-        {
-            throw new PpdsException(
-                ErrorCodes.CustomApi.ManagedComponent,
-                $"Cannot delete managed parameter '{existing.GetAttributeValue<string>(CustomAPIRequestParameter.Fields.UniqueName)}'.");
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
