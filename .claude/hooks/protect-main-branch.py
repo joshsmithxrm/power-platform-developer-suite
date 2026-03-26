@@ -9,12 +9,15 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir, normalize_msys_path
+
 
 def get_current_branch() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=os.environ.get("CLAUDE_PROJECT_DIR", "."),
+            cwd=get_project_dir(),
             capture_output=True,
             text=True,
             timeout=5,
@@ -31,7 +34,7 @@ def get_current_branch() -> str:
 def is_allowed_path(file_path: str) -> bool:
     normalized = file_path.replace("\\", "/").lower()
     # Strip project dir prefix so absolute paths work the same as relative ones
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").replace("\\", "/").lower().rstrip("/")
+    project_dir = normalize_msys_path(os.environ.get("CLAUDE_PROJECT_DIR", "")).replace("\\", "/").lower().rstrip("/")
     if project_dir and normalized.startswith(project_dir + "/"):
         normalized = normalized[len(project_dir) + 1:]
     allowed_prefixes = []

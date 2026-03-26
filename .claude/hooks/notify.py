@@ -12,6 +12,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import normalize_msys_path
+
 
 def _is_worktree(cwd):
     """Return True if cwd is a git worktree (not the main repo)."""
@@ -69,7 +72,7 @@ def main():
     except (json.JSONDecodeError, ValueError):
         return
 
-    cwd = data.get("cwd", ".")
+    cwd = normalize_msys_path(data.get("cwd", "."))
 
     # Worktree check: .workflow/state.json should only exist in .worktrees/<name>/
     if not _is_worktree(cwd):

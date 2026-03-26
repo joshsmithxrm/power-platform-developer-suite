@@ -8,6 +8,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def main():
     # Read stdin (Claude Code sends JSON with tool info)
@@ -23,7 +26,7 @@ def main():
     if "gh pr create" not in command:
         sys.exit(0)
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
 
     # Resolve the working directory for git checks.
     # If the gh pr create command includes a -C or --repo-dir flag, use that.
