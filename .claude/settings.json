@@ -265,6 +265,26 @@
         ]
       },
       {
+        "matcher": "Bash(rm -rf:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rm -fr:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Bash(Remove-Item:*)",
         "hooks": [
           {

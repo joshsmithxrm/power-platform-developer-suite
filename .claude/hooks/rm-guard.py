@@ -8,6 +8,7 @@ extract target paths.
 import json
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,11 @@ def extract_paths_from_command(command: str) -> list[str]:
     # Strip the command prefix and flags to get target paths
     # Remove common rm flags: -r, -f, -rf, -fr, -v, -i, --recursive, --force, etc.
     # Remove PowerShell flags: -Recurse, -Force, -Path, etc.
-    tokens = command.split()
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        # Malformed quoting — fall back to simple split
+        tokens = command.split()
     if not tokens:
         return []
 
@@ -38,11 +43,9 @@ def extract_paths_from_command(command: str) -> list[str]:
             if token.lower() in ("-path", "-literalpath", "-include", "-exclude", "-filter"):
                 skip_next = True
             continue
-        # Everything else is a path argument
-        # Strip quotes
-        cleaned = token.strip("'\"")
-        if cleaned:
-            paths.append(cleaned)
+        # Everything else is a path argument (shlex already stripped quotes)
+        if token:
+            paths.append(token)
 
     return paths
 

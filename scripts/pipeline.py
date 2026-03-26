@@ -177,7 +177,7 @@ def find_last_completed_stage(log_path):
                         stage_name = "converge"
                     elif stage_name.startswith("verify-r"):
                         stage_name = "converge"
-                    elif stage_name.startswith("qa"):
+                    elif stage_name.startswith("qa-"):
                         stage_name = "qa"
                     elif stage_name.startswith("review-r"):
                         stage_name = "converge"
@@ -229,6 +229,9 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
         log(logger, stage, "ERROR", reason="claude command not found")
         print("\nERROR: 'claude' command not found. Is Claude Code installed and on PATH?", file=sys.stderr)
         return 1, logger
+    except Exception:
+        stage_log_file.close()
+        raise
 
     # Polling loop — no threading, just poll + sleep
     last_heartbeat = start
@@ -244,7 +247,7 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
             elapsed = time.time() - start
 
             # Timeout check
-            if timeout and elapsed > timeout:
+            if timeout is not None and elapsed > timeout:
                 log(logger, stage, "TIMEOUT", elapsed=f"{int(elapsed)}s", timeout=f"{timeout}s")
                 proc.terminate()
                 try:
@@ -662,6 +665,11 @@ def main():
                     exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("verify"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
+                        sys.exit(1)
+
+                    exit_code, logger = run_claude(worktree_path, "/qa", logger, f"qa-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("qa"))
+                    if exit_code != 0:
+                        log(logger, "pipeline", "FAILED", failed_stage="qa-reconverge")
                         sys.exit(1)
 
                     exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("review"))
