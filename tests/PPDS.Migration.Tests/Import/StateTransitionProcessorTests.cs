@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using Microsoft.Xrm.Sdk.Messages;
 using Moq;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Import;
@@ -54,10 +55,9 @@ public class StateTransitionProcessorTests
         SetupRetrieveStatecode(recordId, 0);
 
         OrganizationRequest? capturedRequest = null;
-        _pool.Setup(p => p.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
-                It.IsAny<CancellationToken>()))
-            .Callback<OrganizationRequest, CancellationToken>((req, _) => capturedRequest = req)
+        _client.Setup(c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")))
+            .Callback<OrganizationRequest>((req) => capturedRequest = req)
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -94,10 +94,9 @@ public class StateTransitionProcessorTests
 
         result.Success.Should().BeTrue();
         result.SuccessCount.Should().Be(1);
-        _pool.Verify(
-            p => p.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
-                It.IsAny<CancellationToken>()),
+        _client.Verify(
+            c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")),
             Times.Never);
     }
 
@@ -127,10 +126,9 @@ public class StateTransitionProcessorTests
         SetupRetrieveStatecode(recordId, 0);
 
         OrganizationRequest? capturedRequest = null;
-        _pool.Setup(p => p.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "WinOpportunity"),
-                It.IsAny<CancellationToken>()))
-            .Callback<OrganizationRequest, CancellationToken>((req, _) => capturedRequest = req)
+        _client.Setup(c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r.RequestName == "WinOpportunity")))
+            .Callback<OrganizationRequest>((req) => capturedRequest = req)
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -162,9 +160,8 @@ public class StateTransitionProcessorTests
         SetupRetrieveStatecode(id2, 0);
         SetupRetrieveStatecode(id3, 0);
 
-        _pool.Setup(p => p.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
-                It.IsAny<CancellationToken>()))
+        _client.Setup(c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")))
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -193,8 +190,8 @@ public class StateTransitionProcessorTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
-        _pool.Verify(
-            p => p.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+        _client.Verify(
+            c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()),
             Times.Never);
     }
 
@@ -204,13 +201,12 @@ public class StateTransitionProcessorTests
     {
         var entity = new Entity { Id = recordId };
         entity["statecode"] = new OptionSetValue(statecodeValue);
+        var response = new RetrieveResponse();
+        response["Entity"] = entity;
 
-        _client.Setup(c => c.RetrieveAsync(
-                It.IsAny<string>(),
-                recordId,
-                It.IsAny<ColumnSet>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(entity);
+        _client.Setup(c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r.RequestName == "Retrieve")))
+            .ReturnsAsync(response);
     }
 
     private static ImportContext CreateContext()
