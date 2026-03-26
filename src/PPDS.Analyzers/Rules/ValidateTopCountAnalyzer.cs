@@ -122,6 +122,28 @@ public sealed class ValidateTopCountAnalyzer : DiagnosticAnalyzer
         if (enclosingBlock is null)
             return false;
 
+        // Check if the variable was declared with an object initializer that sets TopCount
+        // e.g., var qe = new QueryExpression("x") { TopCount = 10 };
+        foreach (var declarator in enclosingBlock.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+        {
+            if (declarator.Identifier.Text != varName || declarator.SpanStart >= callPosition)
+                continue;
+
+            if (declarator.Initializer?.Value is ObjectCreationExpressionSyntax objCreation &&
+                objCreation.Initializer is not null)
+            {
+                foreach (var expr in objCreation.Initializer.Expressions)
+                {
+                    if (expr is AssignmentExpressionSyntax initAssignment &&
+                        initAssignment.Left is IdentifierNameSyntax id &&
+                        id.Identifier.Text == "TopCount")
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
         // Search assignment expressions BEFORE the call site for varName.TopCount = ...
         foreach (var assignment in enclosingBlock.DescendantNodes().OfType<AssignmentExpressionSyntax>())
         {

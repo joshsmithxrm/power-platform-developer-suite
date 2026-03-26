@@ -302,6 +302,54 @@ public class ValidateTopCountAnalyzerTests
     }
 
     [Fact]
+    public async Task PPDS010_VariableWithInitializerTopCount_NoDiagnostic()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                    public int? TopCount { get; set; }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    void DoWork()
+                    {
+                        var qe = new QueryExpression("account") { TopCount = 10 };
+                        _svc.RetrieveMultiple(qe);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<ValidateTopCountAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty("TopCount set in object initializer of variable should not flag");
+    }
+
+    [Fact]
     public async Task PPDS010_NonQueryExpressionArg_NoDiagnostic()
     {
         const string code = """

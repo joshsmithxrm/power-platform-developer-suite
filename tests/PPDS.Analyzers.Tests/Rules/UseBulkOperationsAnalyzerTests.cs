@@ -196,6 +196,47 @@ public class UseBulkOperationsAnalyzerTests
     }
 
     [Fact]
+    public async Task NestedLoop_OnlyFlagsFromInnermostLoop()
+    {
+        const string code = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public interface IOrganizationServiceAsync2
+                {
+                    Task<Guid> CreateAsync(object entity);
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                class Service
+                {
+                    private IOrganizationServiceAsync2 _client;
+                    async Task DoWork(List<List<object>> groups)
+                    {
+                        foreach (var group in groups)
+                        {
+                            foreach (var item in group)
+                            {
+                                await _client.CreateAsync(item);
+                            }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<UseBulkOperationsAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "PPDS008",
+            "nested loops should only flag from the innermost loop, not duplicate");
+    }
+
+    [Fact]
     public async Task FlagsCallOnTypeImplementingInterface()
     {
         const string code = """

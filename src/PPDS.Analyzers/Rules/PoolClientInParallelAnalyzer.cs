@@ -132,7 +132,12 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
             {
                 var methodName = memberAccess.Name.Identifier.Text;
                 if (methodName is "GetClientAsync" or "GetClient")
-                    return true;
+                {
+                    // Verify the method belongs to a known pool type
+                    var methodSymbol = semanticModel.GetSymbolInfo(invocation, cancellationToken).Symbol as IMethodSymbol;
+                    if (methodSymbol is not null && IsPoolType(methodSymbol.ContainingType))
+                        return true;
+                }
             }
         }
 
@@ -140,16 +145,8 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
         var symbol = semanticModel.GetDeclaredSymbol(declarator, cancellationToken);
         if (symbol is ILocalSymbol localSymbol)
         {
-            var typeName = localSymbol.Type.Name;
-            if (typeName == "IPooledClient")
+            if (IsPooledClientType(localSymbol.Type))
                 return true;
-
-            // Check interfaces
-            foreach (var iface in localSymbol.Type.AllInterfaces)
-            {
-                if (iface.Name == "IPooledClient")
-                    return true;
-            }
         }
 
         return false;
@@ -222,6 +219,41 @@ public sealed class PoolClientInParallelAnalyzer : DiagnosticAnalyzer
             }
 
             current = current.Parent;
+        }
+
+        return false;
+    }
+
+    private static bool IsPoolType(INamedTypeSymbol? type)
+    {
+        if (type is null)
+            return false;
+
+        if (type.Name is "IDataverseConnectionPool" &&
+            type.ContainingNamespace?.ToDisplayString() is "PPDS.Dataverse")
+            return true;
+
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (iface.Name is "IDataverseConnectionPool" &&
+                iface.ContainingNamespace?.ToDisplayString() is "PPDS.Dataverse")
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsPooledClientType(ITypeSymbol type)
+    {
+        if (type.Name == "IPooledClient" &&
+            type.ContainingNamespace?.ToDisplayString() is "PPDS.Dataverse")
+            return true;
+
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (iface.Name == "IPooledClient" &&
+                iface.ContainingNamespace?.ToDisplayString() is "PPDS.Dataverse")
+                return true;
         }
 
         return false;

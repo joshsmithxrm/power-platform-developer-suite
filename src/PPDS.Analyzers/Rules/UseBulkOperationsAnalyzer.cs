@@ -85,6 +85,10 @@ public sealed class UseBulkOperationsAnalyzer : DiagnosticAnalyzer
             if (!IsCrudInterface(methodSymbol.ContainingType))
                 continue;
 
+            // Skip if there's a closer enclosing loop — only flag from the innermost loop
+            if (HasCloserEnclosingLoop(invocation, context.Node))
+                continue;
+
             var diagnostic = Diagnostic.Create(
                 Rule,
                 invocation.GetLocation(),
@@ -130,5 +134,22 @@ public sealed class UseBulkOperationsAnalyzer : DiagnosticAnalyzer
         // Verify the namespace to avoid false positives on unrelated types with the same name
         var ns = type.ContainingNamespace?.ToDisplayString();
         return ns is "Microsoft.Xrm.Sdk" or "Microsoft.PowerPlatform.Dataverse.Client" or "PPDS.Dataverse";
+    }
+
+    private static bool HasCloserEnclosingLoop(SyntaxNode node, SyntaxNode currentLoop)
+    {
+        var current = node.Parent;
+        while (current is not null && current != currentLoop)
+        {
+            if (current is ForEachStatementSyntax or ForStatementSyntax or
+                WhileStatementSyntax or DoStatementSyntax)
+            {
+                return true;
+            }
+
+            current = current.Parent;
+        }
+
+        return false;
     }
 }

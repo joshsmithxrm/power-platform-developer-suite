@@ -14,15 +14,18 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
-                Task<Guid> CreateAsync(object entity);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                    Task<Guid> CreateAsync(object entity);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     var client = await _pool.GetClientAsync();
@@ -46,14 +49,17 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     var client = await _pool.GetClientAsync();
@@ -102,15 +108,18 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
-                Task<Guid> CreateAsync(object entity);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                    Task<Guid> CreateAsync(object entity);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     using (var client = await _pool.GetClientAsync())
@@ -135,14 +144,17 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     using (var client = await _pool.GetClientAsync())
@@ -165,14 +177,17 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     var client = await _pool.GetClientAsync();
@@ -195,15 +210,18 @@ public class PoolClientInParallelAnalyzerTests
         const string code = """
             using System;
             using System.Threading.Tasks;
-            interface IPooledClient : IAsyncDisposable
+            namespace PPDS.Dataverse
             {
-                Task<object> RetrieveMultipleAsync(string query);
-                Task<Guid> CreateAsync(object entity);
+                interface IPooledClient : IAsyncDisposable
+                {
+                    Task<object> RetrieveMultipleAsync(string query);
+                    Task<Guid> CreateAsync(object entity);
+                }
+                interface IDataverseConnectionPool { Task<IPooledClient> GetClientAsync(); }
             }
-            interface IPool { Task<IPooledClient> GetClientAsync(); }
             class Service
             {
-                private IPool _pool;
+                private PPDS.Dataverse.IDataverseConnectionPool _pool;
                 async Task DoWork()
                 {
                     var client = await _pool.GetClientAsync();
