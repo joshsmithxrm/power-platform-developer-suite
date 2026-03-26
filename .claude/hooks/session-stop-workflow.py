@@ -90,6 +90,7 @@ def main():
             # Prefixes that don't require workflow enforcement
             non_code_prefixes = (
                 "specs/",
+                ".plans/",
                 "docs/",
                 ".claude/",
                 "README",

@@ -1,11 +1,11 @@
 ---
 name: design
-description: Brainstorm ideas into specs through collaborative dialogue. Use when starting a new feature, exploring an idea, or designing a system — before any implementation.
+description: Brainstorm ideas into specs and plans through collaborative dialogue. Use when starting a new feature, exploring an idea, or designing a system — before any implementation. Requires a worktree (run /start first).
 ---
 
 # Design
 
-Collaborative design sessions that produce committed spec files. Replaces external brainstorming workflows with a PPDS-native process that knows our architecture, constitution, and spec template.
+Collaborative design sessions that produce reviewed specs and implementation plans. Brainstorm → spec → review → plan → review → handoff. Runs in a worktree, not on main.
 
 ## When to Use
 
@@ -17,62 +17,109 @@ Collaborative design sessions that produce committed spec files. Replaces extern
 
 ## Process
 
-### 1. Load Context
+### Step 1: Load Context and Search
+
+**Gate:** Check current branch. If on `main` or `master`, error immediately:
+> You're on main. Run `/start` first to create a worktree.
 
 Before asking any questions, read:
 - `specs/CONSTITUTION.md` — non-negotiable principles that constrain the design
 - `specs/SPEC-TEMPLATE.md` — the format the output must follow
 
-### 2. Understand the Idea
+**Search for existing specs:** Grep all `specs/*.md` for overlapping scope — check file names, overview sections, and Code frontmatter for the domain being designed. If an existing spec covers this domain:
+- Present the finding: "Found existing spec `specs/<name>.md` covering this domain."
+- Propose update mode: "Should I update this spec, or is this a new spec?"
+- If updating, read the existing spec fully before proceeding.
 
-Ask clarifying questions **one at a time**:
+### Step 2: Brainstorm
+
+**Understand the idea** — ask clarifying questions **one at a time**:
 - Prefer multiple choice when possible
 - Focus on: purpose, constraints, success criteria
 - Assess scope: if the request describes multiple independent subsystems, flag this immediately and help decompose
 
-### 3. Explore Approaches
-
+**Explore approaches:**
 - Propose 2-3 different approaches with trade-offs
 - Lead with your recommended option and explain why
 - Be honest about consequences — don't oversell
 
-### 4. Present Design
-
-- Present the design in sections, scaled to complexity
+**Present design** — present in sections, scaled to complexity:
 - Ask after each section: "Does this look right?"
 - Cover: architecture, components, data flow, error handling, testing
 - Check against constitution principles — flag any tensions
 
-### 5. Write Spec
+### Step 3: Write Spec and Review
 
 When the design is approved:
-1. Create a worktree: `git worktree add .worktrees/spec-<name> -b spec/<name>`
-2. Write the spec to `.worktrees/spec-<name>/specs/<name>.md` using the spec template
-3. Include numbered acceptance criteria (Constitution I3)
-4. Commit the spec in the worktree: `git -C .worktrees/spec-<name> add specs/ && git -C .worktrees/spec-<name> commit -m "spec: <name>"`
-5. Present the spec path for user review
 
-**Why a worktree?** You stay on main, ready for the next design session. The spec lives in its own branch without switching context. GitHub branch protection blocks direct pushes to main, so specs go through PRs like everything else.
+**A. Write the spec:**
+1. Write the spec to `specs/<name>.md` using the spec template
+2. Include numbered acceptance criteria (Constitution I3)
+3. If updating an existing spec, preserve unchanged sections
 
-### 6. Transition
+**B. Review the spec:**
+1. Invoke `/review` — dispatch an impartial reviewer that gets ONLY the spec content, constitution, and spec template. No design conversation context.
+2. Fix critical and important findings
+3. Note which findings were fixed and which were dismissed with rationale
 
-After user approves the written spec:
-1. Push the spec branch and create a PR: `git -C .worktrees/spec-<name> push -u origin spec/<name>` then `gh pr create`
-2. Present the pipeline command for implementation:
+**C. Present to user:**
+1. Present the spec to the user
+2. Show review findings: "The reviewer found N issues. Fixed M, dismissed K. Here's what was caught and fixed: [list]. Here's what I disagreed with: [list with rationale]."
+3. Wait for user approval before proceeding
 
-> Spec PR created: `<url>`
->
-> To implement: `python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>`
->
-> Or say "run it" and I'll invoke the pipeline from here.
+### Step 4: Write Plan and Review
 
-If the user wants to proceed immediately, invoke the pipeline:
+After user approves the spec:
+
+**A. Write the implementation plan:**
+1. Generate a phased implementation plan in `.plans/<date>-<name>.md`
+2. Each phase should map to specific ACs from the spec
+3. Identify sequential vs parallel phases
+4. Include file paths, commands, and verification steps
+
+**B. Review the plan:**
+1. Invoke `/review` — reviewer checks plan against spec ACs for coverage gaps
+2. Fix findings (missing ACs, incorrect phase ordering, missing verification)
+3. Note fixes and dismissals
+
+**C. Present to user:**
+1. Present the plan with a summary table (phases, files, ACs covered)
+2. Show review findings and fixes
+3. Wait for user approval
+
+### Step 5: Commit
+
+On user approval of the plan:
+
 ```bash
-python scripts/pipeline.py --spec specs/<name>.md --branch <branch-name>
-```
-Run this in the background so the user can check `/status` while it runs.
+git add specs/<name>.md
+git commit -m "spec: <name>
 
-If deferring, note the spec path for the next session.
+Co-Authored-By: {use the format from the system prompt}"
+```
+
+Note: `.plans/` is gitignored — the plan lives in the worktree filesystem only.
+
+### Step 6: Handoff
+
+Present three options:
+
+```
+Spec committed. Choose next step:
+
+  1. Launch headless pipeline (recommended)
+     → python scripts/pipeline.py --worktree <cwd> --spec specs/<name>.md --from implement
+
+  2. Continue interactively
+     → /implement
+
+  3. Defer (pick up later)
+     → Spec is committed on branch feat/<name>. Resume anytime.
+```
+
+If the user chooses option 1, run the pipeline command in the background.
+If option 2, invoke `/implement` immediately.
+If option 3, note the spec path and stop.
 
 ## Key Principles
 
@@ -82,6 +129,8 @@ If deferring, note the spec path for the next session.
 - **Explore alternatives** — always propose 2-3 approaches before settling
 - **Incremental validation** — present design, get approval, then proceed
 - **Constitution compliance** — every design must comply with the constitution
+- **Review before presenting** — specs and plans go through /review before the user sees them
+- **Do NOT use plan mode** — /design has its own approval gates (one question at a time, incremental validation). Plan mode blocks spec writing. Exit plan mode before running /design.
 
 ## Anti-Patterns
 
@@ -92,4 +141,7 @@ If deferring, note the spec path for the next session.
 | Asking 5 questions at once | One question per message |
 | Proposing only one approach | Always propose 2-3 with trade-offs |
 | Skipping the spec | The spec IS the deliverable of this skill |
-| Using plan mode with /design | /design has its own approval gates (one question at a time, incremental validation). Plan mode blocks spec writing. Exit plan mode before running /design. |
+| Skipping the plan | The plan is the second deliverable — spec alone isn't enough |
+| Using plan mode with /design | /design has its own approval gates. Exit plan mode first. |
+| Running on main | /design requires a worktree. Run /start first. |
+| Skipping spec search | Always search existing specs before creating new ones. |
