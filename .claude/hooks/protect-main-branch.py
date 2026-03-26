@@ -34,9 +34,7 @@ def is_allowed_path(file_path: str) -> bool:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").replace("\\", "/").lower().rstrip("/")
     if project_dir and normalized.startswith(project_dir + "/"):
         normalized = normalized[len(project_dir) + 1:]
-    allowed_prefixes = [
-        ".plans/",
-    ]
+    allowed_prefixes = []
     allowed_substrings = [
         "/tmp/",
         "/temp/",

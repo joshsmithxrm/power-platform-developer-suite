@@ -202,8 +202,8 @@ def _show_main_guidance(project_dir):
         pass
 
     lines.append("")
-    lines.append("To start new work: /design (creates spec branch) or python scripts/pipeline.py <plan-path>")
-    lines.append("Brainstorming is fine on main. All file changes (specs included) require a branch.")
+    lines.append("To start new work: /start (creates worktree + opens terminal)")
+    lines.append("Brainstorming is fine on main. All file changes require a worktree.")
 
     print("\n".join(lines), file=sys.stderr)
 
