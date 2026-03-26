@@ -190,6 +190,9 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False):
     start = time.time()
     env = os.environ.copy()
     env["MSYS_NO_PATHCONV"] = "1"  # P1: Prevent Git Bash path expansion
+    # P7: Set CLAUDE_PROJECT_DIR to Windows-native path — prevents MSYS
+    # path mangling (/c/VS/... → C:\c\VS\...) in hook command expansion
+    env["CLAUDE_PROJECT_DIR"] = str(Path(worktree_path).resolve())
 
     try:
         result = subprocess.run(

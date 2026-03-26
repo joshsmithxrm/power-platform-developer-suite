@@ -8,6 +8,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def main() -> None:
     try:
@@ -21,7 +24,7 @@ def main() -> None:
     if "gh issue create" not in command:
         sys.exit(0)
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
     state_path = os.path.join(project_dir, ".workflow", "state.json")
 
     if not os.path.exists(state_path):
