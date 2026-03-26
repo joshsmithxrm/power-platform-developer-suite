@@ -1,9 +1,10 @@
 # Workflow Enforcement
 
-**Status:** Implemented
-**Version:** 3.0
+**Status:** Draft (v4.0 — headless pipeline mode additions)
+**Version:** 4.0
 **Last Updated:** 2026-03-26
-**Code:** .claude/ | scripts/hooks/ | .claude/skills/ | specs/
+**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
+**Surfaces:** N/A
 
 ---
 
@@ -21,12 +22,13 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 - **Full state machine orchestration**: We enforce outcomes at exit points, not step-by-step sequencing. The AI can work in any order as long as all required steps complete before committing or creating a PR.
 - **CI/CD pipeline changes**: GitHub Actions and external CI are out of scope. This spec covers the local development workflow only.
-- **Headless/unattended execution**: Future goal (triggering implementation from GitHub issues, webhooks). This spec covers interactive Claude Code sessions.
 - **Superpowers plugin replacement**: We disable superpowers for this repo and build our own skills, but we do not modify or fork the superpowers plugin itself.
 
 ---
 
 ## Architecture
+
+### Interactive Mode
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -46,10 +48,10 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
                    │
                    ▼
 ┌──────────────────────────────────────────────────────┐
-│          workflow-state.json (gitignored)             │
+│     .workflow/state.json (gitignored)                 │
 │                                                       │
+│  .workflow/state.json (gitignored)                    │
 │  Tracks: gates, verify, qa, review, pr timestamps    │
-│  Invalidates on new commits (gates must re-run)      │
 └──────────────────┬───────────────────────────────────┘
                    │
                    ▼
@@ -58,7 +60,33 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 │                                                       │
 │  git commit  → warn if gates stale (soft)            │
 │  gh pr create → block if steps missing (hard)        │
-│  session stop → emit completion summary (visible)    │
+│  session stop → block if steps missing (blocks)      │
+└──────────────────────────────────────────────────────┘
+```
+
+### Headless Pipeline Mode
+
+```
+┌──────────────────────────────────────────────────────┐
+│         Pipeline Orchestrator (pipeline.py)           │
+│                                                       │
+│  Sets PPDS_PIPELINE=1 in subprocess env              │
+│  Spawns one claude -p per stage via Popen            │
+│  Monitors via polling loop (5s interval)             │
+│  Heartbeat every 60s → pipeline.log                  │
+│  Per-stage timeout → terminate if exceeded           │
+│  Stage output → .workflow/stages/{stage}.log         │
+│  Checks state.json between stages                    │
+└──────────────────┬───────────────────────────────────┘
+                   │ for each stage:
+                   ▼
+┌──────────────────────────────────────────────────────┐
+│            claude -p "/{stage}" session               │
+│                                                       │
+│  SessionStart hook → skips behavioral rules          │
+│  Skill runs → writes to workflow-state.json          │
+│  Stop hook → detects PPDS_PIPELINE → exits 0         │
+│  Process exits → pipeline reads exit code            │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -67,11 +95,12 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 | Component | Responsibility |
 |-----------|----------------|
 | Workflow State File | Tracks which workflow steps have been completed and when. Invalidates stale entries on new commits. |
-| SessionStart Hook | Injects current workflow state and required sequence into AI context at session start. |
+| SessionStart Hook | Injects current workflow state and required sequence into AI context at session start. Pipeline-aware: skips behavioral rules when `PPDS_PIPELINE=1`. |
 | Pre-Commit Hook (enhanced) | Warns if `/gates` hasn't been run since last code changes. Soft gate — does not block. |
 | PR Gate Hook | Blocks `gh pr create` unless gates, verify, QA, and review are all current. Hard gate. |
-| Stop Hook | Emits workflow completion summary when session ends. Cannot block, but makes non-compliance visible. |
+| Stop Hook | Blocks session end when workflow steps are incomplete. Pipeline-aware: exits immediately when `PPDS_PIPELINE=1`. |
 | Skills | Define each workflow step. Write their completion status to the workflow state file. |
+| Pipeline Orchestrator | `scripts/pipeline.py` — runs stages as sequential `claude -p` sessions. Each stage gets a fresh context window. The script — not the AI — decides what runs next. |
 
 ### Dependencies
 
@@ -133,7 +162,9 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 **Trigger:** Session start on any branch.
 
-**Behavior:**
+**Pipeline mode:** When `PPDS_PIPELINE=1` is set, the hook emits only the workflow state summary (checklist) to stderr. It skips behavioral rules ("Don't ask permission", "Run /gates -> /verify -> ...") because the pipeline orchestrator controls stage sequencing. Injecting interactive behavioral rules into headless sessions causes stage bleed-through — the implement stage runs all subsequent stages in one session instead of letting the pipeline manage them.
+
+**Behavior (interactive mode):**
 1. Read `.workflow/state.json` if it exists.
 2. Read current branch name.
 3. Determine workflow state: which steps have been completed, which are stale, which are pending.
@@ -214,12 +245,16 @@ Run these before creating a PR.
 
 **Trigger:** Session end (Stop event).
 
-**Behavior:**
-1. Read `.workflow/state.json` if it exists.
-2. Check for uncommitted changes (`git status`).
-3. **Design-only bypass:** On worktree branches, if the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`), skip workflow enforcement — this was a design session, not an implementation session. End cleanly. (Does not apply on main — main has no workflow state.)
-4. Emit a workflow completion summary.
-5. **Cannot block session end.** The user always has the right to stop.
+**Pipeline mode:** When `PPDS_PIPELINE=1` is set, the hook exits 0 immediately. The pipeline orchestrator handles stage sequencing via `state.json` — the Stop hook's workflow enforcement is redundant and harmful in headless mode. Without this bypass, the hook blocks the implement stage from exiting because gates/verify/review haven't run yet (they are separate pipeline stages), creating an infinite retry loop.
+
+**Behavior (all modes — in order):**
+1. **Pipeline check (first):** If `PPDS_PIPELINE=1` is set, exit 0 immediately. All subsequent checks are skipped.
+2. **Infinite loop guard:** If `stop_hook_active` is set in hook input, exit 0 (prevents re-entry).
+3. **Main branch:** If on `main` or `master`, exit 0.
+4. Read `.workflow/state.json` if it exists. If missing, exit 0.
+5. **Design-only bypass:** If the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`), exit 0 — this was a design session.
+6. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
+7. If all steps complete, emit summary to stderr and exit 0.
 
 **Output:**
 ```
@@ -240,7 +275,7 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 
 | Skill | Writes to state |
 |-------|----------------|
-| `/implement` | `branch`, `spec`, `plan`, `started`. Mandatory tail: runs `/gates` → `/verify` → `/qa` → `/review` → `/converge` after final phase. |
+| `/implement` | `branch`, `spec`, `plan`, `started`, `implemented`. Interactive mode mandatory tail: runs `/gates` → `/verify` → `/qa` → `/review` → `/converge` after final phase. In pipeline mode (`PPDS_PIPELINE=1`): skips tail — pipeline orchestrator runs subsequent stages as separate sessions. |
 | `/gates` | `gates.passed`, `gates.commit_ref` |
 | `/verify` | `verify.{surface}` (ext, tui, mcp, cli) |
 | `/qa` | `qa.{surface}` |
@@ -270,8 +305,8 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
-| `/status` | Display current workflow state. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. On-demand visibility into what's been done and what's pending. No state writes. |
-| `/start` | Bootstrap a feature worktree. | Accepts freeform input (issues, descriptions). AI extracts candidate name + issue numbers, proposes to user for confirmation. Creates worktree at `.worktrees/<name>` with branch `feat/<name>`, initializes `.workflow/state.json` with `branch`, `started`, and `issues` fields, opens new terminal using system default shell in worktree directory. Prints "Run `claude` then `/design`". Handles: existing branch (no `-b`), existing worktree (ask resume or new), platform detection for terminal launch (pwsh on Windows, default shell on Linux/Mac), missing terminal command (prints cd instructions instead). |
+| `/status` | Display current workflow state. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. Additionally reads `.workflow/pipeline.log` for pipeline status (stage progress, heartbeats, duration) and `.workflow/stages/{stage}.log` for recent stage output. No state writes. |
+| `/start` | Bootstrap a feature worktree. | Accepts freeform input (issues, descriptions). AI extracts candidate name + issue numbers, proposes to user for confirmation. Creates worktree at `.worktrees/<name>` with branch `feat/<name>`, initializes `.workflow/state.json` with `branch`, `started`, and `issues` fields, opens new terminal using system default shell in worktree directory. Prints "Run `claude` then `/design`". Handles: existing branch (no `-b`), existing worktree (ask resume or new), platform detection for terminal launch (pwsh on Windows, default shell on Linux/Mac), missing terminal command (prints cd instructions instead). **Worktree-aware:** Works from any branch — if on a feature branch/worktree, resolves the main repo root via `git worktree list` and creates the new worktree from there. |
 
 ### Main Branch Bootstrap
 
@@ -305,6 +340,99 @@ If no worktrees exist, skip the list, show `/start` guidance only.
 ```
 
 Exit code 2 (hard gate). Build/test/lint do not run.
+
+### Headless Pipeline Mode
+
+The pipeline orchestrator (`scripts/pipeline.py`) runs the full workflow as sequential `claude -p` sessions. Each stage gets a fresh context window. The script — not the AI — decides what runs next.
+
+#### Hook Commands — Relative Paths
+
+All hook commands in `.claude/settings.json` use relative paths:
+```
+python ".claude/hooks/session-stop-workflow.py"
+```
+
+Not:
+```
+python "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-stop-workflow.py"
+```
+
+Claude Code runs hooks with `cwd` set to the project directory, so relative paths resolve correctly. This eliminates the entire class of MSYS `${CLAUDE_PROJECT_DIR}` expansion bugs on Windows — there is no variable to mangle. The `_pathfix.py` module is retained for use inside hook scripts that reference `CLAUDE_PROJECT_DIR` for other purposes (e.g., finding `.workflow/state.json`).
+
+**Root cause this fixes:** Under MSYS bash, Claude expands `${CLAUDE_PROJECT_DIR}` to `/c/VS/...`, which MSYS mangles to `C:\c\VS\...` (double prefix). Python can't find the hook script at the mangled path. The hook fails, failure is sent back to Claude as user input, Claude responds, triggering another stop attempt — infinite loop (observed: 1,000-3,000+ iterations per session, hours of wall time).
+
+#### Pipeline Environment
+
+The pipeline sets these environment variables before spawning `claude -p`:
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `PPDS_PIPELINE` | `1` | Signals headless pipeline mode to hooks. Stop hook exits 0 immediately. Start hook skips behavioral rules. |
+| `MSYS_NO_PATHCONV` | `1` | Prevents MSYS bash from mangling paths in command arguments. |
+| `CLAUDE_PROJECT_DIR` | Windows-native path via `Path.resolve()` | Defense-in-depth for hook scripts' internal `_pathfix.get_project_dir()` usage. |
+
+#### Process Management
+
+The pipeline uses `subprocess.Popen` with file redirect and a polling loop — not `subprocess.run` with `capture_output=True`.
+
+**Why:** `subprocess.run(capture_output=True, timeout=None)` buffers all output in memory and blocks until process exit. If the subprocess hangs, the pipeline gets zero output and blocks forever. Observed: 0-byte output files, hours of blocking.
+
+**Subprocess launch:**
+```python
+proc = subprocess.Popen(
+    ["claude", "-p", prompt, "--verbose"],
+    cwd=worktree_path,
+    stdout=stage_log_file,      # File redirect, not PIPE
+    stderr=subprocess.STDOUT,    # Merge stderr into stdout
+    env=env,
+)
+```
+
+stdout and stderr merge into `.workflow/stages/{stage}.log`. No PIPE — eliminates buffer deadlock class of bugs. Stage log is readable in real-time by `/status` or manual `tail -f`.
+
+**Polling loop (5-second interval):**
+1. `process.poll()` — detect exit
+2. Timeout check — terminate if elapsed > stage timeout
+3. Heartbeat every 60s — log elapsed time, PID, output file size, activity status
+
+**Timeout enforcement:** On timeout, `process.terminate()` sends SIGTERM (Unix) or TerminateProcess (Windows). Wait 30s grace period on Unix, then `process.kill()` if still alive. On Windows, `terminate()` and `kill()` both call TerminateProcess — no grace period.
+
+#### Default Stage Timeouts
+
+| Stage | Timeout | Rationale |
+|-------|---------|-----------|
+| implement | 45 min | Largest stage — multiple phases, many commits |
+| gates | 15 min | Build + unit tests |
+| verify | 20 min | Multi-surface verification |
+| qa | 20 min | Blind verification (three-agent) |
+| review | 15 min | Code review analysis |
+| converge (per round) | 15 min | Fix + re-gate per round |
+| pr | 10 min | PR creation and Gemini triage |
+| retro | 10 min | Post-mortem analysis |
+
+Overridable via `--stage-timeout <seconds>` CLI flag (applies to all stages).
+
+#### Pipeline Log Format
+
+Existing format preserved. New entry types:
+
+```
+2026-03-26T20:30:17Z [implement] START
+2026-03-26T20:31:17Z [implement] HEARTBEAT elapsed=60s pid=12345 output_bytes=45230 activity=active
+2026-03-26T20:32:17Z [implement] HEARTBEAT elapsed=120s pid=12345 output_bytes=102400 activity=active
+2026-03-26T20:33:17Z [implement] HEARTBEAT elapsed=180s pid=12345 output_bytes=102400 activity=idle
+2026-03-26T20:45:00Z [implement] OUTPUT line=<last 20 lines of stage log>
+2026-03-26T20:45:00Z [implement] DONE exit=0 duration=887s
+```
+
+#### Stage Log Files
+
+Location: `.workflow/stages/{stage}.log`
+
+- One file per stage invocation (overwritten on retry)
+- Contains raw `claude -p` stdout+stderr
+- Readable in real-time via `tail -f` or `/status`
+- Gitignored (`.workflow/` is already gitignored)
 
 ### CLAUDE.md Workflow Section Rewrite
 
@@ -383,7 +511,7 @@ After all skills in this spec are implemented:
 | AC-11 | SessionStart hook injects required workflow sequence when no state file exists | Manual: start session on new feature branch | 🔲 |
 | AC-12 | Stop hook emits workflow completion summary on session end | Manual: end session with incomplete workflow | 🔲 |
 | AC-13 | Pre-commit hook warns when gates are stale and `src/` files are staged | Manual: modify src/ file, commit without running `/gates` | 🔲 |
-| AC-14 | `/implement` runs `/gates`, `/verify`, `/qa`, `/review`, `/converge` as mandatory tail after final phase | Manual: run `/implement` on a plan, verify tail steps execute | 🔲 |
+| AC-14 | `/implement` runs `/gates`, `/verify`, `/qa`, `/review`, `/converge` as mandatory tail after final phase (interactive mode only — skipped when `PPDS_PIPELINE=1`) | Manual: run `/implement` on a plan, verify tail steps execute | 🔲 |
 | AC-15 | `/pr` responds to each Gemini comment individually on the PR | Manual: create PR with Gemini review, verify per-comment replies | 🔲 |
 | AC-16 | `/pr` includes summary of all review comments and actions in status report | Manual: create PR, verify summary output | 🔲 |
 | AC-17 | `/design` loads constitution + spec template + searches all `specs/*.md` for overlapping scope before brainstorming; if existing spec found, presents it and proposes update mode | Manual: run `/design` for domain with existing spec, verify search + update-mode proposal | 🔲 |
@@ -420,6 +548,22 @@ After all skills in this spec are implemented:
 | AC-48 | `protect-main-branch.py` blocks ALL edits on main — `.plans/` removed from allowed prefixes; only temp dirs and `.worktrees/` writes allowed | Manual: attempt to edit `.plans/` file on main, verify blocked | 🔲 |
 | AC-49 | `session-stop-workflow.py` skips workflow enforcement on worktree branches when the only changed files (vs main) are non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`) — design/config sessions end cleanly | Manual: end design session in worktree with only spec changes, verify no enforcement | 🔲 |
 | AC-50 | `/design` does not activate plan mode — uses its own incremental approval flow (one question at a time, section-by-section validation) | Manual: run `/design`, verify plan mode is not used | 🔲 |
+| AC-51 | All hook commands in settings.json use relative paths `.claude/hooks/` — no `${CLAUDE_PROJECT_DIR}` in any command string | `test_pipeline.py::test_all_hook_commands_use_relative_paths` | 🔲 |
+| AC-52 | Stop hook exits 0 immediately when `PPDS_PIPELINE=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_pipeline_mode` | 🔲 |
+| AC-53 | Start hook skips behavioral rules when `PPDS_PIPELINE=1` env var is set (emits only status checklist) | `test_pipeline.py::test_start_hook_skips_rules_in_pipeline_mode` | 🔲 |
+| AC-54 | Pipeline sets `PPDS_PIPELINE=1` in subprocess environment | `test_pipeline.py::test_sets_pipeline_env_var` | 🔲 |
+| AC-55 | Stage output written to `.workflow/stages/{stage}.log` file (not PIPE) | `test_pipeline.py::test_stage_output_goes_to_file` | 🔲 |
+| AC-56 | Pipeline logs heartbeat every 60s with elapsed time, PID, output bytes, and activity status | `test_pipeline.py::test_heartbeat_logging` | 🔲 |
+| AC-57 | Per-stage timeout terminates subprocess when exceeded | `test_pipeline.py::test_timeout_kills_subprocess` | 🔲 |
+| AC-58 | Exit code logged immediately when subprocess finishes | `test_pipeline.py::test_logs_exit_code_on_completion` | 🔲 |
+| AC-59 | Last 20 lines of stage output written to pipeline.log after stage completes | `test_pipeline.py::test_captures_output_tail` | 🔲 |
+| AC-60 | `--stage-timeout` CLI flag overrides default stage timeouts | `test_pipeline.py::test_stage_timeout_cli_override` | 🔲 |
+| AC-61 | Dry-run mode works with new process management (no subprocess spawned) | `test_pipeline.py::test_dry_run_skips_subprocess` | 🔲 |
+| AC-62 | `/start` works from feature branches — resolves main repo root and creates worktree from there | Manual: run `/start` from a worktree, verify new worktree created | 🔲 |
+| AC-63 | `/status` shows pipeline stage progress including heartbeat data when pipeline is running | Manual: run `/status` during pipeline execution, verify stage timing shown | 🔲 |
+| AC-64 | All `.claude/commands/*.md` files migrated to `.claude/skills/{name}/SKILL.md` with frontmatter | `test_pipeline.py::test_no_commands_directory` | 🔲 |
+| AC-65 | Pipeline STAGES includes `qa` between `verify` and `review` | `test_pipeline.py::test_pipeline_stages_include_qa` | 🔲 |
+| AC-66 | `/implement` skill skips mandatory tail (gates/verify/qa/review) when `PPDS_PIPELINE=1` is set | `test_pipeline.py::test_implement_skips_tail_in_pipeline_mode` | 🔲 |
 
 ### Edge Cases
 
@@ -436,6 +580,16 @@ After all skills in this spec are implemented:
 | User runs `/design` on main without a worktree | Errors with "Run `/start` first" message. No spec or plan is created. |
 | User runs `/start` with uninterpretable input | AI asks for clarification. If still unclear, proposes a generic name and asks for confirmation. |
 | `/pr` CI or Gemini review takes longer than 15 minutes | `/pr` stops polling, reports current status and what's still pending. User can re-check later with natural language. |
+| Pipeline stage timeout exceeded | Process terminated, `TIMEOUT` logged to pipeline.log, pipeline exits 1. |
+| Pipeline subprocess crashes immediately (exit 1 in <1s) | Exit code logged, pipeline proceeds to failure handling. |
+| Pipeline subprocess completes work but process doesn't exit | Timeout fires, process killed, pipeline logs TIMEOUT and continues to next stage if outcome verified. |
+| Stage log directory missing | Auto-created before subprocess launch. |
+| `claude` command not found on PATH | `FileNotFoundError` caught, `ERROR` logged, pipeline exits 1. |
+| `/start` run from worktree | Resolves main repo root via `git worktree list`, creates new worktree from there. Current session unaffected. |
+| Hook command with MSYS path mangling | Cannot happen — relative paths have no `${CLAUDE_PROJECT_DIR}` to mangle. |
+| Two pipelines run on same worktree simultaneously | Undefined — last-writer-wins on state.json, interleaved stage logs. Pipeline does not acquire a lock. Users should not do this. |
+| `PPDS_PIPELINE=1` set manually in interactive session | Stop hook exits immediately, skipping workflow enforcement. Start hook skips behavioral rules. User gets a degraded experience — this is intentional only for pipeline use. |
+| Stage log file locked by another process (Windows) | Popen fails to open file — caught as OSError, logged as ERROR, pipeline exits 1. |
 
 ---
 
@@ -486,6 +640,53 @@ After all skills in this spec are implemented:
 **Consequences:**
 - Positive: Full control over skill behavior. No external dependency changes breaking our workflow. Reduced token overhead.
 - Negative: Lose automatic access to future superpowers improvements. Mitigated by periodic review of superpowers changelog.
+
+### Why Relative Hook Paths Instead of Fixing `${CLAUDE_PROJECT_DIR}`?
+
+**Context:** `${CLAUDE_PROJECT_DIR}` is expanded by Claude Code's internal system before the shell processes the command. Under MSYS bash on Windows, this produces double-prefixed paths (`/c/VS/...` becomes `C:\c\VS\...`). The ed632d61e fix attempted to set `CLAUDE_PROJECT_DIR` to a Windows-native path in the environment, but Claude Code computes its own project directory from `cwd`, ignoring the env var for hook command expansion.
+
+**Decision:** Use relative paths. Claude runs hooks with `cwd=project_dir`, so `.claude/hooks/foo.py` resolves correctly without any variable expansion. No variable = no mangling.
+
+**Evidence:** ed632d61e fix applied to both cmt-parity and plugin-registration branches. Both still failed with identical path mangling. Transcript analysis: 1,614 stop hook errors in cmt-parity, 515 in plugin-registration, all showing `C:\c\VS\...` mangled path.
+
+**Alternatives considered:**
+- Fix path inside `_pathfix.py`: Script never loads — Python can't find the file at the mangled path
+- Set `CLAUDE_PROJECT_DIR` in env: Tried in ed632d61e, Claude ignores it for hook expansion
+- Hardcode absolute Windows paths: Not portable
+
+### Why File Redirect Instead of PIPE?
+
+**Context:** The original pipeline used `subprocess.run(capture_output=True)`, which buffers ALL output in memory via PIPE. If the process hangs, nothing is returned — the 0-byte output file in the original bug confirms this.
+
+**Decision:** Redirect stdout/stderr to files on disk. Output is visible in real-time. No buffer limits. No deadlock possible.
+
+**Evidence:** Three stuck pipeline instances observed with 0 bytes captured. Python processes at 0.03-0.06s total CPU over hours — completely blocked inside `subprocess.run` waiting for data that never comes.
+
+**Alternatives considered:**
+- PIPE with reader threads: Adds threading complexity — the exact class of problems that cause hangs on Windows
+- PIPE with `communicate()`: Blocks until exit, same as `subprocess.run`
+
+### Why Polling Instead of Threading?
+
+**Context:** Need to monitor subprocess health (heartbeat, timeout) while it runs.
+
+**Decision:** 5-second polling loop with `process.poll()` + `time.sleep()`. Both are non-blocking/trivial. No race conditions. Fully debuggable.
+
+**Alternatives considered:**
+- Threading: Complex, harder to debug, potential Windows pipe edge cases
+- asyncio: Changes function signatures throughout, overkill for sequential pipeline
+
+### Why Bypass Stop Hook in Pipeline Mode?
+
+**Context:** The Stop hook enforces that all workflow steps (gates, verify, review) are complete before allowing session end. In pipeline mode, stages run as separate `claude -p` sessions — the implement session hasn't run gates/verify/review because those are later stages.
+
+**Decision:** Pipeline sets `PPDS_PIPELINE=1`, Stop hook exits 0 immediately. The pipeline already enforces stage outcomes via `verify_outcome()` and `state.json` reads between stages.
+
+**Evidence:** Even if the path mangling were fixed, the Stop hook would block implement from exiting, emit `decision: block` with "You MUST now run: /gates", forcing Claude to run all stages in one session — breaking the pipeline's stage separation. Observed in plugin-registration: workflow state showed gates/verify/qa/review all passed inside the implement session.
+
+**Alternatives considered:**
+- Make Stop hook understand stage boundaries: Over-complex, couples hook to pipeline logic
+- Remove Stop hook entirely: Breaks interactive session enforcement
 
 ### Why Absorb Systematic Debugging Into /debug?
 
@@ -544,23 +745,24 @@ When a new required step is added (e.g., security scanning):
 
 All hook-related `settings.json` changes consolidated:
 
-1. **PostToolUse section** (new): Add `PostToolUse` matcher array to `.claude/settings.json`. Currently only `PreToolUse` exists.
+1. **All hook commands use relative paths** (no `${CLAUDE_PROJECT_DIR}`):
+   ```json
+   { "type": "command", "command": "python \".claude/hooks/session-stop-workflow.py\"" }
+   ```
+   Not:
+   ```json
+   { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-stop-workflow.py\"" }
+   ```
+
+2. **PostToolUse section** (new): Add `PostToolUse` matcher array to `.claude/settings.json`. Currently only `PreToolUse` exists.
    ```json
    "hooks": {
      "PostToolUse": [
        {
          "matcher": "Bash(git commit:*)",
-         "hooks": [{ "type": "command", "command": ".claude/hooks/post-commit-state.py" }]
+         "hooks": [{ "type": "command", "command": "python \".claude/hooks/post-commit-state.py\"" }]
        }
      ]
-   }
-   ```
-
-2. **PreToolUse additions**: Add PR gate hook entry to existing `PreToolUse` array:
-   ```json
-   {
-     "matcher": "Bash(gh pr create:*)",
-     "hooks": [{ "type": "command", "command": ".claude/hooks/pr-gate.py" }]
    }
    ```
 
@@ -568,6 +770,10 @@ All hook-related `settings.json` changes consolidated:
    ```json
    { "enabledPlugins": { "superpowers@claude-plugins-official": false } }
    ```
+
+### Skill Location Consolidation
+
+All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` directory is deprecated — any remaining commands should be migrated to `.claude/skills/{name}/SKILL.md` with frontmatter.
 
 ---
 
@@ -578,9 +784,20 @@ All hook-related `settings.json` changes consolidated:
 
 ---
 
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-20 | Initial spec (v1.0) |
+| 2026-03-22 | v2.0 — skill renames, /design, /start, /pr, main branch bootstrap |
+| 2026-03-24 | v3.0 — stop hook blocking, converge cycle handling, /shakedown |
+| 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
+
+---
+
 ## Roadmap
 
-- **Headless execution (Option C):** Trigger implementation from GitHub issues or webhooks. Requires persisted workflow state and session handoff mechanism.
+- **GitHub-triggered pipelines:** Trigger implementation from GitHub issues or webhooks. Requires persisted workflow state and session handoff mechanism.
 - **PR monitoring webhook:** Replace polling in `/pr` with GitHub webhook notification when CI/reviews complete.
 - **Worktree auto-cleanup:** SessionStart hook checks for stale worktrees (no commits in >7 days) and prompts for cleanup.
 - **Cross-session workflow continuity:** Persist workflow state to git (not gitignored) so a new session can pick up where a previous session left off.
