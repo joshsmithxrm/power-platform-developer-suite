@@ -229,20 +229,6 @@ class TestOutputTail:
             assert "output line 10" in lines[-20:][0]
 
 
-# ---------------------------------------------------------------------------
-# AC-60: --stage-timeout CLI override
-# ---------------------------------------------------------------------------
-class TestStageTimeoutCli:
-    def test_stage_timeout_cli_override(self):
-        """AC-60: --stage-timeout flag is accepted by argparse."""
-        import pipeline
-
-        # Parse args with --stage-timeout
-        parser = pipeline.argparse.ArgumentParser()
-        parser.add_argument("--stage-timeout", type=int)
-        args = parser.parse_args(["--stage-timeout", "100"])
-        assert args.stage_timeout == 100
-
 
 # ---------------------------------------------------------------------------
 # AC-61: Dry-run works

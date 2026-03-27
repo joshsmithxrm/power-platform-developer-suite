@@ -32,20 +32,24 @@ def get_current_branch() -> str:
 
 
 def is_allowed_path(file_path: str) -> bool:
-    normalized = file_path.replace("\\", "/").lower()
-    # Strip project dir prefix so absolute paths work the same as relative ones
-    project_dir = normalize_msys_path(os.environ.get("CLAUDE_PROJECT_DIR", "")).replace("\\", "/").lower().rstrip("/")
+    normalized = normalize_msys_path(file_path).replace("\\", "/").lower()
+    project_dir = normalize_msys_path(
+        os.environ.get("CLAUDE_PROJECT_DIR", "")
+    ).replace("\\", "/").lower().rstrip("/")
+
+    relative = normalized
     if project_dir and normalized.startswith(project_dir + "/"):
-        normalized = normalized[len(project_dir) + 1:]
-    allowed_prefixes = []
+        relative = normalized[len(project_dir) + 1:]
+
     allowed_substrings = [
         "/tmp/",
         "/temp/",
         "appdata/local/temp",
         ".worktrees/",
     ]
-    return any(normalized.startswith(p) for p in allowed_prefixes) or any(
-        s in normalized for s in allowed_substrings
+    # Check both absolute and relative forms
+    return any(s in normalized for s in allowed_substrings) or any(
+        s in relative for s in allowed_substrings
     )
 
 def main() -> None:

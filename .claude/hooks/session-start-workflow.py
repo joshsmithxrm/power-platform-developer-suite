@@ -63,7 +63,7 @@ def main():
         msg = (
             f"WORKFLOW ENFORCEMENT ACTIVE on branch {branch}:\n"
             "  No workflow state tracked yet.\n"
-            "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
+            "  For new features: /design → /implement → /gates → /verify → /qa → /review → /pr\n"
             "  For bug fixes: /gates → /verify (if UI changed) → /pr"
         )
         if not os.environ.get("PPDS_PIPELINE"):

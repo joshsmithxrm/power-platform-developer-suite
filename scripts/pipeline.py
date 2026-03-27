@@ -1031,7 +1031,6 @@ def main():
     parser.add_argument("--worktree", help="Use existing worktree instead of creating one")
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
-    parser.add_argument("--stage-timeout", type=int, help="(Deprecated — ignored. Timeouts are now activity-based.)")
     args = parser.parse_args()
 
     # Handle backward compat: positional plan arg
