@@ -610,6 +610,9 @@ def process_retro_findings(worktree_path, logger, repo_root):
         issue_only=len(issues), observation=len(observations),
     )
 
+    gh_env = os.environ.copy()
+    gh_env["MSYS_NO_PATHCONV"] = "1"
+
     for finding in issues:
         desc = finding.get("description", "No description")
         fix = finding.get("fix_description", "")
@@ -630,9 +633,21 @@ def process_retro_findings(worktree_path, logger, repo_root):
         body += "\n\n---\n*Filed automatically by pipeline retro.*"
 
         try:
+            title = f"retro: {desc[:70]}"
+            existing = subprocess.run(
+                ["gh", "issue", "list", "--search", f'"{title}" in:title',
+                 "--state", "open", "--json", "number", "--jq", "length"],
+                cwd=repo_root, capture_output=True, text=True, timeout=15,
+                env=gh_env,
+            )
+            if existing.returncode == 0 and existing.stdout.strip() not in ("", "0"):
+                log(logger, "retro", "ISSUE_EXISTS", finding=finding_id)
+                continue
+
             subprocess.run(
                 ["gh", "issue", "create", "--title", title, "--body", body],
                 cwd=repo_root, capture_output=True, text=True, timeout=30, check=True,
+                env=gh_env,
             )
             log(logger, "retro", "ISSUE_CREATED", finding=finding_id)
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
@@ -1320,6 +1335,24 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+
+            # Auto-commit stranded files between stages (#717)
+            if worktree_path and stage not in ("worktree", "retro", "pr"):
+                dirty = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
+                )
+                if dirty.returncode == 0 and dirty.stdout.strip():
+                    subprocess.run(["git", "add", "-u"], cwd=worktree_path,
+                                   capture_output=True, text=True, timeout=10)
+                    commit = subprocess.run(
+                        ["git", "commit", "-m", f"chore({stage}): auto-commit stage changes"],
+                        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+                    )
+                    if commit.returncode == 0:
+                        log(logger, stage, "AUTO_COMMIT", reason="stranded files committed")
+                    elif "nothing to commit" not in (commit.stdout + commit.stderr):
+                        log(logger, stage, "AUTO_COMMIT_FAILED", reason=commit.stderr.strip()[:200])
 
             # Track stage duration with exit code and last output line
             stage_dur = f"{int(time.time() - stage_start_time)}s"
