@@ -55,6 +55,13 @@ class TestAgentFrontmatter:
         errors = verify_workflow_checks.check_agent_frontmatter(str(agent))
         assert errors == []
 
+    def test_agent_frontmatter_allowed_tools_key(self, tmp_path):
+        """AC-20: allowedTools is accepted as an alias for tools."""
+        agent = tmp_path / "agent.md"
+        agent.write_text("---\nname: test\nallowedTools:\n  - Read\n  - Bash\n---\n# Test\n")
+        errors = verify_workflow_checks.check_agent_frontmatter(str(agent))
+        assert errors == []
+
 
 class TestDeadLinkDetection:
     def test_dead_link_detection(self, tmp_path):

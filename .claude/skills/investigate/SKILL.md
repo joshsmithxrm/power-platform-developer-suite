@@ -100,7 +100,7 @@ Agent tool:
 
 **Convergence rules:**
 - **Max 3 rounds** — safety valve, stop after 3 rounds regardless
-- **Fewer blockers each round** — round N+1 must have fewer BLOCKERs than round N to indicate convergence
+- **Fewer blockers each round** — round N+1 must have fewer BLOCKERs than round N to indicate convergence. If blockers increase (divergence), continue up to max 3 rounds, then stop and note "challenger diverged — escalate all findings to human"
 - **Zero blockers + implementation-detail concerns only** — stop when no BLOCKERs remain and all CONCERNs are implementation-detail level (not architectural)
 - **Same findings reappear** — if the challenger raises the same findings across rounds, it is looping; stop and note "challenger converged (repeated findings)"
 

@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify
+description: AI self-verification of implemented work across surfaces (extension, CLI, MCP, TUI, workflow). Use after implementation to verify code works in its runtime environment.
 ---
 
 # Verify
@@ -164,7 +164,7 @@ For each tool:
 3. Verify response matches expected schema
 
 
-### 8. Workflow Mode
+### 7. Workflow Mode
 
 Structural validation of process code (`.claude/` and `scripts/`).
 
@@ -212,7 +212,7 @@ python scripts/workflow-state.py set verify.workflow now
 python scripts/workflow-state.py set qa.workflow now
 ```
 
-### 7. Report
+### 8. Report
 
 Present structured results:
 

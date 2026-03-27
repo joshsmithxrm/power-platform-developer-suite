@@ -59,15 +59,15 @@ def check_agent_frontmatter(agent_path: str) -> list[str]:
 
     frontmatter = parts[1].strip()
 
-    # Parse tools list from YAML
+    # Parse tools list from YAML (accept both 'tools' and 'allowedTools')
     tools = []
     in_tools = False
     for line in frontmatter.split("\n"):
         stripped = line.strip()
-        if stripped.startswith("tools:"):
+        if stripped.startswith("tools:") or stripped.startswith("allowedTools:"):
             in_tools = True
             # Check for inline list
-            after = stripped[len("tools:"):].strip()
+            after = stripped.split(":", 1)[1].strip()
             if after.startswith("["):
                 # Inline list: tools: [Read, Grep]
                 tools = [t.strip() for t in after.strip("[]").split(",") if t.strip()]
