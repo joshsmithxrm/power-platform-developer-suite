@@ -843,6 +843,12 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     log(logger, "pr", "START")
     start = time.time()
 
+    # PPDS_SHAKEDOWN: skip PR creation entirely
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "pr", "PR_SKIPPED_SHAKEDOWN")
+        log(logger, "pr", "DONE", exit=0, duration="0s", mode="shakedown")
+        return 0, logger
+
     def _check_timeout():
         """Check if stage hard ceiling exceeded. Logs and returns True if timed out."""
         if (time.time() - start) > HARD_CEILING:

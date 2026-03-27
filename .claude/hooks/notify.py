@@ -55,7 +55,7 @@ def show_toast(title, msg, url):
 
 
 def main():
-    if os.environ.get("PPDS_PIPELINE"):
+    if os.environ.get("PPDS_PIPELINE") or os.environ.get("PPDS_SHAKEDOWN"):
         sys.exit(0)
 
     parser = argparse.ArgumentParser(description="Desktop toast notification")

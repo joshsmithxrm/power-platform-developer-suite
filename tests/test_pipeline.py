@@ -1560,6 +1560,76 @@ class TestShakedownSuppressesIssueOps:
 
 
 # ===========================================================================
+# Shakedown Tests (WE AC-115–121, AC-118, AC-118b)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# AC-116: Shakedown env var propagation
+# ---------------------------------------------------------------------------
+class TestShakedownEnvVar:
+    def test_shakedown_env_var(self):
+        """AC-116: PPDS_SHAKEDOWN env var recognized by pipeline."""
+        import pipeline
+        import inspect
+        source = inspect.getsource(pipeline.run_pr_stage)
+        assert "PPDS_SHAKEDOWN" in source
+
+
+# ---------------------------------------------------------------------------
+# AC-117: Shakedown suppresses issue filing
+# ---------------------------------------------------------------------------
+class TestShakedownSuppressesIssueFiling:
+    def test_shakedown_suppresses_issue_filing(self):
+        """AC-117: process_retro_findings skips gh issue create in shakedown."""
+        import pipeline
+        import inspect
+        source = inspect.getsource(pipeline.process_retro_findings)
+        assert "PPDS_SHAKEDOWN" in source
+        assert "SHAKEDOWN_SKIPPED" in source
+
+
+# ---------------------------------------------------------------------------
+# AC-118: Shakedown skips PR creation
+# ---------------------------------------------------------------------------
+class TestShakedownSkipsPr:
+    def test_shakedown_skips_pr_creation(self):
+        """AC-118: run_pr_stage exits 0 with PR_SKIPPED_SHAKEDOWN in shakedown."""
+        import pipeline
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            with patch.dict(os.environ, {"PPDS_SHAKEDOWN": "1"}):
+                exit_code, _ = pipeline.run_pr_stage(tmpdir, logger)
+
+            logger.close()
+            assert exit_code == 0
+
+            with open(log_path) as f:
+                content = f.read()
+            assert "PR_SKIPPED_SHAKEDOWN" in content
+
+
+# ---------------------------------------------------------------------------
+# AC-118b: Shakedown suppresses notify
+# ---------------------------------------------------------------------------
+class TestShakedownSuppressesNotify:
+    def test_shakedown_suppresses_notify(self):
+        """AC-118b: notify.py exits 0 without sending in shakedown."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "notify.py"
+        )
+        with open(hook_path, "r") as f:
+            content = f.read()
+        assert "PPDS_SHAKEDOWN" in content
+
+
+# ===========================================================================
 # Workflow Enforcement v7.0 Tests (ACs 100-127) — Stop Hook + Heartbeat
 # ===========================================================================
 
