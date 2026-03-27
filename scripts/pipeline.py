@@ -580,6 +580,43 @@ def _find_duplicate_issue(title, repo_root):
     return None
 
 
+def _handle_duplicate(finding, existing_issue_number, repo_root, logger, worktree_path):
+    """Post structured comment on existing issue for duplicate findings."""
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "retro", "SHAKEDOWN_SKIPPED_COMMENT",
+            finding=finding.get("id", "R-??"), issue=existing_issue_number)
+        return
+
+    state = read_state(worktree_path) if worktree_path else {}
+    branch = state.get("branch", "unknown")
+    finding_id = finding.get("id", "R-??")
+    desc = finding.get("description", "No description")
+
+    comment_body = (
+        f"## Also observed: {finding_id}\n\n"
+        f"**Branch:** `{branch}`\n"
+        f"**Finding:** {finding_id}\n"
+        f"**Evidence:** {desc}\n\n"
+        "---\n*Also observed by pipeline retro.*"
+    )
+
+    gh_env = os.environ.copy()
+    gh_env["MSYS_NO_PATHCONV"] = "1"
+
+    try:
+        subprocess.run(
+            ["gh", "issue", "comment", str(existing_issue_number),
+             "--body", comment_body],
+            cwd=repo_root, capture_output=True, text=True, timeout=30,
+            env=gh_env,
+        )
+        log(logger, "retro", "ISSUE_UPDATED_DUPLICATE",
+            finding=finding_id, existing=f"#{existing_issue_number}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+        log(logger, "retro", "ISSUE_COMMENT_FAILED",
+            finding=finding_id, issue=existing_issue_number)
+
+
 def process_retro_findings(worktree_path, logger, repo_root):
     """Process retro findings for auto-heal."""
     findings_path = os.path.join(worktree_path, ".workflow", "retro-findings.json")
@@ -610,6 +647,12 @@ def process_retro_findings(worktree_path, logger, repo_root):
         issue_only=len(issues), observation=len(observations),
     )
 
+    # PPDS_SHAKEDOWN suppresses all issue filing and commenting
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "retro", "SHAKEDOWN_SKIPPED_ALL_ISSUES",
+            issue_count=len(issues))
+        return
+
     gh_env = os.environ.copy()
     gh_env["MSYS_NO_PATHCONV"] = "1"
 
@@ -621,8 +664,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
 
         existing = _find_duplicate_issue(title, repo_root)
         if existing:
-            log(logger, "retro", "ISSUE_SKIPPED_DUPLICATE",
-                finding=finding_id, existing=f"#{existing}")
+            _handle_duplicate(finding, existing, repo_root, logger, worktree_path)
             continue
 
         body = f"## Retro Finding {finding_id}\n\n{desc}\n\n**Recommended fix:** {fix}"
@@ -633,17 +675,6 @@ def process_retro_findings(worktree_path, logger, repo_root):
         body += "\n\n---\n*Filed automatically by pipeline retro.*"
 
         try:
-            title = f"retro: {desc[:70]}"
-            existing = subprocess.run(
-                ["gh", "issue", "list", "--search", f'"{title}" in:title',
-                 "--state", "open", "--json", "number", "--jq", "length"],
-                cwd=repo_root, capture_output=True, text=True, timeout=15,
-                env=gh_env,
-            )
-            if existing.returncode == 0 and existing.stdout.strip() not in ("", "0"):
-                log(logger, "retro", "ISSUE_EXISTS", finding=finding_id)
-                continue
-
             subprocess.run(
                 ["gh", "issue", "create", "--title", title, "--body", body],
                 cwd=repo_root, capture_output=True, text=True, timeout=30, check=True,

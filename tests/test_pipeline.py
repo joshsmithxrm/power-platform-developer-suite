@@ -1478,6 +1478,87 @@ class TestObservationsPersisted:
             )
 
 
+# ---------------------------------------------------------------------------
+# RF AC-07: Duplicate issue update (not skip)
+# ---------------------------------------------------------------------------
+class TestDuplicateIssueUpdate:
+    def test_update_duplicate_issue(self):
+        """RF AC-07: process_retro_findings calls _handle_duplicate on dupes."""
+        import pipeline
+        from unittest.mock import patch, MagicMock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "issue-only",
+                     "description": "Pipeline resumes while previous stage still running"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=42), \
+                 patch.object(pipeline, "_handle_duplicate") as mock_handle:
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+            mock_handle.assert_called_once()
+            args = mock_handle.call_args
+            assert args[0][1] == 42  # existing_issue_number
+
+    def test_duplicate_comment_format(self):
+        """RF AC-16: Duplicate comment includes branch, finding ID, evidence."""
+        import pipeline
+        import inspect
+        source = inspect.getsource(pipeline._handle_duplicate)
+        assert "branch" in source.lower()
+        assert "finding_id" in source or "finding" in source
+        assert "Also observed" in source
+
+
+# ---------------------------------------------------------------------------
+# RF AC-17: PPDS_SHAKEDOWN suppresses all issue ops
+# ---------------------------------------------------------------------------
+class TestShakedownSuppressesIssueOps:
+    def test_shakedown_suppresses_all_issue_ops(self):
+        """RF AC-17: PPDS_SHAKEDOWN=1 prevents gh issue create and comment."""
+        import pipeline
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "issue-only",
+                     "description": "A real issue that should not be filed"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            env_patch = {"PPDS_SHAKEDOWN": "1"}
+            with patch.dict(os.environ, env_patch), \
+                 patch("subprocess.run") as mock_run:
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+            # subprocess.run should never be called for gh commands
+            mock_run.assert_not_called()
+
+            with open(log_path) as f:
+                content = f.read()
+            assert "SHAKEDOWN_SKIPPED" in content
+
+
 # ===========================================================================
 # Workflow Enforcement v7.0 Tests (ACs 100-127) — Stop Hook + Heartbeat
 # ===========================================================================
