@@ -292,7 +292,22 @@ async function runDaemon() {
     });
   }
 
+  // ── Idle timeout — self-terminate after 30 min of no requests ───
+  const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+  let idleTimer = null;
+
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      console.error('Idle timeout (30m) — shutting down');
+      cleanup();
+    }, IDLE_TIMEOUT_MS);
+  }
+
+  resetIdleTimer(); // Start the timer when daemon starts
+
   const server = createServer(async (req, res) => {
+    resetIdleTimer(); // Reset on every request
     try {
       if (req.url === '/health') {
         res.writeHead(200); res.end('ok'); return;
@@ -324,6 +339,7 @@ async function runDaemon() {
   console.error(`Daemon ready on port ${daemonPort}`);
 
   async function cleanup() {
+    if (idleTimer) clearTimeout(idleTimer);
     try { terminal.kill(); } catch {}
     deleteSession();
     if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);

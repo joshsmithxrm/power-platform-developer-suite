@@ -97,6 +97,16 @@ Process worktrees **one at a time, sequentially** — do NOT run removals in par
 
 For each merged or squash-merged worktree (not locked, not the main worktree):
 
+**Before removal, shut down any running daemons:**
+
+1. Search for `*-session.json` files in the worktree (e.g., `tests/PPDS.Tui.E2eTests/tools/.tui-verify-session.json`)
+2. For each session file found:
+   - Read `daemonPort` and `daemonPid` from the JSON
+   - Send `POST http://localhost:{port}/shutdown` (timeout 5s)
+   - If the HTTP request fails, kill the PID directly: `taskkill /PID {pid} /F` (Windows) or `kill {pid}` (Unix)
+   - Delete the session file
+3. Proceed with worktree removal after daemons are shut down
+
 ```bash
 git worktree remove --force .worktrees/<name>
 ```
