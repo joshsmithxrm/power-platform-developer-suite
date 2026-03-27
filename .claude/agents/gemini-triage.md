@@ -1,4 +1,5 @@
 ---
+name: gemini-triage
 model: sonnet
 tools:
   - Read
