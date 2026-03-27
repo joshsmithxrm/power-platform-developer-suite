@@ -1,4 +1,4 @@
-using System.CommandLine;
+﻿using System.CommandLine;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -363,7 +363,7 @@ public static class DeployCommand
                     }
                     else
                     {
-                        stepId = await service.UpsertStepAsync(typeId, stepConfig, messageId.Value, filterId, solution);
+                        stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
 

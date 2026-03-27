@@ -90,7 +90,7 @@ Custom APIs span three Dataverse entities with a parent-child relationship.
 | `DisplayName` | string | Yes | Human-readable display name |
 | `Name` | string | Yes | Logical name |
 | `Description` | string | No | Free-text description |
-| `PluginTypeId` | Guid | Yes | The implementing plugin type |
+| `PluginTypeId` | Guid | No | The implementing plugin type (nullable — can be set or cleared after creation via `set-plugin`) |
 | `BindingType` | OptionSet | Yes | Global (0), Entity (1), EntityCollection (2) |
 | `BoundEntityLogicalName` | string | Conditional | Required when BindingType = Entity or EntityCollection |
 | `AllowedCustomProcessingStepType` | OptionSet | Yes | None (0), AsyncOnly (1), SyncAndAsync (2) |
@@ -296,6 +296,27 @@ ppds custom-apis add-parameter myorg_ApproveInvoice ApprovalId \
 ```bash
 ppds custom-apis remove-parameter myorg_ApproveInvoice ApproverNote
 ```
+
+**`ppds custom-apis set-plugin <unique-name-or-id> --plugin <type-name> --assembly <assembly-name>`**
+
+Sets, changes, or clears the implementing plugin type for a Custom API.
+
+```bash
+# Link a plugin type to a Custom API
+ppds custom-apis set-plugin myorg_ApproveInvoice \
+    --plugin ApproveInvoicePlugin \
+    --assembly MyPlugin
+
+# Clear the plugin type (unlink)
+ppds custom-apis set-plugin myorg_ApproveInvoice --none
+```
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `<unique-name-or-id>` | Yes | Custom API unique name or ID |
+| `--plugin` | Conditional | Plugin type name (required unless `--none`) |
+| `--assembly` | Conditional | Assembly containing the plugin type (required with `--plugin`) |
+| `--none` | No | Clear the plugin type (unlink) |
 
 #### Extension Surface
 
@@ -548,6 +569,11 @@ public interface ICustomApiService
         Guid id, bool force = false,
         CancellationToken cancellationToken = default);
 
+    // Plugin Type Linking
+    Task SetPluginTypeAsync(
+        Guid customApiId, string? pluginTypeName, string? assemblyName,
+        CancellationToken cancellationToken = default);
+
     // Parameters
     Task<Guid> AddParameterAsync(
         Guid customApiId, CustomApiParameterRegistration parameter,
@@ -639,7 +665,7 @@ public record CustomApiParameterRegistration(
 );
 ```
 
-Note: `UniqueName`, `BindingType`, `BoundEntityLogicalName`, and `PluginTypeId` cannot be changed after creation — they are excluded from `CustomApiUpdateRequest`.
+Note: `UniqueName`, `BindingType`, and `BoundEntityLogicalName` cannot be changed after creation — they are excluded from `CustomApiUpdateRequest`. `PluginTypeId` is changed via the dedicated `SetPluginTypeAsync` method (not through update) because it requires resolving a plugin type by name and assembly.
 
 ---
 
@@ -656,6 +682,7 @@ Note: `UniqueName`, `BindingType`, `BoundEntityLogicalName`, and `PluginTypeId` 
 | POST | `customApis/unregister` | Delete with cascade |
 | POST | `customApis/addParameter` | Add request parameter or response property |
 | POST | `customApis/removeParameter` | Delete a parameter or property |
+| POST | `customApis/setPlugin` | Set, change, or clear implementing plugin type |
 
 ### Request/Response Examples
 
@@ -787,6 +814,32 @@ Response:
 ```json
 {
     "id": "33333333-3333-3333-3333-333333333333"
+}
+```
+
+**customApis/setPlugin**
+
+Request (link):
+```json
+{
+    "nameOrId": "myorg_ApproveInvoice",
+    "pluginTypeName": "ApproveInvoicePlugin",
+    "assemblyName": "MyPlugin"
+}
+```
+
+Request (unlink — `assemblyName` is ignored when `pluginTypeName` is null):
+```json
+{
+    "nameOrId": "myorg_ApproveInvoice",
+    "pluginTypeName": null
+}
+```
+
+Response:
+```json
+{
+    "success": true
 }
 ```
 
@@ -969,7 +1022,12 @@ Custom APIs are added to the existing `registrations.json` schema (defined in [p
 | AC-24 | TUI: Custom APIs appear as root nodes alongside packages, assemblies, and endpoints | `PluginRegistrationScreenTests.TreeShowsCustomApis` | 🔲 |
 | AC-25 | TUI: Selecting custom API node shows detail panel with API info and parameter counts | `PluginRegistrationScreenTests.CustomApiDetail_ShowsInfo` | 🔲 |
 | AC-26 | MCP: `customApis_list` returns all APIs (read-only) | `McpCustomApiTests.List_ReturnsAll` | 🔲 |
-| AC-27 | No managed component gatekeeping — all operations available on managed custom APIs | `CustomApiServiceTests.ManagedApi_OperationsNotBlocked` | 🔲 |
+| AC-27 | No managed component gatekeeping — all operations available on managed custom APIs; no IsManaged check before update/unregister/remove-parameter. Dataverse is the authority. | `CustomApiServiceTests.ManagedApi_OperationsNotBlocked` | 🔲 |
+| AC-28 | `ppds custom-apis set-plugin <api> --plugin <type> --assembly <name>` sets PluginTypeId on the Custom API | `CustomApiServiceTests.SetPlugin_SetsPluginTypeId` | 🔲 |
+| AC-29 | `ppds custom-apis set-plugin <api> --none` clears PluginTypeId (sets to null) | `CustomApiServiceTests.SetPlugin_None_ClearsPluginTypeId` | 🔲 |
+| AC-30 | `set-plugin` with non-existent plugin type throws `PpdsException` with `CustomApi.PluginTypeNotFound` | `CustomApiServiceTests.SetPlugin_InvalidType_ThrowsNotFound` | 🔲 |
+| AC-31 | RPC: `customApis/setPlugin` with pluginTypeName+assemblyName sets plugin type and returns success | `CustomApiRpcTests.SetPlugin_Link_ReturnsSuccess` | 🔲 |
+| AC-32 | RPC: `customApis/setPlugin` with pluginTypeName=null clears plugin type and returns success | `CustomApiRpcTests.SetPlugin_Unlink_ReturnsSuccess` | 🔲 |
 
 ### Edge Cases
 
@@ -981,6 +1039,8 @@ Custom APIs are added to the existing `registrations.json` schema (defined in [p
 | Output parameter with IsOptional=true | CustomApiParameterAttribute(Direction=Output, IsOptional=true) | IsOptional ignored, stored as false |
 | Parameter type Entity without LogicalEntityName | Type=Entity, LogicalEntityName=null | Validation error |
 | Deploy with unknown plugin type | Config references non-existent type | PpdsException with CustomApi.PluginTypeNotFound |
+| set-plugin with same plugin type already linked | Same pluginTypeName+assemblyName | Idempotent success (no-op update) |
+| set-plugin unlink with assemblyName provided | pluginTypeName=null, assemblyName="Foo" | assemblyName ignored, plugin type cleared |
 
 ### Test Examples
 
@@ -1091,20 +1151,21 @@ public async Task AddParameter_EntityType_RequiresLogicalEntityName()
 - Positive: Assembly and type references are by name (resolved during deploy), so ordering doesn't matter
 - Negative: Deploy must resolve `pluginTypeName` → PluginTypeId at deployment time
 
-### Why BindingType and PluginTypeId are immutable after creation?
+### Why BindingType is immutable but PluginTypeId is mutable?
 
-**Context:** Dataverse does not allow changing `BindingType`, `BoundEntityLogicalName`, or `PluginTypeId` on an existing `customapi` record. Attempting to update these fields returns an error.
+**Context:** Dataverse does not allow changing `BindingType` or `BoundEntityLogicalName` on an existing `customapi` record. However, `PluginTypeId` *can* be changed via direct update — it is the reference to the implementing plugin, not a structural property of the API.
 
-**Decision:** Exclude these fields from `CustomApiUpdateRequest`. If a user needs to change binding or plugin type, they must unregister and re-register.
+**Decision:** Exclude `BindingType` and `BoundEntityLogicalName` from `CustomApiUpdateRequest`. Provide a dedicated `SetPluginTypeAsync` method for changing or clearing the implementing plugin type, keeping it separate from general updates because it requires plugin type resolution by name and assembly.
 
 **Alternatives considered:**
-- Allow updates and handle the error: Rejected — confusing UX to accept input that will fail
-- Transparent delete-and-recreate: Rejected — loses the entity GUID, breaks references
+- Include PluginTypeId in CustomApiUpdateRequest: Rejected — the RPC and CLI interfaces resolve by name+assembly, not raw Guid. A separate method with a clear contract is cleaner.
+- Require unregister + re-register to change plugin type: Rejected — PluginTypeId is mutable in Dataverse, and forcing re-registration loses the entity GUID and breaks references.
 
 **Consequences:**
-- Positive: No confusing errors from the Dataverse API
-- Positive: Explicit about what can and cannot change
-- Negative: Changing binding requires unregister + re-register workflow
+- Positive: Binding is truly immutable (matches Dataverse enforcement)
+- Positive: Plugin type can be changed without losing the Custom API's GUID
+- Positive: Dedicated command is discoverable (`set-plugin`) vs. buried in update flags
+- Negative: One more service method and RPC endpoint
 
 ---
 
@@ -1140,6 +1201,7 @@ If Dataverse adds new parameter types in future:
 
 | Date | Change |
 |------|--------|
+| 2026-03-26 | v1 completion: add set-plugin command (#427), remove IsManaged gatekeeping (#660), add new ACs |
 | 2026-03-23 | Initial spec |
 
 ---

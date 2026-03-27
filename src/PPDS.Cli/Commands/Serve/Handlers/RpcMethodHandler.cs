@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -1028,15 +1028,18 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("plugins/registerStep")]
     public async Task<PluginsRegisterResponse> PluginsRegisterStepAsync(
-        string pluginTypeId,
+        string eventHandlerId,
         string message,
         string entity,
         string stage,
         string mode = "Synchronous",
+        string eventHandlerType = "pluginType",
         int executionOrder = 1,
         string? filteringAttributes = null,
+        string? name = null,
         string? description = null,
         string? unsecureConfiguration = null,
+        string? secureConfiguration = null,
         string? deployment = null,
         string? runAsUser = null,
         bool? canBeBypassed = null,
@@ -1048,8 +1051,8 @@ public class RpcMethodHandler : IDisposable
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var typeId))
-            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(eventHandlerId) || !Guid.TryParse(eventHandlerId, out var typeId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'eventHandlerId' parameter must be a valid GUID");
         if (string.IsNullOrWhiteSpace(message))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'message' parameter is required");
         if (string.IsNullOrWhiteSpace(entity))
@@ -1071,6 +1074,7 @@ public class RpcMethodHandler : IDisposable
 
             var stepConfig = new PluginStepConfig
             {
+                Name = name ?? $"{message} of {entity}",
                 Message = message,
                 Entity = entity,
                 Stage = stage,
@@ -1079,6 +1083,7 @@ public class RpcMethodHandler : IDisposable
                 FilteringAttributes = filteringAttributes,
                 Description = description,
                 UnsecureConfiguration = unsecureConfiguration,
+                SecureConfiguration = secureConfiguration,
                 Deployment = deployment,
                 RunAsUser = runAsUser,
                 CanBeBypassed = canBeBypassed,
@@ -1088,7 +1093,7 @@ public class RpcMethodHandler : IDisposable
                 SecondaryEntity = secondaryEntity
             };
 
-            var stepId = await registrationService.UpsertStepAsync(typeId, stepConfig, messageId, filterId, solutionName, ct);
+            var stepId = await registrationService.UpsertStepAsync(typeId, eventHandlerType, stepConfig, messageId, filterId, solutionName, ct);
 
             return new PluginsRegisterResponse { Id = stepId.ToString() };
         }, cancellationToken);
@@ -4419,6 +4424,35 @@ public class RpcMethodHandler : IDisposable
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Sets or clears the implementing plugin type on a Custom API.
+    /// Maps to: ppds custom-apis set-plugin --json
+    /// </summary>
+    [JsonRpcMethod("customApis/setPlugin")]
+    public async Task<CustomApisSetPluginResponse> CustomApisSetPluginAsync(
+        string nameOrId,
+        string? pluginTypeName = null,
+        string? assemblyName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(nameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var customApiService = sp.GetRequiredService<ICustomApiService>();
+
+            // Resolve Custom API
+            var api = await customApiService.GetAsync(nameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.CustomApi.NotFound, $"Custom API '{nameOrId}' not found.");
+
+            await customApiService.SetPluginTypeAsync(api.Id, pluginTypeName, assemblyName, ct);
+
+            return new CustomApisSetPluginResponse { Success = true };
+        }, cancellationToken);
+    }
+
     private static CustomApiDto MapCustomApiToDto(CustomApiInfo api) =>
         new()
         {
@@ -7378,6 +7412,12 @@ public class CustomApisUpdateParameterResponse
 }
 
 public class CustomApisRemoveParameterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisSetPluginResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

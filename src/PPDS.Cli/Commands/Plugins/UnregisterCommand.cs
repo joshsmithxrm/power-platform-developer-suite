@@ -138,7 +138,6 @@ public static class UnregisterCommand
             return ex.ErrorCode switch
             {
                 ErrorCodes.Plugin.NotFound => ExitCodes.NotFoundError,
-                ErrorCodes.Plugin.ManagedComponent => ExitCodes.Forbidden,
                 ErrorCodes.Plugin.HasChildren => ExitCodes.PreconditionFailed,
                 _ => ExitCodes.Failure
             };
@@ -287,10 +286,6 @@ public static class UnregisterCommand
         {
             case ErrorCodes.Plugin.NotFound:
                 Console.Error.WriteLine($"  {ex.EntityType} not found in the environment.");
-                break;
-
-            case ErrorCodes.Plugin.ManagedComponent:
-                Console.Error.WriteLine("  Managed components cannot be deleted in this environment.");
                 break;
 
             case ErrorCodes.Plugin.HasChildren:

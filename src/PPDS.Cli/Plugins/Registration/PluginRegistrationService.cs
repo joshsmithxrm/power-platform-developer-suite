@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
@@ -41,6 +41,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         [PluginAssembly.EntityLogicalName] = ComponentTypePluginAssembly,
         [SdkMessageProcessingStep.EntityLogicalName] = ComponentTypeSdkMessageProcessingStep
     };
+
+    // Entity logical name for secure configuration (no early-bound class generated)
+    private const string SecureConfigEntityName = "sdkmessageprocessingstepsecureconfig";
 
     // Pipeline stage values (from SDK Message Processing Step entity)
     private const int StagePreValidation = 10;
@@ -1076,6 +1079,14 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 {
                     new ConditionExpression(PluginType.Fields.TypeName, ConditionOperator.Equal, typeName)
                 }
+            },
+            LinkEntities =
+            {
+                new LinkEntity(PluginType.EntityLogicalName, PluginAssembly.EntityLogicalName, PluginType.Fields.PluginAssemblyId, PluginAssembly.Fields.PluginAssemblyId, JoinOperator.LeftOuter)
+                {
+                    Columns = new ColumnSet(PluginAssembly.Fields.Name),
+                    EntityAlias = "assembly"
+                }
             }
         };
 
@@ -1090,7 +1101,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             Id = entity.Id,
             TypeName = entity.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
-            FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName)
+            FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName),
+            AssemblyId = entity.GetAttributeValue<EntityReference>(PluginType.Fields.PluginAssemblyId)?.Id,
+            AssemblyName = entity.GetAttributeValue<AliasedValue>($"assembly.{PluginAssembly.Fields.Name}")?.Value?.ToString()
         };
     }
 
@@ -1214,14 +1227,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Creates or updates a processing step.
     /// </summary>
-    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="eventHandlerId">The event handler ID (plugin type or service endpoint).</param>
+    /// <param name="eventHandlerType">The event handler type: "pluginType" or "serviceEndpoint".</param>
     /// <param name="stepConfig">The step configuration.</param>
     /// <param name="messageId">The SDK message ID.</param>
     /// <param name="filterId">Optional SDK message filter ID.</param>
     /// <param name="solutionName">Optional solution name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<Guid> UpsertStepAsync(
-        Guid pluginTypeId,
+        Guid eventHandlerId,
+        string eventHandlerType,
         PluginStepConfig stepConfig,
         Guid messageId,
         Guid? filterId,
@@ -1233,12 +1248,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             ColumnSet = new ColumnSet(
                 SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
-                SdkMessageProcessingStep.Fields.StateCode),
+                SdkMessageProcessingStep.Fields.StateCode,
+                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, pluginTypeId),
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
                     new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
                 }
             }
@@ -1251,7 +1267,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var entity = new SdkMessageProcessingStep
         {
             Name = stepConfig.Name,
-            EventHandler = new EntityReference(PluginType.EntityLogicalName, pluginTypeId),
+            EventHandler = new EntityReference(
+                    string.Equals(eventHandlerType, "serviceEndpoint", StringComparison.OrdinalIgnoreCase) ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
+                    eventHandlerId),
             SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
             Stage = (sdkmessageprocessingstep_stage)MapStageToValue(stepConfig.Stage),
             Mode = (sdkmessageprocessingstep_mode)MapModeToValue(stepConfig.Mode),
@@ -1334,7 +1352,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 if (existingSecureConfigRef != null)
                 {
                     // Update existing secure config entity
-                    var secureConfigUpdate = new Entity("sdkmessageprocessingstepsecureconfig")
+                    var secureConfigUpdate = new Entity(SecureConfigEntityName)
                     {
                         Id = existingSecureConfigRef.Id
                     };
@@ -1344,10 +1362,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 else
                 {
                     // Create new secure config entity and link to step
-                    var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                    var secureConfigEntity = new Entity(SecureConfigEntityName);
                     secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
                     var newSecureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", newSecureConfigId);
+                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, newSecureConfigId);
                 }
             }
 
@@ -1374,10 +1392,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             // Handle secure configuration for new step
             if (stepConfig.SecureConfiguration != null)
             {
-                var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                var secureConfigEntity = new Entity(SecureConfigEntityName);
                 secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
                 var secureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", secureConfigId);
+                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, secureConfigId);
             }
 
             stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
@@ -1486,16 +1504,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Step with ID '{stepId}' not found.");
         }
 
-        // Check managed state
-        var isManaged = existingStep.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false;
-        var isCustomizable = GetBooleanManagedProperty(existingStep, SdkMessageProcessingStep.Fields.IsCustomizable);
-
-        if (isManaged && !isCustomizable)
-        {
-            var stepName = existingStep.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name);
-            throw new PpdsException(ErrorCodes.Plugin.ManagedComponent, $"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
-        }
-
         // Build update entity with only changed properties
         var entity = new SdkMessageProcessingStep { Id = stepId };
         var hasChanges = false;
@@ -1573,17 +1581,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var existingImage = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
         if (existingImage == null)
         {
-            throw new InvalidOperationException($"Image with ID '{imageId}' not found.");
-        }
-
-        // Check managed state
-        var isManaged = existingImage.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
-        var isCustomizable = GetBooleanManagedProperty(existingImage, SdkMessageProcessingStepImage.Fields.IsCustomizable);
-
-        if (isManaged && !isCustomizable)
-        {
-            var imageName = existingImage.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name);
-            throw new InvalidOperationException($"Cannot update: {imageName} is managed. Managed components cannot be modified in this environment.");
+            throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Image with ID '{imageId}' not found.");
         }
 
         // Build update entity with only changed properties
@@ -1661,6 +1659,26 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return value?.Value ?? true; // Default to true (customizable) if not set
     }
 
+    private async Task<Guid?> GetSecureConfigIdForStepAsync(Guid stepId, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, stepId)
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entity = results.Entities.FirstOrDefault();
+        return entity?.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId)?.Id;
+    }
+
     #endregion
 
     #region Delete Operations
@@ -1683,6 +1701,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeleteStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
+        // Fetch secure config reference before deleting the step
+        var secureConfigId = await GetSecureConfigIdForStepAsync(stepId, cancellationToken);
+
         // Delete images first - fetch list and delete in parallel
         var images = await ListImagesForStepAsync(stepId, cancellationToken);
 
@@ -1701,6 +1722,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
         await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
+
+        // Clean up orphaned secure config record after step is deleted
+        if (secureConfigId.HasValue)
+        {
+            await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync(SecureConfigEntityName, secureConfigId.Value, secureConfigClient, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -1825,17 +1853,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 ErrorCodes.Plugin.NotFound);
 
         var name = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty;
-        var isManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
-
-        if (isManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {name} is managed. Managed components cannot be deleted in this environment.",
-                name,
-                "Image",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
-
         await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
 
         return new UnregisterResult
@@ -1859,14 +1876,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 "Step",
                 ErrorCodes.Plugin.NotFound);
 
-        if (step.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {step.Name} is managed. Managed components cannot be deleted in this environment.",
-                step.Name,
-                "Step",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
+        // Fetch secure config reference before deleting the step
+        var secureConfigId = await GetSecureConfigIdForStepAsync(stepId, cancellationToken);
 
         // Check for images
         var images = await ListImagesForStepAsync(stepId, cancellationToken);
@@ -1907,6 +1918,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
         result.StepsDeleted = 1;
 
+        // Clean up orphaned secure config record after step is deleted
+        if (secureConfigId.HasValue)
+        {
+            await using var secureConfigClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync(SecureConfigEntityName, secureConfigId.Value, secureConfigClient, cancellationToken);
+        }
+
         return result;
     }
 
@@ -1922,15 +1940,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 pluginTypeId.ToString(),
                 "Type",
                 ErrorCodes.Plugin.NotFound);
-
-        if (pluginType.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {pluginType.TypeName} is managed. Managed components cannot be deleted in this environment.",
-                pluginType.TypeName,
-                "Type",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Check for steps
         var steps = await ListStepsForTypeAsync(pluginTypeId, options: null, cancellationToken);
@@ -1978,15 +1987,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 assemblyId.ToString(),
                 "Assembly",
                 ErrorCodes.Plugin.NotFound);
-
-        if (assembly.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {assembly.Name} is managed. Managed components cannot be deleted in this environment.",
-                assembly.Name,
-                "Assembly",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Get types and their steps
         var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
@@ -2042,15 +2042,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 packageId.ToString(),
                 "Package",
                 ErrorCodes.Plugin.NotFound);
-
-        if (package.IsManaged)
-        {
-            throw new UnregisterException(
-                $"Cannot unregister: {package.Name} is managed. Managed components cannot be deleted in this environment.",
-                package.Name,
-                "Package",
-                ErrorCodes.Plugin.ManagedComponent);
-        }
 
         // Get assemblies
         var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);

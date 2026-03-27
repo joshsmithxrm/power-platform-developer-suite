@@ -214,7 +214,7 @@ public class PpdsException : Exception
 | Validation.* | `Validation.RequiredField`, `Validation.InvalidValue` |
 | Operation.* | `Operation.NotFound`, `Operation.PartialFailure` |
 | Query.* | `Query.ParseError`, `Query.ExecutionFailed` |
-| Plugin.* | `Plugin.NotFound`, `Plugin.ManagedComponent` |
+| Plugin.* | `Plugin.NotFound`, `Plugin.NoContent`, `Plugin.ImageNotSupported`, `Plugin.HasChildren`, `Plugin.UserNotFound`, `Plugin.SetStateFailed` |
 
 **Exit codes** ([`ExitCodes.cs`](../src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs)):
 

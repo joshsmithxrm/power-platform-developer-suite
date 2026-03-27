@@ -1,4 +1,4 @@
-using PPDS.Cli.Infrastructure.Errors;
+﻿using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Registration;
@@ -281,14 +281,16 @@ public interface IPluginRegistrationService
     /// <summary>
     /// Creates or updates a processing step.
     /// </summary>
-    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="eventHandlerId">The event handler ID (plugin type or service endpoint).</param>
+    /// <param name="eventHandlerType">The event handler type: "pluginType" or "serviceEndpoint".</param>
     /// <param name="stepConfig">The step configuration.</param>
     /// <param name="messageId">The SDK message ID.</param>
     /// <param name="filterId">Optional SDK message filter ID.</param>
     /// <param name="solutionName">Optional solution name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<Guid> UpsertStepAsync(
-        Guid pluginTypeId,
+        Guid eventHandlerId,
+        string eventHandlerType,
         PluginStepConfig stepConfig,
         Guid messageId,
         Guid? filterId,

@@ -229,9 +229,6 @@ public static class ErrorCodes
         /// <summary>Message does not support plugin images.</summary>
         public const string ImageNotSupported = "Plugin.ImageNotSupported";
 
-        /// <summary>Cannot modify managed component.</summary>
-        public const string ManagedComponent = "Plugin.ManagedComponent";
-
         /// <summary>Entity has child components that must be removed first.</summary>
         public const string HasChildren = "Plugin.HasChildren";
 
@@ -274,9 +271,6 @@ public static class ErrorCodes
         /// <summary>Input validation failed (URL, SAS key length, namespace format, etc.).</summary>
         public const string ValidationFailed = "ServiceEndpoint.ValidationFailed";
 
-        /// <summary>Cannot modify a managed service endpoint.</summary>
-        public const string ManagedComponent = "ServiceEndpoint.ManagedComponent";
-
         /// <summary>Service endpoint has dependent step registrations that must be removed first.</summary>
         public const string HasDependents = "ServiceEndpoint.HasDependents";
     }
@@ -295,14 +289,14 @@ public static class ErrorCodes
         /// <summary>Input validation failed (binding type, bound entity, parameter type, etc.).</summary>
         public const string ValidationFailed = "CustomApi.ValidationFailed";
 
-        /// <summary>Cannot modify a managed Custom API.</summary>
-        public const string ManagedComponent = "CustomApi.ManagedComponent";
-
         /// <summary>Custom API has parameters/properties that must be removed first (use --force to cascade).</summary>
         public const string HasDependents = "CustomApi.HasDependents";
 
         /// <summary>Parameter or response property not found by ID.</summary>
         public const string ParameterNotFound = "CustomApi.ParameterNotFound";
+
+        /// <summary>Plugin type not found by name.</summary>
+        public const string PluginTypeNotFound = "CustomApi.PluginTypeNotFound";
     }
 
     /// <summary>

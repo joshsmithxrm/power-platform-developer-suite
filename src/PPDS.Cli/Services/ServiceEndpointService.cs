@@ -216,13 +216,6 @@ public sealed class ServiceEndpointService : IServiceEndpointService
                 $"Service endpoint with ID '{id}' was not found.");
         }
 
-        if (existing.IsManaged)
-        {
-            throw new PpdsException(
-                ErrorCodes.ServiceEndpoint.ManagedComponent,
-                $"Cannot update managed service endpoint '{existing.Name}'.");
-        }
-
         var update = new Entity(ServiceEndpoint.EntityLogicalName) { Id = id };
         var hasChanges = false;
 

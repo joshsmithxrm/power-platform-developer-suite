@@ -38,6 +38,7 @@ public static class CustomApisCommandGroup
         command.Subcommands.Add(AddParameterCommand.Create());
         command.Subcommands.Add(UpdateParameterCommand.Create());
         command.Subcommands.Add(RemoveParameterCommand.Create());
+        command.Subcommands.Add(SetPluginCommand.Create());
 
         return command;
     }

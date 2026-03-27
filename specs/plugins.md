@@ -312,8 +312,8 @@ Task<Guid> UpsertPluginTypeAsync(
     Guid assemblyId, string typeName, string? solutionName = null,
     CancellationToken cancellationToken = default);
 Task<Guid> UpsertStepAsync(
-    Guid pluginTypeId, PluginStepConfig stepConfig, Guid messageId,
-    Guid? filterId, string? solutionName = null,
+    Guid eventHandlerId, string eventHandlerType, PluginStepConfig stepConfig,
+    Guid messageId, Guid? filterId, string? solutionName = null,
     CancellationToken cancellationToken = default);
 Task<Guid> UpsertImageAsync(
     Guid stepId, PluginImageConfig imageConfig, string messageName,
@@ -566,7 +566,7 @@ Imperative registration without a config file. Supports 5 subcommands.
 ppds plugins register assembly <path.dll> [--solution <name>]
 ppds plugins register package <path.nupkg> [--solution <name>]
 ppds plugins register type <assembly-id> <type-name> [--solution <name>]
-ppds plugins register step <type-id> <message> <entity> <stage> [--mode] [--rank] [--filtering] [--config]
+ppds plugins register step <event-handler-id> <message> <entity> <stage> [--event-handler-type pluginType|serviceEndpoint] [--mode] [--rank] [--filtering] [--config] [--secure-config]
 ppds plugins register image <step-id> <name> <image-type> [--attributes] [--entity-alias]
 ```
 
@@ -662,7 +662,7 @@ RPC endpoints support the Extension panel and other RPC clients. All endpoints u
 |--------|-----------|---------|
 | `plugins/registerAssembly` | `path` (base64 content), `solutionName?` | `{ id }` |
 | `plugins/registerPackage` | `path` (base64 content), `solutionName?` | `{ id }` |
-| `plugins/registerStep` | Step config fields | `{ id }` |
+| `plugins/registerStep` | `eventHandlerId`, `eventHandlerType` (pluginType\|serviceEndpoint), step config fields, `secureConfiguration?` | `{ id }` |
 | `plugins/registerImage` | Image config fields | `{ id }` |
 | `plugins/updateStep` | `id`, update fields | Success |
 | `plugins/updateImage` | `id`, update fields | Success |
@@ -855,7 +855,7 @@ Nodes load children lazily on first expand to handle large environments (hundred
 └─ Package C
 ```
 
-Root load: `ListPackagesAsync()` + `ListAssembliesAsync()` (standalone only). Managed components (IsManaged=true) display dimmed and block unregistration.
+Root load: `ListPackagesAsync()` + `ListAssembliesAsync()` (standalone only). Managed components (IsManaged=true) display with `(managed)` label but all operations are available — Dataverse is the authority on what can be modified.
 
 ### Key Hotkeys and Dialogs
 
@@ -903,7 +903,7 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 - [ ] Space on a step node toggles enabled state
 - [ ] Delete key opens `ConfirmDestructiveActionDialog` with cascade preview
 - [ ] High severity confirmation requires typing "DELETE"
-- [ ] Managed components cannot be unregistered (action blocked with message)
+- [ ] Managed components show `(managed)` label but all operations are available (no gatekeeping)
 - [ ] F5 refreshes tree from root
 - [ ] State capture returns accurate `PluginRegistrationScreenState`
 
@@ -1158,7 +1158,7 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-05 | Re-deploying same configuration is idempotent | ✅ |
 | AC-06 | `ppds plugins enable <step>` sets StateCode=Enabled | ❌ |
 | AC-07 | `ppds plugins disable <step>` sets StateCode=Disabled | ❌ |
-| AC-08 | Secure configuration is set during step registration but not returned in queries | ❌ |
+| AC-08 | Secure configuration is set during step registration (CLI `--secure-config`, RPC `secureConfiguration` param) but not returned in queries | ❌ |
 | AC-09 | Extension: PluginsPanel loads tree with packages, assemblies, types, steps, images | ❌ |
 | AC-10 | Extension: Three view modes (Assembly, Message, Entity) switch correctly | ❌ |
 | AC-11 | Extension: Step registration form validates async requires PostOperation | ❌ |
@@ -1174,7 +1174,10 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-21 | MCP: `plugins_list` returns full hierarchy | ❌ |
 | AC-22 | MCP: `plugins_get` returns detailed entity info | ❌ |
 | AC-23 | RPC: All browsing and mutation endpoints return correct data | ❌ |
-| AC-24 | No artificial protection on managed components — all operations available | ❌ |
+| AC-24 | No artificial protection on managed components — all operations available; no IsManaged check before unregister/update. Dataverse is the authority on what can be modified. | ❌ |
+| AC-25 | RPC `plugins/registerStep` accepts `eventHandlerType` (pluginType or serviceEndpoint) and `eventHandlerId` to support registering steps on service endpoints and webhooks | ❌ |
+| AC-26 | RPC `plugins/registerStep` accepts `secureConfiguration` parameter and passes it through to `UpsertStepAsync` | ❌ |
+| AC-27 | CLI `ppds plugins register step` accepts `--event-handler-type` flag (pluginType or serviceEndpoint, default: pluginType) to register steps on service endpoints | ❌ |
 
 ### Edge Cases
 
@@ -1246,5 +1249,6 @@ public async Task Deploy_IdempotentOnSecondRun()
 
 | Date | Change |
 |------|--------|
+| 2026-03-26 | v1 completion: remove IsManaged gatekeeping (#660), secureConfiguration in RPC (#63), service endpoint step support (#65) |
 | 2026-03-23 | Added Extension, MCP, RPC surfaces; new annotation properties; CLI enable/disable; updated ACs |
 | 2026-03-18 | Merged TUI surface content from tui-plugin-registration.md per SL3 |
