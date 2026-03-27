@@ -106,8 +106,7 @@ python scripts/workflow-state.py set phase implementing
 ```
 
 ### Step 4: Create Task Tracking
-- Use TaskCreate to build a task list from the plan phases
-- Set up dependencies between tasks using addBlockedBy/addBlocks
+- Use TodoWrite to build a task list from the plan phases
 - Mark any already-completed work as done
 
 ### Step 4.5: Assess Model Selection
@@ -123,7 +122,7 @@ Do not hardcode model IDs in the plan. Assess at dispatch time based on the phas
 For EACH phase in the plan, repeat this cycle:
 
 **A. Dispatch Agents**
-- For ALL independent tasks within the current phase, dispatch background agents using the Task tool with `run_in_background: true`
+- For ALL independent tasks within the current phase, dispatch background agents using the Agent tool with `run_in_background: true`
 - For parallel streams in a phase group (e.g., "Phase 2-4: PARALLEL"), dispatch ALL streams simultaneously
 - Each agent prompt MUST include:
   - The specific task/subtask from the plan with full requirements

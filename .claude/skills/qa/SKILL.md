@@ -225,16 +225,16 @@ For each panel:
 3. LOOK at the screenshot
 4. Record in your matrix:
 
-| Feature | Solutions | Import Jobs | Plugin Traces | Web Resources | Conn Refs | Env Vars | Metadata | Data Explorer | Plugin Registration |
-|---------|-----------|-------------|---------------|---------------|-----------|----------|----------|---------------|---------------------|
-| Search bar | | | | | | | | | |
-| Solution filter | | | | | | | | | |
-| Refresh button | | | | | | | | | |
-| Export button | | | | | | | | | |
-| Maker Portal link | | | | | | | | | |
-| Sortable columns | | | | | | | | | |
-| Keyboard shortcuts | | | | | | | | | |
-| Auto-refresh | | | | | | | | | |
+| Feature | Solutions | Import Jobs | Plugin Traces | Web Resources | Conn Refs | Env Vars | Metadata | Data Explorer |
+|---------|-----------|-------------|---------------|---------------|-----------|----------|----------|---------------|
+| Search bar | | | | | | | | |
+| Solution filter | | | | | | | | |
+| Refresh button | | | | | | | | |
+| Export button | | | | | | | | |
+| Maker Portal link | | | | | | | | |
+| Sortable columns | | | | | | | | |
+| Keyboard shortcuts | | | | | | | | |
+| Auto-refresh | | | | | | | | |
 | Loading indicator | | | | | | | | |
 | Timestamp format | | | | | | | | |
 

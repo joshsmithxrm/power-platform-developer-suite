@@ -19,6 +19,12 @@ Run `/status` to check current workflow state.
 
 ## Process
 
+Set the PR phase at entry:
+
+```bash
+python scripts/workflow-state.py set phase pr
+```
+
 ### 1. Rebase on Main and Push
 
 ```bash
@@ -174,12 +180,6 @@ Awaiting your review.
 ```
 
 ### 7. Write Workflow State
-Set the PR phase:
-
-```bash
-python scripts/workflow-state.py set phase pr
-```
-
 After PR is created:
 
 ```bash

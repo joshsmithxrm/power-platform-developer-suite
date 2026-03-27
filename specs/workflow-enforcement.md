@@ -3,7 +3,7 @@
 **Status:** Draft (v7.0 — comprehensive workflow overhaul: phase-aware hooks, post-PR monitor, shakedown, retro trigger)
 **Version:** 7.0
 **Last Updated:** 2026-03-27
-**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr-monitor.py](../scripts/pr-monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
+**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
 
 ---
@@ -659,7 +659,7 @@ Do not create PRs, post comments, or modify workflow state — the pipeline hand
 
 #### Post-PR Monitor (Decoupled Background Process)
 
-**Script:** `scripts/pr-monitor.py`
+**Script:** `scripts/pr_monitor.py`
 
 **Purpose:** After `/pr` creates a draft PR, the session can exit. The PR monitor runs as a background process — decoupled from any Claude session — handling CI monitoring, Gemini triage, draft→ready conversion, retro, and notification.
 
@@ -670,7 +670,7 @@ import sys, subprocess, platform
 log_path = f"{worktree_path}/.workflow/pr-monitor.log"
 log_file = open(log_path, "w")
 
-cmd = ["python", "scripts/pr-monitor.py",
+cmd = ["python", "scripts/pr_monitor.py",
        "--worktree", worktree_path,
        "--pr", str(pr_number)]
 
@@ -700,7 +700,7 @@ log_file.close()  # Parent closes its handle; child inherits the fd
 **Flow:**
 
 ```
-pr-monitor.py --worktree <path> --pr <number>
+pr_monitor.py --worktree <path> --pr <number>
 │
 ├─ 1. Write PID to .workflow/pr-monitor.pid
 │
@@ -747,7 +747,7 @@ pr-monitor.py --worktree <path> --pr <number>
 └─ 10. Clean up PID file, exit 0
 ```
 
-**CI failure handling:** On CI red, the monitor notifies the user with failure details and exits. It does NOT attempt to fix CI failures or wait indefinitely. The user decides whether to fix and re-push. After fixing, the user can re-launch the monitor: `python scripts/pr-monitor.py --worktree <path> --pr <number> --resume`. The `--resume` flag reads `pr-monitor-result.json` and skips steps already completed.
+**CI failure handling:** On CI red, the monitor notifies the user with failure details and exits. It does NOT attempt to fix CI failures or wait indefinitely. The user decides whether to fix and re-push. After fixing, the user can re-launch the monitor: `python scripts/pr_monitor.py --worktree <path> --pr <number> --resume`. The `--resume` flag reads `pr-monitor-result.json` and skips steps already completed.
 
 **Resume sub-state model:** `pr-monitor-result.json` tracks completion of each sub-step independently:
 
@@ -1084,15 +1084,15 @@ After all skills in this spec are implemented:
 | AC-103 | Stop hook exits 0 immediately when `PPDS_SHAKEDOWN=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_shakedown_mode` | 🔲 |
 | AC-104 | Stop hook writes `stop_hook_blocked: true`, `stop_hook_count: N`, `stop_hook_last: <timestamp>` to state file on block — retro can detect repeated ignored blocks | `test_pipeline.py::test_stop_hook_enforcement_logging` | 🔲 |
 | AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `reviewing`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
-| AC-106 | `pr-monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
-| AC-107 | `pr-monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
-| AC-108 | `pr-monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends notification with failure details, exits 1 | `test_pr_monitor.py::test_ci_failure_notify_and_exit` | 🔲 |
-| AC-109 | `pr-monitor.py --resume` skips already-completed steps by reading `pr-monitor-result.json` | `test_pr_monitor.py::test_resume_skips_completed` | 🔲 |
-| AC-110 | `pr-monitor.py` spawns `claude -p` triage when inline comments > 0, waits for completion, posts threaded replies | `test_pr_monitor.py::test_triage_on_inline_comments` | 🔲 |
-| AC-111 | `pr-monitor.py` re-polls CI after triage commits (loop back to CI check) | `test_pr_monitor.py::test_repoll_ci_after_triage` | 🔲 |
-| AC-112 | `pr-monitor.py` runs `claude -p "/retro"` as penultimate step before notification | `test_pr_monitor.py::test_retro_runs_before_notify` | 🔲 |
-| AC-113 | `pr-monitor.py` converts draft → ready via `gh pr ready` after all checks pass | `test_pr_monitor.py::test_draft_to_ready` | 🔲 |
-| AC-114 | `pr-monitor.py` writes `.workflow/pr-monitor-result.json` with status, ci result, comment counts, triage summary, retro status | `test_pr_monitor.py::test_result_json_schema` | 🔲 |
+| AC-106 | `pr_monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
+| AC-107 | `pr_monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
+| AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends notification with failure details, exits 1 | `test_pr_monitor.py::test_ci_failure_notify_and_exit` | 🔲 |
+| AC-109 | `pr_monitor.py --resume` skips already-completed steps by reading `pr-monitor-result.json` | `test_pr_monitor.py::test_resume_skips_completed` | 🔲 |
+| AC-110 | `pr_monitor.py` spawns `claude -p` triage when inline comments > 0, waits for completion, posts threaded replies | `test_pr_monitor.py::test_triage_on_inline_comments` | 🔲 |
+| AC-111 | `pr_monitor.py` re-polls CI after triage commits (loop back to CI check) | `test_pr_monitor.py::test_repoll_ci_after_triage` | 🔲 |
+| AC-112 | `pr_monitor.py` runs `claude -p "/retro"` as penultimate step before notification | `test_pr_monitor.py::test_retro_runs_before_notify` | 🔲 |
+| AC-113 | `pr_monitor.py` converts draft → ready via `gh pr ready` after all checks pass | `test_pr_monitor.py::test_draft_to_ready` | 🔲 |
+| AC-114 | `pr_monitor.py` writes `.workflow/pr-monitor-result.json` with status, ci result, comment counts, triage summary, retro status | `test_pr_monitor.py::test_result_json_schema` | 🔲 |
 | AC-115 | `/shakedown-workflow` creates throwaway worktrees branched from current branch (not main) — worktrees inherit modified `.claude/`, `scripts/`, `specs/` | Manual: run `/shakedown-workflow`, verify worktree branch parent | 🔲 |
 | AC-116 | `/shakedown-workflow` sets `PPDS_SHAKEDOWN=1` in pipeline subprocess environment | `test_pipeline.py::test_shakedown_env_var` | 🔲 |
 | AC-117 | `PPDS_SHAKEDOWN=1` suppresses `gh issue create` in `process_retro_findings()` | `test_pipeline.py::test_shakedown_suppresses_issue_filing` | 🔲 |
@@ -1103,10 +1103,10 @@ After all skills in this spec are implemented:
 | AC-121 | `/shakedown-workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
 | AC-122 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
 | AC-123 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
-| AC-124 | `pr-monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
-| AC-125 | `pr-monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
-| AC-126 | `pr-monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
-| AC-127 | `pr-monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
+| AC-124 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
+| AC-125 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
+| AC-126 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
+| AC-127 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
 
 ### Edge Cases
 
@@ -1127,9 +1127,9 @@ After all skills in this spec are implemented:
 | Stop hook fires on branch where local main is stale | Hook uses `origin/main...HEAD` → only real branch changes detected. |
 | Stop hook fires repeatedly, agent ignores it | `stop_hook_count` increments in state. Retro detects pattern: "stop hook fired N times, ignored N times." |
 | State file has no `phase` field (legacy) | Treated as null → full enforcement applies (safe default). |
-| `pr-monitor.py` parent process exits | Monitor runs in its own process group (`start_new_session=True`). Continues independently. |
-| `pr-monitor.py` CI fails, user fixes and re-pushes | User re-launches with `--resume`. Monitor reads prior result, skips Gemini polling (already done), re-polls CI. |
-| `pr-monitor.py` triage agent fails | Monitor skips triage, converts draft → ready with "triage incomplete" annotation. Continues to retro + notify. |
+| `pr_monitor.py` parent process exits | Monitor runs in its own process group (`start_new_session=True`). Continues independently. |
+| `pr_monitor.py` CI fails, user fixes and re-pushes | User re-launches with `--resume`. Monitor reads prior result, skips Gemini polling (already done), re-polls CI. |
+| `pr_monitor.py` triage agent fails | Monitor skips triage, converts draft → ready with "triage incomplete" annotation. Continues to retro + notify. |
 | Shakedown PR accidentally merged | PRs created with `[SHAKEDOWN]` prefix are draft-only, never converted to ready. Merge protection (reviewers required) prevents accidental merge. |
 | Shakedown worktree cleanup fails (locked files) | Log warning, continue with other worktrees. Stale worktrees cleaned up by `/cleanup`. |
 | Hook path doubled in worktree | Git-root resolution workaround bypasses Claude Code's project dir resolution. |
@@ -1350,7 +1350,7 @@ After all skills in this spec are implemented:
 
 **Evidence:** PR #735: Gemini commented 4 min after creation, pipeline had already exited. PR #726: Gemini had no comments but user was not notified. PR #725: Gemini comments addressed only because session was interactive.
 
-**Decision:** `scripts/pr-monitor.py` runs as a background process (`start_new_session=True`), decoupled from the Claude session. Handles CI polling, Gemini triage, draft→ready, retro, and notification autonomously.
+**Decision:** `scripts/pr_monitor.py` runs as a background process (`start_new_session=True`), decoupled from the Claude session. Handles CI polling, Gemini triage, draft→ready, retro, and notification autonomously.
 
 **Alternatives considered:**
 - **Keep in-session, extend timeout:** Still couples PR lifecycle to session lifetime. Session crashes → PR abandoned.
@@ -1472,14 +1472,14 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
 | 2026-03-26 | v5.0 — pipeline observability and PR orchestration: (1) stream-json output for real-time stage logs, (2) multi-signal activity detection, (3) JSONL post-processing, (4) pipeline lock file, (5) /status live JSONL monitoring, (6) scripted PR stage with draft→ready flow, (7) gemini-triage agent profile (Sonnet), (8) pipeline-result.json + notify on completion/failure. |
 | 2026-03-27 | v6.0 — work-type routing: (1) `/start` classifies work type (user-confirmed, labels as hints), (2) `.plans/context.md` written to worktree with issue details + work type + next step, (3) work-type-aware guidance replaces hardcoded `/design`, (4) `work_type` field in workflow state, (5) `/design` reads `context.md` instead of `design-context.md`, (6) `/design` anti-patterns updated for bug-fix path, (7) `/implement` Step 0 fallback when no spec found. |
-| 2026-03-27 | v7.0 — comprehensive workflow overhaul: (1) phase-aware stop hook replaces git-diff heuristic, (2) `origin/main` in all hooks/heartbeat replaces stale local `main`, (3) enforcement logging in state for retro detection, (4) `PPDS_SHAKEDOWN=1` env var, (5) post-PR monitor (`pr-monitor.py`) — decoupled background process for CI/Gemini/triage/retro/notify, (6) `/shakedown-workflow` skill — behavioral integration test for workflow changes, (7) hook path doubling investigation + workaround, (8) phase lifecycle for all entry points. Addresses issues #731, #727, #732, #730, #734, #712, #733, #728, #729, #723, #724, #715, #662. |
+| 2026-03-27 | v7.0 — comprehensive workflow overhaul: (1) phase-aware stop hook replaces git-diff heuristic, (2) `origin/main` in all hooks/heartbeat replaces stale local `main`, (3) enforcement logging in state for retro detection, (4) `PPDS_SHAKEDOWN=1` env var, (5) post-PR monitor (`pr_monitor.py`) — decoupled background process for CI/Gemini/triage/retro/notify, (6) `/shakedown-workflow` skill — behavioral integration test for workflow changes, (7) hook path doubling investigation + workaround, (8) phase lifecycle for all entry points. Addresses issues #731, #727, #732, #730, #734, #712, #733, #728, #729, #723, #724, #715, #662. |
 
 ---
 
 ## Roadmap
 
 - **GitHub-triggered pipelines:** Trigger implementation from GitHub issues or webhooks. Requires persisted workflow state and session handoff mechanism.
-- **PR monitoring webhook:** Replace Gemini polling with GitHub webhook notification. Eliminates pr-monitor.py polling entirely.
+- **PR monitoring webhook:** Replace Gemini polling with GitHub webhook notification. Eliminates pr_monitor.py polling entirely.
 - **Cross-worktree status aggregation:** `/status` from main shows all active pipelines across worktrees. Currently each worktree's status is independent.
 - **Worktree auto-cleanup:** SessionStart hook checks for stale worktrees (no commits in >7 days) and prompts for cleanup.
 - **Cross-session workflow continuity:** Persist workflow state to git (not gitignored) so a new session can pick up where a previous session left off.

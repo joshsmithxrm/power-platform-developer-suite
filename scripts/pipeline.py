@@ -88,7 +88,7 @@ def log(logger, stage, event, **extra):
     console_parts = [f"[{local_time()}] {stage}: {event}"]
     for k, v in extra.items():
         console_parts.append(f"{k}={v}")
-    print(" ".join(console_parts))
+    print(" ".join(console_parts), file=sys.stderr)
 
 
 def open_logger(log_path, mode="a"):
@@ -1160,9 +1160,9 @@ def main():
         last_done = find_last_completed_stage(candidate_log)
         if last_done and last_done in STAGES:
             start_idx = STAGES.index(last_done) + 1
-            print(f"Resuming after '{last_done}' (stage {start_idx + 1}/{len(STAGES)})")
+            print(f"Resuming after '{last_done}' (stage {start_idx + 1}/{len(STAGES)})", file=sys.stderr)
         else:
-            print("No completed stages found in pipeline.log, starting from beginning.")
+            print("No completed stages found in pipeline.log, starting from beginning.", file=sys.stderr)
 
     # Set up worktree
     if args.worktree:
@@ -1188,43 +1188,43 @@ def main():
 
     mode = "a" if (args.from_stage or args.resume) else "w"
     logger = open_logger(log_path, mode)
+    try:
 
-    log(
-        logger, "pipeline",
-        "START" if not (args.from_stage or args.resume) else "RESUME",
-        plan=source_rel, name=name, branch=branch,
-        from_stage=args.from_stage or ("auto" if args.resume else "worktree"),
-    )
-
-    # Acquire pipeline lock
-    lock_path = os.path.join(log_dir, "pipeline.lock")
-    if not acquire_lock(lock_path, logger):
-        logger.close()
-        sys.exit(1)
-
-    # Write pipeline phase to state (if worktree exists)
-    if worktree_path and os.path.exists(worktree_path):
-        subprocess.run(
-            ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
-            cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        log(
+            logger, "pipeline",
+            "START" if not (args.from_stage or args.resume) else "RESUME",
+            plan=source_rel, name=name, branch=branch,
+            from_stage=args.from_stage or ("auto" if args.resume else "worktree"),
         )
 
-    pipeline_start = time.time()
-    pr_url = None
-    stage_durations = {}
-    _failed_stage = None
-    _failed_log_stage = None  # actual log filename (may differ from display name)
-    _failed_reason = None
-    _result_written = False
+        # Acquire pipeline lock
+        lock_path = os.path.join(log_dir, "pipeline.lock")
+        if not acquire_lock(lock_path, logger):
+            logger.close()
+            sys.exit(1)
 
-    def _pipeline_fail(stage_name, reason=None, log_stage=None):
-        nonlocal _failed_stage, _failed_log_stage, _failed_reason
-        _failed_stage = stage_name
-        _failed_log_stage = log_stage or stage_name
-        _failed_reason = reason
-        raise PipelineFailure(f"{stage_name}: {reason}")
+        # Write pipeline phase to state (if worktree exists)
+        if worktree_path and os.path.exists(worktree_path):
+            subprocess.run(
+                ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
+                cwd=worktree_path, capture_output=True, text=True, timeout=10,
+            )
 
-    try:
+        pipeline_start = time.time()
+        pr_url = None
+        stage_durations = {}
+        _failed_stage = None
+        _failed_log_stage = None  # actual log filename (may differ from display name)
+        _failed_reason = None
+        _result_written = False
+
+        def _pipeline_fail(stage_name, reason=None, log_stage=None):
+            nonlocal _failed_stage, _failed_log_stage, _failed_reason
+            _failed_stage = stage_name
+            _failed_log_stage = log_stage or stage_name
+            _failed_reason = reason
+            raise PipelineFailure(f"{stage_name}: {reason}")
+
         for i, stage in enumerate(STAGES):
             if i < start_idx:
                 continue
@@ -1427,7 +1427,7 @@ def main():
             write_result(worktree_path, "complete", duration, stage_durations,
                          pr_url=pr_url)
             _result_written = True
-        print(f"\nPipeline complete in {duration}s.")
+        print(f"\nPipeline complete in {duration}s.", file=sys.stderr)
         if pr_url:
             print(f"PR: {pr_url}")
 

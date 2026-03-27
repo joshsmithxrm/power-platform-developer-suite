@@ -2,7 +2,7 @@
 
 **Status:** Draft (v2.0 — retro overhaul: transcript reading, isolation, auto-trigger, issue updates)
 **Last Updated:** 2026-03-27
-**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [.claude/skills/retro/](../.claude/skills/retro/)
+**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/retro_helpers.py](../scripts/retro_helpers.py) | [.claude/skills/retro/](../.claude/skills/retro/)
 **Surfaces:** N/A
 
 ---
@@ -269,7 +269,7 @@ for finding in issues:
 
 It does NOT receive the conversation history from the implementation session. The subagent returns findings to the parent session, which writes them to state and handles filing.
 
-**pr-monitor mode (new):** `pr-monitor.py` runs `claude -p "/retro"` in the worktree — inherently isolated (separate process, fresh context).
+**pr-monitor mode (new):** `pr_monitor.py` runs `claude -p "/retro"` in the worktree — inherently isolated (separate process, fresh context).
 
 ### Automatic Trigger
 
@@ -281,7 +281,7 @@ It does NOT receive the conversation history from the implementation session. Th
 |---------|-----------|-----------|
 | Pipeline completion (success) | Last stage in pipeline.py sequence | Separate `claude -p` session |
 | Pipeline failure | `except PipelineFailure` block in pipeline.py (see pipeline-observability) | Separate `claude -p` session |
-| PR monitor completion | Step 7 of pr-monitor.py, before notification | Separate `claude -p` session |
+| PR monitor completion | Step 7 of pr_monitor.py, before notification | Separate `claude -p` session |
 | Interactive PR creation | `/pr` skill spawns retro subagent after PR is created | Subagent (isolated context) |
 
 **No stop-hook trigger:** The stop hook is NOT a good trigger for retro. It fires unpredictably (e.g., feat/workflow-overhaul design session 2026-03-27: stop hook fired 6 times as false positives from stale local main). Retro is triggered by completion events (PR created, pipeline done), not by session lifecycle.
@@ -376,7 +376,7 @@ for finding in issues:
 | AC-12 | `extract_transcript_signals()` identifies tool failures: Bash tool_result with non-zero exit code, Read with "file not found", Edit with "old_string not found" | `test_tool_failure_detection` | 🔲 |
 | AC-13 | `extract_enforcement_signals(state_path)` returns stop hook block count and timestamps from `stop_hook_count` field in state | `test_enforcement_signal_extraction` | 🔲 |
 | AC-14 | Interactive `/retro` dispatches subagent with `subagent_type: "general-purpose"` — subagent receives only transcript files, constitution, and state (no conversation history) | Manual — run `/retro` in interactive session, verify subagent dispatch in tool calls | 🔲 |
-| AC-15 | `pr-monitor.py` triggers retro as penultimate step (step 7), passing worktree path for transcript access | `test_pr_monitor.py::test_retro_trigger` | 🔲 |
+| AC-15 | `pr_monitor.py` triggers retro as penultimate step (step 7), passing worktree path for transcript access | `test_pr_monitor.py::test_retro_trigger` | 🔲 |
 | AC-16 | Duplicate issue comment includes branch name, session ID, new evidence, and "also observed" preamble | `test_duplicate_comment_format` | 🔲 |
 | AC-17 | `PPDS_SHAKEDOWN=1` suppresses all `gh issue create` and `gh issue comment` calls | `test_shakedown_suppresses_all_issue_ops` | 🔲 |
 | AC-18 | Interactive `/pr` skill spawns retro subagent after PR is created (isolated, best-effort) | Manual — run `/pr` interactively, verify retro subagent dispatched after PR creation | 🔲 |

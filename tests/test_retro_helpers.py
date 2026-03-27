@@ -94,3 +94,29 @@ class TestDiscoverTranscripts:
 
             transcripts = retro_helpers.discover_transcripts(tmpdir)
             assert any("implement.jsonl" in t for t in transcripts)
+
+    def test_discover_transcripts_filters_by_worktree(self, monkeypatch):
+        """discover_transcripts only returns transcripts for the given worktree."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_projects = os.path.join(fake_home, ".claude", "projects")
+            # Simulate two project dirs: one matching, one not
+            worktree = os.path.join(fake_home, "my", "project")
+            os.makedirs(worktree)
+            encoded = retro_helpers._encode_project_dir(worktree)
+            matching_dir = os.path.join(claude_projects, encoded)
+            other_dir = os.path.join(claude_projects, "other-project")
+            os.makedirs(matching_dir)
+            os.makedirs(other_dir)
+            with open(os.path.join(matching_dir, "mine.jsonl"), "w") as f:
+                f.write("{}\n")
+            with open(os.path.join(other_dir, "theirs.jsonl"), "w") as f:
+                f.write("{}\n")
+
+            monkeypatch.setattr(
+                os.path, "expanduser",
+                lambda p: p.replace("~", fake_home),
+            )
+            transcripts = retro_helpers.discover_transcripts(worktree)
+            assert any("mine.jsonl" in t for t in transcripts)
+            assert not any("theirs.jsonl" in t for t in transcripts)

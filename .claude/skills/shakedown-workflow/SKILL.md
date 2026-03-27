@@ -41,7 +41,7 @@ For each worktree, run the pipeline with PPDS_SHAKEDOWN=1:
 
 ```bash
 cd .worktrees/shakedown-<scenario>
-PPDS_SHAKEDOWN=1 python scripts/pipeline.py --worktree . --spec specs/<synthetic-spec>.md --dry-run
+PPDS_SHAKEDOWN=1 python scripts/pipeline.py --worktree . --spec specs/SPEC-TEMPLATE.md --dry-run
 ```
 
 Use `--dry-run` mode — we're testing the orchestration logic, not running real AI sessions.

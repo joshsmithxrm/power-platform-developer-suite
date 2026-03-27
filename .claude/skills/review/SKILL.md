@@ -46,6 +46,7 @@ python scripts/workflow-state.py get qa_findings
 ```
 
 Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
+
 ### Step 3: Dispatch Impartial Reviewer
 For large diffs (>10 files), use per-file chunking instead of a single subagent:
 

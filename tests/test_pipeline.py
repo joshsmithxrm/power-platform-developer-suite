@@ -1451,6 +1451,9 @@ class TestRetroDeduplication:
 class TestObservationsPersisted:
     def test_observations_persisted_in_store(self):
         """AC-09: observation findings remain in retro-findings.json (not filtered out)."""
+        import pipeline
+        from unittest.mock import patch, MagicMock
+
         with tempfile.TemporaryDirectory() as tmpdir:
             wf_dir = os.path.join(tmpdir, ".workflow")
             os.makedirs(wf_dir)
@@ -1464,8 +1467,19 @@ class TestObservationsPersisted:
             with open(findings_path, "w") as f:
                 json.dump(findings, f)
 
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            # Mock subprocess and duplicate check so gh is never called
+            mock_result = MagicMock(returncode=0, stdout="", stderr="")
+            with patch("subprocess.run", return_value=mock_result), \
+                 patch.object(pipeline, "_find_duplicate_issue", return_value=None):
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+
             # After process_retro_findings runs, the file should still contain
-            # observation findings (the function reads but doesn't modify the file)
+            # observation findings (the function reads but doesn't remove them)
             with open(findings_path) as f:
                 data = json.load(f)
 

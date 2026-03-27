@@ -145,8 +145,21 @@ def extract_enforcement_signals(state_path):
     return signals
 
 
+def _encode_project_dir(path):
+    """Encode a filesystem path into the Claude Code project directory name.
+
+    Claude Code stores per-project data under ``~/.claude/projects/<encoded>``,
+    where ``<encoded>`` is the absolute path with ``:``, ``/``, ``\\``, and ``.``
+    replaced by ``-``.
+    """
+    import re
+
+    path = os.path.abspath(path)
+    return re.sub(r"[:\\/.]", "-", path)
+
+
 def discover_transcripts(worktree_path):
-    """Find all transcript files (JSONL, logs) in the worktree."""
+    """Find all transcript files (JSONL, logs) for *this* worktree only."""
     transcripts = []
     # Pipeline stage logs
     stages_dir = os.path.join(worktree_path, ".workflow", "stages")
@@ -156,10 +169,16 @@ def discover_transcripts(worktree_path):
                 transcripts.append(os.path.join(stages_dir, f))
     # Interactive session transcripts (Claude Code stores these)
     claude_dir = os.path.expanduser("~/.claude/projects")
-    # Best-effort — path format may vary
     if os.path.isdir(claude_dir):
-        for root, dirs, files in os.walk(claude_dir):
-            for f in files:
-                if f.endswith(".jsonl"):
-                    transcripts.append(os.path.join(root, f))
+        encoded = _encode_project_dir(worktree_path)
+        for entry in os.listdir(claude_dir):
+            if entry != encoded:
+                continue
+            project_dir = os.path.join(claude_dir, entry)
+            if not os.path.isdir(project_dir):
+                continue
+            for root, _dirs, files in os.walk(project_dir):
+                for f in files:
+                    if f.endswith(".jsonl"):
+                        transcripts.append(os.path.join(root, f))
     return transcripts
