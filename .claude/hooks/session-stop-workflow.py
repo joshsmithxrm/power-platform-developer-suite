@@ -99,7 +99,6 @@ def main():
                 "specs/",
                 ".plans/",
                 "docs/",
-                ".claude/",
                 "README",
                 "CLAUDE.md",
             )
@@ -144,7 +143,7 @@ def main():
             missing.append("/gates")
 
     # Valid surface keys
-    valid_surfaces = ("ext", "tui", "mcp", "cli")
+    valid_surfaces = ("ext", "tui", "mcp", "cli", "workflow")
 
     # Verify (at least one valid surface)
     verify = state.get("verify", {})

@@ -1,7 +1,7 @@
 ---
 name: gemini-triage
 model: sonnet
-allowedTools:
+tools:
   - Read
   - Edit
   - Write

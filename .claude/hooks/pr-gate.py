@@ -101,7 +101,7 @@ def main():
         )
 
     # Valid surface keys
-    valid_surfaces = ("ext", "tui", "mcp", "cli")
+    valid_surfaces = ("ext", "tui", "mcp", "cli", "workflow")
 
     # 2. At least one valid surface verified
     verify = state.get("verify", {})

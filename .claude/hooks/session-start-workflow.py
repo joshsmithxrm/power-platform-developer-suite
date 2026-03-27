@@ -63,7 +63,7 @@ def main():
         msg = (
             f"WORKFLOW ENFORCEMENT ACTIVE on branch {branch}:\n"
             "  No workflow state tracked yet.\n"
-            "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
+            "  For new features: /design → /implement → /gates → /verify → /qa → /review → /pr\n"
             "  For bug fixes: /gates → /verify (if UI changed) → /pr"
         )
         if not os.environ.get("PPDS_PIPELINE"):
@@ -117,9 +117,9 @@ def main():
 
     # Verify surfaces
     verify = state.get("verify", {})
-    for surface in ("ext", "tui", "mcp", "cli"):
+    for surface in ("ext", "tui", "mcp", "cli", "workflow"):
         ts = verify.get(surface)
-        label = {"ext": "Extension", "tui": "TUI", "mcp": "MCP", "cli": "CLI"}[surface]
+        label = {"ext": "Extension", "tui": "TUI", "mcp": "MCP", "cli": "CLI", "workflow": "Workflow"}[surface]
         if ts:
             lines.append(f"  ✓ {label} verified")
         else:
@@ -152,7 +152,7 @@ def main():
     missing = []
     if not gates_passed or (head_sha and gates_ref != head_sha):
         missing.append("/gates")
-    if not any(verify.get(s) for s in ("ext", "tui", "mcp", "cli")):
+    if not any(verify.get(s) for s in ("ext", "tui", "mcp", "cli", "workflow")):
         missing.append("/verify")
     if not qa_surfaces:
         missing.append("/qa")

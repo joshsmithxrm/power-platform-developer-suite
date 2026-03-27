@@ -97,6 +97,25 @@ python scripts/workflow-state.py append issues <N>
 
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
 
+### Step 5b: Write Design Context (if present)
+
+If the conversation contains design-context content from a prior `/investigate` session:
+
+1. Create `.plans/` directory in the new worktree:
+   ```bash
+   mkdir -p .worktrees/<name>/.plans
+   ```
+
+2. Write the design-context content from conversation to `.plans/design-context.md` in the worktree
+
+3. Update Step 7 guidance to include:
+   ```
+   Design context written to .plans/design-context.md.
+   Run /design to continue.
+   ```
+
+If no design-context in conversation — skip this step, no file written.
+
 ### Step 6: Open Terminal
 
 Detect platform:

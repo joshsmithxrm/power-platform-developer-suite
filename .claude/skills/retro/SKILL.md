@@ -199,6 +199,35 @@ Tier definitions:
 - **draft-fix**: Skill wording, checklist gaps. Auto-PR but flag for review.
 - **issue-only**: Architectural changes, new skills. Create GitHub issue, needs /design.
 
+### 10. Persistent Store Update
+
+After writing `.workflow/retro-findings.json`, update the persistent retro store:
+
+1. **Read** `.retros/summary.json` (from repo root, not worktree `.workflow/`)
+   - If file doesn't exist: create with seed schema (schema_version: 1, total_retros: 0, empty findings_by_category, zeroed metrics)
+   - If file has invalid JSON: log warning, create fresh
+   - If `schema_version` differs from expected (1): log warning, create fresh
+
+2. **Append** each finding to `findings_by_category[category]` with `{date, branch, finding_id}`
+   - Append only — never mutate or delete existing entries during this step
+   - New categories are added as new keys
+
+3. **Increment** `total_retros`
+
+4. **Update** `metrics` (rolling averages computed from all entries in store):
+   - `avg_fix_ratio`: average feat/fix ratio across all retros
+   - `pipeline_success_rate`: fraction of retros with severity "clean"
+   - `avg_convergence_rounds`: average convergence rounds (from pipeline retros)
+
+5. **Trim** entries that fall outside both retention windows:
+   - Keep entries within last 20 retros (by `total_retros` count)
+   - Keep entries within last 6 months (by `date` field)
+   - Remove only entries that exceed BOTH thresholds (older than 6 months AND beyond 20 retros)
+
+6. **Update** `last_updated` to today's date
+
+7. **Write** `.retros/summary.json`
+
 ---
 
 ## Pipeline Retro
@@ -209,7 +238,8 @@ When running as a pipeline stage (headless, no user present):
 2. Read worktree transcripts — count sessions, extract basic metrics
 3. Read git log — commit count, feat/fix ratio
 4. Write `.workflow/retro-findings.json` with mechanical metrics ONLY
-5. No grading, no judgment, no root cause analysis — just data
-6. **Crash detection:** If this retro runs for less than 5 minutes and produces zero findings, log a warning in retro-findings.json
+5. **Update persistent store:** Follow the same Persistent Store Update process (section 10) to append findings to `.retros/summary.json`
+6. No grading, no judgment, no root cause analysis — just data
+7. **Crash detection:** If this retro runs for less than 5 minutes and produces zero findings, log a warning in retro-findings.json
 
 The pipeline orchestrator reads this file for auto-heal decisions.
