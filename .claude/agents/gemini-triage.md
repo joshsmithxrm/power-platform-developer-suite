@@ -5,7 +5,11 @@ tools:
   - Read
   - Edit
   - Write
-  - Bash
+  - Bash(git add:*)
+  - Bash(git commit:*)
+  - Bash(git diff:*)
+  - Bash(git push:*)
+  - Bash(git status:*)
   - Grep
   - Glob
 ---
