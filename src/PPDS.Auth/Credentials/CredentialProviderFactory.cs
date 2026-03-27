@@ -44,6 +44,7 @@ public static class CredentialProviderFactory
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
     /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
     /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
+    /// <param name="clientSecretOverride">Optional client secret that takes priority over env var and credential store lookups.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A credential provider for the profile's auth method.</returns>
     public static async Task<ICredentialProvider> CreateAsync(
@@ -51,13 +52,14 @@ public static class CredentialProviderFactory
         ISecureCredentialStore? credentialStore = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
+        string? clientSecretOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (profile == null)
             throw new ArgumentNullException(nameof(profile));
 
         // Check for environment variable override for SPN secret
-        var envSecret = GetSpnSecretFromEnvironment();
+        var envSecret = clientSecretOverride ?? GetSpnSecretFromEnvironment();
 
         return profile.AuthMethod switch
         {

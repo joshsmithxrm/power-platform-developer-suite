@@ -17,6 +17,10 @@ paths: ["src/PPDS.Extension/**"]
 - Styles: `src/panels/styles/{feature}-panel.css` (`@import './shared.css'`)
 - Discover panels dynamically via glob, not hardcoded lists
 
+## HTML Structure
+
+- Content wrapper uses `class="content"` (not `class="panel-content"`) — all panels follow this convention
+
 ## Code Rules
 
 - External CSS only (no inline styles) — VS Code silently drops inline scripts exceeding ~32KB

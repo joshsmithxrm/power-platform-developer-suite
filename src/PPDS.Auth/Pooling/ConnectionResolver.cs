@@ -46,6 +46,9 @@ public sealed class ConnectionResolver : IDisposable
         string? environmentOverride = null,
         CancellationToken cancellationToken = default)
     {
+        var envClient = await TryResolveFromEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+        if (envClient != null) return envClient;
+
         var collection = await _store.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         var profile = collection.ActiveProfile
@@ -69,6 +72,9 @@ public sealed class ConnectionResolver : IDisposable
         string? environmentOverride = null,
         CancellationToken cancellationToken = default)
     {
+        var envClient = await TryResolveFromEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+        if (envClient != null) return envClient;
+
         var collection = await _store.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         var profile = collection.GetByName(profileName)
@@ -94,6 +100,24 @@ public sealed class ConnectionResolver : IDisposable
         string? environmentDisplayName = null,
         CancellationToken cancellationToken = default)
     {
+        // Environment variable auth takes precedence — return single source from synthetic profile
+        var envAuth = EnvironmentVariableAuth.TryCreateProfile();
+        if (envAuth != null)
+        {
+            var (profile, clientSecret) = envAuth.Value;
+            var envUrl = profile.Environment!.Url;
+            var source = new ProfileConnectionSource(
+                profile,
+                envUrl,
+                maxPoolSizePerProfile,
+                _deviceCodeCallback,
+                beforeInteractiveAuth: null,
+                environmentDisplayName,
+                credentialStore: null,
+                clientSecretOverride: clientSecret);
+            return new[] { source };
+        }
+
         var names = profileNames.ToList();
         if (names.Count == 0)
             throw new ArgumentException("At least one profile name is required.", nameof(profileNames));
@@ -191,6 +215,26 @@ public sealed class ConnectionResolver : IDisposable
             .ToList();
     }
 
+    private async Task<ServiceClient?> TryResolveFromEnvironmentAsync(
+        CancellationToken cancellationToken)
+    {
+        var envAuth = EnvironmentVariableAuth.TryCreateProfile();
+        if (envAuth == null) return null;
+
+        var (profile, clientSecret) = envAuth.Value;
+        var envUrl = profile.Environment!.Url;
+
+        using var provider = await CredentialProviderFactory.CreateAsync(
+            profile,
+            credentialStore: null,
+            clientSecretOverride: clientSecret,
+            cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        return await provider.CreateServiceClientAsync(envUrl, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private async Task<ServiceClient> ResolveProfileAsync(
         AuthProfile profile,
         string? environmentOverride,
@@ -209,7 +253,7 @@ public sealed class ConnectionResolver : IDisposable
 
         // Create credential provider using async factory (supports secure store lookups)
         using var provider = await CredentialProviderFactory.CreateAsync(
-            profile, _credentialStore, _deviceCodeCallback, beforeInteractiveAuth: null, cancellationToken)
+            profile, _credentialStore, _deviceCodeCallback, beforeInteractiveAuth: null, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         return await provider.CreateServiceClientAsync(envUrl, cancellationToken)

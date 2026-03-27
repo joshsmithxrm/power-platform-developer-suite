@@ -1,7 +1,7 @@
 @import './shared.css';
 
 /* ── 6a: Side-by-Side Split Pane ──────────────────────────────── */
-.panel-content {
+.content {
     display: flex;
     flex-direction: row;
     flex: 1;
