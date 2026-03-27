@@ -59,7 +59,7 @@ git log --since="2 days ago" --format="%H %ai" --no-merges
 
 This is where the old retro failed. The interactive session (main repo) is where the real user interaction happens. The worktree transcripts are headless pipeline sessions with zero user input.
 
-**Search main repo transcripts by PR number or branch name:**
+**Search main repo transcripts by PR number or branch name** (grep -l for file names only — safe because it matches filenames, not line content):
 
 ```bash
 # Find main repo transcript directory
