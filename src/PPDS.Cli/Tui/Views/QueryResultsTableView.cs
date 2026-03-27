@@ -25,6 +25,7 @@ internal sealed class QueryResultsTableView : FrameView
     private bool _isLoadingMore;
     private bool _guidColumnsHidden;
     private string? _currentFilter;
+    private bool _disposed;
     private object? _statusRestoreToken; // Token to cancel pending status restore
     private const int StatusRestoreDelayMs = 2500;
 
@@ -133,6 +134,8 @@ internal sealed class QueryResultsTableView : FrameView
     public void LoadResults(QueryResult result)
     {
         _lastResult = result;
+        _dataTable?.Dispose();
+        _unfilteredDataTable?.Dispose();
         _unfilteredDataTable = null; // Clear filter cache
         _currentFilter = null;
 
@@ -194,6 +197,8 @@ internal sealed class QueryResultsTableView : FrameView
     /// <param name="entityLogicalName">The entity logical name for building record URLs.</param>
     public void InitializeStreamingColumns(IReadOnlyList<QueryColumn> columns, string entityLogicalName)
     {
+        _dataTable?.Dispose();
+        _unfilteredDataTable?.Dispose();
         _unfilteredDataTable = null;
         _currentFilter = null;
 
@@ -271,6 +276,8 @@ internal sealed class QueryResultsTableView : FrameView
     /// </summary>
     public void ClearData()
     {
+        _dataTable?.Dispose();
+        _unfilteredDataTable?.Dispose();
         _dataTable = new DataTable();
         _unfilteredDataTable = null; // Clear filter cache
         _currentFilter = null;
@@ -306,6 +313,7 @@ internal sealed class QueryResultsTableView : FrameView
             // Clear filter - restore original data
             if (_unfilteredDataTable != null)
             {
+                _dataTable?.Dispose(); // Dispose old filtered table
                 _dataTable = _unfilteredDataTable.Copy();
                 _tableView.Table = _dataTable;
                 ApplyColumnSizing();
@@ -331,7 +339,9 @@ internal sealed class QueryResultsTableView : FrameView
         {
             // Apply filter to source and create new filtered table
             sourceTable.DefaultView.RowFilter = string.Join(" OR ", conditions);
+            var oldDataTable = _dataTable;
             _dataTable = sourceTable.DefaultView.ToTable();
+            oldDataTable?.Dispose(); // Dispose old data table after replacement
             sourceTable.DefaultView.RowFilter = string.Empty; // Reset source filter
 
             _tableView.Table = _dataTable;
@@ -345,13 +355,22 @@ internal sealed class QueryResultsTableView : FrameView
     /// </summary>
     private static string EscapeFilterValue(string value)
     {
-        // Escape special characters: ', *, %, [, ]
-        return value
-            .Replace("'", "''")
-            .Replace("[", "[[]")
-            .Replace("]", "[]]")
-            .Replace("*", "[*]")
-            .Replace("%", "[%]");
+        // Escape special characters for DataView.RowFilter LIKE expressions.
+        // Order matters: escape ] before [ to avoid double-escaping the ] in [[]
+        var sb = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            sb.Append(c switch
+            {
+                '\'' => "''",
+                '[' => "[[]",
+                ']' => "[]]",
+                '*' => "[*]",
+                '%' => "[%]",
+                _ => c.ToString()
+            });
+        }
+        return sb.ToString();
     }
 
     private void SetupKeyboardShortcuts()
@@ -380,7 +399,7 @@ internal sealed class QueryResultsTableView : FrameView
                     e.Handled = true;
                     break;
 
-                case Key.CtrlMask | Key.O:
+                case Key.CtrlMask | Key.ShiftMask | Key.O:
                     OpenInBrowser();
                     e.Handled = true;
                     break;
@@ -525,8 +544,7 @@ internal sealed class QueryResultsTableView : FrameView
         if (string.IsNullOrEmpty(id)) return null;
 
         // Build Dynamics 365 record URL
-        var baseUrl = _environmentUrl.TrimEnd('/');
-        return $"{baseUrl}/main.aspx?etn={_lastResult.EntityLogicalName}&id={id}&pagetype=entityrecord";
+        return DataverseUrlBuilder.BuildRecordUrl(_environmentUrl, _lastResult.EntityLogicalName, id);
     }
 
     private void UpdateStatus()
@@ -651,5 +669,16 @@ internal sealed class QueryResultsTableView : FrameView
         _guidColumnsHidden = !_guidColumnsHidden;
         ApplyColumnSizing();
         UpdateStatus();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !_disposed)
+        {
+            _disposed = true;
+            _dataTable?.Dispose();
+            _unfilteredDataTable?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

@@ -72,7 +72,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         RegisterHotkey(registry, Key.CtrlMask | Key.F, "Filter", ShowFilterDialog);
 
-        RegisterHotkey(registry, Key.CtrlMask | Key.T, "Timeline", () =>
+        RegisterHotkey(registry, Key.F6, "Timeline", () =>
             ErrorService.FireAndForget(ShowTimelineAsync(), "PluginTraces.Timeline"));
 
         RegisterHotkey(registry, Key.CtrlMask | Key.D, "Delete", ShowDeleteDialog);

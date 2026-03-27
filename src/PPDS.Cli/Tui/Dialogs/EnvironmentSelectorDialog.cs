@@ -1,5 +1,6 @@
 using PPDS.Auth.Profiles;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Tui.Infrastructure;
@@ -479,7 +480,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         string url;
         if (!string.IsNullOrWhiteSpace(env.EnvironmentId))
         {
-            url = $"https://make.powerapps.com/environments/{env.EnvironmentId}/solutions";
+            url = DataverseUrlBuilder.BuildMakerPortalUrl(env.EnvironmentId);
         }
         else
         {

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
@@ -536,7 +537,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         var url = EnvironmentUrl;
         if (_selectedEntity != null)
         {
-            url += $"/main.aspx?pagetype=entitylist&etn={_selectedEntity.LogicalName}";
+            url = DataverseUrlBuilder.BuildEntityListUrl(EnvironmentUrl, _selectedEntity.LogicalName);
         }
 
         using var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))

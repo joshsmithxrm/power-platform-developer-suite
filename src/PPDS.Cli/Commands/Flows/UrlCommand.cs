@@ -83,9 +83,7 @@ public static class UrlCommand
                 return ExitCodes.ValidationError;
             }
 
-            // Build Power Automate URL using the Power Platform environment ID GUID
-            // Format: https://make.powerautomate.com/environments/{environmentId}/flows/{flowId}/details
-            var makerUrl = $"https://make.powerautomate.com/environments/{connectionInfo.EnvironmentId}/flows/{flow.Id}/details";
+            var makerUrl = DataverseUrlBuilder.BuildFlowUrl(connectionInfo.EnvironmentId, flow.Id);
 
             if (globalOptions.IsJsonMode)
             {

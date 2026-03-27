@@ -88,6 +88,43 @@ public sealed class SqlQueryScreenTests : IDisposable
     }
 
     /// <summary>
+    /// AC-25: Menu items and hotkey registrations must use ErrorService.FireAndForget
+    /// instead of unmonitored fire-and-forget patterns like "_ = Task".
+    /// </summary>
+    [Fact]
+    public void MenuItems_UseFireAndForget()
+    {
+        var srcDir = FindSrcDirectory();
+        var screenFile = Path.Combine(srcDir, "PPDS.Cli", "Tui", "Screens", "SqlQueryScreen.cs");
+        var lines = File.ReadAllLines(screenFile);
+
+        var violations = new List<string>();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Contains("_ = ") && !lines[i].TrimStart().StartsWith("//"))
+            {
+                violations.Add($"Line {i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            $"SqlQueryScreen contains unmonitored fire-and-forget patterns (use ErrorService.FireAndForget instead):\n{string.Join("\n", violations)}");
+    }
+
+    private static string FindSrcDirectory()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir != null)
+        {
+            var srcCandidate = Path.Combine(dir, "src");
+            if (Directory.Exists(srcCandidate))
+                return srcCandidate;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+        throw new InvalidOperationException("Could not find src/ directory");
+    }
+
+    /// <summary>
     /// Stub that mirrors SqlQueryScreen's Title logic exactly:
     ///   EnvironmentUrl != null ? $"SQL Query - {EnvironmentDisplayName ?? EnvironmentUrl}" : "SQL Query"
     /// This avoids needing Application.Init() while verifying the title format contract.

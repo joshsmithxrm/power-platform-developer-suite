@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
@@ -25,6 +24,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 /// </remarks>
 internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<ProfileCreationDialogState>
 {
+    private readonly AuthMethodFormModel _model;
     private readonly IReadOnlyList<string> _authMethodNames;
     private readonly AuthMethod[] _authMethods;
 
@@ -100,24 +100,11 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         _session = session;
         _deviceCodeCallback = deviceCodeCallback;
 
-        // Build platform-aware auth method list
-        var methods = new List<(string Label, AuthMethod Method)>
-        {
-            ("Device Code (Interactive)", AuthMethod.DeviceCode),
-            ("Browser (Interactive)", AuthMethod.InteractiveBrowser),
-            ("Client Secret (Service Principal)", AuthMethod.ClientSecret),
-            ("Certificate File (Service Principal)", AuthMethod.CertificateFile),
-        };
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            methods.Add(("Certificate Store (Service Principal)", AuthMethod.CertificateStore));
-        }
-
-        methods.Add(("Username & Password", AuthMethod.UsernamePassword));
-
+        // Build platform-aware auth method list via extracted model
+        _model = new AuthMethodFormModel();
+        var methods = _model.GetAvailableMethods();
         _authMethods = methods.Select(m => m.Method).ToArray();
-        _authMethodNames = methods.Select(m => m.Label).ToArray();
+        _authMethodNames = methods.Select(m => m.Label).ToList();
         var radioLabels = methods.Select(m => (NStack.ustring)m.Label).ToArray();
 
         Width = 70;
@@ -386,36 +373,24 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
     private void OnAuthMethodChanged(SelectedItemChangedArgs args)
     {
         var method = GetSelectedMethod();
-        var isSpn = method is AuthMethod.ClientSecret or AuthMethod.CertificateFile or AuthMethod.CertificateStore;
-        var isUserPass = method == AuthMethod.UsernamePassword;
+        var visibility = _model.GetVisibleFields(method);
 
-        _spnFrame.Visible = isSpn;
-        _credFrame.Visible = isUserPass;
+        _spnFrame.Visible = visibility.ShowSpnFrame;
+        _credFrame.Visible = visibility.ShowCredFrame;
 
-        // Toggle SPN field visibility by method
-        _secretLabel.Visible = method == AuthMethod.ClientSecret;
-        _clientSecretField.Visible = method == AuthMethod.ClientSecret;
+        _secretLabel.Visible = visibility.ShowClientSecret;
+        _clientSecretField.Visible = visibility.ShowClientSecret;
 
-        _certPathLabel.Visible = method == AuthMethod.CertificateFile;
-        _certPathField.Visible = method == AuthMethod.CertificateFile;
-        _certPwdLabel.Visible = method == AuthMethod.CertificateFile;
-        _certPasswordField.Visible = method == AuthMethod.CertificateFile;
+        _certPathLabel.Visible = visibility.ShowCertPath;
+        _certPathField.Visible = visibility.ShowCertPath;
+        _certPwdLabel.Visible = visibility.ShowCertPassword;
+        _certPasswordField.Visible = visibility.ShowCertPassword;
 
-        _thumbprintLabel.Visible = method == AuthMethod.CertificateStore;
-        _thumbprintField.Visible = method == AuthMethod.CertificateStore;
+        _thumbprintLabel.Visible = visibility.ShowThumbprint;
+        _thumbprintField.Visible = visibility.ShowThumbprint;
 
-        // Update status text
         _statusLabel.ColorScheme = TuiColorPalette.Default;
-        _statusLabel.Text = method switch
-        {
-            AuthMethod.DeviceCode => "A code will be shown to enter at microsoft.com/devicelogin",
-            AuthMethod.InteractiveBrowser => "Your default browser will open for sign-in",
-            AuthMethod.ClientSecret => "Requires App ID, Tenant ID, Client Secret, and Environment URL",
-            AuthMethod.CertificateFile => "Requires App ID, Tenant ID, Certificate, and Environment URL",
-            AuthMethod.CertificateStore => "Requires App ID, Tenant ID, Thumbprint, and Environment URL",
-            AuthMethod.UsernamePassword => "Username and password \u2014 may require disabling MFA",
-            _ => "Select an authentication method"
-        };
+        _statusLabel.Text = _model.GetStatusText(method);
     }
 
     private void OnAuthenticateClicked()
@@ -428,62 +403,13 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
 
         // Validate inputs
         var method = GetSelectedMethod();
-        var isSpn = method is AuthMethod.ClientSecret or AuthMethod.CertificateFile or AuthMethod.CertificateStore;
-
-        if (isSpn)
+        var fieldValues = CollectFieldValues();
+        var error = _model.Validate(method, fieldValues);
+        if (error != null)
         {
-            // Validate SPN fields
-            if (string.IsNullOrWhiteSpace(_appIdField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Application ID is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(_tenantIdField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Tenant ID is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(_environmentUrlField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Environment URL is required for service principals";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (method == AuthMethod.ClientSecret && string.IsNullOrWhiteSpace(_clientSecretField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Client Secret is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (method == AuthMethod.CertificateFile && string.IsNullOrWhiteSpace(_certPathField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Certificate path is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (method == AuthMethod.CertificateStore && string.IsNullOrWhiteSpace(_thumbprintField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Certificate thumbprint is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-        }
-        else if (method == AuthMethod.UsernamePassword)
-        {
-            if (string.IsNullOrWhiteSpace(_usernameField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Username is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(_passwordField.Text?.ToString()))
-            {
-                _statusLabel.Text = "Error: Password is required";
-                _statusLabel.ColorScheme = TuiColorPalette.Error;
-                return;
-            }
+            _statusLabel.Text = $"Error: {error}";
+            _statusLabel.ColorScheme = TuiColorPalette.Error;
+            return;
         }
 
         _isAuthenticating = true;
@@ -491,13 +417,15 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         _statusLabel.ColorScheme = TuiColorPalette.Default;
 
         // Build request
-        var request = BuildCreateRequest();
+        var request = _model.BuildRequest(method, fieldValues);
 
         // Dispose previous CTS if re-authenticating
         _authCompleteCts?.Dispose();
         _authCompleteCts = new CancellationTokenSource();
 
         // Always provide device code callback (needed for Browser's device code fallback too)
+        // Capture CTS in local variable to avoid closure over mutable field (AC-23)
+        var authCompleteCts = _authCompleteCts;
         var deviceCallback = _deviceCodeCallback ?? (info =>
         {
             Application.MainLoop?.Invoke(() =>
@@ -508,7 +436,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
                     info.UserCode,
                     info.VerificationUrl,
                     clipboardCopied: copied,
-                    authComplete: _authCompleteCts?.Token ?? CancellationToken.None);
+                    authComplete: authCompleteCts?.Token ?? CancellationToken.None);
                 Application.Run(dialog);
             });
         });
@@ -619,28 +547,18 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         }
     }
 
-    private ProfileCreateRequest BuildCreateRequest()
-    {
-        var method = GetSelectedMethod();
-
-        return new ProfileCreateRequest
-        {
-            Name = string.IsNullOrWhiteSpace(_nameField.Text?.ToString()) ? null : _nameField.Text.ToString()?.Trim(),
-            Environment = string.IsNullOrWhiteSpace(_environmentUrlField.Text?.ToString()) ? null : _environmentUrlField.Text.ToString()?.Trim(),
-            AuthMethod = method,
-            UseDeviceCode = method == AuthMethod.DeviceCode,
-            // SPN fields
-            ApplicationId = _appIdField.Text?.ToString()?.Trim(),
-            TenantId = _tenantIdField.Text?.ToString()?.Trim(),
-            ClientSecret = method == AuthMethod.ClientSecret ? _clientSecretField.Text?.ToString() : null,
-            CertificatePath = method == AuthMethod.CertificateFile ? _certPathField.Text?.ToString()?.Trim() : null,
-            CertificatePassword = method == AuthMethod.CertificateFile ? _certPasswordField.Text?.ToString() : null,
-            CertificateThumbprint = method == AuthMethod.CertificateStore ? _thumbprintField.Text?.ToString()?.Trim() : null,
-            // Username/Password fields
-            Username = method == AuthMethod.UsernamePassword ? _usernameField.Text?.ToString()?.Trim() : null,
-            Password = method == AuthMethod.UsernamePassword ? _passwordField.Text?.ToString() : null,
-        };
-    }
+    private AuthMethodFieldValues CollectFieldValues() => new(
+        ProfileName: _nameField.Text?.ToString()?.Trim(),
+        EnvironmentUrl: _environmentUrlField.Text?.ToString()?.Trim(),
+        AppId: _appIdField.Text?.ToString()?.Trim(),
+        TenantId: _tenantIdField.Text?.ToString()?.Trim(),
+        ClientSecret: _clientSecretField.Text?.ToString(),
+        CertPath: _certPathField.Text?.ToString()?.Trim(),
+        CertPassword: _certPasswordField.Text?.ToString(),
+        Thumbprint: _thumbprintField.Text?.ToString()?.Trim(),
+        Username: _usernameField.Text?.ToString()?.Trim(),
+        Password: _passwordField.Text?.ToString()
+    );
 
     /// <inheritdoc />
     public ProfileCreationDialogState CaptureState() => new(

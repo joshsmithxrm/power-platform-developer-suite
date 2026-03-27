@@ -83,7 +83,7 @@ public static class GetCommand
                 return ExitCodes.NotFoundError;
             }
 
-            var makerUrl = BuildMakerUrl(connectionInfo.EnvironmentUrl, importJobId);
+            var makerUrl = DataverseUrlBuilder.BuildImportJobMakerUrl(connectionInfo.EnvironmentUrl, importJobId);
 
             if (globalOptions.IsJsonMode)
             {
@@ -122,13 +122,6 @@ public static class GetCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    private static string BuildMakerUrl(string environmentUrl, Guid importJobId)
-    {
-        var uri = new Uri(environmentUrl);
-        var orgName = uri.Host.Split('.')[0];
-        return $"https://make.powerapps.com/environments/Default-{orgName}/solutions/importjob/{importJobId}";
     }
 
     #region Output Models
