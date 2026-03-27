@@ -5,6 +5,11 @@ description: Implement Plan
 
 # Implement Plan
 
+## Usage
+
+`/implement` — read spec and plan from `.plans/`, execute phases
+`/implement specs/my-feature.md` — explicit spec path
+
 ## Pipeline Mode Detection
 
 If the environment variable `PPDS_PIPELINE=1` is set, this skill is being invoked by the
