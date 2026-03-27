@@ -51,7 +51,6 @@ public sealed class SqlQueryPresenterTests : IDisposable
     [Fact]
     public void NoTerminalGuiDependency()
     {
-        var assembly = typeof(SqlQueryPresenter).Assembly;
         var presenterType = typeof(SqlQueryPresenter);
 
         // Check that the source file has no "using Terminal.Gui" via reflection on referenced types
@@ -382,7 +381,7 @@ public sealed class SqlQueryPresenterTests : IDisposable
     [Fact]
     public void Dispose_CancelsAndDisposesQueryCts()
     {
-        var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
 
         // Should not throw
         presenter.Dispose();

@@ -84,32 +84,6 @@ public class DataverseUrlBuilderTests
 
     #endregion
 
-    #region BuildMakerUrl Tests
-
-    [Fact]
-    public void BuildMakerUrl_ValidEnvironmentUrl_ReturnsCorrectUrl()
-    {
-        var url = DataverseUrlBuilder.BuildMakerUrl("https://myorg.crm.dynamics.com");
-
-        Assert.Equal(
-            "https://make.powerapps.com/environments/Default-myorg/solutions",
-            url);
-    }
-
-    [Fact]
-    public void BuildMakerUrl_WithCustomPath_ReturnsCorrectUrl()
-    {
-        var url = DataverseUrlBuilder.BuildMakerUrl(
-            "https://myorg.crm.dynamics.com",
-            "/entities");
-
-        Assert.Equal(
-            "https://make.powerapps.com/environments/Default-myorg/entities",
-            url);
-    }
-
-    #endregion
-
     #region BuildMakerPortalUrl Tests
 
     [Fact]

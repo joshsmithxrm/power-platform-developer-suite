@@ -239,6 +239,11 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
             QueryCancelled?.Invoke();
         }
+        catch (OperationCanceledException) when (screenCancellation.IsCancellationRequested)
+        {
+            _isExecuting = false;
+            // Screen is closing — silently swallow
+        }
         catch (PpdsException dmlEx) when (dmlEx.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
         {
             _isExecuting = false;

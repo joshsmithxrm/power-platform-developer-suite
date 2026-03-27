@@ -33,17 +33,6 @@ public static class DataverseUrlBuilder
     }
 
     /// <summary>
-    /// Builds a Power Apps Maker portal URL using the org name extracted from the environment URL.
-    /// </summary>
-    public static string BuildMakerUrl(string environmentUrl, string? path = "/solutions")
-    {
-        var uri = new Uri(environmentUrl);
-        var orgName = uri.Host.Split('.')[0];
-        var trimmedPath = (path ?? "/solutions").TrimStart('/');
-        return $"https://make.powerapps.com/environments/Default-{orgName}/{trimmedPath}";
-    }
-
-    /// <summary>
     /// Builds a Power Apps Maker portal URL using a Power Platform environment ID directly.
     /// Used when the environment ID is available but the environment URL may not contain org name.
     /// </summary>
