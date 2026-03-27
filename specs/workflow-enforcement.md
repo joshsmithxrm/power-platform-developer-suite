@@ -128,6 +128,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 ```json
 {
   "branch": "feat/import-jobs",
+  "work_type": "feature",
   "spec": "specs/import-jobs.md",
   "issues": [602, 596],
   "plan": ".plans/2026-03-16-import-jobs.md",
@@ -260,7 +261,7 @@ Run these before creating a PR.
 2. **Infinite loop guard:** If `stop_hook_active` is set in hook input, exit 0 (prevents re-entry).
 3. **Main branch:** If on `main` or `master`, exit 0.
 4. Read `.workflow/state.json` if it exists. If missing, exit 0.
-5. **Design-only bypass:** If the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`), exit 0 — this was a design session.
+5. **Design-only bypass:** If the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`), exit 0 — this was a design session. Note: `.claude/` is NOT a non-code prefix — process code requires workflow enforcement.
 6. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
 7. If all steps complete, emit summary to stderr and exit 0.
 
@@ -307,14 +308,14 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 
 | Skill | Purpose | Key Behavior |
 |-------|---------|-------------|
-| `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. |
+| `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Check for `.plans/context.md` — if found, load design context and offer "proceed to spec writing or brainstorm further?" Verify proposal against each Constraint and Known Concern from context file. Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. **Anti-pattern update:** "Every new feature goes through this. Bug fixes and enhancements with existing specs use `/implement` directly." |
 | `/pr` | Rebase → draft PR → Gemini triage → mark ready → notify. | **Interactive mode:** Rebases on main. Creates draft PR. Polls for Gemini reviews (30s interval, 90s min wait, 5 min max). Triages each comment (fix valid, dismiss invalid with rationale). Replies to EACH comment individually. Converts draft → ready (`gh pr ready`). Notifies user. Writes `pr.url`, `pr.created`, `pr.gemini_triaged` to workflow state. **Pipeline mode:** Orchestration is scripted in `pipeline.py` (see PR Stage Orchestration). Only the triage step invokes AI via the `gemini-triage` agent profile (Sonnet). |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
 | `/status` | Display current workflow state with live pipeline monitoring. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. When a pipeline is running (`.workflow/pipeline.lock` exists with live PID): parses `.workflow/pipeline.log` for stage progress and last heartbeat; parses the active stage's `.jsonl` file to show current tool call in progress, files created/modified this stage, commits made, elapsed time, and last activity timestamp. When no pipeline is running: reads `.workflow/stages/{stage}.log` for completed stage summaries. No state writes. |
-| `/start` | Bootstrap a feature worktree. | Accepts freeform input (issues, descriptions). AI extracts candidate name + issue numbers, proposes to user for confirmation. Creates worktree at `.worktrees/<name>` with branch `feat/<name>`, initializes `.workflow/state.json` with `branch`, `started`, and `issues` fields, opens new terminal using system default shell in worktree directory. Prints "Run `claude` then `/design`". Handles: existing branch (no `-b`), existing worktree (ask resume or new), platform detection for terminal launch (pwsh on Windows, default shell on Linux/Mac), missing terminal command (prints cd instructions instead). **Worktree-aware:** Works from any branch — if on a feature branch/worktree, resolves the main repo root via `git worktree list` and creates the new worktree from there. |
+| `/start` | Bootstrap a feature worktree with work-type routing. | Accepts freeform input (issues, descriptions). AI extracts candidate name + issue numbers, proposes to user for confirmation. **Work-type classification:** During confirmation, asks user "What kind of work? (1) Bug fix, (2) Enhancement/refactor, (3) New feature." If linked issues have labels (`type:bug`, `type:enhancement`, `type:refactor`, `type:performance`, `type:docs`), pre-selects the most likely category — but user confirms. Creates worktree at `.worktrees/<name>` with branch `feat/<name>`, initializes `.workflow/state.json` with `branch`, `started`, `issues`, and `work_type` fields. **Context file:** Writes `.plans/context.md` to the worktree with issue titles, bodies (from `gh issue view`), work type, and recommended next step. If conversation contains design-context from `/investigate`, includes it in the context file. **Work-type-aware guidance:** Prints routing based on work type: bug fix → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"; enhancement/refactor → "Run `/implement`"; new feature → "Run `/design`". Opens new terminal using system default shell in worktree directory. Handles: existing branch (no `-b`), existing worktree (ask resume or new), platform detection for terminal launch (pwsh on Windows, default shell on Linux/Mac), missing terminal command (prints cd instructions instead). **Worktree-aware:** Works from any branch — if on a feature branch/worktree, resolves the main repo root via `git worktree list` and creates the new worktree from there. |
 
 ### Main Branch Bootstrap
 
@@ -669,19 +670,17 @@ Replace the current workflow bullet list with:
 ## Workflow (REQUIRED SEQUENCE)
 
 ### New feature or non-trivial change
-1. /spec (or verify spec exists with numbered ACs)
-2. /spec-audit (verify spec matches codebase reality)
-3. Write implementation plan → user approves
-4. /implement <plan-path>
-5. /gates — STOP on failure, fix before proceeding
-6. /verify for EVERY affected surface — you MUST use the product:
+1. /design (brainstorm → spec → plan → review)
+2. /implement (or /implement <plan-path>)
+3. /gates — STOP on failure, fix before proceeding
+4. /verify for EVERY affected surface — you MUST use the product:
    - Extension changed → /ext-verify (screenshots required)
    - TUI changed → /tui-verify (PTY interaction required)
    - MCP changed → /mcp-verify (tool invocation required)
    - CLI changed → /cli-verify (run the command)
-7. /qa for at least one affected surface (blind verification)
-8. /review → /converge until 0 critical, 0 important
-9. /pr (rebase, create PR, monitor CI + reviews)
+5. /qa for at least one affected surface (blind verification)
+6. /review → /converge until 0 critical, 0 important
+7. /pr (rebase, create PR, monitor CI + reviews)
 
 ### Bug fix or small change
 1. /gates before committing
@@ -689,7 +688,7 @@ Replace the current workflow bullet list with:
 3. /pr when ready
 
 ### Enforcement
-Steps 5-8 are enforced by hooks. The PR gate hook will block `gh pr create`
+Steps 3-6 are enforced by hooks. The PR gate hook will block `gh pr create`
 if these steps are incomplete. Run `/status` to check current workflow state.
 
 ### STOP conditions
@@ -754,7 +753,7 @@ After all skills in this spec are implemented:
 | AC-27 | `.workflow/state.json` is listed in `.gitignore` and not tracked by git | Verify `.gitignore` contains entry, `git status` does not show state file | 🔲 |
 | AC-28 | `/implement` contains no superpowers references after rewrite | Read `/implement` skill content, grep for "superpowers" — zero matches | 🔲 |
 | AC-29 | `/review` dispatches reviewer without superpowers dependency | Run `/review`, verify subagent launches as general-purpose with isolation constraints | 🔲 |
-| AC-30 | `/pr` stops polling after 15 minutes with graceful timeout message | Manual: create PR with slow CI, verify timeout behavior | 🔲 |
+| AC-30 | `/pr` stops Gemini polling after 5 minutes maximum with graceful timeout message | Manual: create PR with slow Gemini, verify 5-minute max polling | 🔲 |
 | AC-31 | `/status` displays current workflow state summary on demand | Manual: run `/status` mid-session, verify output matches state file | 🔲 |
 | AC-32 | `/shakedown` outputs findings document to `docs/qa/` | Manual: complete `/shakedown`, verify findings file created | 🔲 |
 | AC-33 | `/shakedown` includes parity comparison across tested surfaces | Manual: run `/shakedown` on 2+ surfaces, verify parity matrix in output | 🔲 |
@@ -765,7 +764,7 @@ After all skills in this spec are implemented:
 | AC-38 | SessionStart hook on main shows active worktrees and `/start` guidance | Manual: start session on main with existing worktrees | 🔲 |
 | AC-39 | Pre-commit hook blocks `git commit` on main with guidance message | Manual: attempt commit on main, verify exit code 2 | 🔲 |
 | AC-40 | `/start` gracefully handles missing terminal command — prints `cd` + `claude` instructions for user to run manually | Manual: test with terminal launch unavailable | 🔲 |
-| AC-41 | `/start` prints "Run `claude` then `/design`" after opening the terminal | Manual: run `/start`, verify guidance message | 🔲 |
+| AC-41 | `/start` prints work-type-aware guidance after opening the terminal: bug fix → "Code the fix + regression test, then `/gates` → `/verify` → `/pr`"; enhancement → "Run `/implement`"; new feature → "Run `/design`" | Manual: run `/start` for each work type, verify guidance changes | 🔲 |
 | AC-42 | `/design` Step 2 (brainstorm) explicitly explores 2-3 approaches before converging on a direction | Manual: run `/design`, verify multiple approaches proposed | 🔲 |
 | AC-43 | `/design` Step 3 writes spec, then runs `/review` against the spec before presenting to user | Manual: complete design brainstorm, verify review runs on spec draft | 🔲 |
 | AC-44 | `/design` Step 3 presents spec + review findings + fixes to user (shows what was caught and fixed, not just the clean result) | Manual: verify presentation includes review findings | 🔲 |
@@ -773,7 +772,7 @@ After all skills in this spec are implemented:
 | AC-46 | `/design` Step 5 presents plan + review findings to user; on approval, commits spec to worktree branch (plan is ephemeral, gitignored) | Manual: approve plan, verify commit in worktree | 🔲 |
 | AC-47 | `/design` Step 6 (handoff) offers three options: invoke headless pipeline, continue interactively with `/implement`, or defer | Manual: complete design, verify three options presented | 🔲 |
 | AC-48 | `protect-main-branch.py` blocks ALL edits on main — `.plans/` removed from allowed prefixes; only temp dirs and `.worktrees/` writes allowed | Manual: attempt to edit `.plans/` file on main, verify blocked | 🔲 |
-| AC-49 | `session-stop-workflow.py` skips workflow enforcement on worktree branches when the only changed files (vs main) are non-code prefixes (`specs/`, `.plans/`, `docs/`, `.claude/`, `README`, `CLAUDE.md`) — design/config sessions end cleanly | Manual: end design session in worktree with only spec changes, verify no enforcement | 🔲 |
+| AC-49 | `session-stop-workflow.py` skips workflow enforcement on worktree branches when the only changed files (vs main) are non-code prefixes (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`) — design sessions end cleanly. `.claude/` changes require workflow enforcement. | Manual: end design session with only spec changes → no enforcement; end session with `.claude/` changes → enforcement | 🔲 |
 | AC-50 | `/design` does not activate plan mode — uses its own incremental approval flow (one question at a time, section-by-section validation) | Manual: run `/design`, verify plan mode is not used | 🔲 |
 | AC-51 | All hook commands in settings.json use relative paths `.claude/hooks/` — no `${CLAUDE_PROJECT_DIR}` in any command string | `test_pipeline.py::test_all_hook_commands_use_relative_paths` | 🔲 |
 | AC-52 | Stop hook exits 0 immediately when `PPDS_PIPELINE=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_pipeline_mode` | 🔲 |
@@ -817,6 +816,13 @@ After all skills in this spec are implemented:
 | AC-90 | When Gemini posts no comments within 5 minutes, pipeline converts draft to ready with "Gemini: no review received" in PR body | `test_pipeline.py::test_pr_gemini_timeout_annotation` | 🔲 |
 | AC-91 | When triage agent fails or times out, pipeline converts draft to ready with "Gemini triage incomplete — manual review needed" in PR body | `test_pipeline.py::test_pr_triage_failure_annotation` | 🔲 |
 | AC-92 | Triage agent pushes fix commits before outputting results — pipeline verifies remote HEAD matches local HEAD before posting replies | `test_pipeline.py::test_pr_triage_push_verify` | 🔲 |
+| AC-93 | `/start` asks user to confirm work type during Step 3 with three options: bug fix, enhancement/refactor, new feature | Manual: run `/start`, verify work-type question in confirmation prompt | 🔲 |
+| AC-94 | `/start` pre-selects work type from issue labels when available (`type:bug` → bug fix, `type:enhancement`/`type:refactor`/`type:performance` → enhancement, `type:docs` → docs) | Manual: run `/start` with labeled issue, verify pre-selection | 🔲 |
+| AC-95 | `/start` writes `.plans/context.md` to the worktree containing issue titles, bodies, work type, and recommended next step | Manual: run `/start`, read `.plans/context.md` in worktree | 🔲 |
+| AC-96 | `/start` records `work_type` in `.workflow/state.json` via `workflow-state.py set work_type <type>` | Manual: run `/start`, read state file, verify `work_type` field | 🔲 |
+| AC-97 | `/start` includes design-context from `/investigate` conversation in `.plans/context.md` when present | Manual: run `/investigate` then `/start` in same session, verify context file includes investigation output | 🔲 |
+| AC-98 | `/design` reads `.plans/context.md` (not `design-context.md`) at Step 1 and offers proceed/brainstorm choice when found | `grep "context.md" .claude/skills/design/SKILL.md` returns match in Step 1 | 🔲 |
+| AC-99 | `/implement` Step 0 prompts user when no relevant spec is found: "No spec found. Run `/design` or continue without?" | Manual: run `/implement` with no spec in workflow state and no matching spec in `specs/`, verify prompt | 🔲 |
 
 ### Edge Cases
 
@@ -839,6 +845,11 @@ After all skills in this spec are implemented:
 | Stage log directory missing | Auto-created before subprocess launch. |
 | `claude` command not found on PATH | `FileNotFoundError` caught, `ERROR` logged, pipeline exits 1. |
 | `/start` run from worktree | Resolves main repo root via `git worktree list`, creates new worktree from there. Current session unaffected. |
+| `/start` with issue that has no labels | Work-type question shows no pre-selection — user picks from all three options. |
+| `/start` with multiple issues of different types | Pre-selection uses the most common label type. If tied, no pre-selection — user picks. |
+| `/start` with `type:docs` issue | Guidance says "Edit docs and commit. No design or implement needed." |
+| `/start` with `gh` not authenticated | Context file omits issue bodies (only titles from args). Warns user. |
+| `/implement` Step 0 with no matching spec | Prompts user: "No spec found. Run `/design` or continue without?" If continue, generates plan from issue context in `.plans/context.md`. |
 | Hook command with MSYS path mangling | Cannot happen — relative paths have no `${CLAUDE_PROJECT_DIR}` to mangle. |
 | Two pipelines run on same worktree simultaneously | Lock file prevents this. Second pipeline prints "Pipeline already running (PID XXXX)" and exits 1. |
 | `PPDS_PIPELINE=1` set manually in interactive session | Stop hook exits immediately, skipping workflow enforcement. Start hook skips behavioral rules. User gets a degraded experience — this is intentional only for pipeline use. |
@@ -1112,6 +1123,7 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-24 | v3.0 — stop hook blocking, converge cycle handling, /shakedown |
 | 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
 | 2026-03-26 | v5.0 — pipeline observability and PR orchestration: (1) stream-json output for real-time stage logs, (2) multi-signal activity detection, (3) JSONL post-processing, (4) pipeline lock file, (5) /status live JSONL monitoring, (6) scripted PR stage with draft→ready flow, (7) gemini-triage agent profile (Sonnet), (8) pipeline-result.json + notify on completion/failure. |
+| 2026-03-27 | v6.0 — work-type routing: (1) `/start` classifies work type (user-confirmed, labels as hints), (2) `.plans/context.md` written to worktree with issue details + work type + next step, (3) work-type-aware guidance replaces hardcoded `/design`, (4) `work_type` field in workflow state, (5) `/design` reads `context.md` instead of `design-context.md`, (6) `/design` anti-patterns updated for bug-fix path, (7) `/implement` Step 0 fallback when no spec found. |
 
 ---
 
