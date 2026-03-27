@@ -1280,6 +1280,7 @@ class TestRetroFindingsSummary:
     def test_findings_summary_includes_observation_count(self):
         """AC-03: FINDINGS_SUMMARY log includes observation count."""
         import pipeline
+        from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as tmpdir:
             wf_dir = os.path.join(tmpdir, ".workflow")
@@ -1296,7 +1297,11 @@ class TestRetroFindingsSummary:
 
             log_path = os.path.join(tmpdir, "test.log")
             logger = pipeline.open_logger(log_path)
-            pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=None), \
+                 patch("subprocess.run"):
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
             logger.close()
 
             with open(log_path) as f:
