@@ -84,6 +84,7 @@ When the design is approved:
 1. Invoke `/review` — dispatch an impartial reviewer that gets ONLY the spec content, constitution, and spec template. No design conversation context.
 2. Fix critical and important findings
 3. Note which findings were fixed and which were dismissed with rationale
+4. Restore phase: `python scripts/workflow-state.py set phase design`
 
 **C. Present to user:**
 1. Present the spec to the user
@@ -104,6 +105,7 @@ After user approves the spec:
 1. Invoke `/review` — reviewer checks plan against spec ACs for coverage gaps
 2. Fix findings (missing ACs, incorrect phase ordering, missing verification)
 3. Note fixes and dismissals
+4. Restore phase: `python scripts/workflow-state.py set phase design`
 
 **C. Present to user:**
 1. Present the plan with a summary table (phases, files, ACs covered)
@@ -122,6 +124,12 @@ Co-Authored-By: {use the format from the system prompt}"
 ```
 
 Note: `.plans/` is gitignored — the plan lives in the worktree filesystem only.
+
+Write the spec path to workflow state so `/implement` can find it:
+
+```bash
+python scripts/workflow-state.py set spec specs/<name>.md
+```
 
 ### Step 6: Handoff
 

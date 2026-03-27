@@ -176,12 +176,14 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 - If the phase touches CLI commands (`src/PPDS.Cli/Commands/`, not `Serve/`):
   Invoke `/qa cli` to verify command output matches expectations.
 - Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
+- After all sub-skill invocations (/verify, /qa) complete, restore phase: `python scripts/workflow-state.py set phase implementing`
 
 **D. Review**
 - Invoke `/review` to dispatch an impartial reviewer for the phase's work
 - The reviewer receives ONLY the diff, constitution, and ACs — NO implementation context (no plan, no task descriptions). It reviews code against specs, not against the plan.
 - If the review identifies issues, dispatch fix agents before committing
 - Only proceed to commit when review passes
+- After review completes, restore phase: `python scripts/workflow-state.py set phase implementing`
 
 **E. Commit the Phase**
 - Stage all files for this phase: `git add` specific files (not `git add -A`)

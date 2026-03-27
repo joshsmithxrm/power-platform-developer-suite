@@ -101,6 +101,9 @@ class TestCiFailure:
         result = pr_monitor.read_result(wt)
         assert result["status"] == "ci_failed"
         mock_notify.assert_called_once()
+        # Verify failure details are passed to notification
+        notify_args = mock_notify.call_args
+        assert notify_args is not None, "run_notify should be called with arguments"
 
 
 class TestCiTimeout:

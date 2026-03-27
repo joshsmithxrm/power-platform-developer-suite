@@ -56,7 +56,8 @@ def extract_transcript_signals(jsonl_path):
                 # Tool results — failure patterns
                 if event_type == "tool_result" or (
                     event_type == "assistant"
-                    and "tool_result" in str(event)
+                    and isinstance(event.get("message", {}).get("content"), list)
+                    and any(b.get("type") == "tool_result" for b in event["message"]["content"] if isinstance(b, dict))
                 ):
                     content = event.get("content", "")
                     if isinstance(content, list):

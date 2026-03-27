@@ -25,6 +25,8 @@ class TestExtractTranscriptSignals:
             assert "user_corrections" in signals
             assert "tool_failures" in signals
             assert "repeated_commands" in signals
+            # Verify content is actually extracted, not just empty containers
+            assert len(signals["user_corrections"]) >= 1, "Should detect 'no, that is wrong' as correction"
 
 
 class TestUserCorrectionDetection:

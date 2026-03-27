@@ -1187,6 +1187,16 @@ def main():
     log_path = os.path.join(log_dir, "pipeline.log")
 
     mode = "a" if (args.from_stage or args.resume) else "w"
+    # Initialize before try so finally block never hits NameError
+    pipeline_start = time.time()
+    pr_url = None
+    stage_durations = {}
+    _failed_stage = None
+    _failed_log_stage = None  # actual log filename (may differ from display name)
+    _failed_reason = None
+    _result_written = False
+    lock_acquired = False
+
     logger = open_logger(log_path, mode)
     try:
 
@@ -1202,6 +1212,7 @@ def main():
         if not acquire_lock(lock_path, logger):
             logger.close()
             sys.exit(1)
+        lock_acquired = True
 
         # Write pipeline phase to state (if worktree exists)
         if worktree_path and os.path.exists(worktree_path):
@@ -1209,14 +1220,6 @@ def main():
                 ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
                 cwd=worktree_path, capture_output=True, text=True, timeout=10,
             )
-
-        pipeline_start = time.time()
-        pr_url = None
-        stage_durations = {}
-        _failed_stage = None
-        _failed_log_stage = None  # actual log filename (may differ from display name)
-        _failed_reason = None
-        _result_written = False
 
         def _pipeline_fail(stage_name, reason=None, log_stage=None):
             nonlocal _failed_stage, _failed_log_stage, _failed_reason
@@ -1475,7 +1478,8 @@ def main():
             duration = int(time.time() - pipeline_start)
             write_result(worktree_path, "failed", duration, stage_durations,
                          failed_stage=_failed_stage, error=_failed_reason)
-        release_lock(lock_path)
+        if lock_acquired:
+            release_lock(lock_path)
         logger.close()
 
 

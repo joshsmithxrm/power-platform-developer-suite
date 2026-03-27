@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for pipeline reliability (workflow-enforcement v4.0-v5.0, ACs 51-92)."""
+"""Tests for pipeline reliability (workflow-enforcement v4.0-v5.0, ACs 51-92).
+
+NOTE: Some tests use inspect.getsource() to verify structural properties of
+pipeline code (e.g., that a specific env var is set, or a flag is passed). These
+are structural regression tests — they catch removals but would pass if the
+string appeared in dead code or comments. Where feasible, behavioral tests with
+mocked subprocesses are preferred. This is a known coverage gap tracked for
+incremental improvement.
+"""
 import json
 import os
 import subprocess
@@ -1384,32 +1392,8 @@ class TestFindDuplicateIssue:
 
 
 class TestRetroDeduplication:
-    def test_update_duplicate_issue_filing(self):
-        """AC-07: Updates existing issue and logs ISSUE_UPDATED_DUPLICATE when duplicate exists."""
-        import pipeline
-        from unittest.mock import patch, MagicMock
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            wf_dir = os.path.join(tmpdir, ".workflow")
-            os.makedirs(wf_dir)
-            findings = {
-                "findings": [
-                    {"id": "R-01", "tier": "issue-only",
-                     "description": "Pipeline resumes while previous stage still running"},
-                ]
-            }
-            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
-                json.dump(findings, f)
-
-            log_path = os.path.join(tmpdir, "test.log")
-            logger = pipeline.open_logger(log_path)
-
-            with patch.object(pipeline, "_find_duplicate_issue", return_value=42), \
-                 patch.object(pipeline, "_handle_duplicate") as mock_handle:
-                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
-
-            logger.close()
-            mock_handle.assert_called_once()
+    """Merged with TestDuplicateIssueUpdate below; see RF AC-07 tests there."""
+    pass
 
     def test_files_issue_when_dedup_check_fails(self):
         """AC-08: Files issue when _find_duplicate_issue fails (best-effort dedup)."""
@@ -1521,6 +1505,9 @@ class TestDuplicateIssueUpdate:
             mock_handle.assert_called_once()
             args = mock_handle.call_args
             assert args[0][1] == 42  # existing_issue_number
+            # Note: ISSUE_UPDATED_DUPLICATE log is written by _handle_duplicate
+            # itself, which is mocked here. The log message is verified
+            # structurally via test_duplicate_comment_format below.
 
     def test_duplicate_comment_format(self):
         """RF AC-16: Duplicate comment includes branch, finding ID, evidence."""
@@ -1895,8 +1882,9 @@ class TestAllSkillsSetPhase:
         "design": "design",
         "implement": "implementing",
         "review": "reviewing",
-        "qa": "reviewing",
+        "qa": "qa",
         "pr": "pr",
+        "shakedown-workflow": "shakedown",
     }
 
     def test_all_skills_set_phase(self):

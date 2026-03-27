@@ -15,6 +15,12 @@ End-to-end behavioral verification of the development workflow. Creates throwawa
 
 ## Process
 
+### Step 0: Set Phase
+
+```bash
+python scripts/workflow-state.py set phase shakedown
+```
+
 ### Step 1: Select Test Paths
 
 $ARGUMENTS may contain `--paths feature,bug,resume` to select which scenarios to run.

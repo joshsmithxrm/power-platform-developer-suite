@@ -438,7 +438,7 @@ Present the final merged report to the user.
 On QA start, set the phase:
 
 ```bash
-python scripts/workflow-state.py set phase reviewing
+python scripts/workflow-state.py set phase qa
 ```
 
 After QA passes for a surface (verdict is PASS — all checks green), run:

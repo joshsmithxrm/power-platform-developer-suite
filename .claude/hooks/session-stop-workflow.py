@@ -26,10 +26,6 @@ def main():
     except (json.JSONDecodeError, EOFError):
         pass
 
-    # If we already blocked once, allow stop to prevent infinite loop
-    if hook_input.get("stop_hook_active"):
-        sys.exit(0)
-
     project_dir = get_project_dir()
 
     # Get current branch
@@ -62,6 +58,10 @@ def main():
         with open(state_path, "r") as f:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
+        sys.exit(0)
+
+    # If stop hook has already blocked 3+ times, allow stop to prevent infinite loop
+    if state.get("stop_hook_count", 0) > 3:
         sys.exit(0)
 
     # Phase-aware bypass: non-implementing phases don't need workflow enforcement
@@ -212,6 +212,8 @@ def main():
         lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
 
         # Enforcement logging — track block count for retro detection
+        # Note: read-modify-write without file locking. Safe because each
+        # worktree has its own state.json (worktree-per-session pattern).
         try:
             state["stop_hook_blocked"] = True
             state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
