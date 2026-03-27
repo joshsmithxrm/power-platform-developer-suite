@@ -560,6 +560,26 @@ def check_pr_created(worktree_path):
     return pr.get("url")
 
 
+def _find_duplicate_issue(title, repo_root):
+    """Check for existing open issue with matching title prefix."""
+    prefix = title[:50]
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "list", "--search", prefix, "--state", "open",
+             "--json", "number,title", "--limit", "5"],
+            cwd=repo_root, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        issues = json.loads(result.stdout)
+        for issue in issues:
+            if issue["title"].startswith(prefix):
+                return issue["number"]
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
 def process_retro_findings(worktree_path, logger, repo_root):
     """Process retro findings for auto-heal."""
     findings_path = os.path.join(worktree_path, ".workflow", "retro-findings.json")
@@ -582,16 +602,25 @@ def process_retro_findings(worktree_path, logger, repo_root):
     auto_fixes = [f for f in findings if f.get("tier") == "auto-fix"]
     draft_fixes = [f for f in findings if f.get("tier") == "draft-fix"]
     issues = [f for f in findings if f.get("tier") == "issue-only"]
+    observations = [f for f in findings if f.get("tier") == "observation"]
 
     log(
         logger, "retro", "FINDINGS_SUMMARY",
-        auto_fix=len(auto_fixes), draft_fix=len(draft_fixes), issue_only=len(issues),
+        auto_fix=len(auto_fixes), draft_fix=len(draft_fixes),
+        issue_only=len(issues), observation=len(observations),
     )
 
     for finding in issues:
         desc = finding.get("description", "No description")
         fix = finding.get("fix_description", "")
         finding_id = finding.get("id", "R-??")
+        title = f"retro: {desc[:70]}"
+
+        existing = _find_duplicate_issue(title, repo_root)
+        if existing:
+            log(logger, "retro", "ISSUE_SKIPPED_DUPLICATE",
+                finding=finding_id, existing=f"#{existing}")
+            continue
 
         body = f"## Retro Finding {finding_id}\n\n{desc}\n\n**Recommended fix:** {fix}"
         if finding.get("root_cause_chain"):
@@ -602,7 +631,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
 
         try:
             subprocess.run(
-                ["gh", "issue", "create", "--title", f"retro: {desc[:70]}", "--body", body],
+                ["gh", "issue", "create", "--title", title, "--body", body],
                 cwd=repo_root, capture_output=True, text=True, timeout=30, check=True,
             )
             log(logger, "retro", "ISSUE_CREATED", finding=finding_id)
