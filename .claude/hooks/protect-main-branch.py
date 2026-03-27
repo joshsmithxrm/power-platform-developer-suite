@@ -53,7 +53,7 @@ def is_allowed_path(file_path: str) -> bool:
     )
 
 def main() -> None:
-    if os.environ.get("PPDS_PIPELINE"):
+    if os.environ.get("PPDS_PIPELINE") or os.environ.get("PPDS_SHAKEDOWN"):
         sys.exit(0)
 
     branch = get_current_branch()
