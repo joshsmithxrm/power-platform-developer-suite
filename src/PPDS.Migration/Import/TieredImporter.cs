@@ -716,20 +716,19 @@ namespace PPDS.Migration.Import
                 if (shouldSkip) continue;
 
                 // Step 2: Collect state transitions (before stripping statecode/statuscode)
-                foreach (var handler in _stateTransitionHandlers)
+                // Use first matching handler only — each entity has at most one handler by design.
+                var stateHandler = _stateTransitionHandlers.FirstOrDefault(h => h.CanHandle(entityName));
+                if (stateHandler != null)
                 {
-                    if (handler.CanHandle(entityName))
+                    var transition = stateHandler.GetTransition(record, context);
+                    if (transition != null)
                     {
-                        var transition = handler.GetTransition(record, context);
-                        if (transition != null)
-                        {
-                            context.StateTransitions.Add(entityName, record.Id, transition);
-                        }
+                        context.StateTransitions.Add(entityName, record.Id, transition);
                     }
                 }
 
                 // Step 2b: Generic state transition collection for entities without handlers
-                if (!_stateTransitionHandlers.Any(h => h.CanHandle(entityName)))
+                if (stateHandler == null)
                 {
                     var sc = record.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
                     var stc = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? -1;
