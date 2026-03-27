@@ -1,6 +1,7 @@
 # Investigation
 
-**Status:** Draft
+**Status:** Draft (v1.1 — context-aware handoff, context.md consolidation)
+**Version:** 1.1
 **Last Updated:** 2026-03-27
 **Code:** [.claude/skills/investigate/](../.claude/skills/investigate/), [.claude/agents/challenger.md](../.claude/agents/challenger.md), [.claude/hooks/](../.claude/hooks/), [scripts/](../scripts/)
 **Surfaces:** N/A

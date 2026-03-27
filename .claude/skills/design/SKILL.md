@@ -153,7 +153,7 @@ If option 3, note the spec path and stop.
 
 | Pattern | Fix |
 |---------|-----|
-| "This is too simple for a design" | Every new feature goes through this. Bug fixes and enhancements with existing specs use `/implement` directly. Short designs are fine. |
+| "This is too simple for a design" | Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/pr`). Enhancements with existing specs use `/implement` directly. Short designs are fine. |
 | Jumping to implementation | Design MUST be approved before any code |
 | Asking 5 questions at once | One question per message |
 | Proposing only one approach | Always propose 2-3 with trade-offs |
