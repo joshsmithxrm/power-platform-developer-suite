@@ -1384,8 +1384,8 @@ class TestFindDuplicateIssue:
 
 
 class TestRetroDeduplication:
-    def test_skip_duplicate_issue_filing(self):
-        """AC-07: Skips filing and logs ISSUE_SKIPPED_DUPLICATE when duplicate exists."""
+    def test_update_duplicate_issue_filing(self):
+        """AC-07: Updates existing issue and logs ISSUE_UPDATED_DUPLICATE when duplicate exists."""
         import pipeline
         from unittest.mock import patch, MagicMock
 
@@ -1404,15 +1404,12 @@ class TestRetroDeduplication:
             log_path = os.path.join(tmpdir, "test.log")
             logger = pipeline.open_logger(log_path)
 
-            with patch.object(pipeline, "_find_duplicate_issue", return_value=42):
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=42), \
+                 patch.object(pipeline, "_handle_duplicate") as mock_handle:
                 pipeline.process_retro_findings(tmpdir, logger, tmpdir)
 
             logger.close()
-
-            with open(log_path) as f:
-                content = f.read()
-            assert "ISSUE_SKIPPED_DUPLICATE" in content
-            assert "#42" in content
+            mock_handle.assert_called_once()
 
     def test_files_issue_when_dedup_check_fails(self):
         """AC-08: Files issue when _find_duplicate_issue fails (best-effort dedup)."""
