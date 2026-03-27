@@ -81,18 +81,16 @@ public class LeadHandlerTests
         result.MessageData.Should().ContainKey("CreateOpportunity");
         result.MessageData.Should().ContainKey("Status");
 
-        var leadRef = result.MessageData!["LeadId"] as EntityReference;
-        leadRef.Should().NotBeNull();
-        leadRef!.Id.Should().Be(record.Id);
+        var leadRef = (EntityReference)result.MessageData!["LeadId"];
+        leadRef.Id.Should().Be(record.Id);
         leadRef.LogicalName.Should().Be("lead");
 
         result.MessageData["CreateAccount"].Should().Be(false);
         result.MessageData["CreateContact"].Should().Be(false);
         result.MessageData["CreateOpportunity"].Should().Be(false);
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(3);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(3);
     }
 
     [Fact]

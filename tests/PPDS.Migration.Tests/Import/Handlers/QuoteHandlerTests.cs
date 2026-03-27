@@ -87,15 +87,13 @@ public class QuoteHandlerTests
         result.MessageData.Should().ContainKey("QuoteClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["QuoteClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("quoteclose");
+        var closeEntity = (Entity)result.MessageData!["QuoteClose"];
+        closeEntity.LogicalName.Should().Be("quoteclose");
         closeEntity.GetAttributeValue<EntityReference>("quoteid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Won (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(4);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(4);
     }
 
     [Fact]
@@ -116,14 +114,12 @@ public class QuoteHandlerTests
         result.MessageData.Should().ContainKey("QuoteClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["QuoteClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("quoteclose");
+        var closeEntity = (Entity)result.MessageData!["QuoteClose"];
+        closeEntity.LogicalName.Should().Be("quoteclose");
         closeEntity.GetAttributeValue<EntityReference>("quoteid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Closed (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(7);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(7);
     }
 }

@@ -75,15 +75,13 @@ public class OpportunityHandlerTests
         result.MessageData.Should().ContainKey("OpportunityClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["OpportunityClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("opportunityclose");
+        var closeEntity = (Entity)result.MessageData!["OpportunityClose"];
+        closeEntity.LogicalName.Should().Be("opportunityclose");
         closeEntity.GetAttributeValue<EntityReference>("opportunityid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Won (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(3);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(3);
     }
 
     [Fact]
@@ -104,14 +102,12 @@ public class OpportunityHandlerTests
         result.MessageData.Should().ContainKey("OpportunityClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["OpportunityClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("opportunityclose");
+        var closeEntity = (Entity)result.MessageData!["OpportunityClose"];
+        closeEntity.LogicalName.Should().Be("opportunityclose");
         closeEntity.GetAttributeValue<EntityReference>("opportunityid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Lost (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(4);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(4);
     }
 }

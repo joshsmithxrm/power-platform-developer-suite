@@ -33,7 +33,7 @@ namespace PPDS.Migration.Import
         private static TimeSpan RoundToWeeks(TimeSpan elapsed)
         {
             var weeks = (long)Math.Round(elapsed.TotalDays / 7.0);
-            return TimeSpan.FromDays(weeks * 7);
+            return TimeSpan.FromDays((double)weeks * 7);
         }
 
         private static TimeSpan RoundToDays(TimeSpan elapsed)

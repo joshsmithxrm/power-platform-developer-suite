@@ -78,15 +78,13 @@ public class SalesOrderHandlerTests
         result.MessageData.Should().ContainKey("OrderClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["OrderClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("orderclose");
+        var closeEntity = (Entity)result.MessageData!["OrderClose"];
+        closeEntity.LogicalName.Should().Be("orderclose");
         closeEntity.GetAttributeValue<EntityReference>("salesorderid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Fulfilled (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(100001);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(100001);
     }
 
     [Fact]
@@ -107,15 +105,13 @@ public class SalesOrderHandlerTests
         result.MessageData.Should().ContainKey("OrderClose");
         result.MessageData.Should().ContainKey("Status");
 
-        var closeEntity = result.MessageData!["OrderClose"] as Entity;
-        closeEntity.Should().NotBeNull();
-        closeEntity!.LogicalName.Should().Be("orderclose");
+        var closeEntity = (Entity)result.MessageData!["OrderClose"];
+        closeEntity.LogicalName.Should().Be("orderclose");
         closeEntity.GetAttributeValue<EntityReference>("salesorderid").Id.Should().Be(record.Id);
         closeEntity.GetAttributeValue<string>("subject").Should().Be("Canceled (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(100002);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(100002);
     }
 
     [Fact]

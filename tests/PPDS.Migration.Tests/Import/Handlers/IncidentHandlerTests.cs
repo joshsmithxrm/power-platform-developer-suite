@@ -75,15 +75,13 @@ public class IncidentHandlerTests
         result.MessageData.Should().ContainKey("IncidentResolution");
         result.MessageData.Should().ContainKey("Status");
 
-        var resolution = result.MessageData!["IncidentResolution"] as Entity;
-        resolution.Should().NotBeNull();
-        resolution!.LogicalName.Should().Be("incidentresolution");
+        var resolution = (Entity)result.MessageData!["IncidentResolution"];
+        resolution.LogicalName.Should().Be("incidentresolution");
         resolution.GetAttributeValue<EntityReference>("incidentid").Id.Should().Be(record.Id);
         resolution.GetAttributeValue<string>("subject").Should().Be("Resolved (migrated)");
 
-        var status = result.MessageData["Status"] as OptionSetValue;
-        status.Should().NotBeNull();
-        status!.Value.Should().Be(5);
+        var status = (OptionSetValue)result.MessageData["Status"];
+        status.Value.Should().Be(5);
     }
 
     [Fact]
@@ -100,8 +98,7 @@ public class IncidentHandlerTests
         result.StateCode.Should().Be(2);
         result.StatusCode.Should().Be(6);
 
-        var resolution = result.MessageData!["IncidentResolution"] as Entity;
-        resolution.Should().NotBeNull();
-        resolution!.GetAttributeValue<string>("subject").Should().Be("Canceled (migrated)");
+        var resolution = (Entity)result.MessageData!["IncidentResolution"];
+        resolution.GetAttributeValue<string>("subject").Should().Be("Canceled (migrated)");
     }
 }

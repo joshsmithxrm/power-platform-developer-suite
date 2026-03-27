@@ -16,6 +16,8 @@ internal sealed class ExecutionPlanPreviewDialog : Dialog, ITuiStateCapture<Exec
 {
     private readonly ExecutionPlan _plan;
     private readonly int _stateTransitionCount;
+    private Button _okButton = null!;
+    private Button _cancelButton = null!;
 
     /// <summary>
     /// Gets whether the user approved the plan (clicked OK).
@@ -126,23 +128,23 @@ internal sealed class ExecutionPlanPreviewDialog : Dialog, ITuiStateCapture<Exec
             }
         }
 
-        // Buttons
-        var okButton = new Button("_Proceed", is_default: true);
-        okButton.Clicked += () =>
+        // Buttons (disposed by parent Dialog via AddButton)
+        _okButton = new Button("_Proceed", is_default: true);
+        _okButton.Clicked += () =>
         {
             IsApproved = true;
             Application.RequestStop();
         };
 
-        var cancelButton = new Button("_Cancel");
-        cancelButton.Clicked += () =>
+        _cancelButton = new Button("_Cancel");
+        _cancelButton.Clicked += () =>
         {
             IsApproved = false;
             Application.RequestStop();
         };
 
-        AddButton(okButton);
-        AddButton(cancelButton);
+        AddButton(_okButton);
+        AddButton(_cancelButton);
     }
 
     public ExecutionPlanPreviewDialogState CaptureState() => new(
