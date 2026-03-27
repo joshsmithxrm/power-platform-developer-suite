@@ -154,7 +154,7 @@ Write `.plans/context.md` to the new worktree with issue details and routing gui
    - Bug fix → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
    - Enhancement/refactor → "Run `/implement`"
    - New feature → "Run `/design`"
-   - Docs → "Edit docs and commit. No design or implement needed."
+   - Docs → "Edit docs and commit. No design or implement needed. When done: `/pr`"
 
 4. If the conversation contains investigation context from a prior `/investigate` session, include it in the same `.plans/context.md` file under a `## Investigation Context` section.
 
@@ -221,7 +221,7 @@ Issues linked: #N, #M
 Work type: Docs
 
 Terminal opened. Run `claude` then edit docs and commit.
-No design or implement needed.
+No design or implement needed. When done: `/pr`
 ```
 
 If terminal launch failed, replace "Terminal opened. Run `claude`" with:

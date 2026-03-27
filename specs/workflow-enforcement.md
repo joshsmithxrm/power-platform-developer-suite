@@ -128,7 +128,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 ```json
 {
   "branch": "feat/import-jobs",
-  "work_type": "feature",
+  "work_type": "new feature",
   "spec": "specs/import-jobs.md",
   "issues": [602, 596],
   "plan": ".plans/2026-03-16-import-jobs.md",
@@ -687,12 +687,16 @@ Replace the current workflow bullet list with:
 2. If UI/output changed → /verify for affected surface
 3. /pr when ready
 
+### Docs change
+1. Edit docs and commit
+2. /pr when ready
+
 ### Enforcement
 Steps 3-6 are enforced by hooks. The PR gate hook will block `gh pr create`
 if these steps are incomplete. Run `/status` to check current workflow state.
 
 ### STOP conditions
-- DO NOT skip steps 5-8 because "tests pass." Tests are necessary, not sufficient.
+- DO NOT skip steps 3-6 because "tests pass." Tests are necessary, not sufficient.
 - DO NOT declare work complete without visual verification of affected surfaces.
 
 ### Autonomy scope
@@ -764,7 +768,7 @@ After all skills in this spec are implemented:
 | AC-38 | SessionStart hook on main shows active worktrees and `/start` guidance | Manual: start session on main with existing worktrees | 🔲 |
 | AC-39 | Pre-commit hook blocks `git commit` on main with guidance message | Manual: attempt commit on main, verify exit code 2 | 🔲 |
 | AC-40 | `/start` gracefully handles missing terminal command — prints `cd` + `claude` instructions for user to run manually | Manual: test with terminal launch unavailable | 🔲 |
-| AC-41 | `/start` prints work-type-aware guidance after opening the terminal: bug fix → "Code the fix + regression test, then `/gates` → `/verify` → `/pr`"; enhancement → "Run `/implement`"; new feature → "Run `/design`" | Manual: run `/start` for each work type, verify guidance changes | 🔲 |
+| AC-41 | `/start` prints work-type-aware guidance after opening the terminal: bug fix → "Code the fix + regression test, then `/gates` → `/verify` → `/pr`"; enhancement → "Run `/implement`"; new feature → "Run `/design`"; docs → "Edit docs and commit, then `/pr`" | Manual: run `/start` for each work type, verify guidance changes | 🔲 |
 | AC-42 | `/design` Step 2 (brainstorm) explicitly explores 2-3 approaches before converging on a direction | Manual: run `/design`, verify multiple approaches proposed | 🔲 |
 | AC-43 | `/design` Step 3 writes spec, then runs `/review` against the spec before presenting to user | Manual: complete design brainstorm, verify review runs on spec draft | 🔲 |
 | AC-44 | `/design` Step 3 presents spec + review findings + fixes to user (shows what was caught and fixed, not just the clean result) | Manual: verify presentation includes review findings | 🔲 |
