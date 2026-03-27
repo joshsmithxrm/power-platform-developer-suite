@@ -74,9 +74,10 @@ def main() -> None:
 
     print(
         "BLOCKED: You are on the main branch. "
-        "Use /start to create a feature worktree."
+        "Use /start to create a feature worktree.",
+        file=sys.stderr,
     )
-    print("  Run /start from your Claude session on main.")
+    print("  Run /start from your Claude session on main.", file=sys.stderr)
     sys.exit(2)
 
 
