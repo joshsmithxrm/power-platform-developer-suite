@@ -31,6 +31,23 @@ Before asking any questions, read:
 - Propose update mode: "Should I update this spec, or is this a new spec?"
 - If updating, read the existing spec fully before proceeding.
 
+**Check for design context:** After searching for existing specs, check for
+`.plans/design-context.md` in the current working directory.
+
+If found:
+1. Read the file
+2. Present a summary: "Design context loaded from investigation: {topic}. Covers: {scope summary}."
+3. Ask: "Proceed to spec writing, or brainstorm further?"
+4. If "proceed": skip Step 2 (Brainstorm), go directly to Step 3 (Write Spec)
+5. If "brainstorm": continue with Step 2, using the design context as starting input
+
+**Constraint checking:** Before presenting the architecture (Step 2 or Step 3),
+verify the proposal against each Constraint and each Known Concern in
+`design-context.md`. Flag conflicts — e.g., "Constraint #3 says X, but the
+proposed architecture does Y."
+
+If not found: continue with normal Step 2 brainstorm flow.
+
 ### Step 2: Brainstorm
 
 **Understand the idea** — ask clarifying questions **one at a time**:
