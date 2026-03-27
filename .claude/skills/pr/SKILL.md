@@ -174,6 +174,11 @@ Awaiting your review.
 ```
 
 ### 7. Write Workflow State
+nSet the PR phase:
+
+```bash
+python scripts/workflow-state.py set phase pr
+```
 
 After PR is created:
 

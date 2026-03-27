@@ -1615,3 +1615,40 @@ class TestHeartbeatOriginMain:
         assert "origin/main..HEAD" in source_activity, (
             "get_git_activity must use origin/main..HEAD"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-105: All skills set phase
+# ---------------------------------------------------------------------------
+class TestAllSkillsSetPhase:
+    EXPECTED_PHASES = {
+        "start": "starting",
+        "investigate": "investigating",
+        "design": "design",
+        "implement": "implementing",
+        "review": "reviewing",
+        "qa": "reviewing",
+        "pr": "pr",
+    }
+
+    def test_all_skills_set_phase(self):
+        """AC-105: Every skill writes phase to state via workflow-state.py set phase."""
+        for skill_name, expected_phase in self.EXPECTED_PHASES.items():
+            skill_path = os.path.join(
+                REPO_ROOT, ".claude", "skills", skill_name, "SKILL.md"
+            )
+            with open(skill_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            assert f"set phase {expected_phase}" in content, (
+                f"Skill '{skill_name}' must set phase to '{expected_phase}'"
+            )
+
+    def test_pipeline_sets_phase(self):
+        """AC-105: pipeline.py writes phase=pipeline to state."""
+        import inspect
+        import pipeline
+
+        source = inspect.getsource(pipeline.main)
+        assert '"phase", "pipeline"' in source or "'phase', 'pipeline'" in source, (
+            "pipeline.py must set phase to 'pipeline'"
+        )

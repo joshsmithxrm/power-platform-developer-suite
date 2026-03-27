@@ -17,6 +17,12 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
+### Step 0: Set Phase
+
+```bash
+python scripts/workflow-state.py set phase design
+```
+
 ### Step 1: Load Context and Search
 
 **Gate:** Check current branch. If on `main` or `master`, error immediately:
@@ -118,6 +124,12 @@ Co-Authored-By: {use the format from the system prompt}"
 Note: `.plans/` is gitignored — the plan lives in the worktree filesystem only.
 
 ### Step 6: Handoff
+
+Update phase for handoff to implementation:
+
+```bash
+python scripts/workflow-state.py set phase implementing
+```
 
 Present three options:
 

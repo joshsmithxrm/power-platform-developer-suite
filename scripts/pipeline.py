@@ -1165,6 +1165,13 @@ def main():
         logger.close()
         sys.exit(1)
 
+    # Write pipeline phase to state (if worktree exists)
+    if worktree_path and os.path.exists(worktree_path):
+        subprocess.run(
+            ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
+            cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        )
+
     pipeline_start = time.time()
     pr_url = None
     stage_durations = {}

@@ -102,6 +102,7 @@ python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
 python scripts/workflow-state.py set spec "{spec-path}"
 python scripts/workflow-state.py set plan "$ARGUMENTS"
 python scripts/workflow-state.py set started now
+python scripts/workflow-state.py set phase implementing
 ```
 
 ### Step 4: Create Task Tracking

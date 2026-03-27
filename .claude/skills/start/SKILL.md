@@ -107,6 +107,7 @@ git worktree add .worktrees/<name> feat/<name>
 
 # Initialize workflow state in the worktree
 python scripts/workflow-state.py init "feat/<name>"
+python scripts/workflow-state.py set phase starting
 ```
 
 For each extracted issue number:

@@ -110,6 +110,11 @@ Include total counts and a clear verdict:
 - **FAIL**: any critical findings
 
 ## Workflow State
+nOn review start, set the phase:
+
+```bash
+python scripts/workflow-state.py set phase reviewing
+```
 
 After review completes (all findings evaluated and verdict rendered), run:
 
