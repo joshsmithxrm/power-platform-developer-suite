@@ -747,7 +747,7 @@ class TestGeminiTriageAgentExists:
             content = f.read()
 
         assert "model: sonnet" in content, "Agent must use model: sonnet"
-        assert "allowedTools" in content, "Agent must have allowedTools"
+        assert "tools:" in content, "Agent must have tools"
         assert "Read" in content, "Agent must allow Read tool"
         assert "Edit" in content, "Agent must allow Edit tool"
 
