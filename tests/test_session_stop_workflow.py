@@ -98,3 +98,33 @@ class TestWorkflowSurface:
                             assert "workflow" in elements, (
                                 "'workflow' must be in valid_surfaces"
                             )
+
+    def test_workflow_surface_in_pr_gate(self):
+        """AC-25: 'workflow' is a valid surface in pr-gate."""
+        hook_path = os.path.join(
+            os.path.dirname(__file__),
+            os.pardir,
+            ".claude",
+            "hooks",
+            "pr-gate.py",
+        )
+        hook_path = os.path.normpath(hook_path)
+        with open(hook_path, "r") as f:
+            source = f.read()
+
+        import ast
+
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "valid_surfaces":
+                        if isinstance(node.value, ast.Tuple):
+                            elements = [
+                                elt.value
+                                for elt in node.value.elts
+                                if isinstance(elt, ast.Constant)
+                            ]
+                            assert "workflow" in elements, (
+                                "'workflow' must be in pr-gate valid_surfaces"
+                            )
