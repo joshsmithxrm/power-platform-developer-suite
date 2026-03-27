@@ -188,7 +188,101 @@ def find_last_completed_stage(log_path):
     return last_done
 
 
-def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None):
+def is_pid_alive(pid):
+    """Check if a process with the given PID is alive. Cross-platform."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # Process exists but we can't signal it
+    except OSError:
+        return False
+
+
+def acquire_lock(lock_path, logger):
+    """Acquire pipeline lock. Returns True if acquired, False if conflict."""
+    if os.path.exists(lock_path):
+        try:
+            with open(lock_path, "r") as f:
+                existing_pid = int(f.read().strip())
+            if is_pid_alive(existing_pid):
+                print(
+                    f"ERROR: Pipeline already running (PID {existing_pid}). "
+                    f"Delete {lock_path} if this is stale.",
+                    file=sys.stderr,
+                )
+                return False
+            else:
+                log(logger, "pipeline", "STALE_LOCK", pid=existing_pid)
+                os.remove(lock_path)
+        except (ValueError, OSError):
+            os.remove(lock_path)  # Corrupted lock file
+
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def release_lock(lock_path):
+    """Release pipeline lock."""
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
+
+
+def get_git_activity(worktree_path):
+    """Get git working tree changes and commit count. Returns (changes, commits)."""
+    changes = 0
+    commits = 0
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=worktree_path, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            changes = len([l for l in result.stdout.strip().splitlines() if l])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "main..HEAD"],
+            cwd=worktree_path, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            commits = int(result.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
+        pass
+    return changes, commits
+
+
+def extract_text_from_jsonl(jsonl_path):
+    """Extract final assistant text from stream-json JSONL file."""
+    text_parts = []
+    try:
+        with open(jsonl_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # Skip malformed lines (partial writes, stderr)
+                if event.get("type") == "result":
+                    result_text = event.get("result", "")
+                    if result_text:
+                        text_parts.append(result_text)
+    except OSError:
+        pass
+    return "\n".join(text_parts) if text_parts else ""
+
+
+def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None,
+               agent=None):
     """Run `claude -p` in the worktree directory. Returns (exit_code, logger)."""
     full_prompt = HEADLESS_PREAMBLE + prompt
 
@@ -208,17 +302,22 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
     # Create stage log directory and file
     stage_log_dir = os.path.join(worktree_path, ".workflow", "stages")
     os.makedirs(stage_log_dir, exist_ok=True)
-    stage_log_path = os.path.join(stage_log_dir, f"{stage}.log")
+    stage_jsonl_path = os.path.join(stage_log_dir, f"{stage}.jsonl")
 
     try:
-        stage_log_file = open(stage_log_path, "w")
+        stage_log_file = open(stage_jsonl_path, "w")
     except OSError as e:
         log(logger, stage, "ERROR", reason=f"Cannot open stage log: {e}")
         return 1, logger
 
+    cmd = ["claude", "-p", full_prompt, "--verbose",
+           "--output-format", "stream-json"]
+    if agent:
+        cmd.extend(["--agent", agent])
+
     try:
         proc = subprocess.Popen(
-            ["claude", "-p", full_prompt, "--verbose"],
+            cmd,
             cwd=worktree_path,
             env=env,
             stdout=stage_log_file,
@@ -236,6 +335,9 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
     # Polling loop — no threading, just poll + sleep
     last_heartbeat = start
     last_log_size = 0
+    last_git_changes = 0
+    last_commits = 0
+    consecutive_idle = 0
     exit_code = None
 
     try:
@@ -258,17 +360,34 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
                 exit_code = -1
                 break
 
-            # Heartbeat every 60s
+            # Heartbeat every 60s — multi-signal activity detection
             if time.time() - last_heartbeat >= 60:
                 try:
-                    current_size = os.path.getsize(stage_log_path)
+                    current_size = os.path.getsize(stage_jsonl_path)
                 except OSError:
                     current_size = 0
-                activity = "active" if current_size > last_log_size else "idle"
+
+                git_changes, commits = get_git_activity(worktree_path)
+
+                output_grew = current_size > last_log_size
+                git_grew = git_changes > last_git_changes
+                commits_grew = commits > last_commits
+
+                if output_grew or git_grew or commits_grew:
+                    activity = "active"
+                    consecutive_idle = 0
+                else:
+                    consecutive_idle += 1
+                    activity = "stalled" if consecutive_idle >= 3 else "idle"
+
                 last_log_size = current_size
+                last_git_changes = git_changes
+                last_commits = commits
+
                 log(logger, stage, "HEARTBEAT",
                     elapsed=f"{int(elapsed)}s", pid=proc.pid,
-                    output_bytes=current_size, activity=activity)
+                    output_bytes=current_size, git_changes=git_changes,
+                    commits=commits, activity=activity)
                 last_heartbeat = time.time()
 
             time.sleep(5)
@@ -280,7 +399,16 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False, timeout=None
         stage_log_file.close()
     duration = int(time.time() - start)
 
-    # Read last 20 lines of stage log for pipeline.log
+    # Post-process: extract human-readable text from JSONL
+    stage_log_path = os.path.join(stage_log_dir, f"{stage}.log")
+    extracted_text = extract_text_from_jsonl(stage_jsonl_path)
+    try:
+        with open(stage_log_path, "w", errors="replace") as f:
+            f.write(extracted_text)
+    except OSError:
+        pass
+
+    # Read last 20 lines of human-readable log (not JSONL) for pipeline.log
     try:
         with open(stage_log_path, "r", errors="replace") as f:
             lines = f.readlines()
@@ -449,6 +577,42 @@ def process_retro_findings(worktree_path, logger, repo_root):
             note="Auto-heal not yet implemented")
 
 
+def write_result(worktree_path, status, duration, stages, pr_url=None,
+                  failed_stage=None, error=None):
+    """Write pipeline-result.json and invoke notify.py (best-effort)."""
+    result = {
+        "status": status,
+        "duration": duration,
+        "stages": stages,
+        "pr_url": pr_url,
+        "timestamp": timestamp(),
+    }
+    if failed_stage:
+        result["failed_stage"] = failed_stage
+    if error:
+        result["error"] = error
+
+    result_path = os.path.join(worktree_path, ".workflow", "pipeline-result.json")
+    try:
+        with open(result_path, "w") as f:
+            json.dump(result, f, indent=2)
+    except OSError:
+        pass
+
+    # Best-effort notification
+    notify_script = os.path.join(worktree_path, ".claude", "hooks", "notify.py")
+    if os.path.exists(notify_script):
+        title = "Pipeline Complete" if status == "complete" else "Pipeline Failed"
+        msg = f"PR: {pr_url}" if pr_url else f"Failed at {failed_stage}: {error}"
+        try:
+            subprocess.run(
+                ["python", notify_script, "--title", title, "--msg", msg],
+                cwd=worktree_path, timeout=10, capture_output=True,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass  # Non-blocking
+
+
 def main():
     parser = argparse.ArgumentParser(description="PPDS Deterministic Pipeline Orchestrator")
     parser.add_argument("--plan", help="Path to implementation plan file")
@@ -548,8 +712,24 @@ def main():
         from_stage=args.from_stage or ("auto" if args.resume else "worktree"),
     )
 
+    # Acquire pipeline lock
+    lock_path = os.path.join(log_dir, "pipeline.lock")
+    if not acquire_lock(lock_path, logger):
+        logger.close()
+        sys.exit(1)
+
     pipeline_start = time.time()
     pr_url = None
+    stage_durations = {}
+    _failed_stage = None
+    _failed_reason = None
+    _result_written = False
+
+    def _pipeline_fail(stage_name, reason=None):
+        nonlocal _failed_stage, _failed_reason
+        _failed_stage = stage_name
+        _failed_reason = reason
+        sys.exit(1)
 
     try:
         for i, stage in enumerate(STAGES):
@@ -567,7 +747,7 @@ def main():
                     worktree_path = create_worktree(repo_root, name, branch, logger)
                     if not worktree_path:
                         log(logger, "pipeline", "FAILED", failed_stage="worktree")
-                        sys.exit(1)
+                        _pipeline_fail("worktree")
 
                 # Relocate log to worktree
                 new_log_dir = os.path.join(worktree_path, ".workflow")
@@ -614,7 +794,7 @@ def main():
                 exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run, timeout)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="implement")
-                    sys.exit(1)
+                    _pipeline_fail("implement")
 
                 # P4: Outcome verification + retry
                 if not verify_outcome(worktree_path, "implement", pre_commits) and not args.dry_run:
@@ -622,7 +802,7 @@ def main():
                     exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run, timeout)
                     if exit_code != 0 or not verify_outcome(worktree_path, "implement", pre_commits):
                         log(logger, "pipeline", "FAILED", failed_stage="implement", reason="outcome verification failed")
-                        sys.exit(1)
+                        _pipeline_fail("implement", "outcome verification failed")
 
                 # P8: Copy plan artifact back to main
                 copy_plan_to_main(worktree_path, repo_root, logger)
@@ -633,7 +813,7 @@ def main():
                 exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run, timeout)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage=stage)
-                    sys.exit(1)
+                    _pipeline_fail(stage)
 
                 # P4: Outcome verification + retry
                 if not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
@@ -641,7 +821,7 @@ def main():
                     exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run, timeout)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage=stage)
-                        sys.exit(1)
+                        _pipeline_fail(stage)
 
             elif stage == "converge":
                 if check_review_passed(worktree_path):
@@ -655,27 +835,27 @@ def main():
                     exit_code, logger = run_claude(worktree_path, "/converge", logger, f"converge-r{round_num + 1}", args.dry_run, timeout)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="converge")
-                        sys.exit(1)
+                        _pipeline_fail("converge")
 
                     exit_code, logger = run_claude(worktree_path, "/gates", logger, f"gates-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("gates"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="gates-reconverge")
-                        sys.exit(1)
+                        _pipeline_fail("gates-reconverge")
 
                     exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("verify"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
-                        sys.exit(1)
+                        _pipeline_fail("verify-reconverge")
 
                     exit_code, logger = run_claude(worktree_path, "/qa", logger, f"qa-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("qa"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="qa-reconverge")
-                        sys.exit(1)
+                        _pipeline_fail("qa-reconverge")
 
                     exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("review"))
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="review-reconverge")
-                        sys.exit(1)
+                        _pipeline_fail("review-reconverge")
 
                     if check_review_passed(worktree_path):
                         log(logger, "converge", "CONVERGED", rounds=round_num + 1)
@@ -684,13 +864,13 @@ def main():
                     log(logger, "converge", "FAILED_TO_CONVERGE", max_rounds=args.max_converge)
                     log(logger, "pipeline", "FAILED", failed_stage="converge", reason="max rounds exceeded")
                     print(f"\nFAILED: Could not converge after {args.max_converge} rounds.", file=sys.stderr)
-                    sys.exit(1)
+                    _pipeline_fail("converge", "max rounds exceeded")
 
             elif stage == "pr":
                 exit_code, logger = run_claude(worktree_path, "/pr", logger, "pr", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("pr"))
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="pr")
-                    sys.exit(1)
+                    _pipeline_fail("pr")
                 pr_url = check_pr_created(worktree_path)
 
             elif stage == "retro":
@@ -702,15 +882,30 @@ def main():
 
         duration = int(time.time() - pipeline_start)
         log(logger, "pipeline", "COMPLETE", duration=f"{duration}s", pr=pr_url or "none")
+        if worktree_path:
+            write_result(worktree_path, "complete", duration, stage_durations,
+                         pr_url=pr_url)
+            _result_written = True
         print(f"\nPipeline complete in {duration}s.")
         if pr_url:
             print(f"PR: {pr_url}")
 
     except KeyboardInterrupt:
+        duration = int(time.time() - pipeline_start)
         log(logger, "pipeline", "INTERRUPTED")
+        if worktree_path:
+            write_result(worktree_path, "interrupted", duration, stage_durations,
+                         error="KeyboardInterrupt")
+            _result_written = True
         print("\nPipeline interrupted by user.", file=sys.stderr)
         sys.exit(130)
     finally:
+        # Write failure result if not already written (covers sys.exit(1) paths)
+        if not _result_written and _failed_stage and worktree_path:
+            duration = int(time.time() - pipeline_start)
+            write_result(worktree_path, "failed", duration, stage_durations,
+                         failed_stage=_failed_stage, error=_failed_reason)
+        release_lock(lock_path)
         logger.close()
 
 
