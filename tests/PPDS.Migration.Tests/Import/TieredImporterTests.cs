@@ -1007,7 +1007,7 @@ public class TieredImporterTests
         // Set up the pooled client for individual fallback operations
         var mockPooledClient = new Mock<IPooledClient>();
         mockPooledClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()))
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UpsertResponse
             {
                 Results = { ["Target"] = new EntityReference("team", Guid.NewGuid()) }
@@ -1336,7 +1336,7 @@ public class TieredImporterTests
         // Set up pooled client for individual operations
         var mockPooledClient = new Mock<IPooledClient>();
         mockPooledClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()))
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UpsertResponse
             {
                 Results = { ["Target"] = new EntityReference("account", records[0].Id) }

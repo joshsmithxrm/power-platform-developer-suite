@@ -206,8 +206,17 @@ namespace PPDS.Migration.Import
                     {
                         if (handler.CanHandle(entitySchema.LogicalName))
                         {
-                            await handler.ExecuteAsync(entitySchema.LogicalName, context, cancellationToken)
-                                .ConfigureAwait(false);
+                            try
+                            {
+                                await handler.ExecuteAsync(entitySchema.LogicalName, context, cancellationToken)
+                                    .ConfigureAwait(false);
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                _logger?.LogWarning(ex,
+                                    "Post-import handler {Handler} failed for entity {Entity}",
+                                    handler.GetType().Name, entitySchema.LogicalName);
+                            }
                         }
                     }
                 }
@@ -719,6 +728,23 @@ namespace PPDS.Migration.Import
                     }
                 }
 
+                // Step 2b: Generic state transition collection for entities without handlers
+                if (!_stateTransitionHandlers.Any(h => h.CanHandle(entityName)))
+                {
+                    var sc = record.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
+                    var stc = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? -1;
+                    if (sc != 0)
+                    {
+                        context.StateTransitions.Add(entityName, record.Id, new StateTransitionData
+                        {
+                            EntityName = entityName,
+                            RecordId = record.Id,
+                            StateCode = sc,
+                            StatusCode = stc
+                        });
+                    }
+                }
+
                 // Step 3: Strip statecode and statuscode from ALL records (AC-05)
                 record.Attributes.Remove("statecode");
                 record.Attributes.Remove("statuscode");
@@ -749,7 +775,7 @@ namespace PPDS.Migration.Import
                     }
                 }
 
-                var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options);
+                var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
                 preparedRecords.Add(prepared);
             }
 
@@ -884,19 +910,19 @@ namespace PPDS.Migration.Import
                         case ImportMode.Create:
                             var createRequest = new CreateRequest { Target = record };
                             createRequest.ApplyBypassOptions(options);
-                            var createResponse = (CreateResponse)await client.ExecuteAsync(createRequest).ConfigureAwait(false);
+                            var createResponse = (CreateResponse)await client.ExecuteAsync(createRequest, cancellationToken).ConfigureAwait(false);
                             newId = createResponse.id;
                             break;
                         case ImportMode.Update:
                             var updateRequest = new UpdateRequest { Target = record };
                             updateRequest.ApplyBypassOptions(options);
-                            await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
+                            await client.ExecuteAsync(updateRequest, cancellationToken).ConfigureAwait(false);
                             newId = record.Id;
                             break;
                         default:
                             var upsertRequest = new UpsertRequest { Target = record };
                             upsertRequest.ApplyBypassOptions(options);
-                            var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest).ConfigureAwait(false);
+                            var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest, cancellationToken).ConfigureAwait(false);
                             newId = upsertResponse.Target?.Id ?? record.Id;
                             break;
                     }
@@ -937,7 +963,8 @@ namespace PPDS.Migration.Import
             HashSet<string> deferredFields,
             IReadOnlyDictionary<string, FieldValidity> fieldMetadata,
             IdMappingCollection idMappings,
-            ImportOptions options)
+            ImportOptions options,
+            ImportMode effectiveMode)
         {
             var prepared = new Entity(record.LogicalName);
             prepared.Id = record.Id; // Keep original ID for mapping
@@ -965,7 +992,7 @@ namespace PPDS.Migration.Import
                 }
 
                 // Skip fields that are not valid for the current operation based on target metadata
-                if (!_schemaValidator.ShouldIncludeField(attr.Key, options.Mode, fieldMetadata, out _))
+                if (!_schemaValidator.ShouldIncludeField(attr.Key, effectiveMode, fieldMetadata, out _))
                 {
                     continue;
                 }

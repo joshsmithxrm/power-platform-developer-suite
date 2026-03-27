@@ -85,10 +85,10 @@ namespace PPDS.Migration.Import
 
                         await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
-                        // Check if record is already closed (AC-16)
-                        if (await IsRecordClosedAsync(client, entityName, targetId, cancellationToken).ConfigureAwait(false))
+                        // Check if record is already in target state (AC-16)
+                        if (await IsAlreadyInTargetStateAsync(client, entityName, targetId, transition, cancellationToken).ConfigureAwait(false))
                         {
-                            _logger?.LogDebug("Skipping already-closed {Entity}/{Id}", entityName, targetId);
+                            _logger?.LogDebug("Skipping already-in-target-state {Entity}/{Id}", entityName, targetId);
                             successCount++; // Count as success - already in desired state
                             continue;
                         }
@@ -162,26 +162,28 @@ namespace PPDS.Migration.Import
         }
 
         /// <summary>
-        /// Checks if a record is already in a closed/non-active state.
+        /// Checks if a record is already in the desired target state.
         /// </summary>
         /// <param name="client">The Dataverse client.</param>
         /// <param name="entityName">The entity logical name.</param>
         /// <param name="recordId">The record ID to check.</param>
+        /// <param name="target">The desired target state transition.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
-        /// <returns>True if the record is already closed (statecode != 0), false otherwise.</returns>
-        private static async Task<bool> IsRecordClosedAsync(
-            IPooledClient client, string entityName, Guid recordId, CancellationToken cancellationToken)
+        /// <returns>True if the record already matches the target statecode and statuscode, false otherwise.</returns>
+        private static async Task<bool> IsAlreadyInTargetStateAsync(
+            IPooledClient client, string entityName, Guid recordId, StateTransitionData target, CancellationToken cancellationToken)
         {
             try
             {
                 var request = new RetrieveRequest
                 {
                     Target = new EntityReference(entityName, recordId),
-                    ColumnSet = new ColumnSet("statecode")
+                    ColumnSet = new ColumnSet("statecode", "statuscode")
                 };
                 var response = (RetrieveResponse)await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
                 var stateCode = response.Entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
-                return stateCode != 0;
+                var statusCode = response.Entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? -1;
+                return stateCode == target.StateCode && statusCode == target.StatusCode;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

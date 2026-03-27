@@ -96,10 +96,11 @@ namespace PPDS.Migration.Import
         /// Gets the match field for name-based resolution.
         /// </summary>
         /// <param name="entityName">The entity logical name.</param>
-        /// <returns>The match field name, or empty string.</returns>
-        public static string GetMatchField(string entityName)
+        /// <returns>The match field name, or null if no match field is known.
+        /// Full implementation would require entity metadata lookup for primary name attribute.</returns>
+        public static string? GetMatchField(string entityName)
         {
-            return MatchFieldOverrides.TryGetValue(entityName, out var f) ? f : string.Empty;
+            return MatchFieldOverrides.TryGetValue(entityName, out var f) ? f : null;
         }
 
         private async Task<Guid?> TryDirectIdCheckAsync(string en, Guid sid, CancellationToken ct)

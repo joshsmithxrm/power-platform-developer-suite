@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using PPDS.Dataverse.Pooling;
 
@@ -14,14 +15,17 @@ namespace PPDS.Migration.Import.Handlers
     public class DuplicateRuleHandler : IRecordTransformer, IPostImportHandler
     {
         private readonly IDataverseConnectionPool _connectionPool;
+        private readonly ILogger<DuplicateRuleHandler>? _logger;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DuplicateRuleHandler"/> class.
         /// </summary>
         /// <param name="connectionPool">The Dataverse connection pool.</param>
-        public DuplicateRuleHandler(IDataverseConnectionPool connectionPool)
+        /// <param name="logger">Optional logger.</param>
+        public DuplicateRuleHandler(IDataverseConnectionPool connectionPool, ILogger<DuplicateRuleHandler>? logger = null)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
+            _logger = logger;
         }
 
         /// <inheritdoc />
@@ -52,12 +56,19 @@ namespace PPDS.Migration.Import.Handlers
             foreach (var (_, targetId) in rules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var request = new OrganizationRequest("PublishDuplicateRule")
+                try
                 {
-                    ["DuplicateRuleId"] = targetId
-                };
-                await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                    await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    var request = new OrganizationRequest("PublishDuplicateRule")
+                    {
+                        ["DuplicateRuleId"] = targetId
+                    };
+                    await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogWarning(ex, "Failed to publish duplicate rule {RuleId}", targetId);
+                }
             }
         }
 

@@ -52,7 +52,7 @@ public class StateTransitionProcessorTests
         });
 
         // Record is currently active (statecode=0)
-        SetupRetrieveStatecode(recordId, 0);
+        SetupRetrieveState(recordId, stateCode: 0);
 
         OrganizationRequest? capturedRequest = null;
         _client.Setup(c => c.ExecuteAsync(
@@ -74,9 +74,9 @@ public class StateTransitionProcessorTests
     }
 
     [Fact]
-    public async Task SkipsAlreadyClosedRecords()
+    public async Task SkipsAlreadyInTargetStateRecords()
     {
-        // AC-16: record already has non-zero statecode, skip transition
+        // AC-16: record already matches desired statecode and statuscode, skip transition
         var recordId = Guid.NewGuid();
         var context = CreateContext();
         context.StateTransitions.Add("incident", recordId, new StateTransitionData
@@ -88,8 +88,8 @@ public class StateTransitionProcessorTests
             SdkMessage = null
         });
 
-        // Record already has non-zero statecode (closed)
-        SetupRetrieveStatecode(recordId, 1);
+        // Record already has the target statecode and statuscode
+        SetupRetrieveState(recordId, stateCode: 1, statusCode: 5);
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
 
@@ -125,7 +125,7 @@ public class StateTransitionProcessorTests
             }
         });
 
-        SetupRetrieveStatecode(recordId, 0);
+        SetupRetrieveState(recordId, stateCode: 0);
 
         OrganizationRequest? capturedRequest = null;
         _client.Setup(c => c.ExecuteAsync(
@@ -159,9 +159,9 @@ public class StateTransitionProcessorTests
         context.StateTransitions.Add("account", id3, new StateTransitionData
         { EntityName = "account", RecordId = id3, StateCode = 1, StatusCode = 2 });
 
-        SetupRetrieveStatecode(id1, 0);
-        SetupRetrieveStatecode(id2, 0);
-        SetupRetrieveStatecode(id3, 0);
+        SetupRetrieveState(id1, stateCode: 0);
+        SetupRetrieveState(id2, stateCode: 0);
+        SetupRetrieveState(id3, stateCode: 0);
 
         _client.Setup(c => c.ExecuteAsync(
                 It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
@@ -201,10 +201,11 @@ public class StateTransitionProcessorTests
 
     #region Helpers
 
-    private void SetupRetrieveStatecode(Guid recordId, int statecodeValue)
+    private void SetupRetrieveState(Guid recordId, int stateCode, int statusCode = 1)
     {
         var entity = new Entity { Id = recordId };
-        entity["statecode"] = new OptionSetValue(statecodeValue);
+        entity["statecode"] = new OptionSetValue(stateCode);
+        entity["statuscode"] = new OptionSetValue(statusCode);
         var response = new RetrieveResponse();
         response["Entity"] = entity;
 
