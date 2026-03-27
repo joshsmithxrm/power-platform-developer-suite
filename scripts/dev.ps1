@@ -717,6 +717,12 @@ function Resolve-WorktreePath {
         return $null
     }
 
+    # Exact match first — "workflow-overhaul" should not be ambiguous with "workflow-update"
+    $exact = Join-Path $wtDir $Prefix
+    if (Test-Path $exact -PathType Container) {
+        return $exact
+    }
+
     $dirs = @(Get-ChildItem -Directory $wtDir | Where-Object { $_.Name -like "$Prefix*" })
 
     if ($dirs.Count -eq 0) {
@@ -948,7 +954,7 @@ if ($Completions) {
 
 # Parse args
 $command = if ($Args_ -and $Args_.Count -gt 0) { $Args_[0] } else { $null }
-$restArgs = if ($Args_ -and $Args_.Count -gt 1) { $Args_[1..($Args_.Count - 1)] } else { @() }
+$restArgs = [string[]]@(if ($Args_ -and $Args_.Count -gt 1) { $Args_[1..($Args_.Count - 1)] } else { @() })
 
 # No args — dashboard
 if (-not $command) {
