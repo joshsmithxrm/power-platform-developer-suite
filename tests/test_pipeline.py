@@ -1618,6 +1618,58 @@ class TestHeartbeatOriginMain:
 
 
 # ---------------------------------------------------------------------------
+# AC-122: Hook path resolution in worktrees
+# ---------------------------------------------------------------------------
+class TestHookPathResolution:
+    def test_hooks_use_relative_paths_that_work_in_worktrees(self):
+        """AC-122: Hook commands use relative paths that resolve in worktrees."""
+        settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+
+        hooks = settings.get("hooks", {})
+        for event_type, matchers in hooks.items():
+            for matcher_entry in matchers:
+                for hook in matcher_entry.get("hooks", []):
+                    cmd = hook.get("command", "")
+                    if ".claude/hooks/" in cmd:
+                        # Verify it uses a simple relative path (no env var expansion)
+                        assert "CLAUDE_PROJECT_DIR" not in cmd, (
+                            f"Hook should not use CLAUDE_PROJECT_DIR: {cmd}"
+                        )
+                        # Verify the hook file actually exists
+                        # Extract filename from command
+                        parts = cmd.split('"')
+                        for part in parts:
+                            if ".claude/hooks/" in part:
+                                hook_path = os.path.join(REPO_ROOT, part)
+                                assert os.path.exists(hook_path), (
+                                    f"Hook file not found: {hook_path}"
+                                )
+
+    def test_stop_hook_runs_in_worktree(self):
+        """AC-122: Stop hook executes without path errors in a worktree."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        env = os.environ.copy()
+        env["PPDS_PIPELINE"] = "1"
+        env["CLAUDE_PROJECT_DIR"] = REPO_ROOT
+        result = subprocess.run(
+            [sys.executable, hook_path],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=REPO_ROOT,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"Stop hook failed in worktree: {result.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # AC-105: All skills set phase
 # ---------------------------------------------------------------------------
 class TestAllSkillsSetPhase:
