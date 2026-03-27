@@ -606,7 +606,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
         try:
             title = f"retro: {desc[:70]}"
             existing = subprocess.run(
-                ["gh", "issue", "list", "--search", f"in:title {title}",
+                ["gh", "issue", "list", "--search", f'"{title}" in:title',
                  "--state", "open", "--json", "number", "--jq", "length"],
                 cwd=repo_root, capture_output=True, text=True, timeout=15,
                 env=gh_env,
@@ -1322,7 +1322,7 @@ def main():
                     )
                     if commit.returncode == 0:
                         log(logger, stage, "AUTO_COMMIT", reason="stranded files committed")
-                    else:
+                    elif "nothing to commit" not in (commit.stdout + commit.stderr):
                         log(logger, stage, "AUTO_COMMIT_FAILED", reason=commit.stderr.strip()[:200])
 
             # Track stage duration with exit code and last output line
