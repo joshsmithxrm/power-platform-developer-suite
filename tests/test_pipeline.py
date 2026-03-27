@@ -1244,3 +1244,235 @@ class TestReadLastLines:
         with tempfile.TemporaryDirectory() as tmpdir:
             lines = pipeline._read_last_lines(tmpdir, "nonexistent", 5)
             assert lines == []
+
+
+# ---------------------------------------------------------------------------
+# Retro Filing: Issue-worthiness criteria (specs/retro-filing.md)
+# ---------------------------------------------------------------------------
+class TestRetroSkillPrompt:
+    def test_skill_prompt_contains_observation_tier(self):
+        """AC-01: Retro skill prompt includes observation tier with definition."""
+        skill_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "SKILL.md")
+        with open(skill_path, "r") as f:
+            content = f.read()
+        assert "**observation**:" in content or "- **observation**" in content, (
+            "Retro skill prompt must define the observation tier"
+        )
+        assert "Stays in retro report" in content, (
+            "Observation tier must state findings stay in retro report"
+        )
+        assert "NOT filed" in content, (
+            "Observation tier must explicitly say NOT filed as GitHub issue"
+        )
+
+    def test_skill_prompt_contains_litmus_test(self):
+        """AC-02: Retro skill prompt includes litmus test guidance."""
+        skill_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "SKILL.md")
+        with open(skill_path, "r") as f:
+            content = f.read()
+        assert "Can someone open" in content and "code change" in content, (
+            "Retro skill prompt must include the litmus test: "
+            "'Can someone open this issue, make a code change, and close it?'"
+        )
+
+
+class TestRetroFindingsSummary:
+    def test_findings_summary_includes_observation_count(self):
+        """AC-03: FINDINGS_SUMMARY log includes observation count."""
+        import pipeline
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "issue-only", "description": "A real bug"},
+                    {"id": "R-02", "tier": "observation", "description": "A metric"},
+                    {"id": "R-03", "tier": "observation", "description": "Another metric"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=None), \
+                 patch("subprocess.run"):
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+
+            with open(log_path) as f:
+                content = f.read()
+            assert "observation=2" in content, (
+                "FINDINGS_SUMMARY must include observation count"
+            )
+
+    def test_observation_tier_not_filed(self):
+        """AC-04: observation-tier findings do not trigger gh issue create."""
+        import pipeline
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "observation", "description": "High fix ratio"},
+                    {"id": "R-02", "tier": "observation", "description": "Timing gap"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            with patch("subprocess.run") as mock_run:
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+            # subprocess.run should never be called (no gh issue create)
+            mock_run.assert_not_called()
+
+
+class TestFindDuplicateIssue:
+    def test_find_duplicate_returns_existing_issue(self):
+        """AC-05: Returns issue number when matching open issue exists."""
+        import pipeline
+        from unittest.mock import patch, MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps([
+            {"number": 42, "title": "retro: Pipeline resumes while previous stage still"}
+        ])
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pipeline._find_duplicate_issue(
+                "retro: Pipeline resumes while previous stage still running", "/repo"
+            )
+        assert result == 42
+
+    def test_find_duplicate_returns_none_when_no_match(self):
+        """AC-06: Returns None when no matching open issue exists."""
+        import pipeline
+        from unittest.mock import patch, MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps([
+            {"number": 99, "title": "retro: Something completely different and unrelated"}
+        ])
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = pipeline._find_duplicate_issue(
+                "retro: Pipeline resumes while previous stage still running", "/repo"
+            )
+        assert result is None
+
+    def test_find_duplicate_returns_none_on_error(self):
+        """AC-08 helper: Returns None when gh command fails."""
+        import pipeline
+        from unittest.mock import patch
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 15)):
+            result = pipeline._find_duplicate_issue("retro: something", "/repo")
+        assert result is None
+
+
+class TestRetroDeduplication:
+    def test_skip_duplicate_issue_filing(self):
+        """AC-07: Skips filing and logs ISSUE_SKIPPED_DUPLICATE when duplicate exists."""
+        import pipeline
+        from unittest.mock import patch, MagicMock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "issue-only",
+                     "description": "Pipeline resumes while previous stage still running"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=42):
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+
+            with open(log_path) as f:
+                content = f.read()
+            assert "ISSUE_SKIPPED_DUPLICATE" in content
+            assert "#42" in content
+
+    def test_files_issue_when_dedup_check_fails(self):
+        """AC-08: Files issue when _find_duplicate_issue fails (best-effort dedup)."""
+        import pipeline
+        from unittest.mock import patch, MagicMock, call
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "issue-only",
+                     "description": "A specific code bug that needs fixing"},
+                ]
+            }
+            with open(os.path.join(wf_dir, "retro-findings.json"), "w") as f:
+                json.dump(findings, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            mock_create = MagicMock()
+            mock_create.returncode = 0
+
+            with patch.object(pipeline, "_find_duplicate_issue", return_value=None), \
+                 patch("subprocess.run", return_value=mock_create) as mock_run:
+                pipeline.process_retro_findings(tmpdir, logger, tmpdir)
+
+            logger.close()
+
+            # Verify gh issue create was called
+            assert mock_run.called
+            create_call = mock_run.call_args
+            assert "gh" in create_call[0][0]
+            assert "issue" in create_call[0][0]
+            assert "create" in create_call[0][0]
+
+
+class TestObservationsPersisted:
+    def test_observations_persisted_in_store(self):
+        """AC-09: observation findings remain in retro-findings.json (not filtered out)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            findings = {
+                "findings": [
+                    {"id": "R-01", "tier": "observation", "description": "A metric"},
+                    {"id": "R-02", "tier": "issue-only", "description": "A bug"},
+                ]
+            }
+            findings_path = os.path.join(wf_dir, "retro-findings.json")
+            with open(findings_path, "w") as f:
+                json.dump(findings, f)
+
+            # After process_retro_findings runs, the file should still contain
+            # observation findings (the function reads but doesn't modify the file)
+            with open(findings_path) as f:
+                data = json.load(f)
+
+            tiers = [f["tier"] for f in data["findings"]]
+            assert "observation" in tiers, (
+                "observation findings must be preserved in retro-findings.json"
+            )

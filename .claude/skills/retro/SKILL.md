@@ -197,7 +197,13 @@ After discussing with the user, write `.workflow/retro-findings.json`:
 Tier definitions:
 - **auto-fix**: Stale references, typos, hardcoded values. Safe to auto-implement.
 - **draft-fix**: Skill wording, checklist gaps. Auto-PR but flag for review.
-- **issue-only**: Architectural changes, new skills. Create GitHub issue, needs /design.
+- **issue-only**: Specific code bug, missing logic, or broken behavior with a concrete
+  fix. Must be reproducible (would happen on every run). Litmus test: "Can someone open
+  this issue, make a code change, and close it?"
+- **observation**: Run metrics (timing, ratios, counts), single-run anomalies (gaps,
+  timeouts), patterns without concrete fixes ("most-thrashed file"), behavioral
+  recommendations ("consider adding a checklist"). Stays in retro report — NOT filed
+  as a GitHub issue.
 
 ### 10. Persistent Store Update
 
@@ -241,5 +247,25 @@ When running as a pipeline stage (headless, no user present):
 5. **Update persistent store:** Follow the same Persistent Store Update process (section 10) to append findings to `.retros/summary.json`
 6. No grading, no judgment, no root cause analysis — just data
 7. **Crash detection:** If this retro runs for less than 5 minutes and produces zero findings, log a warning in retro-findings.json
+
+### Issue-Worthiness Classification
+
+Before classifying a finding as `issue-only`, apply the litmus test: "Can someone open
+this issue, make a code change, and close it?" If the answer is "this is just how that
+run went" or "there's no specific code to change," classify as `observation` instead.
+
+**Examples of `observation` (do NOT file as issue):**
+- "High fix ratio (11 fix / 2 feat)" — run metric
+- "109-minute gap between stages" — single-run timing
+- "Most-thrashed file (6 touches)" — pattern without a fix
+- "Converge timed out at 900s" — single-run anomaly
+- "38% of compute spent on converge" — percentage metric
+- "Consider adding a checklist for X" — behavioral recommendation
+
+**Examples of `issue-only` (DO file as issue):**
+- "Agent frontmatter uses 'allowedTools' instead of 'tools'" — code bug, concrete fix
+- "Pipeline resumes while previous stage still running" — reproducible logic bug
+- "MSYS converts /path to C:/path in issue titles" — specific, fixable
+- "Duplicate PR stage runs when PR already exists" — missing guard, concrete fix
 
 The pipeline orchestrator reads this file for auto-heal decisions.
