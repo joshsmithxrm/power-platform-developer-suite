@@ -224,3 +224,30 @@ Awaiting your review.
 | Rebase conflicts | Present conflicts to user, do NOT auto-resolve |
 | PR creation fails | Check `gh auth status`, suggest `gh auth login` if needed |
 | Push rejected | Check if branch is behind, suggest rebase |
+
+### 9. Launch Background Monitor (Interactive Mode)
+
+After creating the PR, in interactive mode (when `PPDS_PIPELINE` is NOT set), launch the pr-monitor as a background process:
+
+```bash
+python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number}
+```
+
+Platform-specific detachment is handled by the caller (the skill executor):
+- Windows: Use `subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NEW_PROCESS_GROUP` in Popen creationflags
+- Unix: Use `start_new_session=True` in Popen
+
+The monitor handles: CI polling, Gemini stabilization, triage dispatch, draft→ready conversion, retro, and notification — all as a background process that survives session exit.
+
+### 10. Retro (Interactive Mode)
+
+In interactive mode (not pipeline, not pr-monitor), also spawn a retro subagent after PR creation:
+
+```
+Agent tool:
+  subagent_type: general-purpose
+  prompt: "/retro"
+  run_in_background: true
+```
+
+This is a best-effort retro that runs while the user continues working. The pr-monitor also runs its own retro — this is intentional for coverage.
