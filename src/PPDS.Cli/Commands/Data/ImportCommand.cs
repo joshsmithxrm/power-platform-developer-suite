@@ -83,7 +83,7 @@ public static class ImportCommand
 
         var skipUnresolvedLookupsOption = new Option<bool>("--skip-unresolved-lookups")
         {
-            Description = "Null unresolved lookups instead of failing the record (requires --resolve-lookups)",
+            Description = "Null unresolved lookups instead of failing the record [default: True] (requires --resolve-lookups)",
             DefaultValueFactory = _ => true
         };
 

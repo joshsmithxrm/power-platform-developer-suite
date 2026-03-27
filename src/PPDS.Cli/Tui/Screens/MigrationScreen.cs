@@ -63,6 +63,9 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         {
             X = 1,
             Y = 0,
+            Width = 20,
+            Height = 1,
+            CanFocus = true,
             DisplayMode = DisplayModeLayout.Horizontal
         };
         _modeRadio.SelectedItemChanged += OnModeChanged;
