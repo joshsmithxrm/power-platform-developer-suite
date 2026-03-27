@@ -174,6 +174,19 @@ If Phase 1 has **Critical failures** (panels don't load, crashes, data doesn't a
 
 If Phase 1 passes or has only non-critical failures, proceed to Phase 2.
 
+### Step 5.5: Persist Partial Results
+
+Before dispatching Phase 2, write Phase 1 results to workflow state so they survive a timeout:
+
+```bash
+python scripts/workflow-state.py set qa_partial.phase1_completed now
+# Record per-surface results from Phase 1 (adjust counts to match actual results):
+python scripts/workflow-state.py set qa_partial.phase1_checks_passed <N>
+python scripts/workflow-state.py set qa_partial.phase1_checks_total <N>
+```
+
+This ensures that if Phase 2 times out, Phase 1 results are preserved in `state.json` and included in `pipeline-result.json`.
+
 ### Step 6: Dispatch Phase 2 — Consistency + UX Agents (parallel)
 
 Launch BOTH agents simultaneously. They share the same VS Code instance but test different things.
