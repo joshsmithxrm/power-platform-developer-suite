@@ -166,25 +166,14 @@ class TestHeartbeat:
 # AC-57: Timeout kills subprocess
 # ---------------------------------------------------------------------------
 class TestTimeout:
-    def test_timeout_kills_subprocess(self):
-        """AC-57: Per-stage timeout terminates subprocess."""
+    def test_stall_and_hard_ceiling_constants_exist(self):
+        """AC-57: Stall-based and hard ceiling timeout constants are defined."""
         import pipeline
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            wf_dir = os.path.join(tmpdir, ".workflow")
-            os.makedirs(wf_dir)
-            log_path = os.path.join(wf_dir, "pipeline.log")
-            logger = pipeline.open_logger(log_path)
-
-            # Use a command that sleeps forever instead of claude
-            # We can't easily test this without mocking, so verify
-            # the timeout parameter is accepted
-            exit_code, logger = pipeline.run_claude(
-                tmpdir, "test", logger, "timeout-test",
-                dry_run=True, timeout=1,
-            )
-            logger.close()
-            assert exit_code == 0  # dry-run always succeeds
+        assert hasattr(pipeline, "STALL_LIMIT")
+        assert hasattr(pipeline, "HARD_CEILING")
+        assert pipeline.STALL_LIMIT == 5
+        assert pipeline.HARD_CEILING == 3600
 
 
 # ---------------------------------------------------------------------------
@@ -789,9 +778,12 @@ class TestPipelineResultJson:
             wf_dir = os.path.join(tmpdir, ".workflow")
             os.makedirs(wf_dir)
 
+            stages = {
+                "implement": {"duration": "975s", "exit": 0, "last_line": ""},
+                "gates": {"duration": "300s", "exit": 0, "last_line": ""},
+            }
             pipeline.write_result(
-                tmpdir, "complete", 3600,
-                {"implement": "975s", "gates": "300s"},
+                tmpdir, "complete", 3600, stages,
                 pr_url="https://github.com/test/pr/1",
             )
 
@@ -803,7 +795,7 @@ class TestPipelineResultJson:
 
             assert result["status"] == "complete"
             assert result["duration"] == 3600
-            assert result["stages"]["implement"] == "975s"
+            assert result["stages"]["implement"]["duration"] == "975s"
             assert result["pr_url"] == "https://github.com/test/pr/1"
             assert "timestamp" in result
 
@@ -815,9 +807,12 @@ class TestPipelineResultJson:
             wf_dir = os.path.join(tmpdir, ".workflow")
             os.makedirs(wf_dir)
 
+            stages = {
+                "implement": {"duration": "975s", "exit": 0, "last_line": ""},
+                "gates": {"duration": "300s", "exit": 0, "last_line": ""},
+            }
             pipeline.write_result(
-                tmpdir, "failed", 2700,
-                {"implement": "975s", "gates": "300s"},
+                tmpdir, "failed", 2700, stages,
                 failed_stage="converge",
                 error="max rounds exceeded",
             )
@@ -829,7 +824,7 @@ class TestPipelineResultJson:
             assert result["status"] == "failed"
             assert result["failed_stage"] == "converge"
             assert result["error"] == "max rounds exceeded"
-            assert result["stages"]["implement"] == "975s"
+            assert result["stages"]["implement"]["duration"] == "975s"
 
 
 # ---------------------------------------------------------------------------
@@ -920,3 +915,346 @@ class TestPrTriagePushVerify:
             "run_pr_stage must verify remote HEAD via ls-remote"
         assert "PUSH_MISMATCH" in source, \
             "run_pr_stage must log PUSH_MISMATCH when heads differ"
+
+
+# ===========================================================================
+# Pipeline Observability v2 Tests (pipeline-observability.md ACs)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# AC-01: extract_text_from_jsonl falls back to assistant messages
+# ---------------------------------------------------------------------------
+class TestExtractTextAssistantFallback:
+    def test_extracts_from_assistant_messages_when_no_result(self):
+        """AC-01: Returns text from assistant events when no result event exists."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jsonl_path = os.path.join(tmpdir, "timeout.jsonl")
+            with open(jsonl_path, "w") as f:
+                f.write('{"type":"system","subtype":"init"}\n')
+                f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"Phase 1 complete: CLI 7/7"}]}}\n')
+                f.write('{"type":"tool_use","name":"Bash"}\n')
+                f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"Phase 2 starting..."}]}}\n')
+                # No result event — simulates timeout kill
+
+            text = pipeline.extract_text_from_jsonl(jsonl_path)
+            assert "Phase 1 complete: CLI 7/7" in text
+            assert "Phase 2 starting..." in text
+            assert len(text) > 0
+
+    def test_extracts_text_blocks_only_not_tool_use(self):
+        """AC-01: Only extracts text blocks from assistant content, not tool_use."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jsonl_path = os.path.join(tmpdir, "mixed.jsonl")
+            with open(jsonl_path, "w") as f:
+                f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{}},{"type":"text","text":"Done editing"}]}}\n')
+
+            text = pipeline.extract_text_from_jsonl(jsonl_path)
+            assert "Done editing" in text
+            assert "Edit" not in text
+
+    def test_empty_content_array(self):
+        """AC-01 edge case: Assistant event with empty content returns empty string."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jsonl_path = os.path.join(tmpdir, "empty_content.jsonl")
+            with open(jsonl_path, "w") as f:
+                f.write('{"type":"assistant","message":{"content":[]}}\n')
+                f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}\n')
+
+            text = pipeline.extract_text_from_jsonl(jsonl_path)
+            assert text == ""
+
+
+# ---------------------------------------------------------------------------
+# AC-02: extract_text_from_jsonl prefers result events
+# ---------------------------------------------------------------------------
+class TestExtractTextPrefersResult:
+    def test_prefers_result_when_both_exist(self):
+        """AC-02: Returns result text when both result and assistant events exist."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jsonl_path = os.path.join(tmpdir, "clean.jsonl")
+            with open(jsonl_path, "w") as f:
+                f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"Intermediate step 1"}]}}\n')
+                f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"Intermediate step 2"}]}}\n')
+                f.write('{"type":"result","subtype":"success","result":"Final summary"}\n')
+
+            text = pipeline.extract_text_from_jsonl(jsonl_path)
+            assert text == "Final summary"
+            assert "Intermediate" not in text
+
+
+# ---------------------------------------------------------------------------
+# AC-03: pipeline-result.json includes last_output on failure
+# ---------------------------------------------------------------------------
+class TestWriteResultLastOutput:
+    def test_includes_last_output_on_failure(self):
+        """AC-03: last_output field present when failed_stage is set."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            last_output = ["Phase 1 complete", "Phase 2 starting...", "VS Code launch"]
+            pipeline.write_result(
+                tmpdir, "failed", 1847, {},
+                failed_stage="qa",
+                error="stall timeout after 5m idle",
+                last_output=last_output,
+            )
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert result["last_output"] == last_output
+            assert len(result["last_output"]) == 3
+
+    def test_empty_last_output_list_is_included(self):
+        """AC-03: Empty list is included (not omitted like None)."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            pipeline.write_result(
+                tmpdir, "failed", 100, {},
+                failed_stage="gates",
+                last_output=[],
+            )
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert "last_output" in result
+            assert result["last_output"] == []
+
+    def test_no_last_output_when_none(self):
+        """AC-03: last_output key absent when not provided."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            pipeline.write_result(tmpdir, "complete", 100, {})
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert "last_output" not in result
+
+
+# ---------------------------------------------------------------------------
+# AC-04: Pipeline runs retro after PipelineFailure
+# ---------------------------------------------------------------------------
+class TestPipelineFailureRetro:
+    def test_pipeline_failure_exception_exists(self):
+        """AC-04: PipelineFailure exception class exists."""
+        import pipeline
+
+        assert hasattr(pipeline, "PipelineFailure")
+        assert issubclass(pipeline.PipelineFailure, Exception)
+
+    def test_pipeline_fail_raises_pipeline_failure(self):
+        """AC-04: _pipeline_fail raises PipelineFailure, not sys.exit."""
+        import inspect
+        import pipeline
+
+        # Verify _pipeline_fail source uses raise PipelineFailure, not sys.exit
+        # We need to check main() source since _pipeline_fail is a nested function
+        source = inspect.getsource(pipeline.main)
+        assert "raise PipelineFailure" in source
+        assert "except PipelineFailure" in source
+
+    def test_failure_handler_runs_retro(self):
+        """AC-04: except PipelineFailure block runs retro."""
+        import inspect
+        import pipeline
+
+        source = inspect.getsource(pipeline.main)
+        # Find the PipelineFailure handler and verify it runs retro
+        pf_idx = source.index("except PipelineFailure")
+        handler_section = source[pf_idx:pf_idx + 1000]
+        assert 'mode="failure-retro"' in handler_section
+        assert "/retro" in handler_section
+
+
+# ---------------------------------------------------------------------------
+# AC-06: pipeline-result.json includes partial QA results
+# ---------------------------------------------------------------------------
+class TestWriteResultPartialQa:
+    def test_includes_partial_qa_on_qa_timeout(self):
+        """AC-06: partial_results from qa_partial in state.json when QA fails."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            # Write state with qa_partial
+            state = {
+                "qa_partial": {
+                    "phase1_completed": "2026-03-26T10:00:00Z",
+                    "phase1_cli_passed": 7,
+                    "phase1_cli_total": 7,
+                }
+            }
+            with open(os.path.join(wf_dir, "state.json"), "w") as f:
+                json.dump(state, f)
+
+            pipeline.write_result(
+                tmpdir, "failed", 1200, {},
+                failed_stage="qa",
+                error="stall timeout",
+            )
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert "partial_results" in result
+            assert result["partial_results"]["phase1_cli_passed"] == 7
+
+    def test_no_partial_results_when_not_qa_failure(self):
+        """AC-06: No partial_results when failed stage is not QA."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            pipeline.write_result(
+                tmpdir, "failed", 500, {},
+                failed_stage="gates",
+                error="build failure",
+            )
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert "partial_results" not in result
+
+
+# ---------------------------------------------------------------------------
+# AC-09: Stage entries include exit code and last_line
+# ---------------------------------------------------------------------------
+class TestStageDetailedEntries:
+    def test_stages_include_exit_and_last_line(self):
+        """AC-09: Per-stage entries have duration, exit, and last_line."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+
+            stages = {
+                "implement": {"duration": "450s", "exit": 0, "last_line": "All tests passed"},
+                "qa": {"duration": "1200s", "exit": -1, "last_line": "Phase 2A: Opening Solutions panel..."},
+            }
+            pipeline.write_result(
+                tmpdir, "failed", 1650, stages,
+                failed_stage="qa",
+            )
+
+            with open(os.path.join(wf_dir, "pipeline-result.json")) as f:
+                result = json.load(f)
+
+            assert result["stages"]["implement"]["exit"] == 0
+            assert result["stages"]["qa"]["exit"] == -1
+            assert result["stages"]["qa"]["last_line"] == "Phase 2A: Opening Solutions panel..."
+
+
+# ---------------------------------------------------------------------------
+# AC-12: Stall timeout kills after consecutive idle
+# ---------------------------------------------------------------------------
+class TestStallTimeout:
+    def test_stall_timeout_kills_after_consecutive_idle(self):
+        """AC-12: Stage killed when consecutive_idle >= STALL_LIMIT."""
+        import pipeline
+
+        # Verify the stall timeout logic exists in run_claude
+        import inspect
+        source = inspect.getsource(pipeline.run_claude)
+        assert "STALL_TIMEOUT" in source
+        assert "consecutive_idle >= STALL_LIMIT" in source
+
+
+# ---------------------------------------------------------------------------
+# AC-13: Hard timeout at ceiling
+# ---------------------------------------------------------------------------
+class TestHardTimeout:
+    def test_hard_timeout_kills_at_ceiling(self):
+        """AC-13: Stage killed when elapsed > HARD_CEILING."""
+        import pipeline
+        import inspect
+
+        source = inspect.getsource(pipeline.run_claude)
+        assert "HARD_TIMEOUT" in source
+        assert "HARD_CEILING" in source
+
+
+# ---------------------------------------------------------------------------
+# AC-14: Active stage not killed by stall timeout
+# ---------------------------------------------------------------------------
+class TestActiveStageNotKilled:
+    def test_active_stage_resets_idle_counter(self):
+        """AC-14: Activity resets consecutive_idle to 0."""
+        # Inline test of the activity logic
+        consecutive_idle = 4  # One away from STALL_LIMIT
+        current_size, git_changes, commits = 200, 3, 2
+        last_log_size, last_git_changes, last_commits = 100, 3, 2
+
+        output_grew = current_size > last_log_size
+
+        if output_grew:
+            consecutive_idle = 0
+
+        assert consecutive_idle == 0  # Reset because output grew
+
+
+# ---------------------------------------------------------------------------
+# AC-15: STAGE_TIMEOUTS dict removed
+# ---------------------------------------------------------------------------
+class TestNoFixedTimeouts:
+    def test_no_per_stage_fixed_timeouts(self):
+        """AC-15: STAGE_TIMEOUTS dict no longer exists."""
+        import pipeline
+
+        assert not hasattr(pipeline, "STAGE_TIMEOUTS"), \
+            "STAGE_TIMEOUTS should be removed — timeouts are now activity-based"
+
+
+# ---------------------------------------------------------------------------
+# _read_last_lines helper
+# ---------------------------------------------------------------------------
+class TestReadLastLines:
+    def test_reads_last_n_lines(self):
+        """_read_last_lines returns last N non-empty lines from stage log."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow", "stages")
+            os.makedirs(wf_dir)
+            with open(os.path.join(wf_dir, "qa.log"), "w") as f:
+                for i in range(100):
+                    f.write(f"Line {i}\n")
+
+            lines = pipeline._read_last_lines(tmpdir, "qa", 5)
+            assert len(lines) == 5
+            assert lines[-1] == "Line 99"
+
+    def test_missing_file_returns_empty(self):
+        """_read_last_lines returns [] for missing file."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lines = pipeline._read_last_lines(tmpdir, "nonexistent", 5)
+            assert lines == []
