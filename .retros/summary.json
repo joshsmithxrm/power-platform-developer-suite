@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-03-27",
-  "total_retros": 1,
+  "total_retros": 2,
   "findings_by_category": {
     "external": [
       { "date": "2026-03-27", "branch": "feat/investigation-skill", "finding_id": "R-01" }
@@ -9,11 +9,17 @@
     "tooling": [
       { "date": "2026-03-27", "branch": "feat/investigation-skill", "finding_id": "R-02" },
       { "date": "2026-03-27", "branch": "feat/investigation-skill", "finding_id": "R-03" }
+    ],
+    "design": [
+      { "date": "2026-03-27", "branch": "feat/investigation-skill", "finding_id": "R-04" }
+    ],
+    "behavior": [
+      { "date": "2026-03-27", "branch": "feat/investigation-skill", "finding_id": "R-04" }
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.2,
+    "avg_fix_ratio": 0.45,
     "pipeline_success_rate": 0.0,
-    "avg_convergence_rounds": 0.0
+    "avg_convergence_rounds": 2.0
   }
 }
