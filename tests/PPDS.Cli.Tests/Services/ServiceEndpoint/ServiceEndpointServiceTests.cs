@@ -12,6 +12,7 @@ using Xunit;
 
 namespace PPDS.Cli.Tests.Services.ServiceEndpoint;
 
+[Trait("Category", "Unit")]
 public class ServiceEndpointServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _mockPool;

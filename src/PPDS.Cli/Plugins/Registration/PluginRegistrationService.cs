@@ -1581,7 +1581,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var existingImage = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
         if (existingImage == null)
         {
-            throw new InvalidOperationException($"Image with ID '{imageId}' not found.");
+            throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Image with ID '{imageId}' not found.");
         }
 
         // Build update entity with only changed properties

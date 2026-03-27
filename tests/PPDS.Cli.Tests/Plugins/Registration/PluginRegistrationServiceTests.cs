@@ -773,17 +773,18 @@ public class PluginRegistrationServiceTests
     #region UpdateImageAsync Tests
 
     [Fact]
-    public async Task UpdateImageAsync_ThrowsInvalidOperationException_WhenImageNotFound()
+    public async Task UpdateImageAsync_ThrowsPpdsException_WhenImageNotFound()
     {
         // Arrange
         var imageId = Guid.NewGuid();
         _retrieveMultipleResult = new EntityCollection();
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name,accountnumber")));
 
         Assert.Contains("not found", exception.Message);
+        Assert.Equal(ErrorCodes.Plugin.NotFound, exception.ErrorCode);
     }
 
     [Fact]

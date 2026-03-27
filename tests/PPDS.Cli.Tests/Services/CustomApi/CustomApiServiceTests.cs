@@ -13,6 +13,7 @@ using Xunit;
 
 namespace PPDS.Cli.Tests.Services.CustomApi;
 
+[Trait("Category", "Unit")]
 public class CustomApiServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _mockPool;
