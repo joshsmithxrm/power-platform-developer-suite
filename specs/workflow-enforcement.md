@@ -1,7 +1,7 @@
 # Workflow Enforcement
 
-**Status:** Draft (v4.0 — headless pipeline mode additions)
-**Version:** 4.0
+**Status:** Draft (v5.0 — pipeline observability: stream-json, multi-signal activity, lock file)
+**Version:** 5.0
 **Last Updated:** 2026-03-26
 **Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
@@ -70,21 +70,29 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 ┌──────────────────────────────────────────────────────┐
 │         Pipeline Orchestrator (pipeline.py)           │
 │                                                       │
+│  Acquires pipeline.lock (PID-based, exclusive)       │
 │  Sets PPDS_PIPELINE=1 in subprocess env              │
 │  Spawns one claude -p per stage via Popen            │
+│    --output-format stream-json for real-time output  │
 │  Monitors via polling loop (5s interval)             │
-│  Heartbeat every 60s → pipeline.log                  │
+│  Heartbeat every 60s — multi-signal activity:        │
+│    output_bytes (JSONL file size)                     │
+│    git_changes (working tree modifications)           │
+│    commits (rev-list count ahead of main)             │
 │  Per-stage timeout → terminate if exceeded           │
-│  Stage output → .workflow/stages/{stage}.log         │
+│  Stage output → .workflow/stages/{stage}.jsonl       │
+│  Post-process → .workflow/stages/{stage}.log (text)  │
 │  Checks state.json between stages                    │
+│  Releases pipeline.lock on exit (finally)            │
 └──────────────────┬───────────────────────────────────┘
                    │ for each stage:
                    ▼
 ┌──────────────────────────────────────────────────────┐
-│            claude -p "/{stage}" session               │
+│   claude -p "/{stage}" --output-format stream-json   │
 │                                                       │
 │  SessionStart hook → skips behavioral rules          │
 │  Skill runs → writes to workflow-state.json          │
+│  Stream-json events → stage JSONL file (real-time)   │
 │  Stop hook → detects PPDS_PIPELINE → exits 0         │
 │  Process exits → pipeline reads exit code            │
 └──────────────────────────────────────────────────────┘
@@ -100,7 +108,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 | PR Gate Hook | Blocks `gh pr create` unless gates, verify, QA, and review are all current. Hard gate. |
 | Stop Hook | Blocks session end when workflow steps are incomplete. Pipeline-aware: exits immediately when `PPDS_PIPELINE=1`. |
 | Skills | Define each workflow step. Write their completion status to the workflow state file. |
-| Pipeline Orchestrator | `scripts/pipeline.py` — runs stages as sequential `claude -p` sessions. Each stage gets a fresh context window. The script — not the AI — decides what runs next. |
+| Pipeline Orchestrator | `scripts/pipeline.py` — runs stages as sequential `claude -p --output-format stream-json` sessions. Each stage gets a fresh context window. Multi-signal activity monitoring (output bytes, git changes, commits). Worktree lock file prevents concurrent instances. The script — not the AI — decides what runs next. |
 
 ### Dependencies
 
@@ -300,12 +308,12 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 | Skill | Purpose | Key Behavior |
 |-------|---------|-------------|
 | `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. |
-| `/pr` | Rebase → PR → monitor → summarize. | Rebases on main. Creates PR with structured body. Polls CI status and Gemini reviews (every 30s for 2 min, then every 2 min, max 15 min total). When complete: triages Gemini comments (fix valid ones, dismiss invalid with rationale), replies to EACH comment individually on the PR with action taken, presents summary to user. On timeout: reports current status and what's still pending. Writes `pr.url` and `pr.created` to workflow state. |
+| `/pr` | Rebase → draft PR → Gemini triage → mark ready → notify. | **Interactive mode:** Rebases on main. Creates draft PR. Polls for Gemini reviews (30s interval, 90s min wait, 5 min max). Triages each comment (fix valid, dismiss invalid with rationale). Replies to EACH comment individually. Converts draft → ready (`gh pr ready`). Notifies user. Writes `pr.url`, `pr.created`, `pr.gemini_triaged` to workflow state. **Pipeline mode:** Orchestration is scripted in `pipeline.py` (see PR Stage Orchestration). Only the triage step invokes AI via the `gemini-triage` agent profile (Sonnet). |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
-| `/status` | Display current workflow state. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. Additionally reads `.workflow/pipeline.log` for pipeline status (stage progress, heartbeats, duration) and `.workflow/stages/{stage}.log` for recent stage output. No state writes. |
+| `/status` | Display current workflow state with live pipeline monitoring. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. When a pipeline is running (`.workflow/pipeline.lock` exists with live PID): parses `.workflow/pipeline.log` for stage progress and last heartbeat; parses the active stage's `.jsonl` file to show current tool call in progress, files created/modified this stage, commits made, elapsed time, and last activity timestamp. When no pipeline is running: reads `.workflow/stages/{stage}.log` for completed stage summaries. No state writes. |
 | `/start` | Bootstrap a feature worktree. | Accepts freeform input (issues, descriptions). AI extracts candidate name + issue numbers, proposes to user for confirmation. Creates worktree at `.worktrees/<name>` with branch `feat/<name>`, initializes `.workflow/state.json` with `branch`, `started`, and `issues` fields, opens new terminal using system default shell in worktree directory. Prints "Run `claude` then `/design`". Handles: existing branch (no `-b`), existing worktree (ask resume or new), platform detection for terminal launch (pwsh on Windows, default shell on Linux/Mac), missing terminal command (prints cd instructions instead). **Worktree-aware:** Works from any branch — if on a feature branch/worktree, resolves the main repo root via `git worktree list` and creates the new worktree from there. |
 
 ### Main Branch Bootstrap
@@ -380,7 +388,8 @@ The pipeline uses `subprocess.Popen` with file redirect and a polling loop — n
 **Subprocess launch:**
 ```python
 proc = subprocess.Popen(
-    ["claude", "-p", prompt, "--verbose"],
+    ["claude", "-p", prompt, "--verbose",
+     "--output-format", "stream-json"],
     cwd=worktree_path,
     stdout=stage_log_file,      # File redirect, not PIPE
     stderr=subprocess.STDOUT,    # Merge stderr into stdout
@@ -388,14 +397,81 @@ proc = subprocess.Popen(
 )
 ```
 
-stdout and stderr merge into `.workflow/stages/{stage}.log`. No PIPE — eliminates buffer deadlock class of bugs. Stage log is readable in real-time by `/status` or manual `tail -f`.
+The `--output-format stream-json` flag is critical: it causes `claude -p` to emit one JSON object per line as events occur (tool calls, text chunks, system messages). Without it, `claude -p` in default text mode buffers the entire response and writes to stdout only at process exit — producing 0-byte stage logs throughout execution regardless of actual agent activity.
+
+stdout and stderr merge into `.workflow/stages/{stage}.jsonl`. No PIPE — eliminates buffer deadlock class of bugs. Stage JSONL is readable in real-time by `/status` or manual `tail -f`.
 
 **Polling loop (5-second interval):**
 1. `process.poll()` — detect exit
 2. Timeout check — terminate if elapsed > stage timeout
-3. Heartbeat every 60s — log elapsed time, PID, output file size, activity status
+3. Heartbeat every 60s — multi-signal activity detection (see below)
+
+**Multi-signal activity detection:** The heartbeat checks three independent signals every 60s:
+
+| Signal | How | What it proves |
+|--------|-----|----------------|
+| `output_bytes` | `os.path.getsize(stage_jsonl_path)` | Agent process is running and streaming events |
+| `git_changes` | `git status --porcelain \| wc -l` | Agent is modifying files in the worktree |
+| `commits` | `git rev-list --count main..HEAD` | Agent has committed work product |
+
+Activity classification:
+- **active**: `output_bytes` increased since last heartbeat OR `git_changes` increased OR `commits` increased
+- **idle**: none of the three signals changed since last heartbeat
+- **stalled**: idle for 3+ consecutive heartbeats (180s) — reported as `activity=stalled` in the heartbeat line (no separate warning entry; the field value itself is the signal)
+
+Git subprocess calls use `timeout=5` to avoid blocking the polling loop. If git times out or errors, that signal is skipped (not treated as idle).
+
+**Post-process stage output:** After the subprocess exits, the pipeline:
+1. Parses the JSONL file to extract the final assistant text response
+2. Writes the extracted text to `.workflow/stages/{stage}.log` as a human-readable summary
+3. Logs the last 20 lines of the human-readable `.log` (not the raw JSONL) to `pipeline.log`
+
+This gives both: raw JSONL for tooling/debugging, and plain text for humans.
+
+**Stream-json event format:** Each line in the JSONL file is a JSON object. The relevant event types for parsing:
+
+```jsonl
+{"type":"system","subtype":"init","session_id":"...","tools":[...],"model":"..."}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"...","name":"Edit","input":{...}}]}}
+{"type":"result","subtype":"success","result":"Final assistant text response here","session_id":"..."}
+```
+
+The post-processor extracts text from `type: "result"` events (the `result` field contains the final response text). The `/status` parser reads `type: "assistant"` events to identify in-progress tool calls (content blocks with `type: "tool_use"` and their `name` field). Lines that fail `json.loads` are silently skipped (handles partial writes and non-JSON stderr lines).
 
 **Timeout enforcement:** On timeout, `process.terminate()` sends SIGTERM (Unix) or TerminateProcess (Windows). Wait 30s grace period on Unix, then `process.kill()` if still alive. On Windows, `terminate()` and `kill()` both call TerminateProcess — no grace period.
+
+#### Pipeline Lock File
+
+**Location:** `.workflow/pipeline.lock`
+
+**Purpose:** Prevents concurrent pipeline instances on the same worktree. Observed failure: two `pipeline.py` processes running converge-r1 simultaneously on `plugin-registration`, producing interleaved heartbeats from two PIDs and racing on the same files.
+
+**Behavior:**
+1. On startup, check if `.workflow/pipeline.lock` exists.
+2. If it exists, read the PID from the file. Check if that PID is alive (`os.kill(pid, 0)` on Unix, `OpenProcess` on Windows via `ctypes` or `psutil`-free approach).
+3. If PID is alive: print error message with the existing PID and exit 1. Do not kill the other process.
+4. If PID is dead (stale lock): log a warning, delete the stale lock, and proceed.
+5. Write current PID to the lock file.
+6. Delete the lock file in the `finally` block of `main()`.
+
+**Lock file format:** Single line containing the PID as a plain integer. No JSON, no metadata.
+
+**Cross-platform PID liveness check:**
+```python
+def is_pid_alive(pid):
+    """Check if a process with the given PID is alive. Cross-platform."""
+    try:
+        os.kill(pid, 0)  # Signal 0 = check existence, don't kill
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # Process exists but we can't signal it
+    except OSError:
+        return False
+```
+
+Note: `os.kill(pid, 0)` works on Windows in Python 3.x — it calls `OpenProcess` internally.
 
 #### Default Stage Timeouts
 
@@ -412,27 +488,178 @@ stdout and stderr merge into `.workflow/stages/{stage}.log`. No PIPE — elimina
 
 Overridable via `--stage-timeout <seconds>` CLI flag (applies to all stages).
 
+#### PR Stage Orchestration (Pipeline Mode)
+
+In pipeline mode, the PR stage is split: **Python scripts the orchestration, AI handles only triage judgment.** This replaces the current approach where a single expensive agent session polls for reviews, wastes tokens sleeping, and races on notification timing.
+
+**Pipeline PR flow:**
+
+```
+pipeline.py run_pr_stage():
+│
+├─ 1. Rebase on main
+│     git fetch origin main && git rebase origin/main
+│     On conflict: log FAILED, exit (no auto-resolve)
+│
+├─ 2. Read linked issues from state.json
+│     python scripts/workflow-state.py get issues
+│
+├─ 3. Create draft PR
+│     gh pr create --draft --title "..." --body "..."
+│     Log: PR_CREATED url={url} draft=true
+│
+├─ 4. Poll for Gemini review (Python, no AI)
+│     Loop: gh api repos/.../pulls/{N}/comments --jq 'length'
+│     Interval: 30s, min wait: 90s, max wait: 5 min
+│     Log: GEMINI_POLL attempt={N} comments={count}
+│
+├─ 5. Invoke triage agent (AI, focused)
+│     claude -p --agent gemini-triage --output-format stream-json
+│     Prompt includes: spec content, Gemini comments (JSON),
+│       git diff --stat, instruction to output structured result
+│     Agent: reads code, fixes or dismisses, commits, pushes
+│     Stage log: .workflow/stages/pr-triage.jsonl
+│
+├─ 6. Post threaded replies (Python, from agent output)
+│     For each comment: gh api .../pulls/{N}/comments -F in_reply_to={id} -f body="..."
+│     Log: REPLY_POSTED comment_id={id} action={fixed|dismissed}
+│
+├─ 7. Convert draft → ready
+│     gh pr ready {N}
+│     Log: PR_READY url={url}
+│     (GitHub sends reviewer notification HERE, not at step 3)
+│
+├─ 8. Write workflow state
+│     pr.url, pr.created, pr.gemini_triaged
+│
+├─ 9. Write result + notify
+│     .workflow/pipeline-result.json (summary)
+│     python .claude/hooks/notify.py --title "PR Ready" --url {url}
+│
+└─ 10. Log summary to pipeline.log
+```
+
+**Minimum Gemini wait (90s):** The pipeline waits at least 90 seconds before first checking for comments, even if comments appear earlier in the API. This eliminates the race condition where the agent checks before Gemini has finished posting all its comments. Observed: Gemini consistently takes 2-3 minutes but individual comments may appear incrementally.
+
+**Triage agent prompt construction:** Pipeline.py reads the spec path from state.json, fetches the Gemini comments as structured JSON, generates a `git diff --stat` summary, and constructs the triage prompt:
+
+```
+Triage these Gemini review comments on PR #{number}.
+
+Spec (read for design rationale): {spec_path}
+
+Comments:
+{json array of {id, path, line, body} per comment}
+
+For each comment:
+1. Read the referenced file at the specified line
+2. Evaluate: is this a valid finding (real bug, correct suggestion)?
+3. If valid: fix the code and commit
+4. If invalid: compose a brief dismissal rationale
+
+After processing all comments, output this JSON to stdout:
+[{"id": <comment_id>, "action": "fixed"|"dismissed", "description": "...", "commit": "<sha>"|null}]
+```
+
+**Interactive mode (`/pr` skill):** The `/pr` skill continues to handle everything in a single session for interactive use. Updated to use `--draft` and `gh pr ready` for correct notification timing, but the agent still polls and triages directly. The scripted orchestration only applies to pipeline mode.
+
+**Pipeline failure notification:** When any pipeline stage fails (not just PR), `pipeline.py` writes `.workflow/pipeline-result.json`:
+
+```json
+{
+  "status": "failed",
+  "failed_stage": "converge",
+  "duration": 2700,
+  "pr_url": null,
+  "error": "max converge rounds exceeded",
+  "stages": {"implement": "975s", "gates": "300s", "verify": "275s"},
+  "timestamp": "2026-03-26T23:30:11Z"
+}
+```
+
+On success:
+```json
+{
+  "status": "complete",
+  "duration": 3600,
+  "pr_url": "https://github.com/.../pull/699",
+  "stages": {"implement": "975s", "gates": "300s", ...},
+  "timestamp": "2026-03-26T23:43:37Z"
+}
+```
+
+Both success and failure invoke `notify.py` if it exists (best-effort, non-blocking).
+
+#### Gemini Triage Agent Profile
+
+**Location:** `.claude/agents/gemini-triage.md`
+
+```markdown
+---
+name: gemini-triage
+model: sonnet
+allowedTools:
+  - Read
+  - Edit
+  - Write
+  - Bash
+  - Grep
+  - Glob
+---
+You triage Gemini review comments on a PR. You receive structured
+comments with file paths and line numbers.
+
+For each comment:
+1. Read the referenced file at the specified line
+2. Check the spec (path provided in prompt) for design rationale
+3. Check CONSTITUTION.md for applicable principles
+4. If valid finding: fix the code, commit with message "fix: address Gemini review — {description}"
+5. If invalid: note dismissal rationale (e.g., "No generated constant exists for this entity")
+
+After all comments are processed, push fixes and output JSON:
+[{"id": <comment_id>, "action": "fixed"|"dismissed", "description": "...", "commit": "<sha>"|null}]
+
+Do not create PRs, post comments, or modify workflow state — the pipeline handles that.
+```
+
+**Why Sonnet:** Gemini triage is mechanical — read comment, check code, fix or dismiss. It doesn't require Opus-level reasoning. Sonnet reduces cost per triage by ~5x while maintaining code editing quality. If a triage fix fails gates, the converge loop catches it.
+
+**Version pinning:** `model: sonnet` floats to the latest Sonnet version intentionally. Triage quality is validated by the converge loop (bad fixes get caught by gates/review), so version drift is self-correcting. Pinning would require manual updates and provide minimal stability benefit for this use case.
+
+**Tool restrictions:** No Agent (can't spawn subagents), no web access. The triage agent reads code, edits code, runs git commands. Nothing else.
+
 #### Pipeline Log Format
 
-Existing format preserved. New entry types:
+Existing format preserved. Heartbeat entries extended with multi-signal fields:
 
 ```
 2026-03-26T20:30:17Z [implement] START
-2026-03-26T20:31:17Z [implement] HEARTBEAT elapsed=60s pid=12345 output_bytes=45230 activity=active
-2026-03-26T20:32:17Z [implement] HEARTBEAT elapsed=120s pid=12345 output_bytes=102400 activity=active
-2026-03-26T20:33:17Z [implement] HEARTBEAT elapsed=180s pid=12345 output_bytes=102400 activity=idle
-2026-03-26T20:45:00Z [implement] OUTPUT line=<last 20 lines of stage log>
+2026-03-26T20:31:17Z [implement] HEARTBEAT elapsed=60s pid=12345 output_bytes=45230 git_changes=3 commits=1 activity=active
+2026-03-26T20:32:17Z [implement] HEARTBEAT elapsed=120s pid=12345 output_bytes=102400 git_changes=5 commits=2 activity=active
+2026-03-26T20:33:17Z [implement] HEARTBEAT elapsed=180s pid=12345 output_bytes=102400 git_changes=5 commits=2 activity=idle
+2026-03-26T20:36:17Z [implement] HEARTBEAT elapsed=360s pid=12345 output_bytes=102400 git_changes=5 commits=2 activity=stalled
+2026-03-26T20:45:00Z [implement] OUTPUT line=<last 20 lines of human-readable stage log>
 2026-03-26T20:45:00Z [implement] DONE exit=0 duration=887s
 ```
 
+New fields: `git_changes` (count of modified/untracked files), `commits` (rev-list count ahead of main), `activity` now includes `stalled` state (idle for 3+ consecutive heartbeats).
+
 #### Stage Log Files
 
-Location: `.workflow/stages/{stage}.log`
+**Raw output:** `.workflow/stages/{stage}.jsonl`
 
 - One file per stage invocation (overwritten on retry)
-- Contains raw `claude -p` stdout+stderr
+- Contains stream-json output from `claude -p` — one JSON object per line
+- Grows incrementally during execution (tool calls, text chunks, system events)
 - Readable in real-time via `tail -f` or `/status`
 - Gitignored (`.workflow/` is already gitignored)
+
+**Human-readable summary:** `.workflow/stages/{stage}.log`
+
+- Generated after subprocess exits by parsing the JSONL file
+- Contains the final assistant text response extracted from stream-json
+- Used for the "last 20 lines" capture in pipeline.log
+- Used by `/status` for human-readable stage output
 
 ### CLAUDE.md Workflow Section Rewrite
 
@@ -564,6 +791,32 @@ After all skills in this spec are implemented:
 | AC-64 | All `.claude/commands/*.md` files migrated to `.claude/skills/{name}/SKILL.md` with frontmatter | `test_pipeline.py::test_no_commands_directory` | 🔲 |
 | AC-65 | Pipeline STAGES includes `qa` between `verify` and `review` | `test_pipeline.py::test_pipeline_stages_include_qa` | 🔲 |
 | AC-66 | `/implement` skill skips mandatory tail (gates/verify/qa/review) when `PPDS_PIPELINE=1` is set | `test_pipeline.py::test_implement_skips_tail_in_pipeline_mode` | 🔲 |
+| AC-67 | Pipeline spawns `claude -p` with `--output-format stream-json` — stage JSONL file grows incrementally during execution and contains parseable JSON objects with a `type` field | `test_pipeline.py::test_stream_json_output_format` | 🔲 |
+| AC-68 | Heartbeat (logged every 60s within the 5s polling loop) includes `git_changes` and `commits` fields alongside `output_bytes` | `test_pipeline.py::test_heartbeat_multi_signal` | 🔲 |
+| AC-69 | Activity is `active` when any signal increased, `idle` when none changed, `stalled` after 3+ consecutive idle heartbeats (180s) | `test_pipeline.py::test_activity_classification` | 🔲 |
+| AC-70 | After stage exit, JSONL is post-processed to extract assistant text into `.workflow/stages/{stage}.log`; last 20 lines of `.log` (not JSONL) written to pipeline.log | `test_pipeline.py::test_jsonl_post_processing` | 🔲 |
+| AC-71 | Pipeline writes current PID to `.workflow/pipeline.lock` on startup | `test_pipeline.py::test_pipeline_lock_write` | 🔲 |
+| AC-72 | Pipeline exits with error (exit 1) and message if lock file exists and PID is alive | `test_pipeline.py::test_pipeline_lock_conflict` | 🔲 |
+| AC-73 | Pipeline logs warning and removes lock file if lock file exists but PID is dead (stale lock) | `test_pipeline.py::test_pipeline_lock_stale` | 🔲 |
+| AC-74 | Pipeline lock is released in `finally` block — released on normal exit, error exit, KeyboardInterrupt, and timeout | `test_pipeline.py::test_pipeline_lock_release` | 🔲 |
+| AC-75 | `/status` JSONL parser extracts tool calls, file modifications, and commit count from stream-json fixture data | `test_pipeline.py::test_status_jsonl_parser` | 🔲 |
+| AC-76 | `/status` displays elapsed time and last activity timestamp from pipeline.log heartbeat data | `test_pipeline.py::test_status_heartbeat_display` | 🔲 |
+| AC-77 | `/status` shows live data when pipeline is running (current tool call, files modified, commits, elapsed time, last activity) | Manual: run `/status` during active pipeline, verify all five data points shown | 🔲 |
+| AC-78 | Git subprocess calls in heartbeat use `timeout=5` — a hanging git command does not block the polling loop or delay timeout enforcement | `test_pipeline.py::test_heartbeat_git_timeout` | 🔲 |
+| AC-79 | Pipeline PR stage creates PR as draft (`--draft` flag), not ready-for-review | `test_pipeline.py::test_pr_creates_draft` | 🔲 |
+| AC-80 | Pipeline PR stage waits minimum 90s before first Gemini comment check — no premature "no comments" | `test_pipeline.py::test_pr_gemini_min_wait` | 🔲 |
+| AC-81 | Pipeline PR stage invokes `gemini-triage` agent (Sonnet) with structured prompt containing spec path and comment JSON | `test_pipeline.py::test_pr_triage_agent_invocation` | 🔲 |
+| AC-82 | Pipeline PR stage posts threaded replies to each Gemini comment from triage agent output (not top-level PR comment) | `test_pipeline.py::test_pr_threaded_replies` | 🔲 |
+| AC-83 | Pipeline PR stage converts draft to ready (`gh pr ready`) only after triage is complete — GitHub notification arrives post-triage | `test_pipeline.py::test_pr_draft_to_ready` | 🔲 |
+| AC-84 | `gemini-triage` agent profile exists at `.claude/agents/gemini-triage.md` with model=sonnet and restricted tool set | `test_pipeline.py::test_gemini_triage_agent_exists` | 🔲 |
+| AC-85 | Pipeline writes `.workflow/pipeline-result.json` on both success and failure with status, duration, stages, pr_url, and failed_stage (failure includes completed stages up to failure point) | `test_pipeline.py::test_pipeline_result_json` | 🔲 |
+| AC-86 | Pipeline invokes `notify.py` on completion (best-effort, non-blocking — failure to notify does not fail the pipeline) | `test_pipeline.py::test_pipeline_notify` | 🔲 |
+| AC-87 | Interactive `/pr` skill creates draft PR and converts to ready after triage (same notification timing fix, no agent profile dependency) | Manual: run `/pr` interactively, verify draft→ready flow | 🔲 |
+| AC-88 | Pipeline PR stage polls until Gemini comment count is stable on two consecutive 30s polls (after 90s minimum) before invoking triage | `test_pipeline.py::test_pr_gemini_stabilization` | 🔲 |
+| AC-89 | Pipeline PR stage stops Gemini polling after 5 minutes maximum, even if comment count is still changing | `test_pipeline.py::test_pr_gemini_max_wait` | 🔲 |
+| AC-90 | When Gemini posts no comments within 5 minutes, pipeline converts draft to ready with "Gemini: no review received" in PR body | `test_pipeline.py::test_pr_gemini_timeout_annotation` | 🔲 |
+| AC-91 | When triage agent fails or times out, pipeline converts draft to ready with "Gemini triage incomplete — manual review needed" in PR body | `test_pipeline.py::test_pr_triage_failure_annotation` | 🔲 |
+| AC-92 | Triage agent pushes fix commits before outputting results — pipeline verifies remote HEAD matches local HEAD before posting replies | `test_pipeline.py::test_pr_triage_push_verify` | 🔲 |
 
 ### Edge Cases
 
@@ -587,9 +840,22 @@ After all skills in this spec are implemented:
 | `claude` command not found on PATH | `FileNotFoundError` caught, `ERROR` logged, pipeline exits 1. |
 | `/start` run from worktree | Resolves main repo root via `git worktree list`, creates new worktree from there. Current session unaffected. |
 | Hook command with MSYS path mangling | Cannot happen — relative paths have no `${CLAUDE_PROJECT_DIR}` to mangle. |
-| Two pipelines run on same worktree simultaneously | Undefined — last-writer-wins on state.json, interleaved stage logs. Pipeline does not acquire a lock. Users should not do this. |
+| Two pipelines run on same worktree simultaneously | Lock file prevents this. Second pipeline prints "Pipeline already running (PID XXXX)" and exits 1. |
 | `PPDS_PIPELINE=1` set manually in interactive session | Stop hook exits immediately, skipping workflow enforcement. Start hook skips behavioral rules. User gets a degraded experience — this is intentional only for pipeline use. |
 | Stage log file locked by another process (Windows) | Popen fails to open file — caught as OSError, logged as ERROR, pipeline exits 1. |
+| Pipeline killed without releasing lock (kill -9, power loss) | Next pipeline run detects stale lock via PID liveness check. Logs warning "Stale lock from dead PID XXXX, removing", deletes lock, proceeds normally. |
+| Git not responsive during heartbeat (index.lock, large repo) | Git subprocess calls use `timeout=5`. On timeout, that signal is skipped for this heartbeat. Activity classification uses remaining signals. Polling loop is not blocked. |
+| JSONL file contains malformed lines (partial write on crash) | Post-processor skips unparseable lines with `json.loads` in try/except. Partial data is better than no data. |
+| Stage produces no assistant text (crash before first response) | Post-processor writes empty `.log` file. Pipeline.log OUTPUT section shows "no output captured". |
+| `/status` run when no pipeline active | Shows completed stage summaries from `.log` files and workflow state. No JSONL parsing attempted. |
+| `/status` run during active stage | Parses JSONL up to current file size (no file locking needed — append-only writes). Shows last tool call, file count, commit count. |
+| JSONL file has a partial (unterminated) last line during active write | `/status` parser and post-processor both use `json.loads` in try/except — incomplete final line is silently skipped. Next read picks up the completed line. |
+| Lock file contains PID that was recycled to an unrelated process | Lock is treated as live (false positive). Acceptable trade-off — PID recycling within pipeline lifetime (~1 hour max) is rare. User can manually delete `.workflow/pipeline.lock` if needed. |
+| Gemini posts no review comments within 5 minutes | Pipeline logs `GEMINI_TIMEOUT`, skips triage, converts draft → ready. PR body notes "Gemini: no review received." |
+| Gemini posts comments incrementally (1 comment at 2 min, 2nd at 3 min) | 90s minimum wait + polling until comment count stabilizes (same count on 2 consecutive polls) ensures all comments are captured before triage. |
+| Triage agent fails or times out | Pipeline posts no replies, converts draft → ready anyway. PR body updated with "Gemini triage incomplete — manual review needed." Pipeline continues to retro. |
+| Rebase has conflicts in pipeline PR stage | Pipeline logs `REBASE_CONFLICT`, writes result.json with `status: "failed"`, notifies user. Does not auto-resolve. |
+| `notify.py` missing or fails | Best-effort — pipeline logs warning and continues. Notification is not a hard dependency. |
 
 ---
 
@@ -665,6 +931,59 @@ After all skills in this spec are implemented:
 **Alternatives considered:**
 - PIPE with reader threads: Adds threading complexity — the exact class of problems that cause hangs on Windows
 - PIPE with `communicate()`: Blocks until exit, same as `subprocess.run`
+
+### Why Stream JSON Instead of Text Output?
+
+**Context:** v4.0 introduced file redirect to solve PIPE deadlock, but stage logs remained 0 bytes throughout execution. Root cause: `claude -p --output-format text` (the default) buffers the entire response in memory and writes to stdout only at process exit. The file redirect solved the pipe problem but not the observability problem — the output simply doesn't exist until the process finishes.
+
+**Evidence:** Four concurrent pipelines observed on 2026-03-26. Every active stage showed `output_bytes=0 activity=idle` in heartbeats despite confirmed agent activity (commits, file modifications, 500-800MB memory usage). Stage logs: tui-refactoring implement.log 0 bytes (8 files modified, 2 commits made), plugin-registration converge-r1.log 0 bytes (3 files modified), v1-polish gates.log 0 bytes, cmt-parity qa.log 0 bytes. 100% false-negative rate on activity detection.
+
+**Decision:** Use `--output-format stream-json`. This flag causes `claude -p` to emit one JSON object per line as events occur — tool calls, text chunks, system messages. The file grows incrementally throughout execution, providing real-time observability.
+
+**Trade-off:** Raw stage output is JSONL, not human-readable. Mitigated by post-processing: after process exit, extract assistant text into a companion `.log` file. Both exist: JSONL for tooling, plain text for humans.
+
+**Alternatives considered:**
+- `--verbose` alone: Verbose output may add some stderr, but the core problem is that text-mode stdout is empty until exit. Verbose doesn't change this.
+- Git-only monitoring (no output format change): Detects file changes but provides no visibility into agent reasoning, API calls, or tool execution. Also fails for stages that don't modify files (review, qa). Chosen as a complementary signal, not a replacement.
+
+### Why Multi-Signal Activity Detection?
+
+**Context:** Single-signal detection (output bytes only) has a 100% false-negative rate with text output format, and would still miss activity during brief pauses in stream-json output (e.g., waiting for API response).
+
+**Decision:** Three independent signals: output bytes, git working tree changes, git commit count. Activity is `active` if ANY signal increased. This provides resilience — even if one signal fails or stalls, the others catch real work.
+
+**Evidence:** The tui-refactoring pipeline had 0 output bytes but 8 modified files and 2 new commits. Git signals alone would have correctly classified it as `active`. Conversely, review/qa stages may not modify files — output bytes (via stream-json) catches those.
+
+**Alternatives considered:**
+- Process CPU/memory monitoring: Platform-specific, noisy (GC spikes look like activity), and doesn't distinguish "agent thinking" from "agent stuck in a loop"
+- File system watchers (inotify/ReadDirectoryChanges): Platform-specific, complex, overkill for 60s polling interval
+
+### Why Pipeline Lock File?
+
+**Context:** Two `pipeline.py` instances were observed running simultaneously on the `plugin-registration` worktree. Pipeline.log showed interleaved heartbeats from PIDs 55640 and 25424, both in converge-r1. Both agents were modifying the same files, racing on state.json, and producing corrupted interleaved stage logs.
+
+**Decision:** PID-based lock file (`.workflow/pipeline.lock`). Simple, no external dependencies, cross-platform. Stale lock detection via `os.kill(pid, 0)`.
+
+**Alternatives considered:**
+- `fcntl.flock` / `msvcrt.locking`: Not cross-platform without abstraction layer. `flock` doesn't exist on Windows.
+- Named mutex (Windows) / POSIX semaphore: Over-engineered for a single-file orchestrator. Requires cleanup on crash.
+- Just document "don't do this": We already documented it in v4.0. Users did it anyway. Mechanical enforcement needed.
+
+### Why Script PR Orchestration Instead of Agent-Driven?
+
+**Context:** The v4.0 PR stage ran everything in a single `claude -p "/pr"` session. The agent created the PR, then sat in a `gh api` polling loop waiting for Gemini reviews — burning Opus tokens on `sleep 30`. The agent sometimes checked too early and reported "no comments to address" before Gemini had finished posting. Users received GitHub notifications at PR creation, not after triage was complete.
+
+**Evidence:** PR #699 (plugin-registration, 2026-03-26): User received notification immediately at PR creation, went to review, found un-triaged Gemini comments. Agent eventually fixed both comments 7 minutes later. The notification timing was wrong, and the agent wasted ~5 minutes of Opus tokens sleeping.
+
+**Decision:** Split into scripted orchestration (Python) + focused triage (Sonnet agent). Python handles: draft PR creation, Gemini polling (no AI tokens), reply posting, draft→ready conversion, notification. AI handles only: reading each comment, judging fix vs dismiss, writing code fixes.
+
+**Consequences:**
+- Positive: Correct notification timing (draft→ready), no wasted tokens on polling, deterministic Gemini wait (90s minimum eliminates race), cheaper triage (Sonnet vs Opus), full pipeline visibility into each step
+- Negative: Two code paths — pipeline (scripted) vs interactive (agent-driven). Mitigated by sharing the draft→ready pattern in both paths.
+
+**Alternatives considered:**
+- Keep agent-driven but add `--draft`: Fixes notification timing but still wastes Opus tokens polling. Doesn't fix the premature "no comments" race.
+- GitHub webhook instead of polling: Would be ideal long-term but requires webhook infrastructure (server, auth, routing). Deferred to roadmap.
 
 ### Why Polling Instead of Threading?
 
@@ -792,13 +1111,16 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-22 | v2.0 — skill renames, /design, /start, /pr, main branch bootstrap |
 | 2026-03-24 | v3.0 — stop hook blocking, converge cycle handling, /shakedown |
 | 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
+| 2026-03-26 | v5.0 — pipeline observability and PR orchestration: (1) stream-json output for real-time stage logs, (2) multi-signal activity detection, (3) JSONL post-processing, (4) pipeline lock file, (5) /status live JSONL monitoring, (6) scripted PR stage with draft→ready flow, (7) gemini-triage agent profile (Sonnet), (8) pipeline-result.json + notify on completion/failure. |
 
 ---
 
 ## Roadmap
 
 - **GitHub-triggered pipelines:** Trigger implementation from GitHub issues or webhooks. Requires persisted workflow state and session handoff mechanism.
-- **PR monitoring webhook:** Replace polling in `/pr` with GitHub webhook notification when CI/reviews complete.
+- **PR monitoring webhook:** Replace Gemini polling with GitHub webhook notification. Eliminates polling entirely.
+- **CI status monitoring in PR stage:** Poll CI checks after Gemini triage. Report green/red in pipeline-result.json. Currently deferred — `/gates` already verifies locally.
+- **Cross-worktree status aggregation:** `/status` from main shows all active pipelines across worktrees. Currently each worktree's status is independent.
 - **Worktree auto-cleanup:** SessionStart hook checks for stale worktrees (no commits in >7 days) and prompts for cleanup.
 - **Cross-session workflow continuity:** Persist workflow state to git (not gitignored) so a new session can pick up where a previous session left off.
 - **Devcontainer support for `/start`:** Offer to open worktree in devcontainer as alternative to system default shell.
