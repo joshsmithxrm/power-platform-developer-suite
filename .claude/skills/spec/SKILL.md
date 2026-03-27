@@ -1,3 +1,8 @@
+---
+name: spec
+description: Spec
+---
+
 # Spec
 
 Create, update, or reconcile a specification following PPDS conventions. Three modes: forward (create new), update (modify existing), reconcile (align spec with code). Ensures consistency, cross-references related specs, and enforces numbered acceptance criteria.

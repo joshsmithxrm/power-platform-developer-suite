@@ -9,8 +9,15 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def main():
+    # Pipeline mode: orchestrator handles stage sequencing
+    if os.environ.get("PPDS_PIPELINE"):
+        sys.exit(0)
+
     # Read stdin
     hook_input = {}
     try:
@@ -22,7 +29,7 @@ def main():
     if hook_input.get("stop_hook_active"):
         sys.exit(0)
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
 
     # Get current branch
     branch = "unknown"

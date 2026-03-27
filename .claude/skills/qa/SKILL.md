@@ -1,3 +1,8 @@
+---
+name: qa
+description: QA — Three-Agent Blind Verification
+---
+
 # QA — Three-Agent Blind Verification
 
 Dispatches **three specialized agents with no source code access** to verify quality from different angles: functional correctness, cross-panel consistency, and UX heuristics. Each agent interacts with the running product exactly as a user would.

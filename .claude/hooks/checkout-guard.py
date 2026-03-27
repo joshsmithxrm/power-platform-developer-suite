@@ -10,6 +10,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def is_main_repo(project_dir: str) -> bool:
     """Check if project_dir is the main repo root (not a worktree)."""
@@ -30,7 +33,7 @@ def is_main_repo(project_dir: str) -> bool:
 
 
 def main() -> None:
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
 
     # Only enforce in the main repo folder, not in worktrees
     if not is_main_repo(project_dir):

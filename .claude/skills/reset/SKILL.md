@@ -1,3 +1,8 @@
+---
+name: reset
+description: Reset
+---
+
 # Reset
 
 Clear workflow state for the current branch.

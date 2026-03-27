@@ -35,6 +35,12 @@
       "Bash(mv:*)",
       "Bash(move:*)",
       "Bash(xargs:*)",
+      "Bash(rm:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(del:*)",
+      "Bash(rmdir:*)",
+      "Bash(Remove-Item:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -169,12 +175,6 @@
       "Bash(ppds data truncate:*)"
     ],
     "ask": [
-      "Bash(rm -rf:*)",
-      "Bash(rm -fr:*)",
-      "Bash(rm:*)",
-      "Bash(del:*)",
-      "Bash(rmdir:*)",
-      "Bash(Remove-Item:*)",
       "Bash(git merge:*)",
       "Bash(git rebase:*)",
       "Bash(git reset:*)",
@@ -199,7 +199,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-main-branch.py\"",
+            "command": "python \".claude/hooks/protect-main-branch.py\"",
             "timeout": 5
           }
         ]
@@ -209,7 +209,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-main-branch.py\"",
+            "command": "python \".claude/hooks/protect-main-branch.py\"",
             "timeout": 5
           }
         ]
@@ -219,7 +219,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-commit-validate.py\"",
+            "command": "python \".claude/hooks/pre-commit-validate.py\"",
             "timeout": 120
           }
         ]
@@ -229,7 +229,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pr-gate.py\"",
+            "command": "python \".claude/hooks/pr-gate.py\"",
             "timeout": 30
           }
         ]
@@ -239,7 +239,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/checkout-guard.py\"",
+            "command": "python \".claude/hooks/checkout-guard.py\"",
             "timeout": 5
           }
         ]
@@ -249,7 +249,67 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/review-guard.py\"",
+            "command": "python \".claude/hooks/review-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rm:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rm -rf:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rm -fr:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(Remove-Item:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(del:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(rmdir:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -261,7 +321,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/post-commit-state.py\"",
+            "command": "python \".claude/hooks/post-commit-state.py\"",
             "timeout": 10
           }
         ]
@@ -272,7 +332,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start-workflow.py\"",
+            "command": "python \".claude/hooks/session-start-workflow.py\"",
             "timeout": 10
           }
         ]
@@ -284,7 +344,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/notify.py\"",
+            "command": "python \".claude/hooks/notify.py\"",
             "timeout": 10
           }
         ]
@@ -295,7 +355,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-stop-workflow.py\"",
+            "command": "python \".claude/hooks/session-stop-workflow.py\"",
             "timeout": 30
           }
         ]

@@ -8,6 +8,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def main():
     # Read stdin (Claude Code sends JSON with tool info)
@@ -16,7 +19,7 @@ def main():
     except (json.JSONDecodeError, EOFError):
         pass
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
     state_path = os.path.join(project_dir, ".workflow", "state.json")
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
 

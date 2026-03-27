@@ -11,6 +11,9 @@ import sys
 import os
 import json
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathfix import get_project_dir
+
 
 def main():
     # Read stdin (Claude Code sends JSON with tool info)
@@ -19,8 +22,7 @@ def main():
     except (json.JSONDecodeError, EOFError):
         pass  # Input parsing is optional - matcher already filtered
 
-    # Get project directory from environment or use current directory
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    project_dir = get_project_dir()
 
     # Block commits on main
     try:

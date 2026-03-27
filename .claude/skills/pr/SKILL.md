@@ -46,10 +46,10 @@ Parse the response as a comma-separated list of integers. Store them:
 python scripts/workflow-state.py append issues <N>
 ```
 
-### 3. Create PR
+### 3. Create PR (Draft)
 
 ```bash
-gh pr create --title "<title>" --body "$(cat <<'EOF'
+gh pr create --draft --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <1-3 bullet points>
 
@@ -77,9 +77,10 @@ Omit the `Closes` lines if there are no linked issues. Keep title under 70 chara
 Gemini posts review comments within 2-3 minutes of PR creation. Do NOT skip this step.
 
 **Polling strategy:**
-- Wait 30 seconds after PR creation (let GitHub register the PR)
+- Wait 90 seconds minimum after PR creation (Gemini takes 2-3 minutes)
 - Poll every 30 seconds
-- **Max wait: 10 minutes**
+- **Stabilization check:** stop polling when comment count is identical on two consecutive 30-second polls (Gemini is done posting)
+- **Max wait: 5 minutes**
 - On timeout: report that no review was received
 
 **How to check:**
@@ -91,7 +92,7 @@ gh api repos/{owner}/{repo}/pulls/{number}/reviews --jq 'length'
 gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'
 ```
 
-Stop polling when reviews or comments appear (length > 0). CI status is NOT monitored — `/gates` already verified build/tests locally. The user checks CI on the PR page when ready to merge.
+Stop polling when reviews or comments appear (length > 0) AND comment count has stabilized (same count on two consecutive polls). CI status is NOT monitored — `/gates` already verified build/tests locally. The user checks CI on the PR page when ready to merge.
 
 ### 5. Triage EVERY Review Comment
 
@@ -131,6 +132,17 @@ git add <files>
 git commit -m "fix: address review feedback from {reviewer}"
 git push
 ```
+
+### 5.5. Convert to Ready
+
+After triage is complete, convert the draft PR to ready for review:
+
+```bash
+# Convert draft PR to ready for review
+gh pr ready {N}
+```
+
+> **Note:** This is when GitHub sends the reviewer notification — after triage is complete, not at PR creation. By using draft→ready flow, reviewers are notified only when the PR is fully triaged and ready for human review, avoiding noisy intermediate notifications.
 
 ### 6. Present Summary
 
@@ -173,15 +185,15 @@ Fire a desktop toast so the user knows the PR is ready:
 python .claude/hooks/notify.py --title "PR Ready" --msg "Gemini triaged — click to review" --url "{pr-url}"
 ```
 
-This fires immediately — do not rely on idle_prompt for notification.
+This fires after `gh pr ready` converts the draft to ready for review. Notification timing is correct because the PR remains in draft state until triage completes — reviewers and the user are notified simultaneously when the PR is actually ready.
 
 ## Timeout Behavior
 
-If Gemini doesn't post within 10 minutes:
+If Gemini doesn't post within 5 minutes:
 
 ```
 PR created: {url}
-Gemini: no review received within 10 minutes.
+Gemini: no review received within 5 minutes.
 CI: running — check PR page for status.
 
 Awaiting your review.
