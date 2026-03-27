@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-03-27",
+  "total_retros": 0,
+  "findings_by_category": {},
+  "metrics": {
+    "avg_fix_ratio": 0.0,
+    "pipeline_success_rate": 0.0,
+    "avg_convergence_rounds": 0.0
+  }
+}
