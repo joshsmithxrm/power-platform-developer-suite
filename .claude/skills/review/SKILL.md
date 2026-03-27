@@ -37,9 +37,17 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 - Read each relevant spec — extract ONLY the `## Acceptance Criteria` section
 - Do NOT read any plan files, task descriptions, or implementation notes
 
-### Step 2b: Load QA Findings for DedupBefore dispatching reviewers, read existing QA findings from state:```bashpython scripts/workflow-state.py get qa_findings```Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
+### Step 2b: Load QA Findings for Dedup
+
+Before dispatching reviewers, read existing QA findings from state:
+
+```bash
+python scripts/workflow-state.py get qa_findings
+```
+
+Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
 ### Step 3: Dispatch Impartial Reviewer
-nFor large diffs (>10 files), use per-file chunking instead of a single subagent:
+For large diffs (>10 files), use per-file chunking instead of a single subagent:
 
 1. Group changed files by directory (max 5 files per chunk, or files ≤50 lines can be grouped together)
 2. Dispatch up to 5 parallel subagents, one per chunk — each gets the same constitution + ACs but only their file subset
