@@ -1,7 +1,7 @@
 # Pipeline Observability
 
-**Status:** Draft
-**Last Updated:** 2026-03-26
+**Status:** Draft (v2.0 — pipeline reliability: QA commits, review chunking, converge-on-FAIL, QA/review dedup)
+**Last Updated:** 2026-03-27
 **Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/workflow-state.py](../scripts/workflow-state.py) | [tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs](../tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs) | [scripts/dev.ps1](../scripts/dev.ps1)
 **Surfaces:** N/A
 
@@ -514,6 +514,137 @@ Standard convention for any detached daemon in PPDS:
 
 This contract is informational — governs tui-verify today and any future daemons (ext-verify, etc.). Not enforced mechanically.
 
+### Tier 1: QA Commits Its Own Fixes
+
+**Problem:** QA skill finds issues and sometimes fixes them inline, but never commits. Across PRs #731 and #727, QA left 4 files unstaged. When QA times out, the fixes are lost.
+
+**Fix:** Add a commit step to the QA skill. After each phase completes and any fixes are applied:
+
+```
+git add -A
+git diff --cached --quiet || git commit -m "fix(qa): address QA phase {N} findings"
+```
+
+**QA skill prompt addition:**
+```
+After fixing any issue found during verification:
+1. Stage the fix: git add <file>
+2. Commit immediately: git commit -m "fix(qa): <brief description>"
+3. Do NOT batch fixes — commit after each fix so partial results survive timeout
+```
+
+**Interaction with post-commit hook:** Each QA fix commit triggers the post-commit hook, which clears `gates.passed`. This is correct — QA fixes change the code, so gates must re-run. The pipeline's converge stage handles the re-gating after QA.
+
+**Ordering note:** Pipeline stage sequence is `qa → review → converge`. When QA commits a fix and clears gates, review runs next on un-gated code. This is acceptable: review checks code quality and constitution compliance, not build/test status. If the QA fix introduced a build error, converge will catch it when it re-runs gates. Review findings on un-gated code are still valid — they're about code correctness, not compilability. The alternative (re-gating between QA and review) adds latency for no meaningful quality gain.
+
+### Tier 1: Review Chunking for Large Diffs
+
+**Problem:** Review subagent receives the entire diff + constitution + ACs in one prompt. For large changes (30+ files), this overflows the context window, causing stalls (835s idle then 420s hard stall across PRs #732, #730, #734, #712).
+
+**Root cause:** `_build_review_prompt()` concatenates all changed files' diffs into a single prompt. For implement stages that touch 30+ files, this produces 50-100K tokens before the reviewer even starts reading.
+
+**Fix:** Per-file dispatch with cross-file summary pass.
+
+**New review flow:**
+
+```
+/review (or pipeline review stage)
+│
+├─ 1. Compute diff: git diff origin/main...HEAD --stat
+│     Group files by directory/component
+│
+├─ 2. Chunk into review units (one per file, or group small files ≤50 lines)
+│     Each unit gets: file diff + constitution + relevant ACs
+│     Max chunk size: 8K tokens (fits comfortably in any model context)
+│
+├─ 3. Dispatch per-file review subagents (parallel, max 5 concurrent)
+│     Each agent: Read the file diff, check against constitution + ACs
+│     Output: [{finding, severity, file, line, suggestion}]
+│     Timeout: 3 min per chunk (stall-based, not fixed)
+│     Fallback: if subagent stalls, skip that chunk with "review incomplete" note
+│
+├─ 4. Collect findings from all chunks
+│     Deduplicate (same file+line+finding = single entry)
+│
+├─ 5. Cross-file consistency pass (single subagent)
+│     Input: file manifest + per-file findings + architecture overview
+│     Checks: type mismatches between contracts, missing imports,
+│             interface changes without callers updated, naming inconsistencies
+│     Output: additional cross-file findings
+│
+├─ 6. Merge all findings, classify severity
+│     Write review results to workflow state
+│
+└─ 7. If critical/important findings > 0: review.passed = null (FAIL)
+       If 0 critical + 0 important: review.passed = timestamp (PASS)
+```
+
+**Why per-file, not per-directory:** Files are the natural review boundary — each file's diff is self-contained. Directories could still overflow if a single directory has many large files. Per-file guarantees bounded chunk size.
+
+**Cross-file findings that per-file review misses:**
+- Interface changes in `IFoo.cs` without updating `FooImpl.cs`
+- Type renames that break callers in other files
+- New dependencies not wired in DI container
+- Naming convention drift across files in same module
+
+The cross-file pass is a lightweight check (manifest + findings, not full diffs) so it doesn't hit the context overflow problem.
+
+### Tier 1: Converge Runs on Review FAIL
+
+**Problem:** Pipeline skips converge when review verdict is FAIL (PR #728). The pipeline's stage sequencing treats any stage failure as terminal, but review FAIL is specifically designed to be followed by converge (fix → re-gate → re-review).
+
+**Root cause:** `verify_outcome("review")` returns False on FAIL, and the pipeline treats False as "stop pipeline." But review FAIL means "findings need fixing," which is exactly what converge does.
+
+**Fix:** After review stage completes, check the review verdict specifically:
+
+```python
+# After review stage
+review_state = read_state(worktree_path).get("review", {})
+if review_state.get("passed"):
+    log(logger, "review", "PASSED")
+    # Skip converge if no findings
+    if review_state.get("findings", 0) == 0:
+        log(logger, "converge", "SKIPPED", reason="zero findings")
+    else:
+        run_stage("converge")
+else:
+    # Review FAIL → converge is mandatory
+    log(logger, "review", "FAILED", findings=review_state.get("findings"))
+    run_stage("converge")
+```
+
+**Converge loop:** Converge itself handles the fix → re-gate → re-review loop. The pipeline doesn't need to understand the loop — it just runs converge and checks the outcome.
+
+### Tier 2: QA/Review Deduplication via Shared Findings
+
+**Problem:** QA and review both find the same issues independently (PR #729). QA detects "inconsistent panel naming" and review detects "inconsistent panel naming" — same finding, double the fix work in converge.
+
+**Fix:** QA writes its findings to workflow state. Review reads them and skips already-found issues.
+
+**State schema addition:**
+
+```json
+{
+  "qa_findings": [
+    {
+      "id": "QA-01",
+      "surface": "ext",
+      "description": "Panel name 'Data Explorer' uses different casing in sidebar vs title",
+      "file": "src/PPDS.Extension/panels/data-explorer/panel.ts",
+      "severity": "important",
+      "fixed": true,
+      "fix_commit": "abc1234"
+    }
+  ]
+}
+```
+
+**QA skill changes:** After each finding (whether fixed or not), write to `qa_findings` array in state via `workflow-state.py`.
+
+**Review skill changes:** Before dispatching review subagents, read `qa_findings` from state. Pass them to each review subagent as context: "These issues were already found and fixed by QA. Do not re-report them unless the fix introduced a new problem."
+
+**Dedup algorithm:** Exact match on `(file_path, description[:50])` tuple. Two findings are considered duplicates if they reference the same file AND the first 50 characters of their descriptions are identical. If a QA finding matches a potential review finding and `fixed: true`, the review skips it. If `fixed: false` (QA found it but didn't fix), review still reports it but references the QA finding: "Also found by QA (QA-01), not yet fixed." The dedup is conservative — if the match is ambiguous (different files, or descriptions diverge before char 50), the review reports both.
+
 ---
 
 ## Acceptance Criteria
@@ -524,7 +655,7 @@ This contract is informational — governs tui-verify today and any future daemo
 | AC-02 | `extract_text_from_jsonl()` prefers `result` events over assembled `assistant` message text when both exist (clean exit) | `test_extract_text_prefers_result_when_both_exist` | 🔲 |
 | AC-03 | `pipeline-result.json` includes `last_output` (list of strings) when `failed_stage` is set | `test_write_result_includes_last_output_on_failure` | 🔲 |
 | AC-04 | Pipeline runs retro stage after `PipelineFailure` (best-effort, non-blocking — retro failure doesn't change pipeline exit code) | `test_pipeline_runs_retro_on_failure` | 🔲 |
-| AC-05 | QA skill writes `qa_partial.phase1_completed` to state.json after Phase 1 completes, before dispatching Phase 2 | Manual — QA skill is a prompt, not testable code (Constitution I6 exception: skill behavior is verified via pipeline integration) | 🔲 |
+| AC-05 | QA skill writes `qa_partial.phase1_completed` to state.json after Phase 1 completes, before dispatching Phase 2 | `test_qa_state_write` (integration: run QA skill on fixture, verify state file contains `qa_partial` key) | 🔲 |
 | AC-06 | `pipeline-result.json` includes `partial_results` from state.json when failed stage is QA and `qa_partial` exists in state | `test_write_result_includes_partial_qa_on_qa_timeout` | 🔲 |
 | AC-07 | `dev peek <worktree>` displays last ~50 lines of assistant text from active stage JSONL | Manual — PowerShell UI command, tested via `dev peek` during pipeline run | 🔲 |
 | AC-08 | `dev status` shows retro finding count and tier breakdown when `.workflow/retro-findings.json` exists | Manual — PowerShell UI command, tested via `dev status` | 🔲 |
@@ -535,6 +666,16 @@ This contract is informational — governs tui-verify today and any future daemo
 | AC-13 | Stage is killed after 3600s regardless of activity with `HARD_TIMEOUT` log event | `test_hard_timeout_kills_at_ceiling` | 🔲 |
 | AC-14 | Active stage (output_bytes growing) is NOT killed by stall timeout — idle counter resets on activity | `test_active_stage_not_killed_by_stall_timeout` | 🔲 |
 | AC-15 | `STAGE_TIMEOUTS` dict is removed; all stages use stall-based + hard ceiling logic | `test_no_per_stage_fixed_timeouts` | 🔲 |
+| AC-16 | QA skill commits each fix immediately after applying it (`git add` + `git commit`) — fixes survive timeout | `test_qa_commits_fixes` (integration: run QA skill on fixture with known issue, verify git log contains QA fix commit) | 🔲 |
+| AC-17 | Review dispatches per-file subagents (one per changed file or group of small files ≤50 lines) instead of loading entire diff into one prompt | Manual — observe review stage logs showing per-file dispatch | 🔲 |
+| AC-18 | Review per-file subagent timeout is stall-based (3 min idle); on stall, chunk is skipped with "review incomplete" note (not a hard failure) | Manual — trigger review on large diff, observe timeout handling | 🔲 |
+| AC-19 | Review includes a cross-file consistency pass after per-file review — checks type mismatches, missing imports, interface/caller drift | Manual — observe cross-file pass in review stage logs | 🔲 |
+| AC-20 | Pipeline runs converge stage after review FAIL (not just review PASS) — review FAIL triggers converge, not pipeline exit | `test_pipeline_runs_converge_on_review_fail` | 🔲 |
+| AC-21 | Pipeline skips converge when review passes with zero findings | `test_pipeline_skips_converge_on_zero_findings` | 🔲 |
+| AC-21b | Pipeline runs converge when review passes with non-zero findings (findings exist but none critical/important) | `test_pipeline_runs_converge_on_pass_with_findings` | 🔲 |
+| AC-22 | QA writes findings to `qa_findings` array in workflow state (id, surface, description, file, severity, fixed, fix_commit) | Manual — run QA, read state file, verify `qa_findings` entries | 🔲 |
+| AC-23 | Review reads `qa_findings` from state and passes to subagents as "already found by QA" context | Manual — run QA then review, observe review skipping duplicate findings | 🔲 |
+| AC-24 | Review does not re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem | Manual — verify dedup in review output | 🔲 |
 
 ### Edge Cases
 
@@ -547,6 +688,12 @@ This contract is informational — governs tui-verify today and any future daemo
 | Daemon port in use at startup | Port conflict | Existing stale-session detection handles this (kills old PID, relaunches) |
 | Daemon idle timer reset by /health | Monitoring tool pings health | Timer resets — daemon stays alive while being monitored |
 | JSONL file locked during peek (Windows) | Pipeline writing to JSONL while peek reads it | Open with `FileShare.Read` / shared read mode. Windows file locking is more aggressive than Unix — peek must not use exclusive access |
+| QA fix commit triggers post-commit hook clearing gates | Expected — gates must re-run after code changes. Converge handles re-gating. |
+| Review subagent stalls on one file | That chunk is skipped with "review incomplete" note. Other files continue. Cross-file pass runs with partial results. |
+| All review subagents stall | Review reports "review incomplete for all files" and sets review.passed = null. Converge runs to address. |
+| QA and review find same issue but different description | First-50-chars prefix match on file path + description. If ambiguous, review reports it (prefer false positive over missed finding). |
+| Review receives 50+ changed files | Files grouped into review units. Max 5 concurrent subagents. Queue remaining. Total review time bounded by stall-based timeout. |
+| Converge runs after review FAIL but converge also fails | Pipeline exits with `failed_stage: "converge"`. Failure retro captures both review findings and converge failure. |
 
 ---
 
@@ -613,7 +760,7 @@ This contract is informational — governs tui-verify today and any future daemo
 
 **Context:** QA results are lost on timeout because they're only written to state on full completion.
 
-**Decision:** QA skill writes `qa.partial.phase1` to state.json after Phase 1 completes, using the existing `workflow-state.py set` command.
+**Decision:** QA skill writes `qa_partial.phase1_completed` (top-level key, NOT nested under `qa`) to state.json after Phase 1 completes, using the existing `workflow-state.py set` command.
 
 **Alternatives considered:**
 - Write QA results to a separate `qa-results.json` file (adds another file to track, deviates from canonical state pattern)
@@ -621,7 +768,7 @@ This contract is informational — governs tui-verify today and any future daemo
 - Write to state.json from within each agent (agents are subprocesses — concurrent writes could corrupt state)
 
 **Consequences:**
-- Positive: Uses existing state infrastructure. Results are queryable via `workflow-state.py get qa.partial`. Pipeline-result can include them.
+- Positive: Uses existing state infrastructure. Results are queryable via `workflow-state.py get qa_partial`. Pipeline-result can include them.
 - Negative: Only captures phase-level granularity, not per-check. Acceptable — per-check detail is in the JSONL.
 
 ### Why 30-Minute Idle Timeout for Daemons?
@@ -653,6 +800,7 @@ This contract is informational — governs tui-verify today and any future daemo
 | Date | Change |
 |------|--------|
 | 2026-03-26 | Initial spec — design session from retro findings |
+| 2026-03-27 | v2.0 — pipeline reliability: (1) QA commits its own fixes, (2) review per-file chunking + cross-file summary pass, (3) converge runs on review FAIL (not just PASS), (4) QA/review dedup via shared findings in workflow state. Addresses issues #731, #727, #732, #730, #734, #712, #728, #729. |
 
 ---
 
@@ -661,3 +809,4 @@ This contract is informational — governs tui-verify today and any future daemo
 - **Pipeline analytics dashboard**: Aggregate pipeline-result.json across worktrees for success rate, average duration, common failure stages
 - **Slack/Teams notification on pipeline failure**: Extend notify.py with richer failure detail from last_output
 - **Stage-level retry with backoff**: Instead of fixed retry, use exponential backoff for flaky stages
+- **Auto-heal from retro findings**: `auto-fix` tier findings applied automatically before pipeline retry
