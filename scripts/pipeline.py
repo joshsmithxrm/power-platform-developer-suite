@@ -577,6 +577,322 @@ def process_retro_findings(worktree_path, logger, repo_root):
             note="Auto-heal not yet implemented")
 
 
+def get_repo_slug(worktree_path):
+    """Get owner/repo from git remote. Returns 'owner/repo' or None."""
+    try:
+        result = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
+def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
+    """Poll for Gemini review comments. Returns list of comment dicts."""
+    repo = get_repo_slug(worktree_path)
+    if not repo:
+        log(logger, "pr", "ERROR", reason="Cannot determine repo slug")
+        return []
+
+    start = time.time()
+    last_count = 0
+    stable_polls = 0
+
+    while time.time() - start < max_wait:
+        elapsed = time.time() - start
+
+        # Don't check before minimum wait
+        if elapsed < min_wait:
+            time.sleep(30)
+            continue
+
+        try:
+            result = subprocess.run(
+                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
+                 "--jq", "length"],
+                cwd=worktree_path, capture_output=True, text=True, timeout=15,
+            )
+            count = int(result.stdout.strip()) if result.returncode == 0 else 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
+            count = 0
+
+        log(logger, "pr", "GEMINI_POLL", elapsed=f"{int(elapsed)}s", comments=count)
+
+        if count > 0 and count == last_count:
+            stable_polls += 1
+            if stable_polls >= 2:
+                break  # Stable — all comments posted
+        else:
+            stable_polls = 0
+
+        last_count = count
+        time.sleep(30)
+
+    if last_count == 0:
+        log(logger, "pr", "GEMINI_TIMEOUT")
+        return []
+
+    # Fetch full comments
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
+             "--jq", "[.[] | {id, user: .user.login, path, line, body}]"],
+            cwd=worktree_path, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def run_triage(worktree_path, pr_number, comments, logger, dry_run=False):
+    """Invoke gemini-triage agent to fix/dismiss comments. Returns list or None."""
+    state = read_state(worktree_path)
+    spec_path = state.get("spec", "")
+
+    prompt = (
+        f"Triage these Gemini review comments on PR #{pr_number}.\n\n"
+        f"Spec (read for design rationale): {spec_path}\n\n"
+        f"Comments:\n{json.dumps(comments, indent=2)}\n\n"
+        "For each comment:\n"
+        "1. Read the referenced file at the specified line\n"
+        "2. Evaluate: is this a valid finding?\n"
+        "3. If valid: fix the code and commit\n"
+        "4. If invalid: compose a brief dismissal rationale\n\n"
+        "After all comments, push fixes and output this JSON:\n"
+        '[{"id": <id>, "action": "fixed"|"dismissed", '
+        '"description": "...", "commit": "<sha>"|null}]'
+    )
+
+    exit_code, logger_out = run_claude(
+        worktree_path, prompt, logger, "pr-triage",
+        dry_run=dry_run, agent="gemini-triage", timeout=300,
+    )
+
+    if exit_code != 0:
+        return None
+
+    # Parse structured output from the human-readable stage log
+    stage_log_dir = os.path.join(worktree_path, ".workflow", "stages")
+    stage_log_path = os.path.join(stage_log_dir, "pr-triage.log")
+    try:
+        with open(stage_log_path, "r", errors="replace") as f:
+            content = f.read()
+        # Find JSON array in the output
+        start_idx = content.rfind("[")
+        end_idx = content.rfind("]")
+        if start_idx >= 0 and end_idx > start_idx:
+            return json.loads(content[start_idx:end_idx + 1])
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def post_replies(worktree_path, pr_number, triage_results, logger):
+    """Post threaded replies to Gemini comments from triage results."""
+    repo = get_repo_slug(worktree_path)
+    if not repo:
+        return
+
+    for item in triage_results:
+        comment_id = item.get("id")
+        action = item.get("action", "unknown")
+        description = item.get("description", "")
+        commit_sha = item.get("commit")
+
+        if action == "fixed" and commit_sha:
+            body = f"Fixed in {commit_sha} — {description}"
+        elif action == "dismissed":
+            body = f"Not applicable — {description}"
+        else:
+            body = description or "Reviewed."
+
+        try:
+            subprocess.run(
+                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
+                 "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
+                cwd=worktree_path, capture_output=True, text=True, timeout=15,
+            )
+            log(logger, "pr", "REPLY_POSTED", comment_id=comment_id, action=action)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            log(logger, "pr", "REPLY_FAILED", comment_id=comment_id)
+
+
+def run_pr_stage(worktree_path, logger, dry_run=False, timeout=None):
+    """Scripted PR stage: draft → poll Gemini → triage → ready → notify."""
+    log(logger, "pr", "START")
+    start = time.time()
+
+    if dry_run:
+        log(logger, "pr", "DONE", exit=0, duration="0s", mode="dry-run")
+        return 0, logger
+
+    # 1. Rebase on main
+    subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+    )
+    result = subprocess.run(
+        ["git", "rebase", "origin/main"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        log(logger, "pr", "REBASE_CONFLICT", error=result.stderr.strip()[:200])
+        log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
+        return 1, logger
+
+    # 2. Push branch
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "push", "-u", "origin", branch, "--force-with-lease"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=60,
+    )
+
+    # 3. Read issues from state
+    issues_result = subprocess.run(
+        ["python", "scripts/workflow-state.py", "get", "issues"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=10,
+    )
+    issues = []
+    try:
+        issues = json.loads(issues_result.stdout.strip())
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 4. Build PR body and create draft
+    state = read_state(worktree_path)
+    closes = "\n".join(f"Closes #{n}" for n in issues) if issues else ""
+
+    # Generate summary via a quick claude call
+    summary_prompt = (
+        "Generate a PR title (under 70 chars, conventional commit format) and "
+        "3 bullet-point summary for the changes on this branch vs main. "
+        "Output ONLY: first line = title, then blank line, then bullet points."
+    )
+    exit_code, logger = run_claude(
+        worktree_path, summary_prompt, logger, "pr-summary",
+        dry_run=dry_run, timeout=120,
+    )
+
+    # Read the generated summary
+    summary_log = os.path.join(worktree_path, ".workflow", "stages", "pr-summary.log")
+    pr_title = f"feat: {branch}"
+    pr_body_summary = ""
+    try:
+        with open(summary_log, "r", errors="replace") as f:
+            lines = [l.strip() for l in f.readlines() if l.strip()]
+            if lines:
+                pr_title = lines[0][:70]
+                pr_body_summary = "\n".join(lines[1:])
+    except OSError:
+        pass
+
+    body_parts = ["## Summary", pr_body_summary]
+    if closes:
+        body_parts.append(f"\n{closes}")
+    body_parts.append("\n## Verification")
+    gates = state.get("gates", {})
+    verify = state.get("verify", {})
+    qa = state.get("qa", {})
+    review = state.get("review", {})
+    body_parts.append(f"- [{'x' if gates.get('passed') else ' '}] /gates passed")
+    body_parts.append(f"- [{'x' if any(verify.values()) else ' '}] /verify completed")
+    body_parts.append(f"- [{'x' if any(qa.values()) else ' '}] /qa completed")
+    body_parts.append(f"- [{'x' if review.get('passed') else ' '}] /review completed")
+    body_parts.append("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+    pr_body = "\n".join(body_parts)
+
+    result = subprocess.run(
+        ["gh", "pr", "create", "--draft", "--title", pr_title, "--body", pr_body],
+        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        log(logger, "pr", "CREATE_FAILED", error=result.stderr.strip()[:200])
+        log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
+        return 1, logger
+
+    pr_url = result.stdout.strip()
+    # Extract PR number from URL
+    pr_number = pr_url.rstrip("/").split("/")[-1]
+    log(logger, "pr", "PR_CREATED", url=pr_url, draft=True)
+
+    # Write workflow state immediately
+    for cmd_args in [
+        ["set", "pr.url", pr_url],
+        ["set", "pr.created", "now"],
+    ]:
+        subprocess.run(
+            ["python", "scripts/workflow-state.py"] + cmd_args,
+            cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        )
+
+    # 5. Poll for Gemini comments
+    comments = poll_gemini(worktree_path, pr_number, logger)
+
+    # 6. Handle triage or annotation
+    annotation = None
+    if not comments:
+        annotation = "\n\n**Gemini:** no review received within 5 minutes."
+    else:
+        triage_results = run_triage(worktree_path, pr_number, comments, logger,
+                                    dry_run=dry_run)
+        if triage_results is None:
+            annotation = "\n\n**Gemini:** triage incomplete — manual review needed."
+        else:
+            # Verify push before posting replies
+            try:
+                local_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
+                ).stdout.strip()
+                remote_result = subprocess.run(
+                    ["git", "ls-remote", "origin", branch],
+                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
+                )
+                remote_head = remote_result.stdout.split()[0] if remote_result.stdout.strip() else ""
+                if local_head == remote_head:
+                    post_replies(worktree_path, pr_number, triage_results, logger)
+                else:
+                    log(logger, "pr", "PUSH_MISMATCH",
+                        local=local_head[:8], remote=remote_head[:8])
+                    annotation = ("\n\n**Gemini:** triage fixes committed locally "
+                                  "but push may have failed. Check branch.")
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                annotation = "\n\n**Gemini:** could not verify push status."
+
+    # Append annotation to PR body if needed
+    if annotation:
+        subprocess.run(
+            ["gh", "pr", "edit", pr_number, "--body", pr_body + annotation],
+            cwd=worktree_path, capture_output=True, text=True, timeout=30,
+        )
+
+    # 7. Convert draft → ready
+    subprocess.run(
+        ["gh", "pr", "ready", pr_number],
+        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+    )
+    log(logger, "pr", "PR_READY", url=pr_url)
+
+    # 8. Write final workflow state
+    subprocess.run(
+        ["python", "scripts/workflow-state.py", "set", "pr.gemini_triaged", "true"],
+        cwd=worktree_path, capture_output=True, text=True, timeout=10,
+    )
+
+    duration = int(time.time() - start)
+    log(logger, "pr", "DONE", exit=0, duration=f"{duration}s")
+    return 0, logger
+
+
 def write_result(worktree_path, status, duration, stages, pr_url=None,
                   failed_stage=None, error=None):
     """Write pipeline-result.json and invoke notify.py (best-effort)."""
@@ -867,7 +1183,10 @@ def main():
                     _pipeline_fail("converge", "max rounds exceeded")
 
             elif stage == "pr":
-                exit_code, logger = run_claude(worktree_path, "/pr", logger, "pr", args.dry_run, args.stage_timeout or STAGE_TIMEOUTS.get("pr"))
+                exit_code, logger = run_pr_stage(
+                    worktree_path, logger, dry_run=args.dry_run,
+                    timeout=args.stage_timeout or STAGE_TIMEOUTS.get("pr"),
+                )
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="pr")
                     _pipeline_fail("pr")
