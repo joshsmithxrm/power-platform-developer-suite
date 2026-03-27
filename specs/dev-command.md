@@ -123,7 +123,7 @@ Register-ArgumentCompleter -CommandName dev -ScriptBlock {
             }
     }
     # Subcommands
-    @('status', 'run', 'pr', 'clean', 'help', 'up', 'shell', 'claude', 'down', 'sync', 'reset') |
+    @('status', 'run', 'pr', 'clean', 'help', 'up', 'shell', 'claude', 'down', 'sync', 'reset', 'push') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object {
             [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
@@ -199,7 +199,7 @@ ppds dev                                        6 worktrees
 ```
 
 - Header shows repo name and total worktree count (I4 compliance — user can verify completeness).
-- The main worktree is not shown in the grouped list (it is not a feature worktree). Main branch status is available via `dev status main`.
+- The main worktree is not shown in the grouped list (it is not a feature worktree).
 - `→` prefix marks the current worktree (detected from cwd).
 - Worktree names are truncated to 20 characters with `…` if needed.
 - `+N` = commits ahead of main.

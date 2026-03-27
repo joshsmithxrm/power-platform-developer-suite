@@ -54,12 +54,23 @@ function Resolve-RepoRoot {
 
 # --- Worktree Discovery ---
 
+function Get-MainBranch {
+    param([string]$Root)
+    # Check for origin/main first, fall back to origin/master
+    $ref = git -C $Root rev-parse --verify origin/main 2>$null
+    if ($ref) { return 'origin/main' }
+    $ref = git -C $Root rev-parse --verify origin/master 2>$null
+    if ($ref) { return 'origin/master' }
+    return 'origin/main'  # default
+}
+
 function Get-Worktrees {
     param([string]$Root)
 
     $wtDir = Join-Path $Root '.worktrees'
     if (-not (Test-Path $wtDir)) { return @() }
 
+    $mainRef = Get-MainBranch -Root $Root
     $worktrees = @()
     foreach ($dir in (Get-ChildItem -Directory $wtDir)) {
         $path = $dir.FullName
@@ -70,7 +81,7 @@ function Get-Worktrees {
         if (-not $branch) { $branch = '(detached)' }
 
         $ahead = 0
-        $aheadStr = git -C $path rev-list --count origin/main..HEAD 2>$null
+        $aheadStr = git -C $path rev-list --count "$mainRef..HEAD" 2>$null
         if ($aheadStr) { $ahead = [int]$aheadStr }
 
         $dirtyCount = 0
@@ -138,7 +149,7 @@ function Get-PipelineState {
         $lines = Get-Content $logPath -Tail 50
         # Find last HEARTBEAT or START line
         for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-            if ($lines[$i] -match 'HEARTBEAT.*stage=(\S+).*elapsed=(\S+).*activity=(\S+)') {
+            if ($lines[$i] -match '\[(\S+)\] HEARTBEAT.*elapsed=(\S+).*activity=(\S+)') {
                 $stage = $Matches[1]
                 $elapsed = $Matches[2]
                 $activity = $Matches[3]
@@ -259,7 +270,7 @@ function Get-PrStatus {
     if (Test-Path $cachePath) {
         try {
             $cacheData = Get-Content $cachePath -Raw | ConvertFrom-Json
-            $cacheTime = [datetime]::Parse($cacheData._timestamp)
+            $cacheTime = [datetime]::ParseExact($cacheData._timestamp, 'o', [cultureinfo]::InvariantCulture)
             $cacheAge = ([datetime]::UtcNow - $cacheTime).TotalSeconds
             foreach ($prop in $cacheData.PSObject.Properties) {
                 if ($prop.Name -ne '_timestamp') {
@@ -413,7 +424,8 @@ function Show-Dashboard {
         # Fallback: no worktrees, show basic branch info
         $branch = git -C $Root branch --show-current 2>$null
         if (-not $branch) { $branch = '(detached)' }
-        $ahead = git -C $Root rev-list --count origin/main..HEAD 2>$null
+        $mainRef = Get-MainBranch -Root $Root
+        $ahead = git -C $Root rev-list --count "$mainRef..HEAD" 2>$null
         $dirty = @(git -C $Root status --porcelain 2>$null).Count
 
         Write-Host ""
@@ -545,8 +557,9 @@ function Show-WorktreeStatus {
 
     $name = Split-Path $wtPath -Leaf
     $branch = git -C $wtPath branch --show-current 2>$null
-    $ahead = git -C $wtPath rev-list --count origin/main..HEAD 2>$null
-    $behind = git -C $wtPath rev-list --count HEAD..origin/main 2>$null
+    $mainRef = Get-MainBranch -Root $Root
+    $ahead = git -C $wtPath rev-list --count "$mainRef..HEAD" 2>$null
+    $behind = git -C $wtPath rev-list --count "HEAD..$mainRef" 2>$null
     $dirtyLines = git -C $wtPath status --porcelain 2>$null
     $dirtyCount = if ($dirtyLines) { @($dirtyLines).Count } else { 0 }
 

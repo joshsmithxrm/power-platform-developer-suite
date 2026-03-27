@@ -11,7 +11,7 @@
 #>
 
 #region dev (Worktree Dashboard + Workflow Tool)
-function dev {
+function _Resolve-DevScriptContext {
     $root = git rev-parse --show-toplevel 2>$null
     if ($root) {
         # Resolve to main repo root when inside a worktree
@@ -22,8 +22,7 @@ function dev {
     }
 
     if (-not $root) {
-        Write-Host "  Not in a git repository." -ForegroundColor Red
-        return
+        return @{ Error = "Not in a git repository." }
     }
 
     # Find dev.ps1: dotfiles first, then repo fallback
@@ -35,12 +34,21 @@ function dev {
     elseif (Test-Path $repoPath) { $devScript = $repoPath }
 
     if (-not $devScript) {
-        Write-Host "  dev.ps1 not found (checked dotfiles and repo)" -ForegroundColor Red
+        return @{ Error = "dev.ps1 not found (checked dotfiles and repo)" }
+    }
+
+    return @{ Root = $root; DevScript = $devScript }
+}
+
+function dev {
+    $context = _Resolve-DevScriptContext
+    if ($context.Error) {
+        Write-Host "  $($context.Error)" -ForegroundColor Red
         return
     }
 
     # Call dev.ps1 — capture pipeline output for navigation (Set-Location)
-    $result = & $devScript -RepoRoot $root @args
+    $result = & $context.DevScript -RepoRoot $context.Root @args
     if ($result -and (Test-Path $result -ErrorAction SilentlyContinue)) {
         Set-Location $result
     }
@@ -49,25 +57,10 @@ function dev {
 Register-ArgumentCompleter -CommandName dev -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
-    $root = git rev-parse --show-toplevel 2>$null
-    if ($root) {
-        $commonDir = git -C $root rev-parse --path-format=absolute --git-common-dir 2>$null
-        if ($commonDir -and (Split-Path $commonDir -Leaf) -eq '.git') {
-            $root = Split-Path $commonDir
-        }
-    }
+    $context = _Resolve-DevScriptContext
+    if ($context.Error) { return }
 
-    if (-not $root) { return }
-
-    $devScript = $null
-    $dotfilesPath = Join-Path $env:USERPROFILE 'dotfiles\scripts\dev.ps1'
-    $repoPath = Join-Path $root 'scripts\dev.ps1'
-    if (Test-Path $dotfilesPath) { $devScript = $dotfilesPath }
-    elseif (Test-Path $repoPath) { $devScript = $repoPath }
-
-    if (-not $devScript) { return }
-
-    & $devScript -RepoRoot $root -Completions 2>$null |
+    & $context.DevScript -RepoRoot $context.Root -Completions 2>$null |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object {
             [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
