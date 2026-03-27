@@ -435,7 +435,7 @@ Read the merged report.
 Present the final merged report to the user.
 
 ## Workflow State
-nOn QA start, set the phase:
+On QA start, set the phase:
 
 ```bash
 python scripts/workflow-state.py set phase reviewing
