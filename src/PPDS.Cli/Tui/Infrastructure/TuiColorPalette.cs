@@ -73,6 +73,21 @@ public static class TuiColorPalette
         Disabled = MakeAttr(Color.DarkGray, Color.Black)
     };
 
+    private static ColorScheme? _dimmed;
+
+    /// <summary>
+    /// Color scheme for dimmed/placeholder text.
+    /// DarkGray text on black background for hint labels that disappear when content is present.
+    /// </summary>
+    public static ColorScheme Dimmed => _dimmed ??= new()
+    {
+        Normal = MakeAttr(Color.DarkGray, Color.Black),
+        Focus = MakeAttr(Color.DarkGray, Color.Black),
+        HotNormal = MakeAttr(Color.DarkGray, Color.Black),
+        HotFocus = MakeAttr(Color.DarkGray, Color.Black),
+        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+    };
+
     private static ColorScheme? _readOnlyText;
 
     /// <summary>
@@ -574,6 +589,7 @@ public static class TuiColorPalette
         {
             (nameof(Default), Default),
             (nameof(Focused), Focused),
+            (nameof(Dimmed), Dimmed),
             (nameof(TextInput), TextInput),
             (nameof(ReadOnlyText), ReadOnlyText),
             (nameof(FileDialog), FileDialog),

@@ -152,6 +152,27 @@ namespace PPDS.Migration.Import
         /// to the progress file, providing a structured record of import progress.
         /// </remarks>
         public ImportOutputManager? OutputManager { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether to resolve lookups to entities not in the migration schema
+        /// by querying the target environment.
+        /// Default: false
+        /// </summary>
+        public bool ResolveExternalLookups { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets whether to skip (null out) lookup references that cannot be resolved.
+        /// When false, unresolved lookups cause an error.
+        /// Default: true
+        /// </summary>
+        public bool SkipUnresolvedLookups { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether to impersonate record owners during import.
+        /// When true, records are created/updated as the original owner using caller-object-id impersonation.
+        /// Default: false
+        /// </summary>
+        public bool ImpersonateOwners { get; set; } = false;
     }
 
     /// <summary>
@@ -166,6 +187,9 @@ namespace PPDS.Migration.Import
         Update,
 
         /// <summary>Create or update records as needed.</summary>
-        Upsert
+        Upsert,
+
+        /// <summary>Skip this entity entirely during import.</summary>
+        Skip
     }
 }

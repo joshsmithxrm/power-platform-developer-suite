@@ -287,6 +287,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Plugin Registration", "Browse and manage plugin registrations", () => NavigateToPluginRegistration()),
             new("Metadata Browser", "Browse entity metadata", () => NavigateToMetadataBrowser()),
             new("Web Resources", "Browse and manage web resources", () => NavigateToWebResources()),
+            new("Data Migration", "Export and import Dataverse data", () => NavigateToMigration()),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Environment Details...", "View organization and connection info",
                 hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
@@ -635,6 +636,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _contentArea.Remove(loadingLabel);
 
             var screen = new WebResourcesScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToMigration()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Data Migration...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new MigrationScreen(_session);
             NavigateTo(screen);
 
             return false;

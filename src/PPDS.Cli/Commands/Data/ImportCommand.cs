@@ -75,6 +75,24 @@ public static class ImportCommand
             DefaultValueFactory = _ => false
         };
 
+        var resolveLookupsOption = new Option<bool>("--resolve-lookups")
+        {
+            Description = "Enable external lookup resolution (ID check, then name-based query)",
+            DefaultValueFactory = _ => false
+        };
+
+        var skipUnresolvedLookupsOption = new Option<bool>("--skip-unresolved-lookups")
+        {
+            Description = "Null unresolved lookups instead of failing the record [default: True] (requires --resolve-lookups)",
+            DefaultValueFactory = _ => true
+        };
+
+        var impersonateOwnersOption = new Option<bool>("--impersonate-owners")
+        {
+            Description = "Preserve record ownership via CallerAADObjectId impersonation (requires --user-mapping)",
+            DefaultValueFactory = _ => false
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
         {
             Description = "Output format",
@@ -110,6 +128,9 @@ public static class ImportCommand
             userMappingOption,
             stripOwnerFieldsOption,
             skipMissingColumnsOption,
+            resolveLookupsOption,
+            skipUnresolvedLookupsOption,
+            impersonateOwnersOption,
             outputFormatOption,
             verboseOption,
             debugOption,
@@ -128,6 +149,9 @@ public static class ImportCommand
             var userMappingFile = parseResult.GetValue(userMappingOption);
             var stripOwnerFields = parseResult.GetValue(stripOwnerFieldsOption);
             var skipMissingColumns = parseResult.GetValue(skipMissingColumnsOption);
+            var resolveLookups = parseResult.GetValue(resolveLookupsOption);
+            var skipUnresolvedLookups = parseResult.GetValue(skipUnresolvedLookupsOption);
+            var impersonateOwners = parseResult.GetValue(impersonateOwnersOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
@@ -138,7 +162,8 @@ public static class ImportCommand
             return await ExecuteAsync(
                 profile, environment, data, bypassPlugins, bypassFlows,
                 continueOnError, mode, userMappingFile, stripOwnerFields,
-                skipMissingColumns, outputFormat, verbose, debug, errorReport, cancellationToken);
+                skipMissingColumns, resolveLookups, skipUnresolvedLookups,
+                impersonateOwners, outputFormat, verbose, debug, errorReport, cancellationToken);
         });
 
         return command;
@@ -155,6 +180,9 @@ public static class ImportCommand
         FileInfo? userMappingFile,
         bool stripOwnerFields,
         bool skipMissingColumns,
+        bool resolveLookups,
+        bool skipUnresolvedLookups,
+        bool impersonateOwners,
         OutputFormat outputFormat,
         bool verbose,
         bool debug,
@@ -268,6 +296,9 @@ public static class ImportCommand
                     UserMappings = userMappings,
                     StripOwnerFields = stripOwnerFields,
                     SkipMissingColumns = skipMissingColumns,
+                    ResolveExternalLookups = resolveLookups,
+                    SkipUnresolvedLookups = skipUnresolvedLookups,
+                    ImpersonateOwners = impersonateOwners,
                     CurrentUserId = currentUserId,
                     // Wire up error streaming callback
                     ErrorCallback = outputManager != null ? outputManager.LogError : null,

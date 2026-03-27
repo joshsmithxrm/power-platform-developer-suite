@@ -6,6 +6,7 @@ using PPDS.Migration.Analysis;
 using PPDS.Migration.Export;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
+using PPDS.Migration.Import.Handlers;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
 
@@ -62,6 +63,45 @@ namespace PPDS.Migration.DependencyInjection
             services.AddTransient<BulkOperationProber>();
             services.AddTransient<DeferredFieldProcessor>();
             services.AddTransient<RelationshipProcessor>();
+
+            // Import - Handlers (single-interface)
+            services.AddTransient<IRecordFilter, SystemUserHandler>();
+            services.AddTransient<IRecordFilter, ActivityPointerHandler>();
+            services.AddTransient<IRecordTransformer, BusinessUnitHandler>();
+
+            // Import - Handlers (multi-interface: singleton forwarding pattern)
+            services.AddSingleton<ProductHandler>();
+            services.AddSingleton<IRecordFilter>(sp => sp.GetRequiredService<ProductHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<ProductHandler>());
+
+            services.AddSingleton<DuplicateRuleHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<DuplicateRuleHandler>());
+            services.AddSingleton<IPostImportHandler>(sp => sp.GetRequiredService<DuplicateRuleHandler>());
+
+            services.AddSingleton<OpportunityHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<OpportunityHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<OpportunityHandler>());
+
+            services.AddSingleton<IncidentHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<IncidentHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<IncidentHandler>());
+
+            services.AddSingleton<QuoteHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<QuoteHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<QuoteHandler>());
+
+            services.AddSingleton<SalesOrderHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<SalesOrderHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<SalesOrderHandler>());
+
+            services.AddSingleton<LeadHandler>();
+            services.AddSingleton<IRecordTransformer>(sp => sp.GetRequiredService<LeadHandler>());
+            services.AddSingleton<IStateTransitionHandler>(sp => sp.GetRequiredService<LeadHandler>());
+
+            // Import - Components
+            services.AddTransient<StateTransitionProcessor>();
+            services.AddTransient<EntityReferenceMapper>();
+            services.AddTransient<FileColumnTransferHelper>();
 
             // Import - Orchestration
             services.AddTransient<IPluginStepManager, PluginStepManager>();
