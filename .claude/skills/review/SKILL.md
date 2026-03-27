@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review
+description: Bias-isolated code review — reviewer sees only the diff, constitution, and spec ACs, never the implementation plan or task context
 ---
 
 # Review
