@@ -32,7 +32,7 @@ Before asking any questions, read:
 - If updating, read the existing spec fully before proceeding.
 
 **Check for design context:** After searching for existing specs, check for
-`.plans/design-context.md` in the current working directory.
+`.plans/context.md` in the current working directory.
 
 If found:
 1. Read the file
@@ -43,7 +43,7 @@ If found:
 
 **Constraint checking:** Before presenting the architecture (Step 2 or Step 3),
 verify the proposal against each Constraint and each Known Concern in
-`design-context.md`. Flag conflicts — e.g., "Constraint #3 says X, but the
+`context.md`. Flag conflicts — e.g., "Constraint #3 says X, but the
 proposed architecture does Y."
 
 If not found: continue with normal Step 2 brainstorm flow.
@@ -153,7 +153,7 @@ If option 3, note the spec path and stop.
 
 | Pattern | Fix |
 |---------|-----|
-| "This is too simple for a design" | Every change goes through this. Short designs are fine. |
+| "This is too simple for a design" | Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/verify` + `/pr`). Enhancements with existing specs use `/implement` directly. Short designs are fine. |
 | Jumping to implementation | Design MUST be approved before any code |
 | Asking 5 questions at once | One question per message |
 | Proposing only one approach | Always propose 2-3 with trade-offs |

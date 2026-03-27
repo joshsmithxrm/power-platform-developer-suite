@@ -1,6 +1,7 @@
 # Investigation
 
-**Status:** Draft
+**Status:** Draft (v1.1 — context-aware handoff, context.md consolidation)
+**Version:** 1.1
 **Last Updated:** 2026-03-27
 **Code:** [.claude/skills/investigate/](../.claude/skills/investigate/), [.claude/agents/challenger.md](../.claude/agents/challenger.md), [.claude/hooks/](../.claude/hooks/), [scripts/](../scripts/)
 **Surfaces:** N/A
@@ -17,7 +18,7 @@ Pre-commitment exploration skill that gathers context, researches options, synth
 - **Adversarial quality**: Catch blind spots via a structurally isolated challenger agent with a mandatory 8-dimension checklist
 - **Retro feedback loop**: Persist retro findings across sessions so `/investigate` can detect recurring patterns
 - **Workflow verification**: Validate `.claude/` and `scripts/` changes with the same rigor as product code
-- **Seamless handoff**: Bridge `/investigate` → `/start` → `/design` via design-context content passed through conversation
+- **Seamless handoff**: Bridge `/investigate` → `/start` → `/design` via context content passed through conversation
 
 ### Non-Goals
 
@@ -65,13 +66,13 @@ Pre-commitment exploration skill that gathers context, researches options, synth
 │                              │ (convo)  │              │
 │                              └──────────┘              │
 └────────────────────────────────┬────────────────────────┘
-                                 │ design-context in conversation
+                                 │ context in conversation
                                  ▼
 ┌──────────┐    ┌──────────┐    ┌──────────┐
 │  /start  │───▶│ worktree │───▶│  /design │
 │ writes   │    │ .plans/  │    │ loads    │
-│ context  │    │ design-  │    │ context  │
-│ to .plans│    │ context  │    │          │
+│ context  │    │ context  │    │ context  │
+│ to .plans│    │ .md      │    │          │
 └──────────┘    └──────────┘    └──────────┘
 ```
 
@@ -119,8 +120,8 @@ Pre-commitment exploration skill that gathers context, researches options, synth
 | Researcher agent | Read-only codebase + web research, dispatched inline via Agent tool (not a separate agent file) |
 | `.retros/summary.json` | Persistent retro findings store — append-only, windowed, git-tracked |
 | `/verify workflow` mode | Structural validation of `.claude/` and `scripts/` changes |
-| `/start` modification | Writes design-context to worktree `.plans/` during creation |
-| `/design` modification | Loads design-context from `.plans/` if present at Step 1 |
+| `/start` modification | Writes context to worktree `.plans/` during creation |
+| `/design` modification | Loads context from `.plans/` if present at Step 1 |
 | Hook fixes | Stop-hook, pr-gate, session-start, protect-main changes |
 
 ### Dependencies
@@ -139,7 +140,7 @@ Pre-commitment exploration skill that gathers context, researches options, synth
 4. Challenger uses the 8-dimension mandatory checklist: testability, verifiability, failure modes, observability, operability, reversibility, dependencies, scope
 5. Retro persistent store (`.retros/summary.json`) is git-tracked, append-only, updated by `/retro` skill
 6. `/verify workflow` validates all `.claude/` and `scripts/` structural properties
-7. Handoff passes design-context through conversation memory — `/investigate` holds content, `/start` writes it to worktree `.plans/design-context.md`
+7. Handoff passes context through conversation memory — `/investigate` holds content, `/start` writes it to worktree `.plans/context.md`
 8. Hook changes enforce workflow verification for process code changes
 
 ### Primary Flows
@@ -153,7 +154,7 @@ Pre-commitment exploration skill that gathers context, researches options, synth
 5. **Triage**: AI auto-resolves factual errors and missing details. Design decisions and values questions go to human at align step.
 6. **Present**: Investigation summary + challenge findings side by side
 7. **Align**: Human says go / change X / not worth it
-8. **Handoff**: Present the design-context summary and instruct human to run `/start` in the same conversation — `/start` writes the design-context from conversation to the worktree
+8. **Handoff**: Present the context summary. **Context-aware routing:** If already in a worktree, write `.plans/context.md` directly and instruct "Run `/design` to continue." If on main, instruct "Run `/start` to create a worktree — context will be written to `.plans/context.md` in the new worktree."
 
 **Quick Investigation:**
 
@@ -297,25 +298,25 @@ After worktree creation (current Step 5), before opening terminal (Step 6):
 
 The AI has the investigation output in conversation context. `/start` writes it directly — no scanning or sentinels needed.
 
-After worktree creation, `/start` writes the design-context content from conversation to `.plans/design-context.md` in the new worktree:
+After worktree creation, `/start` writes the context content from conversation to `.plans/context.md` in the new worktree:
 1. Create `.plans/` directory in the new worktree (if it doesn't exist)
-2. Write the design-context content to `.plans/design-context.md` in the worktree
-3. Include this in the Step 7 guidance: "Design context written to `.plans/design-context.md`. Run `/design` to continue."
+2. Write the context content to `.plans/context.md` in the worktree
+3. Include this in the Step 7 guidance: "Design context written to `.plans/context.md`. Run `/design` to continue."
 
-If `/start` is invoked without prior `/investigate` (no design-context in conversation) — existing flow unchanged, no file written.
+If `/start` is invoked without prior `/investigate` (no context in conversation) — existing flow unchanged, no file written.
 
 ### `/design` Modification
 
 At the end of Step 1 (after loading constitution and spec template):
 
-1. Check for `.plans/design-context.md` in current working directory
+1. Check for `.plans/context.md` in current working directory
 2. If found: read it, present a summary to the user, ask: "Design context loaded from investigation. Proceed to spec writing, or brainstorm further?"
 3. If "proceed": skip brainstorm (Step 2), go directly to Step 3 (write spec)
 4. If "brainstorm": continue with normal Step 2 flow, using the design context as input
 5. If not found: normal brainstorm flow, no change
 
-**Constraint checking (when design-context is loaded):**
-Before presenting the architecture (Step 2 or Step 3), verify the proposal against each Constraint and each Known Concern listed in `design-context.md`. Flag any conflicts — e.g., "Constraint #3 says X, but the proposed architecture does Y." This catches drift between the investigation decisions and the spec being written.
+**Constraint checking (when context is loaded):**
+Before presenting the architecture (Step 2 or Step 3), verify the proposal against each Constraint and each Known Concern listed in `context.md`. Flag any conflicts — e.g., "Constraint #3 says X, but the proposed architecture does Y." This catches drift between the investigation decisions and the spec being written.
 
 ### Hook Changes
 
@@ -412,18 +413,20 @@ The `is_allowed_path` function (line 34) normalizes paths but the `.worktrees/` 
 | AC-19 | Skill frontmatter validation catches missing name or description | `test_verify_workflow.py::test_skill_frontmatter_missing_name` | 🔲 |
 | AC-20 | Agent frontmatter validation catches invalid tool names | `test_verify_workflow.py::test_agent_frontmatter_invalid_tool` | 🔲 |
 | AC-21 | Dead link detection finds references to non-existent files | `test_verify_workflow.py::test_dead_link_detection` | 🔲 |
-| AC-22 | `/start` skill writes `.plans/design-context.md` to worktree when design-context is present in conversation | `grep "design-context.md" .claude/skills/start/SKILL.md` returns match in write logic | 🔲 |
-| AC-23 | `/design` skill loads `.plans/design-context.md` at Step 1 and offers proceed/brainstorm choice | `grep "design-context.md" .claude/skills/design/SKILL.md` returns match in Step 1 section | 🔲 |
+| AC-22 | `/start` skill writes `.plans/context.md` to worktree when context is present in conversation (canonical: workflow-enforcement AC-95, AC-97) | `grep "context.md" .claude/skills/start/SKILL.md` returns match in write logic | 🔲 |
+| AC-23 | `/design` skill loads `.plans/context.md` at Step 1 and offers proceed/brainstorm choice (canonical: workflow-enforcement AC-98) | `grep "context.md" .claude/skills/design/SKILL.md` returns match in Step 1 section | 🔲 |
 | AC-24 | session-stop-workflow.py `non_code_prefixes` does not contain `.claude/` | `python -c "exec(open('.claude/hooks/session-stop-workflow.py').read()); assert '.claude/' not in non_code_prefixes"` or equivalent grep | 🔲 |
 | AC-25 | session-stop-workflow.py and pr-gate.py `valid_surfaces` contains `"workflow"` | `grep '"workflow"' .claude/hooks/session-stop-workflow.py .claude/hooks/pr-gate.py` returns matches in valid_surfaces tuples | 🔲 |
 | AC-26 | session-start-workflow.py references `/design` not `/spec` in guidance text | `grep '/spec' .claude/hooks/session-start-workflow.py` returns no matches | 🔲 |
 | AC-27 | protect-main-branch.py correctly allows `.worktrees/` paths under MSYS normalization | `test_protect_main_branch.py::test_msys_worktree_path_allowed` | 🔲 |
 | AC-28 | `/investigate` skill references `.retros/summary.json` in gather step for pattern awareness | `grep "summary.json" .claude/skills/investigate/SKILL.md` returns match in gather section | 🔲 |
 | AC-29 | `.claude/` file changes trigger workflow enforcement (end-to-end: commit .claude/ change, session-stop blocks without verify) | `test_session_stop_workflow.py::test_claude_dir_requires_enforcement` | 🔲 |
-| AC-30 | `/design` skill verifies proposal against each Constraint and Known Concern from design-context before presenting architecture | `grep -i "constraint.*flag\|known concern\|conflict" .claude/skills/design/SKILL.md` returns match | 🔲 |
+| AC-30 | `/design` skill verifies proposal against each Constraint and Known Concern from context before presenting architecture | `grep -i "constraint.*flag\|known concern\|conflict" .claude/skills/design/SKILL.md` returns match | 🔲 |
 | AC-31 | Workflow-only change passes QA gate when `qa.workflow` is set by `/verify workflow` | `test_session_stop_workflow.py::test_qa_workflow_surface_accepted` | 🔲 |
 | AC-32 | Missing `.retros/summary.json` does not cause error during `/investigate` gather phase | `test_verify_workflow.py::test_missing_retro_store_no_error` | 🔲 |
 | AC-33 | `.retros/summary.json` with wrong `schema_version` triggers rebuild, not crash | `test_verify_workflow.py::test_retro_store_schema_mismatch_rebuild` | 🔲 |
+| AC-34 | `/investigate` Step 8 handoff detects if already in a worktree and writes `.plans/context.md` directly instead of saying "Run `/start`" | Manual: run `/investigate` in a worktree, verify context file written and guidance says "Run `/design`" | 🔲 |
+| AC-35 | `/investigate` Step 8 handoff detects main branch and instructs "Run `/start`" with context in conversation memory | Manual: run `/investigate` on main, verify guidance says "Run `/start`" | 🔲 |
 
 ### Edge Cases
 
@@ -433,13 +436,15 @@ The `is_allowed_path` function (line 34) normalizes paths but the `.worktrees/` 
 | Challenger finds zero issues in round 1 | Clean proposal | Stop after round 1, present with "no concerns found" |
 | Challenger loops (same findings reappear) | Round 2 repeats round 1 findings | Stop, note "challenger converged (repeated findings)" |
 | Quick mode on complex topic | Human chooses quick for architecture change | Skill proceeds without challenge — human's judgment call |
-| No design-context in conversation | `/start` invoked without prior `/investigate` | Normal `/start` flow, no `.plans/design-context.md` written |
-| `.plans/design-context.md` already exists | `/design` finds stale context from prior investigation | Present it, ask "proceed or brainstorm?" — human decides |
+| No context in conversation | `/start` invoked without prior `/investigate` | Normal `/start` flow, no `.plans/context.md` written |
+| `.plans/context.md` already exists | `/design` finds stale context from prior investigation | Present it, ask "proceed or brainstorm?" — human decides |
 | `.retros/summary.json` has merge conflict | Two branches update concurrently | Append-only makes conflict mechanically resolvable — both additions are valid |
 | MSYS path with mixed separators | `/c/VS/ppdsw/ppds/.worktrees/foo/bar.md` | `protect-main-branch.py` normalizes to `C:/VS/...` and allows |
 | Challenger diverges (more blockers each round) | Round 2 has more blockers than round 1 | Stop at max 3 rounds, present all findings, note divergence to human |
 | Retro store schema version mismatch | `summary.json` has `schema_version: 2` but code expects 1 | Log warning, rebuild fresh file with current schema |
-| No design-context in new session | Human runs `/start` in a new session without prior `/investigate` | No `.plans/design-context.md` written, normal `/start` flow |
+| No context in new session | Human runs `/start` in a new session without prior `/investigate` | No `.plans/context.md` written, normal `/start` flow |
+| `/investigate` run in worktree | Already on a feature branch | Handoff writes `.plans/context.md` directly, says "Run `/design`" — skips `/start` |
+| `/investigate` run on main with existing worktree for this work | Worktree exists for the topic | Handoff says "Run `/start`" — resume will be offered when worktree exists |
 
 ---
 
@@ -459,7 +464,7 @@ The output of the synthesize step, input to the challenger agent. Plain markdown
 
 ### Design Context
 
-The file written by `/start` to `.plans/design-context.md`. Contains the investigation output that `/design` consumes.
+The file written by `/start` to `.plans/context.md`. Contains the investigation output that `/design` consumes.
 
 ```markdown
 # Design Context: {topic}
@@ -575,9 +580,9 @@ The file written by `/start` to `.plans/design-context.md`. Contains the investi
 
 ### Why conversation-based handoff?
 
-**Context:** `/investigate` needs to pass design-context to `/start` → `/design`. Can't write to main (protect-main-branch hook blocks it).
+**Context:** `/investigate` needs to pass context to `/start` → `/design`. Can't write to main (protect-main-branch hook blocks it).
 
-**Decision:** `/investigate` holds design-context in conversation memory. Human runs `/start`, which writes it to the new worktree's `.plans/design-context.md`.
+**Decision:** `/investigate` holds context in conversation memory. Human runs `/start`, which writes it to the new worktree's `.plans/context.md`.
 
 **Alternatives considered:**
 - Write intermediate file on main: Rejected — protect-main-branch hook blocks it.
@@ -629,6 +634,7 @@ The file written by `/start` to `.plans/design-context.md`. Contains the investi
 | Date | Change |
 |------|--------|
 | 2026-03-27 | Initial spec |
+| 2026-03-27 | v1.1 — context-aware handoff: (1) Step 8 detects worktree vs main and routes accordingly, (2) context file renamed from `design-context.md` to `context.md` for consolidation with `/start` work-type routing, (3) worktree handoff writes context file directly instead of requiring `/start`. |
 
 ---
 
