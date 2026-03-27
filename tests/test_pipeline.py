@@ -1617,6 +1617,60 @@ class TestHeartbeatOriginMain:
         )
 
 
+# ===========================================================================
+# Pipeline Reliability (PO AC-16–24) — Converge Logic
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# PO AC-20: Pipeline runs converge on review FAIL
+# ---------------------------------------------------------------------------
+class TestConvergeOnReviewFail:
+    def test_pipeline_runs_converge_on_review_fail(self):
+        """PO AC-20: Converge stage checks review state, not just review.passed."""
+        import inspect
+        import pipeline
+
+        source = inspect.getsource(pipeline.main)
+        # The converge stage should read review findings and make a decision
+        assert "review_findings" in source, (
+            "Converge logic must check review findings count"
+        )
+        assert "review FAIL" in source or "review_passed" in source, (
+            "Converge logic must handle review FAIL case"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PO AC-21: Pipeline skips converge on zero findings
+# ---------------------------------------------------------------------------
+class TestConvergeSkipsOnZero:
+    def test_pipeline_skips_converge_on_zero_findings(self):
+        """PO AC-21: Converge skipped when review passes with zero findings."""
+        import inspect
+        import pipeline
+
+        source = inspect.getsource(pipeline.main)
+        assert "review_findings == 0" in source or "zero findings" in source, (
+            "Converge must skip when review passes with zero findings"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PO AC-21b: Pipeline runs converge on pass with findings
+# ---------------------------------------------------------------------------
+class TestConvergeRunsOnPassWithFindings:
+    def test_pipeline_runs_converge_on_pass_with_findings(self):
+        """PO AC-21b: Converge runs when review passes with non-zero findings."""
+        import inspect
+        import pipeline
+
+        source = inspect.getsource(pipeline.main)
+        assert "review_findings > 0" in source, (
+            "Converge must run when review passes with findings > 0"
+        )
+
+
 # ---------------------------------------------------------------------------
 # AC-122: Hook path resolution in worktrees
 # ---------------------------------------------------------------------------

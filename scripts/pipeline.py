@@ -1281,9 +1281,23 @@ def main():
                         _pipeline_fail(stage)
 
             elif stage == "converge":
-                if check_review_passed(worktree_path):
-                    log(logger, "converge", "SKIPPED", reason="review already passed")
+                state = read_state(worktree_path)
+                review = state.get("review", {})
+                review_passed = review.get("passed", False)
+                review_findings = review.get("findings", 0)
+                try:
+                    review_findings = int(review_findings)
+                except (TypeError, ValueError):
+                    review_findings = 0
+
+                if review_passed and review_findings == 0:
+                    log(logger, "converge", "SKIPPED", reason="review passed with zero findings")
                     continue
+                elif review_passed and review_findings > 0:
+                    log(logger, "converge", "TRIGGERED",
+                        reason=f"review passed with {review_findings} findings")
+                else:
+                    log(logger, "converge", "TRIGGERED", reason="review FAIL")
 
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
