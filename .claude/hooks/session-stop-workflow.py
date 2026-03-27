@@ -8,14 +8,15 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _pathfix import get_project_dir
 
 
 def main():
-    # Pipeline mode: orchestrator handles stage sequencing
-    if os.environ.get("PPDS_PIPELINE"):
+    # Pipeline/shakedown mode: orchestrator handles stage sequencing
+    if os.environ.get("PPDS_PIPELINE") or os.environ.get("PPDS_SHAKEDOWN"):
         sys.exit(0)
 
     # Read stdin
@@ -63,6 +64,11 @@ def main():
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
+    # Phase-aware bypass: non-implementing phases don't need workflow enforcement
+    phase = state.get("phase")
+    if phase in ("starting", "investigating", "design", "reviewing", "pr"):
+        sys.exit(0)
+
     # Get current HEAD for staleness check
     head_sha = None
     try:
@@ -78,11 +84,11 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Planning/spec phase: skip enforcement if no source code changes beyond main
+    # Code change detection: skip enforcement if no source code changes beyond main
     # (spec updates and docs don't owe gates/verify/review)
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "main...HEAD"],
+            ["git", "diff", "--name-only", "origin/main...HEAD"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -204,6 +210,17 @@ def main():
         lines.append("")
         lines.append(f"You MUST now run: {next_step}")
         lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
+
+        # Enforcement logging — track block count for retro detection
+        try:
+            state["stop_hook_blocked"] = True
+            state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
+            state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2)
+                f.write("\n")
+        except OSError:
+            pass
 
         output = {
             "decision": "block",

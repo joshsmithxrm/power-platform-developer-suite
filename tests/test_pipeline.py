@@ -1476,3 +1476,142 @@ class TestObservationsPersisted:
             assert "observation" in tiers, (
                 "observation findings must be preserved in retro-findings.json"
             )
+
+
+# ===========================================================================
+# Workflow Enforcement v7.0 Tests (ACs 100-127) — Stop Hook + Heartbeat
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# AC-100: Stop hook uses origin/main
+# ---------------------------------------------------------------------------
+class TestStopHookOriginMain:
+    def test_stop_hook_uses_origin_main(self):
+        """AC-100: Stop hook uses origin/main...HEAD, not local main...HEAD."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        with open(hook_path, "r") as f:
+            content = f.read()
+        assert "origin/main...HEAD" in content, (
+            "Stop hook must use origin/main...HEAD for code change detection"
+        )
+        # Ensure bare main...HEAD is NOT used (outside of origin/main)
+        lines = content.split("\n")
+        for line in lines:
+            if "main...HEAD" in line and "origin/main" not in line:
+                assert False, (
+                    f"Found bare main...HEAD (without origin/) in: {line.strip()}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# AC-101: Stop hook phase bypass
+# ---------------------------------------------------------------------------
+class TestStopHookPhaseBypass:
+    def test_stop_hook_phase_bypass(self):
+        """AC-101: Stop hook exits 0 for non-implementing phases."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        with open(hook_path, "r") as f:
+            content = f.read()
+
+        # Verify the phase bypass logic exists
+        assert 'state.get("phase")' in content, (
+            "Stop hook must read phase from state"
+        )
+        for phase in ("starting", "investigating", "design", "reviewing", "pr"):
+            assert f'"{phase}"' in content, (
+                f"Stop hook must bypass for phase: {phase}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# AC-102: Stop hook enforces implementing phase
+# ---------------------------------------------------------------------------
+class TestStopHookEnforcesImplementing:
+    def test_stop_hook_enforces_implementing_phase(self):
+        """AC-102: Stop hook enforces workflow for implementing phase and null."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        with open(hook_path, "r") as f:
+            content = f.read()
+
+        # The bypass list should NOT include "implementing" or "pipeline"
+        # These phases require full workflow enforcement
+        assert '"implementing"' not in content.split("if phase in")[1].split(")")[0], (
+            "implementing phase must NOT be in the bypass list"
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-103: Stop hook exits in shakedown mode
+# ---------------------------------------------------------------------------
+class TestStopHookShakedown:
+    def test_stop_hook_exits_in_shakedown_mode(self):
+        """AC-103: Stop hook exits 0 when PPDS_SHAKEDOWN=1."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        env = os.environ.copy()
+        env["PPDS_SHAKEDOWN"] = "1"
+        result = subprocess.run(
+            [sys.executable, hook_path],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=REPO_ROOT,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"Stop hook should exit 0 in shakedown mode, got {result.returncode}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-104: Stop hook enforcement logging
+# ---------------------------------------------------------------------------
+class TestStopHookEnforcementLogging:
+    def test_stop_hook_enforcement_logging(self):
+        """AC-104: Stop hook writes stop_hook_blocked, count, and timestamp to state."""
+        hook_path = os.path.join(
+            REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
+        )
+        with open(hook_path, "r") as f:
+            content = f.read()
+
+        assert "stop_hook_blocked" in content, (
+            "Stop hook must write stop_hook_blocked to state"
+        )
+        assert "stop_hook_count" in content, (
+            "Stop hook must write stop_hook_count to state"
+        )
+        assert "stop_hook_last" in content, (
+            "Stop hook must write stop_hook_last timestamp to state"
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-123: Pipeline heartbeat uses origin/main
+# ---------------------------------------------------------------------------
+class TestHeartbeatOriginMain:
+    def test_heartbeat_uses_origin_main(self):
+        """AC-123: get_commit_count and get_git_activity use origin/main..HEAD."""
+        import inspect
+        import pipeline
+
+        # Check get_commit_count
+        source_count = inspect.getsource(pipeline.get_commit_count)
+        assert "origin/main..HEAD" in source_count, (
+            "get_commit_count must use origin/main..HEAD"
+        )
+
+        # Check get_git_activity
+        source_activity = inspect.getsource(pipeline.get_git_activity)
+        assert "origin/main..HEAD" in source_activity, (
+            "get_git_activity must use origin/main..HEAD"
+        )

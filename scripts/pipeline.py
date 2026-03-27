@@ -113,7 +113,7 @@ def get_commit_count(worktree_path):
     """Get number of commits ahead of main."""
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "main..HEAD"],
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
             cwd=worktree_path,
             capture_output=True,
             text=True,
@@ -246,7 +246,7 @@ def get_git_activity(worktree_path):
         pass
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "main..HEAD"],
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
             cwd=worktree_path, capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
