@@ -65,10 +65,7 @@ BeforeAll {
             [string[]]$Arguments
         )
 
-        $params = @{ RepoRoot = $Root }
         if ($Arguments) {
-            # Build full command to capture Write-Host output
-            $argStr = ($Arguments | ForEach-Object { "'$_'" }) -join ','
             $output = pwsh -NoProfile -Command "& '$script:DevScript' -RepoRoot '$Root' $($Arguments -join ' ')" 2>&1
             return $output
         } else {

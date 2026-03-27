@@ -398,7 +398,7 @@ function Format-WorktreeLine {
         Dirty  = $dirty
         Detail = $detail
         IsCurrent = $IsCurrent
-        Group  = Get-WorktreeGroup -Wt $Wt -MergedBranches @()
+        Group  = $null  # Computed in Show-Dashboard with real merged branches
         Raw    = $Wt
     }
 }
@@ -553,7 +553,8 @@ function Show-WorktreeStatus {
     $workflow = $null
     $statePath = Join-Path $wtPath '.workflow' 'state.json'
     if (Test-Path $statePath) {
-        try { $workflow = Get-Content $statePath -Raw | ConvertFrom-Json } catch {}
+        try { $workflow = Get-Content $statePath -Raw | ConvertFrom-Json }
+        catch { Write-Host "  Warning: failed to read $statePath`: $_" -ForegroundColor DarkYellow }
     }
 
     $pipeline = Get-PipelineState -WorktreePath $wtPath
@@ -564,7 +565,8 @@ function Show-WorktreeStatus {
 
     Write-Host "  Branch:    " -NoNewline -ForegroundColor DarkGray
     Write-Host "$branch" -ForegroundColor White
-    Write-Host "             +$ahead ahead, -$($behind ?? '0') behind main" -ForegroundColor DarkGray
+    $behindStr = if ($behind) { $behind } else { '0' }
+    Write-Host "             +$ahead ahead, -$behindStr behind main" -ForegroundColor DarkGray
 
     if ($workflow -and $workflow.started) {
         Write-Host "  Started:   $($workflow.started)" -ForegroundColor DarkGray
@@ -591,7 +593,8 @@ function Show-WorktreeStatus {
         # Gates
         if ($workflow.gates -and $workflow.gates.passed) {
             $ref = if ($workflow.gates.commit_ref) { $workflow.gates.commit_ref.Substring(0, 7) } else { '?' }
-            $head = (git -C $wtPath rev-parse --short HEAD 2>$null) ?? '?'
+            $head = git -C $wtPath rev-parse --short HEAD 2>$null
+            if (-not $head) { $head = '?' }
             $stale = if ($ref -ne $head) { ', STALE' } else { ', current' }
             Write-Host "    ✓ gates      passed (commit $ref$stale)" -ForegroundColor Green
         } else {
@@ -681,7 +684,9 @@ function Show-WorktreeStatus {
                         Write-Host "    Comments: $(@($pr.comments).Count)" -ForegroundColor DarkGray
                     }
                 }
-            } catch {}
+            } catch {
+                Write-Host "    Warning: failed to fetch PR: $_" -ForegroundColor DarkYellow
+            }
         }
     }
 
@@ -778,14 +783,16 @@ function Invoke-Pipeline {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
             $spec = $state.spec
-        } catch {}
+        } catch { Write-Host "  Warning: failed to read state: $_" -ForegroundColor DarkYellow }
     }
 
     $args_ = @($pipelineScript, '--worktree', $wtPath)
     if ($spec) { $args_ += @('--spec', $spec) }
 
     $proc = Start-Process python -ArgumentList $args_ -PassThru -WorkingDirectory $Root
-    Write-Host "  Pipeline started (PID $($proc.Id))." -ForegroundColor Green
+    $procId = $proc.Id
+    $proc.Dispose()
+    Write-Host "  Pipeline started (PID $procId)." -ForegroundColor Green
     Write-Host "  Monitor: dev status $(Split-Path $wtPath -Leaf)" -ForegroundColor DarkGray
 }
 
