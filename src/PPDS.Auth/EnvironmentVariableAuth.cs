@@ -98,7 +98,7 @@ public static class EnvironmentVariableAuth
         if (Enum.TryParse<CloudEnvironment>(value, ignoreCase: true, out var cloud))
             return cloud;
         throw new AuthenticationException(
-            $"{CloudVar} must be one of: Public, UsGov, UsGovHigh, UsGovDod, China. Got: {value}",
+            $"{CloudVar} must be one of: {string.Join(", ", Enum.GetNames<CloudEnvironment>())}. Got: {value}",
             "Auth.InvalidCloud");
     }
 }
