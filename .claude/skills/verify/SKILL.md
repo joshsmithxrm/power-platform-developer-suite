@@ -35,6 +35,7 @@ Based on $ARGUMENTS or recent changes:
 - `src/PPDS.Cli/Tui/` → TUI mode
 - `src/PPDS.Extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
+- `.claude/` or `scripts/` → Workflow mode
 - No clear match → Ask user
 
 ### 2. Run Unit Tests First
@@ -162,6 +163,55 @@ For each tool:
 2. Call with edge case input -> verify error handling
 3. Verify response matches expected schema
 
+
+### 8. Workflow Mode
+
+Structural validation of process code (`.claude/` and `scripts/`).
+
+**Check 1: Python tests**
+```bash
+pytest tests/test_pipeline.py tests/test_workflow_state.py tests/test_protect_main_branch.py tests/test_session_stop_workflow.py -v
+```
+
+**Check 2: Hook script tests**
+For each `.py` file in `.claude/hooks/` (excluding `_pathfix.py`):
+```bash
+echo '{}' | python .claude/hooks/{hook}.py
+# Expect exit 0 (allow) or exit 2 (block) — not a crash (exit 1)
+```
+
+**Check 3: settings.json validation**
+Parse `.claude/settings.json` as JSON. For each hook entry, verify the `command` path exists on disk.
+
+**Check 4: Skill frontmatter validation**
+For each `.claude/skills/*/SKILL.md`:
+- Parse YAML frontmatter (between `---` delimiters)
+- Verify `name` field present and non-empty
+- Verify `description` field present and non-empty
+
+**Check 5: Agent frontmatter validation**
+For each `.claude/agents/*.md`:
+- Parse YAML frontmatter
+- Verify `tools` list present
+- Verify each tool name is in the known valid set: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`, `Agent`, `WebSearch`, `WebFetch`, `NotebookEdit` (and Bash with patterns like `Bash(git diff:*)`)
+
+**Check 6: Skill file references**
+Scan each skill markdown for file path patterns (relative paths starting with `./`, `../`, or absolute paths). Verify each referenced file exists.
+
+**Check 7: Retro store schema**
+If `.retros/summary.json` exists:
+- Parse as JSON
+- Verify required keys: `schema_version`, `last_updated`, `total_retros`, `findings_by_category`, `metrics`
+- Verify `schema_version == 1`
+If the file does not exist, this check passes (the store is optional until first retro).
+
+**Check 8: Workflow state write**
+On all checks passing:
+```bash
+python scripts/workflow-state.py set verify.workflow now
+python scripts/workflow-state.py set qa.workflow now
+```
+
 ### 7. Report
 
 Present structured results:
@@ -190,6 +240,7 @@ python scripts/workflow-state.py set verify.{surface} now
 ```
 
 Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
+Surface key `workflow`: `/verify workflow` → writes `verify.workflow` + `qa.workflow` (structural validation IS the QA for process code).
 
 ## Rules
 
