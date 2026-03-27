@@ -55,6 +55,9 @@ def show_toast(title, msg, url):
 
 
 def main():
+    if os.environ.get("PPDS_PIPELINE"):
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description="Desktop toast notification")
     parser.add_argument("--title", default="PR Ready")
     parser.add_argument("--msg", default="Click to open pull request")
