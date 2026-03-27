@@ -66,8 +66,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     {
         new MenuBarItem("_Query", new MenuItem[]
         {
-            new("Execute", "F5", () => ErrorService.FireAndForget(
-                _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation), "ExecuteQuery")),
+            new("Execute", "F5", StartPresenterExecution),
             new("Show FetchXML", "Ctrl+Shift+F / F9", ShowFetchXmlDialog),
             new("Show Execution Plan", "Ctrl+Shift+E / F7", ShowExecutionPlanDialog),
             new("History", "Ctrl+Shift+H / F8", ShowHistoryDialog),
@@ -498,8 +497,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             else
                 _queryInput.SetFocus();
         });
-        RegisterHotkey(registry, Key.F5, "Execute query", () => ErrorService.FireAndForget(
-            _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation), "ExecuteQuery"));
+        RegisterHotkey(registry, Key.F5, "Execute query", StartPresenterExecution);
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
         // F10 instead of Ctrl+Shift+T: terminals cannot distinguish Ctrl+T from Ctrl+Shift+T
         // (they send the same keycode), so the global Ctrl+T (new tab) always wins. See #580.

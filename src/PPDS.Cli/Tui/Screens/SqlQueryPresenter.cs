@@ -37,7 +37,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     public int LastPageNumber => _lastPageNumber;
     public bool IsExecuting => _isExecuting;
     public string? LastErrorMessage => _lastErrorMessage;
-    public QueryPlanDescription? LastExecutionPlan { get => _lastExecutionPlan; set => _lastExecutionPlan = value; }
+    public QueryPlanDescription? LastExecutionPlan => _lastExecutionPlan;
     public long LastExecutionTimeMs => _lastExecutionTimeMs;
     public bool UseTdsEndpoint => _useTdsEndpoint;
 
@@ -151,7 +151,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
 
-            // AC-13: atomically capture and reset DML confirmation flag
+            // AC-13: capture and reset DML confirmation flag
             var isConfirmed = _confirmedDml;
             _confirmedDml = false;
 
@@ -324,9 +324,13 @@ internal sealed class SqlQueryPresenter : IDisposable
         }
     }
 
+    private bool _disposed;
+
     /// <inheritdoc />
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _queryCts?.Cancel();
         _queryCts?.Dispose();
     }

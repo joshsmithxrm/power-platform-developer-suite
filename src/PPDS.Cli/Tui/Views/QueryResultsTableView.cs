@@ -355,13 +355,22 @@ internal sealed class QueryResultsTableView : FrameView
     /// </summary>
     private static string EscapeFilterValue(string value)
     {
-        // Escape special characters: ', *, %, [, ]
-        return value
-            .Replace("'", "''")
-            .Replace("[", "[[]")
-            .Replace("]", "[]]")
-            .Replace("*", "[*]")
-            .Replace("%", "[%]");
+        // Escape special characters for DataView.RowFilter LIKE expressions.
+        // Order matters: escape ] before [ to avoid double-escaping the ] in [[]
+        var sb = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            sb.Append(c switch
+            {
+                '\'' => "''",
+                '[' => "[[]",
+                ']' => "[]]",
+                '*' => "[*]",
+                '%' => "[%]",
+                _ => c.ToString()
+            });
+        }
+        return sb.ToString();
     }
 
     private void SetupKeyboardShortcuts()
