@@ -19,7 +19,7 @@ Run `/status` to check current workflow state.
 
 ## Process
 
-### 1. Rebase on Main
+### 1. Rebase on Main and Push
 
 ```bash
 git fetch origin main
@@ -27,6 +27,19 @@ git rebase origin/main
 ```
 
 If conflicts exist, present them to the user — do NOT auto-resolve.
+
+After successful rebase, verify and push:
+
+```bash
+# Verify rebase succeeded — origin/main must be an ancestor of HEAD
+git merge-base --is-ancestor origin/main HEAD
+
+# Push rebased branch (force-with-lease is safe — only overwrites our own commits)
+git push --force-with-lease origin HEAD
+```
+
+If `merge-base` fails, the rebase didn't apply correctly — investigate before proceeding.
+If push is rejected, fetch and retry the rebase.
 
 ### 2. Check for Linked Issues
 
