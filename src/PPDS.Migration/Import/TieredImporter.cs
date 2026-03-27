@@ -15,6 +15,7 @@ using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
+using PPDS.Migration.Import.Handlers;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
@@ -35,6 +36,11 @@ namespace PPDS.Migration.Import
         private readonly DeferredFieldProcessor _deferredFieldProcessor;
         private readonly RelationshipProcessor _relationshipProcessor;
         private readonly BulkOperationProber _prober;
+        private readonly IReadOnlyList<IRecordFilter> _recordFilters;
+        private readonly IReadOnlyList<IRecordTransformer> _recordTransformers;
+        private readonly IReadOnlyList<IStateTransitionHandler> _stateTransitionHandlers;
+        private readonly IReadOnlyList<IPostImportHandler> _postImportHandlers;
+        private readonly StateTransitionProcessor? _stateTransitionProcessor;
         private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
@@ -62,6 +68,10 @@ namespace PPDS.Migration.Import
             _deferredFieldProcessor = deferredFieldProcessor ?? throw new ArgumentNullException(nameof(deferredFieldProcessor));
             _relationshipProcessor = relationshipProcessor ?? throw new ArgumentNullException(nameof(relationshipProcessor));
             _prober = prober ?? throw new ArgumentNullException(nameof(prober));
+            _recordFilters = Array.Empty<IRecordFilter>();
+            _recordTransformers = Array.Empty<IRecordTransformer>();
+            _stateTransitionHandlers = Array.Empty<IStateTransitionHandler>();
+            _postImportHandlers = Array.Empty<IPostImportHandler>();
             _defaultOptions = new ImportOptions();
         }
 
@@ -78,12 +88,22 @@ namespace PPDS.Migration.Import
             DeferredFieldProcessor deferredFieldProcessor,
             RelationshipProcessor relationshipProcessor,
             BulkOperationProber prober,
+            IEnumerable<IRecordFilter>? recordFilters = null,
+            IEnumerable<IRecordTransformer>? recordTransformers = null,
+            IEnumerable<IStateTransitionHandler>? stateTransitionHandlers = null,
+            IEnumerable<IPostImportHandler>? postImportHandlers = null,
+            StateTransitionProcessor? stateTransitionProcessor = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
             : this(connectionPool, bulkExecutor, dataReader, graphBuilder, planBuilder,
                    schemaValidator, deferredFieldProcessor, relationshipProcessor, prober)
         {
+            _recordFilters = recordFilters?.ToList() ?? (IReadOnlyList<IRecordFilter>)Array.Empty<IRecordFilter>();
+            _recordTransformers = recordTransformers?.ToList() ?? (IReadOnlyList<IRecordTransformer>)Array.Empty<IRecordTransformer>();
+            _stateTransitionHandlers = stateTransitionHandlers?.ToList() ?? (IReadOnlyList<IStateTransitionHandler>)Array.Empty<IStateTransitionHandler>();
+            _postImportHandlers = postImportHandlers?.ToList() ?? (IReadOnlyList<IPostImportHandler>)Array.Empty<IPostImportHandler>();
+            _stateTransitionProcessor = stateTransitionProcessor;
             _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
             _logger = logger;
@@ -166,21 +186,56 @@ namespace PPDS.Migration.Import
                     .ConfigureAwait(false);
                 var phase2Duration = deferredResult.Duration;
 
-                // Phase 3: Process M2M relationships
+                // Phase 3: Process state transitions
+                PhaseResult stateTransitionResult;
+                if (_stateTransitionProcessor != null)
+                {
+                    context.OutputManager?.LogProgress("Starting state transitions phase");
+                    stateTransitionResult = await _stateTransitionProcessor.ProcessAsync(context, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    stateTransitionResult = PhaseResult.Skipped();
+                }
+
+                // Run post-import handlers after state transitions
+                foreach (var handler in _postImportHandlers)
+                {
+                    foreach (var entitySchema in data.Schema.Entities)
+                    {
+                        if (handler.CanHandle(entitySchema.LogicalName))
+                        {
+                            try
+                            {
+                                await handler.ExecuteAsync(entitySchema.LogicalName, context, cancellationToken)
+                                    .ConfigureAwait(false);
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                _logger?.LogWarning(ex,
+                                    "Post-import handler {Handler} failed for entity {Entity}",
+                                    handler.GetType().Name, entitySchema.LogicalName);
+                            }
+                        }
+                    }
+                }
+
+                // Phase 4: Process M2M relationships
                 context.OutputManager?.LogProgress("Starting M2M relationships phase");
                 var relationshipResult = await _relationshipProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
-                var phase3Duration = relationshipResult.Duration;
+                var phase4Duration = relationshipResult.Duration;
 
                 stopwatch.Stop();
 
-                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {M2M} relationships in {Duration}",
-                    totalImported, deferredResult.SuccessCount, relationshipResult.SuccessCount, stopwatch.Elapsed);
+                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships in {Duration}",
+                    totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, stopwatch.Elapsed);
 
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,
                     totalImported, data.TotalRecordCount, deferredResult, relationshipResult,
-                    stopwatch.Elapsed, phase1Duration, phase2Duration, phase3Duration,
+                    stopwatch.Elapsed, phase1Duration, phase2Duration, phase4Duration,
                     options, progress);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -391,6 +446,18 @@ namespace PPDS.Migration.Import
                             return;
                         }
 
+                        // Check per-entity import mode override (AC-37, AC-38)
+                        var entitySchema = context.Data.Schema.Entities
+                            .FirstOrDefault(e => e.LogicalName.Equals(entityName, StringComparison.OrdinalIgnoreCase));
+                        if (entitySchema?.ImportMode == ImportMode.Skip)
+                        {
+                            _logger?.LogInformation("Skipping entity {Entity} (ImportMode=Skip)", entityName);
+                            return;
+                        }
+
+                        // Determine effective import mode for this entity
+                        var effectiveMode = entitySchema?.ImportMode ?? context.Options.Mode;
+
                         context.Plan.DeferredFields.TryGetValue(entityName, out var deferredFields);
                         var entityFieldMetadata = context.TargetFieldMetadata.GetFieldsForEntity(entityName);
 
@@ -400,9 +467,8 @@ namespace PPDS.Migration.Import
                             tier.TierNumber,
                             deferredFields,
                             entityFieldMetadata,
-                            context.IdMappings,
-                            context.Options,
-                            context.Progress,
+                            context,
+                            effectiveMode,
                             warnings,
                             ct).ConfigureAwait(false);
 
@@ -597,9 +663,8 @@ namespace PPDS.Migration.Import
             int tierNumber,
             IReadOnlyList<string>? deferredFields,
             IReadOnlyDictionary<string, FieldValidity> fieldMetadata,
-            IdMappingCollection idMappings,
-            ImportOptions options,
-            IProgressReporter? progress,
+            ImportContext context,
+            ImportMode effectiveMode,
             IWarningCollector warnings,
             CancellationToken cancellationToken)
         {
@@ -608,13 +673,108 @@ namespace PPDS.Migration.Import
                 ? new HashSet<string>(deferredFields, StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            var options = context.Options;
+            var idMappings = context.IdMappings;
+            var progress = context.Progress;
+
             _logger?.LogDebug("Importing {Count} records for {Entity}", records.Count, entityName);
 
-            // Prepare records: remap lookups, null deferred fields, and filter based on operation validity
+            // Compute elapsed time for date shifting
+            var elapsed = context.Data.ExportedAt != default
+                ? DateTime.UtcNow - context.Data.ExportedAt
+                : TimeSpan.Zero;
+
+            // Look up field schemas for date mode
+            var entitySchema = context.Data.Schema.Entities
+                .FirstOrDefault(e => e.LogicalName.Equals(entityName, StringComparison.OrdinalIgnoreCase));
+            var dateFieldModes = new Dictionary<string, DateMode>(StringComparer.OrdinalIgnoreCase);
+            if (entitySchema != null)
+            {
+                foreach (var field in entitySchema.Fields)
+                {
+                    if (field.DateMode != DateMode.Absolute)
+                    {
+                        dateFieldModes[field.LogicalName] = field.DateMode;
+                    }
+                }
+            }
+
+            // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
             foreach (var record in records)
             {
-                var prepared = PrepareRecordForImport(record, deferredSet, fieldMetadata, idMappings, options);
+                // Step 1: Apply record filters
+                var shouldSkip = false;
+                foreach (var filter in _recordFilters)
+                {
+                    if (filter.CanHandle(entityName) && filter.ShouldSkip(record, context))
+                    {
+                        shouldSkip = true;
+                        break;
+                    }
+                }
+                if (shouldSkip) continue;
+
+                // Step 2: Collect state transitions (before stripping statecode/statuscode)
+                // Use first matching handler only — each entity has at most one handler by design.
+                var stateHandler = _stateTransitionHandlers.FirstOrDefault(h => h.CanHandle(entityName));
+                if (stateHandler != null)
+                {
+                    var transition = stateHandler.GetTransition(record, context);
+                    if (transition != null)
+                    {
+                        context.StateTransitions.Add(entityName, record.Id, transition);
+                    }
+                }
+
+                // Step 2b: Generic state transition collection for entities without handlers
+                if (stateHandler == null)
+                {
+                    var sc = record.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
+                    var stc = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? -1;
+                    if (sc != 0)
+                    {
+                        context.StateTransitions.Add(entityName, record.Id, new StateTransitionData
+                        {
+                            EntityName = entityName,
+                            RecordId = record.Id,
+                            StateCode = sc,
+                            StatusCode = stc
+                        });
+                    }
+                }
+
+                // Step 3: Strip statecode and statuscode from ALL records (AC-05)
+                record.Attributes.Remove("statecode");
+                record.Attributes.Remove("statuscode");
+
+                // Step 4: Apply record transformers
+                var transformed = record;
+                foreach (var transformer in _recordTransformers)
+                {
+                    if (transformer.CanHandle(entityName))
+                    {
+                        transformed = transformer.Transform(transformed, context);
+                    }
+                }
+
+                // Step 5: Apply date shifting for non-absolute DateMode fields
+                if (elapsed != TimeSpan.Zero && dateFieldModes.Count > 0)
+                {
+                    foreach (var (fieldName, mode) in dateFieldModes)
+                    {
+                        if (transformed.Contains(fieldName) && transformed[fieldName] is DateTime dtValue)
+                        {
+                            var shifted = DateShifter.Shift(dtValue, mode, elapsed);
+                            if (shifted.HasValue)
+                            {
+                                transformed[fieldName] = shifted.Value;
+                            }
+                        }
+                    }
+                }
+
+                var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
                 preparedRecords.Add(prepared);
             }
 
@@ -651,7 +811,7 @@ namespace PPDS.Migration.Import
                 // Track if we fell back to individual operations (for warning emission)
                 var wasKnownBulkNotSupported = _prober.IsKnownBulkNotSupported(entityName);
 
-                var operationType = options.Mode switch
+                var operationType = effectiveMode switch
                 {
                     ImportMode.Create => BulkOperationType.Create,
                     ImportMode.Update => BulkOperationType.Update,
@@ -663,7 +823,7 @@ namespace PPDS.Migration.Import
                     preparedRecords,
                     operationType,
                     bulkOptions,
-                    async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), options, cancellationToken).ConfigureAwait(false),
+                    async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, cancellationToken).ConfigureAwait(false),
                     progressAdapter,
                     cancellationToken).ConfigureAwait(false);
 
@@ -685,7 +845,7 @@ namespace PPDS.Migration.Import
             else
             {
                 // UseBulkApis is false - use individual operations directly
-                bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, options, cancellationToken).ConfigureAwait(false);
+                bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, effectiveMode, options, cancellationToken).ConfigureAwait(false);
             }
 
             // Track ID mappings - for bulk operations, IDs are preserved from Entity.Id
@@ -727,6 +887,7 @@ namespace PPDS.Migration.Import
         private async Task<BulkOperationResult> ExecuteIndividualOperationsAsync(
             string entityName,
             List<Entity> records,
+            ImportMode effectiveMode,
             ImportOptions options,
             CancellationToken cancellationToken)
         {
@@ -743,24 +904,24 @@ namespace PPDS.Migration.Import
                 try
                 {
                     Guid newId;
-                    switch (options.Mode)
+                    switch (effectiveMode)
                     {
                         case ImportMode.Create:
                             var createRequest = new CreateRequest { Target = record };
                             createRequest.ApplyBypassOptions(options);
-                            var createResponse = (CreateResponse)await client.ExecuteAsync(createRequest).ConfigureAwait(false);
+                            var createResponse = (CreateResponse)await client.ExecuteAsync(createRequest, cancellationToken).ConfigureAwait(false);
                             newId = createResponse.id;
                             break;
                         case ImportMode.Update:
                             var updateRequest = new UpdateRequest { Target = record };
                             updateRequest.ApplyBypassOptions(options);
-                            await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
+                            await client.ExecuteAsync(updateRequest, cancellationToken).ConfigureAwait(false);
                             newId = record.Id;
                             break;
                         default:
                             var upsertRequest = new UpsertRequest { Target = record };
                             upsertRequest.ApplyBypassOptions(options);
-                            var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest).ConfigureAwait(false);
+                            var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest, cancellationToken).ConfigureAwait(false);
                             newId = upsertResponse.Target?.Id ?? record.Id;
                             break;
                     }
@@ -801,7 +962,8 @@ namespace PPDS.Migration.Import
             HashSet<string> deferredFields,
             IReadOnlyDictionary<string, FieldValidity> fieldMetadata,
             IdMappingCollection idMappings,
-            ImportOptions options)
+            ImportOptions options,
+            ImportMode effectiveMode)
         {
             var prepared = new Entity(record.LogicalName);
             prepared.Id = record.Id; // Keep original ID for mapping
@@ -829,7 +991,7 @@ namespace PPDS.Migration.Import
                 }
 
                 // Skip fields that are not valid for the current operation based on target metadata
-                if (!_schemaValidator.ShouldIncludeField(attr.Key, options.Mode, fieldMetadata, out _))
+                if (!_schemaValidator.ShouldIncludeField(attr.Key, effectiveMode, fieldMetadata, out _))
                 {
                     continue;
                 }
