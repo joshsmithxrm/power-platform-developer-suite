@@ -624,8 +624,8 @@ def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
 
         if count > 0 and count == last_count:
             stable_polls += 1
-            if stable_polls >= 2:
-                break  # Stable — all comments posted
+            if stable_polls >= 1:
+                break  # Stable — two consecutive polls with same count
         else:
             stable_polls = 0
 
@@ -727,6 +727,14 @@ def run_pr_stage(worktree_path, logger, dry_run=False, timeout=None):
     """Scripted PR stage: draft → poll Gemini → triage → ready → notify."""
     log(logger, "pr", "START")
     start = time.time()
+
+    def _check_timeout():
+        """Check if stage timeout exceeded. Logs and returns True if timed out."""
+        if timeout is not None and (time.time() - start) > timeout:
+            log(logger, "pr", "TIMEOUT",
+                elapsed=f"{int(time.time() - start)}s", timeout=f"{timeout}s")
+            return True
+        return False
 
     if dry_run:
         log(logger, "pr", "DONE", exit=0, duration="0s", mode="dry-run")
@@ -834,6 +842,11 @@ def run_pr_stage(worktree_path, logger, dry_run=False, timeout=None):
             cwd=worktree_path, capture_output=True, text=True, timeout=10,
         )
 
+    # Check timeout before polling
+    if _check_timeout():
+        log(logger, "pr", "DONE", exit=-1, duration=f"{int(time.time() - start)}s")
+        return -1, logger
+
     # 5. Poll for Gemini comments
     comments = poll_gemini(worktree_path, pr_number, logger)
 
@@ -867,6 +880,16 @@ def run_pr_stage(worktree_path, logger, dry_run=False, timeout=None):
                                   "but push may have failed. Check branch.")
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 annotation = "\n\n**Gemini:** could not verify push status."
+
+    # Check timeout before finalizing
+    if _check_timeout():
+        # Still convert to ready so the PR isn't stuck as draft
+        subprocess.run(
+            ["gh", "pr", "ready", pr_number],
+            cwd=worktree_path, capture_output=True, text=True, timeout=30,
+        )
+        log(logger, "pr", "DONE", exit=-1, duration=f"{int(time.time() - start)}s")
+        return -1, logger
 
     # Append annotation to PR body if needed
     if annotation:
@@ -1056,6 +1079,8 @@ def main():
                 log(logger, "retro", "SKIPPED", reason="--no-retro flag")
                 continue
 
+            stage_start_time = time.time()
+
             if stage == "worktree":
                 if worktree_path and os.path.exists(worktree_path):
                     log(logger, "worktree", "EXISTS", path=worktree_path)
@@ -1198,6 +1223,9 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+
+            # Track stage duration
+            stage_durations[stage] = f"{int(time.time() - stage_start_time)}s"
 
         duration = int(time.time() - pipeline_start)
         log(logger, "pipeline", "COMPLETE", duration=f"{duration}s", pr=pr_url or "none")
