@@ -1126,12 +1126,14 @@ def main():
     pr_url = None
     stage_durations = {}
     _failed_stage = None
+    _failed_log_stage = None  # actual log filename (may differ from display name)
     _failed_reason = None
     _result_written = False
 
-    def _pipeline_fail(stage_name, reason=None):
-        nonlocal _failed_stage, _failed_reason
+    def _pipeline_fail(stage_name, reason=None, log_stage=None):
+        nonlocal _failed_stage, _failed_log_stage, _failed_reason
         _failed_stage = stage_name
+        _failed_log_stage = log_stage or stage_name
         _failed_reason = reason
         raise PipelineFailure(f"{stage_name}: {reason}")
 
@@ -1236,30 +1238,35 @@ def main():
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
 
-                    exit_code, logger = run_claude(worktree_path, "/converge", logger, f"converge-r{round_num + 1}", args.dry_run)
+                    converge_log = f"converge-r{round_num + 1}"
+                    exit_code, logger = run_claude(worktree_path, "/converge", logger, converge_log, args.dry_run)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="converge")
-                        _pipeline_fail("converge")
+                        _pipeline_fail("converge", log_stage=converge_log)
 
-                    exit_code, logger = run_claude(worktree_path, "/gates", logger, f"gates-r{round_num + 1}", args.dry_run)
+                    gates_log = f"gates-r{round_num + 1}"
+                    exit_code, logger = run_claude(worktree_path, "/gates", logger, gates_log, args.dry_run)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="gates-reconverge")
-                        _pipeline_fail("gates-reconverge")
+                        _pipeline_fail("gates-reconverge", log_stage=gates_log)
 
-                    exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run)
+                    verify_log = f"verify-r{round_num + 1}"
+                    exit_code, logger = run_claude(worktree_path, "/verify", logger, verify_log, args.dry_run)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
-                        _pipeline_fail("verify-reconverge")
+                        _pipeline_fail("verify-reconverge", log_stage=verify_log)
 
-                    exit_code, logger = run_claude(worktree_path, "/qa", logger, f"qa-r{round_num + 1}", args.dry_run)
+                    qa_log = f"qa-r{round_num + 1}"
+                    exit_code, logger = run_claude(worktree_path, "/qa", logger, qa_log, args.dry_run)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="qa-reconverge")
-                        _pipeline_fail("qa-reconverge")
+                        _pipeline_fail("qa-reconverge", log_stage=qa_log)
 
-                    exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run)
+                    review_log = f"review-r{round_num + 1}"
+                    exit_code, logger = run_claude(worktree_path, "/review", logger, review_log, args.dry_run)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="review-reconverge")
-                        _pipeline_fail("review-reconverge")
+                        _pipeline_fail("review-reconverge", log_stage=review_log)
 
                     if check_review_passed(worktree_path):
                         log(logger, "converge", "CONVERGED", rounds=round_num + 1)
@@ -1268,7 +1275,8 @@ def main():
                     log(logger, "converge", "FAILED_TO_CONVERGE", max_rounds=args.max_converge)
                     log(logger, "pipeline", "FAILED", failed_stage="converge", reason="max rounds exceeded")
                     print(f"\nFAILED: Could not converge after {args.max_converge} rounds.", file=sys.stderr)
-                    _pipeline_fail("converge", "max rounds exceeded")
+                    _pipeline_fail("converge", "max rounds exceeded",
+                                    log_stage=f"review-r{args.max_converge}")
 
             elif stage == "pr":
                 exit_code, logger = run_pr_stage(
@@ -1310,7 +1318,7 @@ def main():
             failed_stage=_failed_stage, reason=_failed_reason,
             duration=f"{duration}s")
         if worktree_path:
-            last_output = _read_last_lines(worktree_path, _failed_stage, 50)
+            last_output = _read_last_lines(worktree_path, _failed_log_stage, 50)
             write_result(worktree_path, "failed", duration, stage_durations,
                          failed_stage=_failed_stage, error=_failed_reason,
                          last_output=last_output)
@@ -1320,7 +1328,7 @@ def main():
             log(logger, "retro", "START", mode="failure-retro")
             try:
                 exit_code, logger = run_claude(
-                    worktree_path, "/retro", logger, "retro")
+                    worktree_path, "/retro", logger, "retro", args.dry_run)
                 if exit_code != 0:
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
@@ -1331,8 +1339,6 @@ def main():
         print(f"\nPipeline FAILED at stage '{_failed_stage}'.", file=sys.stderr)
         if _failed_reason:
             print(f"  Reason: {_failed_reason}", file=sys.stderr)
-        release_lock(lock_path)
-        logger.close()
         sys.exit(1)
 
     except KeyboardInterrupt:
@@ -1343,8 +1349,6 @@ def main():
                          error="KeyboardInterrupt")
             _result_written = True
         print("\nPipeline interrupted by user.", file=sys.stderr)
-        release_lock(lock_path)
-        logger.close()
         sys.exit(130)
     finally:
         # Safety net — write failure result if not already written
