@@ -48,20 +48,39 @@ From `$ARGUMENTS`, extract:
 - `issue NNN` or `issues NNN` → issue NNN
 - Bare numbers near context words (bug, fix, feat, issue) → issue NNN
 
+### Step 2b: Work-Type Classification
+
+If issues were extracted in Step 2, attempt to classify the work type from labels:
+
+```bash
+gh issue view <N> --json labels --jq '.labels[].name'
+```
+
+Map labels to work type:
+- `type:bug` → bug fix
+- `type:enhancement`, `type:refactor`, `type:performance` → enhancement
+- `type:docs` → docs
+
+If multiple issues have different label types, use the most common. If tied, leave pre-selection empty.
+
+If no labels found, `gh` not authenticated, or no issues extracted — leave pre-selection empty.
+
 ### Step 3: Propose and Confirm
 
-Present the extracted name and issues to the user:
+Present the extracted name, issues, and work type to the user:
 
 ```
 I'll create:
   Worktree: .worktrees/<name>
   Branch:   feat/<name>
   Issues:   #N, #M
+  Work type: (1) Bug fix  (2) Enhancement/refactor  (3) New feature  (4) Docs
+             [pre-selected: Bug fix based on type:bug label]
 
 Good?
 ```
 
-Wait for user confirmation. If the user suggests a different name, use that instead.
+Wait for user confirmation. If the user suggests a different name or work type, use that instead.
 
 ### Step 4: Check for Existing Worktree
 
@@ -95,26 +114,53 @@ For each extracted issue number:
 python scripts/workflow-state.py append issues <N>
 ```
 
+Record the confirmed work type:
+```bash
+python scripts/workflow-state.py set work_type <type>
+```
+
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
 
-### Step 5b: Write Design Context (if present)
+### Step 5b: Write Context File
 
-If the conversation contains design-context content from a prior `/investigate` session:
+Write `.plans/context.md` to the new worktree with issue details and routing guidance:
 
 1. Create `.plans/` directory in the new worktree:
    ```bash
    mkdir -p .worktrees/<name>/.plans
    ```
 
-2. Write the design-context content from conversation to `.plans/design-context.md` in the worktree
-
-3. Update Step 7 guidance to include:
-   ```
-   Design context written to .plans/design-context.md.
-   Run /design to continue.
+2. For each extracted issue, fetch details:
+   ```bash
+   gh issue view <N> --json title,body
    ```
 
-If no design-context in conversation — skip this step, no file written.
+3. Write `.plans/context.md` with the following structure:
+   ```markdown
+   # Context: <name>
+
+   ## Issues
+   ### #N: <title>
+   <body>
+
+   ## Work Type
+   <confirmed work type>
+
+   ## Recommended Next Step
+   <routing guidance based on work type>
+   ```
+
+   Routing guidance values:
+   - Bug fix → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
+   - Enhancement/refactor → "Run `/implement`"
+   - New feature → "Run `/design`"
+   - Docs → "Edit docs and commit. No design or implement needed."
+
+4. If the conversation contains investigation context from a prior `/investigate` session, include it in the same `.plans/context.md` file under a `## Investigation Context` section.
+
+5. If `gh` is not authenticated or issue fetch fails, write context with issue numbers and titles from args only. Warn the user.
+
+If no issues and no investigation context in conversation — skip this step, no file written.
 
 ### Step 6: Open Terminal
 
@@ -140,30 +186,58 @@ Worktree created. Open a terminal there:
 
 After terminal launch (or if launch fails, after printing cd instructions):
 
+**Bug fix:**
 ```
 Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
+Work type: Bug fix
+
+Terminal opened. Run `claude` then code the fix + regression test.
+When done: `/gates` → `/verify` → `/pr`
+```
+
+**Enhancement/refactor:**
+```
+Worktree ready at .worktrees/<name> (branch feat/<name>)
+Issues linked: #N, #M
+Work type: Enhancement/refactor
+
+Terminal opened. Run `claude` then `/implement` to start.
+```
+
+**New feature:**
+```
+Worktree ready at .worktrees/<name> (branch feat/<name>)
+Issues linked: #N, #M
+Work type: New feature
 
 Terminal opened. Run `claude` then `/design` to start.
 ```
 
-If terminal launch failed:
+**Docs:**
 ```
 Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
+Work type: Docs
 
+Terminal opened. Run `claude` then edit docs and commit.
+No design or implement needed.
+```
+
+If terminal launch failed, replace "Terminal opened. Run `claude`" with:
+```
 Could not open terminal automatically. Run:
   cd .worktrees/<name>
   claude
-
-Then run `/design` to start.
 ```
 
 ## Rules
 
 1. **Works from any branch** — if on a feature branch, resolves main repo root automatically.
-2. **Always confirm** — propose name and issues, wait for user approval.
+2. **Always confirm** — propose name, issues, and work type, wait for user approval.
 3. **No duplicate worktrees** — check before creating, offer resume.
 4. **Platform detection** — use `uname -s`, not hardcoded assumptions.
 5. **Workflow state** — always initialize state in the new worktree.
 6. **Freeform input** — never require structured flags. Parse what the user gives you.
+7. **Labels are hints** — work-type pre-selection from labels is a convenience; user confirms.
+8. **Context file** — write `.plans/context.md` with issue details and routing guidance.

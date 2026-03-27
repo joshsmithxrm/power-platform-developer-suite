@@ -32,7 +32,7 @@ Read relevant context from the codebase:
 2. **Skills**: Read any skills that will be affected by the proposal
 3. **Code**: Read key source files in the affected area
 4. **Retro patterns**: Read `.retros/summary.json` if it exists — check `findings_by_category` for recurring patterns relevant to this investigation. If the file doesn't exist or has invalid JSON, skip without error.
-5. **Design context from args**: If `$ARGUMENTS` contains a design-context reference, read it
+5. **Design context from args**: If `$ARGUMENTS` contains a context reference, read it
 
 Present a brief summary of what was gathered: "Found N specs, M skills, K source files relevant to this topic."
 
@@ -139,7 +139,7 @@ Wait for the human's response. Do not proceed until alignment is reached.
 
 ### Step 8: Handoff
 
-Present the design-context summary that will be passed to `/start`:
+Present the investigation context summary that will be passed to `/start`:
 
 ```markdown
 # Design Context: {topic}
@@ -163,10 +163,19 @@ Present the design-context summary that will be passed to `/start`:
 {key data points that informed the investigation}
 ```
 
-Instruct the human:
-> Run `/start` to create a worktree. The design context will be written to `.plans/design-context.md` in the new worktree. Then run `/design` to continue to spec writing.
+Detect current context and route accordingly:
 
-The design-context content stays in conversation memory — `/start` will write it to the worktree's `.plans/design-context.md` when invoked in the same conversation.
+**If on main or master:**
+> Run `/start` to create a worktree. The investigation context will be passed from
+> this conversation to `/start`, which writes it to `.plans/context.md`.
+> Then run `/design` to continue.
+
+**If already in a worktree (feature branch):**
+> Write the investigation context content to `.plans/context.md` in the current
+> worktree directory. Then instruct: "Context written to `.plans/context.md`.
+> Run `/design` to continue."
+
+The investigation context content stays in conversation memory — `/start` will write it to the worktree's `.plans/context.md` when invoked in the same conversation.
 
 ## Rules
 
@@ -177,4 +186,4 @@ The design-context content stays in conversation memory — `/start` will write 
 5. **Research is read-only** — researcher agent may not edit, write, or execute commands
 6. **Convergence is mandatory** — do not skip challenge rounds if blockers exist (up to max 3)
 7. **BLOCKERs always to human** — never auto-resolve a BLOCKER finding
-8. **Handoff is conversation-based** — design-context lives in conversation memory, written by `/start`
+8. **Handoff is conversation-based** — investigation context lives in conversation memory, written by `/start`

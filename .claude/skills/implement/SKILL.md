@@ -42,6 +42,10 @@ If no $ARGUMENTS is provided, look for the spec referenced in `.workflow/state.j
 - Generate a phased implementation plan following the spec's acceptance criteria
 - Save to `.plans/{date}-{spec-name}.md`
 - Continue to Step 1 with the generated plan
+n**Fallback — no spec found:** If no relevant spec is found (workflow state has no `spec` field AND no spec in `specs/` matches the current work domain):
+- Prompt user: "No spec found for this work. (1) Run `/design` to create one, or (2) continue without a spec?"
+- If user chooses `/design`: stop and instruct user to run `/design`
+- If user chooses continue: check for `.plans/context.md` and generate a plan from issue context if available, otherwise ask the user to describe the work for plan generation
 
 ### Step 1: Read & Analyze the Plan
 - Read the plan file at $ARGUMENTS (resolve relative to repo root if needed)
