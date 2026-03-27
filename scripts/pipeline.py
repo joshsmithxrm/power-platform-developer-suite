@@ -683,12 +683,14 @@ def run_triage(worktree_path, pr_number, comments, logger, dry_run=False):
     try:
         with open(stage_log_path, "r", errors="replace") as f:
             content = f.read()
-        # Find JSON array in the output
-        start_idx = content.rfind("[")
-        end_idx = content.rfind("]")
-        if start_idx >= 0 and end_idx > start_idx:
-            return json.loads(content[start_idx:end_idx + 1])
-    except (OSError, json.JSONDecodeError):
+        # Find JSON array using raw_decode (handles trailing text correctly)
+        last_bracket = content.rfind("[")
+        if last_bracket != -1:
+            decoder = json.JSONDecoder()
+            obj, _ = decoder.raw_decode(content[last_bracket:])
+            if isinstance(obj, list):
+                return obj
+    except (OSError, json.JSONDecodeError, ValueError):
         pass
     return None
 
@@ -759,10 +761,14 @@ def run_pr_stage(worktree_path, logger, dry_run=False, timeout=None):
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=worktree_path, capture_output=True, text=True, timeout=10,
     ).stdout.strip()
-    subprocess.run(
+    push_result = subprocess.run(
         ["git", "push", "-u", "origin", branch, "--force-with-lease"],
         cwd=worktree_path, capture_output=True, text=True, timeout=60,
     )
+    if push_result.returncode != 0:
+        log(logger, "pr", "PUSH_FAILED", error=push_result.stderr.strip()[:200])
+        log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
+        return 1, logger
 
     # 3. Read issues from state
     issues_result = subprocess.run(
