@@ -33,18 +33,16 @@ public class IncidentHandlerTests
     }
 
     [Fact]
-    public void StripsStateStatusFromRecord()
+    public void TransformIsPassThrough()
     {
+        // statecode/statuscode stripping is handled by TieredImporter before Transform is called
         var record = new Entity("incident") { Id = Guid.NewGuid() };
-        record["statecode"] = new OptionSetValue(1);
-        record["statuscode"] = new OptionSetValue(5);
         record["title"] = "Test Case";
 
         var result = _handler.Transform(record, CreateContext());
 
-        result.Attributes.Should().NotContainKey("statecode");
-        result.Attributes.Should().NotContainKey("statuscode");
         result.Attributes.Should().ContainKey("title");
+        result.Should().BeSameAs(record);
     }
 
     [Fact]

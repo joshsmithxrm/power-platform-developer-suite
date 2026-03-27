@@ -36,18 +36,16 @@ public class LeadHandlerTests
     }
 
     [Fact]
-    public void StripsStateStatusFromRecord()
+    public void TransformIsPassThrough()
     {
+        // statecode/statuscode stripping is handled by TieredImporter before Transform is called
         var record = new Entity("lead") { Id = Guid.NewGuid() };
-        record["statecode"] = new OptionSetValue(1);
-        record["statuscode"] = new OptionSetValue(3);
         record["subject"] = "Test Lead";
 
         var result = _handler.Transform(record, _context);
 
-        result.Attributes.Should().NotContainKey("statecode");
-        result.Attributes.Should().NotContainKey("statuscode");
         result.Attributes.Should().ContainKey("subject");
+        result.Should().BeSameAs(record);
     }
 
     [Fact]

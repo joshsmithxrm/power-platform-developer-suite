@@ -38,6 +38,7 @@ namespace PPDS.Migration.Import
             string entityName, Guid recordId, string fieldName,
             CancellationToken cancellationToken)
         {
+            // D2 exception: FileContinuationToken is session-bound; must use same client for all chunks.
             await using var client = await _connectionPool.GetClientAsync(
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -53,7 +54,7 @@ namespace PPDS.Migration.Import
             var fileSizeInBytes = (long)initResponse["FileSizeInBytes"];
 
             // Step 2: Download all blocks
-            var allData = new List<byte>();
+            var allData = new List<byte>((int)Math.Min(fileSizeInBytes, int.MaxValue));
             long offset = 0;
 
             while (offset < fileSizeInBytes)
@@ -95,6 +96,7 @@ namespace PPDS.Migration.Import
             byte[] data, string fileName, string mimeType,
             CancellationToken cancellationToken)
         {
+            // D2 exception: FileContinuationToken is session-bound; must use same client for all chunks.
             await using var client = await _connectionPool.GetClientAsync(
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 

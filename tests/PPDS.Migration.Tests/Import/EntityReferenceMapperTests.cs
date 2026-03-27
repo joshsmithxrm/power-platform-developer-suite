@@ -59,7 +59,7 @@ public class EntityReferenceMapperTests
     {
         var sourceId = Guid.NewGuid();
 
-        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest)))
+        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RetrieveResponse());
 
         var sut = CreateSut();
@@ -74,12 +74,12 @@ public class EntityReferenceMapperTests
         var sourceId = Guid.NewGuid();
         var targetId = Guid.NewGuid();
 
-        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest)))
+        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Record not found"));
 
         var results = new EntityCollection();
         results.Entities.Add(new Entity("transactioncurrency", targetId));
-        _client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryExpression>()))
+        _client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(results);
 
         var sut = CreateSut();
@@ -93,7 +93,7 @@ public class EntityReferenceMapperTests
     {
         var sourceId = Guid.NewGuid();
 
-        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest)))
+        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveRequest), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RetrieveResponse());
 
         var sut = CreateSut();

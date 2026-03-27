@@ -33,18 +33,16 @@ public class QuoteHandlerTests
     }
 
     [Fact]
-    public void StripsStateStatusFromRecord()
+    public void TransformIsPassThrough()
     {
+        // statecode/statuscode stripping is handled by TieredImporter before Transform is called
         var record = new Entity("quote") { Id = Guid.NewGuid() };
-        record["statecode"] = new OptionSetValue(2);
-        record["statuscode"] = new OptionSetValue(3);
         record["name"] = "Test Quote";
 
         var result = _handler.Transform(record, CreateContext());
 
-        result.Attributes.Should().NotContainKey("statecode");
-        result.Attributes.Should().NotContainKey("statuscode");
         result.Attributes.Should().ContainKey("name");
+        result.Should().BeSameAs(record);
     }
 
     [Fact]

@@ -94,7 +94,7 @@ public class DuplicateRuleHandlerTests
 
         // Set up mock pooled client
         var mockClient = new Mock<IPooledClient>();
-        mockClient.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()))
+        mockClient.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
         mockClient.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
@@ -108,13 +108,15 @@ public class DuplicateRuleHandlerTests
         mockClient.Verify(
             c => c.ExecuteAsync(It.Is<OrganizationRequest>(r =>
                 r.RequestName == "PublishDuplicateRule" &&
-                (Guid)r["DuplicateRuleId"] == targetId1)),
+                (Guid)r["DuplicateRuleId"] == targetId1),
+                It.IsAny<CancellationToken>()),
             Times.Once);
 
         mockClient.Verify(
             c => c.ExecuteAsync(It.Is<OrganizationRequest>(r =>
                 r.RequestName == "PublishDuplicateRule" &&
-                (Guid)r["DuplicateRuleId"] == targetId2)),
+                (Guid)r["DuplicateRuleId"] == targetId2),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

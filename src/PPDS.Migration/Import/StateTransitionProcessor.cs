@@ -86,7 +86,7 @@ namespace PPDS.Migration.Import
                         await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         // Check if record is already closed (AC-16)
-                        if (await IsRecordClosedAsync(client, entityName, targetId).ConfigureAwait(false))
+                        if (await IsRecordClosedAsync(client, entityName, targetId, cancellationToken).ConfigureAwait(false))
                         {
                             _logger?.LogDebug("Skipping already-closed {Entity}/{Id}", entityName, targetId);
                             successCount++; // Count as success - already in desired state
@@ -102,7 +102,7 @@ namespace PPDS.Migration.Import
                                 ["State"] = new OptionSetValue(transition.StateCode),
                                 ["Status"] = new OptionSetValue(transition.StatusCode)
                             };
-                            await client.ExecuteAsync(request).ConfigureAwait(false);
+                            await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
                         }
                         else
                         {
@@ -115,7 +115,7 @@ namespace PPDS.Migration.Import
                                     request[kvp.Key] = kvp.Value;
                                 }
                             }
-                            await client.ExecuteAsync(request).ConfigureAwait(false);
+                            await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
                         }
 
                         successCount++;
@@ -167,9 +167,10 @@ namespace PPDS.Migration.Import
         /// <param name="client">The Dataverse client.</param>
         /// <param name="entityName">The entity logical name.</param>
         /// <param name="recordId">The record ID to check.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>True if the record is already closed (statecode != 0), false otherwise.</returns>
         private static async Task<bool> IsRecordClosedAsync(
-            IPooledClient client, string entityName, Guid recordId)
+            IPooledClient client, string entityName, Guid recordId, CancellationToken cancellationToken)
         {
             try
             {
@@ -178,11 +179,11 @@ namespace PPDS.Migration.Import
                     Target = new EntityReference(entityName, recordId),
                     ColumnSet = new ColumnSet("statecode")
                 };
-                var response = (RetrieveResponse)await client.ExecuteAsync(request).ConfigureAwait(false);
+                var response = (RetrieveResponse)await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
                 var stateCode = response.Entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
                 return stateCode != 0;
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return false; // If we cannot check, proceed with the transition
             }

@@ -56,8 +56,9 @@ public class StateTransitionProcessorTests
 
         OrganizationRequest? capturedRequest = null;
         _client.Setup(c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")))
-            .Callback<OrganizationRequest>((req) => capturedRequest = req)
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
+                It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) => capturedRequest = req)
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -96,7 +97,8 @@ public class StateTransitionProcessorTests
         result.SuccessCount.Should().Be(1);
         _client.Verify(
             c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")),
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -127,8 +129,9 @@ public class StateTransitionProcessorTests
 
         OrganizationRequest? capturedRequest = null;
         _client.Setup(c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "WinOpportunity")))
-            .Callback<OrganizationRequest>((req) => capturedRequest = req)
+                It.Is<OrganizationRequest>(r => r.RequestName == "WinOpportunity"),
+                It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) => capturedRequest = req)
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -161,7 +164,8 @@ public class StateTransitionProcessorTests
         SetupRetrieveStatecode(id3, 0);
 
         _client.Setup(c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "SetState")))
+                It.Is<OrganizationRequest>(r => r.RequestName == "SetState"),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
 
         var result = await _sut.ProcessAsync(context, CancellationToken.None);
@@ -191,7 +195,7 @@ public class StateTransitionProcessorTests
                 It.IsAny<CancellationToken>()),
             Times.Never);
         _client.Verify(
-            c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()),
+            c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -205,7 +209,8 @@ public class StateTransitionProcessorTests
         response["Entity"] = entity;
 
         _client.Setup(c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r.RequestName == "Retrieve")))
+                It.Is<RetrieveRequest>(r => r.Target.Id == recordId),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
     }
 

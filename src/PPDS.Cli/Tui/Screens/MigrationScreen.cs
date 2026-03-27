@@ -19,10 +19,13 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
     private readonly FrameView _configFrame;
     private readonly Label _schemaPathLabel;
     private readonly TextField _schemaPathField;
+    private readonly Label _schemaPathHint;
     private readonly Label _outputPathLabel;
     private readonly TextField _outputPathField;
+    private readonly Label _outputPathHint;
     private readonly Label _dataPathLabel;
     private readonly TextField _dataPathField;
+    private readonly Label _dataPathHint;
     private readonly CheckBox _resolveLookupsCheckBox;
     private readonly CheckBox _skipUnresolvedLookupsCheckBox;
     private readonly CheckBox _impersonateOwnersCheckBox;
@@ -30,6 +33,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
     private readonly CheckBox _skipMissingColumnsCheckBox;
     private readonly Label _importModeLabel;
     private readonly RadioGroup _importModeRadio;
+    private readonly Label _exportDescriptionLabel;
     private readonly FrameView _progressFrame;
     private readonly Label _phaseLabel;
     private readonly Label _entityLabel;
@@ -59,46 +63,89 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
     public MigrationScreen(InteractiveSession session, string? environmentUrl = null)
         : base(session, environmentUrl)
     {
-        _modeRadio = new RadioGroup(new NStack.ustring[] { "Export", "Import" })
+        // QA-CRIT-2: Use "E_xport" (Alt+X) to avoid conflict with global Alt+E (environment picker in TuiShell).
+        // QA-CRIT-1: "Import" keeps Alt+I; the impersonate checkbox below uses a different hotkey.
+        _modeRadio = new RadioGroup(new NStack.ustring[] { "E_xport", "_Import" })
         {
             X = 1,
             Y = 0,
             Width = 20,
             Height = 1,
             CanFocus = true,
+            TabStop = true, // QA-IMP-1: Ensure radio group participates in Tab focus cycle
             DisplayMode = DisplayModeLayout.Horizontal
         };
         _modeRadio.SelectedItemChanged += OnModeChanged;
 
-        _configFrame = new FrameView("Configuration")
+        // QA-IMP-4: Add keyboard shortcut hints to the frame title, following the SQL Query screen pattern.
+        _configFrame = new FrameView("Configuration (Ctrl+Enter to start, Ctrl+P to preview plan)")
         {
             X = 0,
             Y = 2,
             Width = Dim.Fill(),
-            Height = 10
+            Height = 10,
+            TabStop = true // QA-IMP-1: Ensure FrameView participates in Tab focus cycle
         };
 
         _schemaPathLabel = new Label("Schema path:") { X = 1, Y = 0 };
         _schemaPathField = new TextField("") { X = 15, Y = 0, Width = Dim.Fill(1) };
+        _schemaPathHint = new Label("e.g., ./data_schema.xml") { X = 15, Y = 0, Width = Dim.Fill(1), ColorScheme = TuiColorPalette.Dimmed };
         _outputPathLabel = new Label("Output path:") { X = 1, Y = 1 };
         _outputPathField = new TextField("") { X = 15, Y = 1, Width = Dim.Fill(1) };
+        _outputPathHint = new Label("e.g., ./export.zip") { X = 15, Y = 1, Width = Dim.Fill(1), ColorScheme = TuiColorPalette.Dimmed };
 
         _dataPathLabel = new Label("Data path:") { X = 1, Y = 0 };
         _dataPathField = new TextField("") { X = 15, Y = 0, Width = Dim.Fill(1) };
+        _dataPathHint = new Label("e.g., ./data.zip") { X = 15, Y = 0, Width = Dim.Fill(1), ColorScheme = TuiColorPalette.Dimmed };
         _importModeLabel = new Label("Mode:") { X = 1, Y = 2 };
         _importModeRadio = new RadioGroup(new NStack.ustring[] { "Create", "Update", "Upsert", "Skip" })
         {
             X = 15,
             Y = 2,
+            TabStop = true, // QA-IMP-1: Ensure radio group participates in Tab focus cycle
             DisplayMode = DisplayModeLayout.Horizontal
         };
         _importModeRadio.SelectedItem = 2;
 
-        _resolveLookupsCheckBox = new CheckBox("Resolve external lookups") { X = 1, Y = 4 };
-        _skipUnresolvedLookupsCheckBox = new CheckBox("Skip unresolved lookups", true) { X = 1, Y = 5 };
-        _impersonateOwnersCheckBox = new CheckBox("Impersonate owners") { X = 1, Y = 6 };
-        _continueOnErrorCheckBox = new CheckBox("Continue on error", true) { X = 1, Y = 7 };
-        _skipMissingColumnsCheckBox = new CheckBox("Skip missing columns") { X = 40, Y = 4 };
+        // QA-IMP-1: Ensure all checkboxes have TabStop = true so they participate in Tab focus cycle.
+        // QA-CRIT-1: "Im_personate owners" uses Alt+P to avoid conflict with "Import" (Alt+I).
+        //   Alt+P does not conflict with global hotkeys because TuiShell registers Alt+P via
+        //   HotkeyRegistry (not as a label hotkey), and screen-level label hotkeys take precedence
+        //   when the screen content is focused.
+        _resolveLookupsCheckBox = new CheckBox("Resolve external lookups") { X = 1, Y = 4, TabStop = true };
+        _skipUnresolvedLookupsCheckBox = new CheckBox("Skip unresolved lookups", true) { X = 1, Y = 5, TabStop = true };
+        _impersonateOwnersCheckBox = new CheckBox("Im_personate owners") { X = 1, Y = 6, TabStop = true };
+        _continueOnErrorCheckBox = new CheckBox("Continue on error", true) { X = 1, Y = 7, TabStop = true };
+        _skipMissingColumnsCheckBox = new CheckBox("Skip missing columns") { X = 40, Y = 4, TabStop = true };
+
+        // QA-IMP-5: Description label shown in export mode to fill the empty space below the two fields.
+        _exportDescriptionLabel = new Label(
+            "Export uses a schema file to define which entities and columns\n" +
+            "to extract from Dataverse. The output is a portable data package\n" +
+            "(.zip) that can be imported into another environment.\n\n" +
+            "Provide the schema XML and an output path, then press Ctrl+Enter.")
+        {
+            X = 1,
+            Y = 3,
+            Width = Dim.Fill(1),
+            Height = 5,
+            ColorScheme = TuiColorPalette.Dimmed
+        };
+
+        // QA-IMP-3: Wire hint label visibility — show hint when field is empty, hide when it has text.
+        // Terminal.Gui v1 TextField does not support built-in placeholder text, so we overlay a dimmed
+        // Label that is hidden once the user types anything.
+        WireFieldHint(_schemaPathField, _schemaPathHint);
+        WireFieldHint(_outputPathField, _outputPathHint);
+        WireFieldHint(_dataPathField, _dataPathHint);
+
+        // QA-IMP-2: Terminal.Gui v1 does not provide a distinct visual focus indicator between text
+        // fields in PTY mode — the cursor position is the only cue. Assigning TextInput ColorScheme
+        // gives a DarkGray background on focus, which helps in terminals that support it. This is a
+        // known framework limitation and cannot be fully resolved without upstream changes.
+        _schemaPathField.ColorScheme = TuiColorPalette.TextInput;
+        _outputPathField.ColorScheme = TuiColorPalette.TextInput;
+        _dataPathField.ColorScheme = TuiColorPalette.TextInput;
 
         _progressFrame = new FrameView("Progress")
         {
@@ -173,18 +220,42 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
     private void ShowExportConfig()
     {
         _configFrame.RemoveAll();
-        _configFrame.Add(_schemaPathLabel, _schemaPathField, _outputPathLabel, _outputPathField);
+        // QA-IMP-5: Include the export description to fill the empty space below the two fields.
+        _configFrame.Add(
+            _schemaPathLabel, _schemaPathField, _schemaPathHint,
+            _outputPathLabel, _outputPathField, _outputPathHint,
+            _exportDescriptionLabel);
+        // Frame height stays at 10 — the description fills the space that import checkboxes would use.
+        _configFrame.Height = 10;
+        UpdateHintVisibility(_schemaPathField, _schemaPathHint);
+        UpdateHintVisibility(_outputPathField, _outputPathHint);
     }
 
     private void ShowImportConfig()
     {
         _configFrame.RemoveAll();
         _configFrame.Add(
-            _dataPathLabel, _dataPathField,
+            _dataPathLabel, _dataPathField, _dataPathHint,
             _importModeLabel, _importModeRadio,
             _resolveLookupsCheckBox, _skipUnresolvedLookupsCheckBox,
             _impersonateOwnersCheckBox, _continueOnErrorCheckBox,
             _skipMissingColumnsCheckBox);
+        _configFrame.Height = 10;
+        UpdateHintVisibility(_dataPathField, _dataPathHint);
+    }
+
+    /// <summary>
+    /// Wires a TextField to show/hide a hint label based on whether the field has text.
+    /// </summary>
+    private static void WireFieldHint(TextField field, Label hint)
+    {
+        field.TextChanged += _ => UpdateHintVisibility(field, hint);
+    }
+
+    private static void UpdateHintVisibility(TextField field, Label hint)
+    {
+        var text = field.Text?.ToString();
+        hint.Visible = string.IsNullOrEmpty(text);
     }
 
     private async Task StartOperationAsync()

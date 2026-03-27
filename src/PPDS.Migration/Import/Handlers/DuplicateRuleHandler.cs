@@ -49,16 +49,15 @@ namespace PPDS.Migration.Import.Handlers
             var rules = context.IdMappings.GetMappingsForEntity("duplicaterule");
             if (rules == null || rules.Count == 0) return;
 
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-
             foreach (var (_, targetId) in rules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
                 var request = new OrganizationRequest("PublishDuplicateRule")
                 {
                     ["DuplicateRuleId"] = targetId
                 };
-                await client.ExecuteAsync(request).ConfigureAwait(false);
+                await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
             }
         }
 

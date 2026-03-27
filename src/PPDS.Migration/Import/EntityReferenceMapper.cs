@@ -108,7 +108,7 @@ namespace PPDS.Migration.Import
             {
                 await using var c = await _pool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
                 var req = new RetrieveRequest { Target = new EntityReference(en, sid), ColumnSet = new ColumnSet(false) };
-                await c.ExecuteAsync(req).ConfigureAwait(false);
+                await c.ExecuteAsync(req, ct).ConfigureAwait(false);
                 return sid;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
@@ -121,7 +121,7 @@ namespace PPDS.Migration.Import
                 await using var c = await _pool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
                 var q = new QueryExpression(en) { ColumnSet = new ColumnSet(false), TopCount = 1 };
                 q.Criteria.AddCondition(mf, ConditionOperator.Equal, nv);
-                var r = await c.RetrieveMultipleAsync(q).ConfigureAwait(false);
+                var r = await c.RetrieveMultipleAsync(q, ct).ConfigureAwait(false);
                 return r.Entities.Count > 0 ? r.Entities[0].Id : null;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { return null; }

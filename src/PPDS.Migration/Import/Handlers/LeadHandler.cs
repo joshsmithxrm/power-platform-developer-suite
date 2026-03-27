@@ -18,8 +18,7 @@ namespace PPDS.Migration.Import.Handlers
         /// <inheritdoc />
         public Entity Transform(Entity record, ImportContext context)
         {
-            record.Attributes.Remove("statecode");
-            record.Attributes.Remove("statuscode");
+            // statecode/statuscode already stripped by TieredImporter before Transform is called
             return record;
         }
 
