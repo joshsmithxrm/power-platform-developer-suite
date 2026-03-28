@@ -1,6 +1,6 @@
 ---
 name: qa
-description: QA — Three-Agent Blind Verification
+description: "QA — Three-Agent Blind Verification. Use when making code changes that need product-level validation — after implementation, after fix rounds, before PRs. Dispatches agents that test the running product without seeing source code."
 ---
 
 # QA — Three-Agent Blind Verification
@@ -16,6 +16,22 @@ Dispatches **three specialized agents with no source code access** to verify qua
 `/qa cli` — verify CLI changes by running commands
 `/qa mcp` — verify MCP changes via Inspector
 `/qa "SELECT TOP 5 should return 5 rows"` — explicit behavior description
+
+## Workflow State
+
+On QA start, set the phase:
+
+```bash
+python scripts/workflow-state.py set phase qa
+```
+
+After QA passes for a surface (verdict is PASS — all checks green), run:
+
+```bash
+python scripts/workflow-state.py set qa.{surface} now
+```
+
+Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
 
 ## Process
 
@@ -207,6 +223,22 @@ You may ONLY use these tools:
 
 You MUST NOT read source code files under src/.
 
+## Workflow State
+
+On QA start, set the phase:
+
+```bash
+python scripts/workflow-state.py set phase qa
+```
+
+After QA passes for a surface (verdict is PASS — all checks green), run:
+
+```bash
+python scripts/workflow-state.py set qa.{surface} now
+```
+
+Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
+
 ## Process
 
 Open EACH of these panels in sequence:
@@ -288,6 +320,22 @@ You may ONLY use these tools:
 - Read: ONLY for viewing screenshot image files (in $TEMP)
 
 You MUST NOT read source code files under src/.
+
+## Workflow State
+
+On QA start, set the phase:
+
+```bash
+python scripts/workflow-state.py set phase qa
+```
+
+After QA passes for a surface (verdict is PASS — all checks green), run:
+
+```bash
+python scripts/workflow-state.py set qa.{surface} now
+```
+
+Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
 
 ## Process
 
@@ -433,22 +481,6 @@ Read the merged report.
 ### Step 10: Report Final
 
 Present the final merged report to the user.
-
-## Workflow State
-On QA start, set the phase:
-
-```bash
-python scripts/workflow-state.py set phase qa
-```
-
-After QA passes for a surface (verdict is PASS — all checks green), run:
-
-```bash
-python scripts/workflow-state.py set qa.{surface} now
-```
-
-Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
-
 ## Rules
 
 1. **Blind verifiers** — no agent sees source code. Period.
