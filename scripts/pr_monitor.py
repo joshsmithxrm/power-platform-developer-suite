@@ -348,7 +348,7 @@ def run_triage(worktree, pr_number, comments, logger):
     logger.log("triage", "START", comments=len(comments))
 
     try:
-        stage_log_file = open(stage_jsonl_path, "w")
+        stage_log_file = open(stage_jsonl_path, "a")  # Append — preserve previous triage rounds
     except OSError as e:
         logger.log("triage", "ERROR", reason=f"Cannot open stage log: {e}")
         return None
@@ -474,6 +474,9 @@ def post_replies(worktree, pr_number, triage_results, logger):
 
     for item in triage_results:
         comment_id = item.get("id")
+        if not comment_id:
+            logger.log("replies", "SKIPPED", reason="missing comment id")
+            continue
         action = item.get("action", "unknown")
         description = item.get("description", "")
         commit_sha = item.get("commit")
@@ -486,12 +489,16 @@ def post_replies(worktree, pr_number, triage_results, logger):
             body = description or "Reviewed."
 
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
                  "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
                 cwd=worktree, capture_output=True, text=True, timeout=15,
             )
-            logger.log("replies", "POSTED", comment_id=comment_id, action=action)
+            if result.returncode != 0:
+                logger.log("replies", "FAILED", comment_id=comment_id,
+                           error=result.stderr.strip()[:100])
+            else:
+                logger.log("replies", "POSTED", comment_id=comment_id, action=action)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             logger.log("replies", "FAILED", comment_id=comment_id)
 
@@ -645,8 +652,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
             if ci_status == "fail":
                 result["status"] = "ci_failed"
-                run_notify(worktree, pr_number, logger)
-                mark_step(result, "notify", "done")
+                _step_notify(worktree, pr_number, logger, result)
                 write_result(worktree, result)
                 logger.log("monitor", "ABORT", reason="CI failed")
                 logger.close()
@@ -710,8 +716,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
             if ci_status == "fail":
                 result["status"] = "ci_failed"
-                run_notify(worktree, pr_number, logger)
-                mark_step(result, "notify", "done")
+                _step_notify(worktree, pr_number, logger, result)
                 write_result(worktree, result)
                 logger.log("monitor", "ABORT",
                            reason=f"CI failed after triage round {triage_iteration}")

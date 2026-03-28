@@ -2,7 +2,7 @@
 
 **Status:** Draft (v2.0 — retro overhaul: transcript reading, isolation, auto-trigger, issue updates)
 **Last Updated:** 2026-03-27
-**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/retro_helpers.py](../scripts/retro_helpers.py) | [.claude/skills/retro/](../.claude/skills/retro/)
+**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/retro_helpers.py](../scripts/retro_helpers.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/skills/retro/](../.claude/skills/retro/)
 **Surfaces:** N/A
 
 ---
@@ -111,7 +111,7 @@ Before filing a GitHub issue for an `issue-only` finding, `process_retro_finding
 2. Extract search prefix: first 50 characters of the title
 3. Run `gh issue list --search "{prefix}" --state open --json number,title --limit 5`
 4. For each returned issue, check if title starts with the same prefix
-5. If match found: log `ISSUE_SKIPPED_DUPLICATE` with the existing issue number, skip filing
+5. If match found: log `ISSUE_UPDATED_DUPLICATE` with the existing issue number, call `_handle_duplicate()` to post a comment on the existing issue with new occurrence details, then continue to the next finding
 6. If no match: proceed with `gh issue create`
 
 **Why 50-char prefix match:** Pipeline retries may produce the same finding with slightly different trailing text (e.g., different timing numbers). Matching on a prefix catches these while avoiding false positives from unrelated issues.
@@ -366,10 +366,10 @@ for finding in issues:
 | AC-12 | `extract_transcript_signals()` identifies tool failures: Bash tool_result with non-zero exit code, Read with "file not found", Edit with "old_string not found" | `test_tool_failure_detection` | 🔲 |
 | AC-13 | `extract_enforcement_signals(state_path)` returns stop hook block count and timestamps from `stop_hook_count` field in state | `test_enforcement_signal_extraction` | 🔲 |
 | AC-14 | Interactive `/retro` dispatches subagent with `subagent_type: "general-purpose"` — subagent receives only transcript files, constitution, and state (no conversation history) | Manual — run `/retro` in interactive session, verify subagent dispatch in tool calls | 🔲 |
-| AC-15 | `pr_monitor.py` triggers retro as penultimate step (step 7), passing worktree path for transcript access | `test_pr_monitor.py::test_retro_trigger` | 🔲 |
+| AC-15 | `pr_monitor.py` triggers retro as penultimate step (step 7), passing worktree path for transcript access (cross-ref: canonical in workflow-enforcement.md) | `test_pr_monitor.py::test_retro_trigger` | 🔲 |
 | AC-16 | Duplicate issue comment includes branch name, session ID, new evidence, and "also observed" preamble | `test_duplicate_comment_format` | 🔲 |
 | AC-17 | `PPDS_SHAKEDOWN=1` suppresses all `gh issue create` and `gh issue comment` calls | `test_shakedown_suppresses_all_issue_ops` | 🔲 |
-| AC-18 | Interactive `/pr` skill spawns retro subagent after PR is created (isolated, best-effort) | Manual — run `/pr` interactively, verify retro subagent dispatched after PR creation | 🔲 |
+| AC-18 | Interactive `/pr` skill spawns retro subagent after PR is created (isolated, best-effort) (cross-ref: canonical in workflow-enforcement.md) | Manual — run `/pr` interactively, verify retro subagent dispatched after PR creation | 🔲 |
 
 ### Edge Cases
 

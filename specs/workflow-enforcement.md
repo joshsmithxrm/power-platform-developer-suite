@@ -1038,7 +1038,7 @@ After all skills in this spec are implemented:
 | AC-54 | Pipeline sets `PPDS_PIPELINE=1` in subprocess environment | `test_pipeline.py::test_sets_pipeline_env_var` | 🔲 |
 | AC-55 | Stage output written to `.workflow/stages/{stage}.log` file (not PIPE) | `test_pipeline.py::test_stage_output_goes_to_file` | 🔲 |
 | AC-56 | Pipeline logs heartbeat every 60s with elapsed time, PID, output bytes, and activity status | `test_pipeline.py::test_heartbeat_logging` | 🔲 |
-| AC-57 | Per-stage timeout terminates subprocess when exceeded | `test_pipeline.py::test_timeout_kills_subprocess` | 🔲 |
+| ~~AC-57~~ | ~~Per-stage timeout terminates subprocess when exceeded~~ Superseded by pipeline-observability AC-13 (hard ceiling) | `test_pipeline.py::test_timeout_kills_subprocess` | N/A |
 | AC-58 | Exit code logged immediately when subprocess finishes | `test_pipeline.py::test_logs_exit_code_on_completion` | 🔲 |
 | AC-59 | Last 20 lines of stage output written to pipeline.log after stage completes | `test_pipeline.py::test_captures_output_tail` | 🔲 |
 | ~~AC-60~~ | _Superseded by pipeline-observability AC-12 through AC-15 (activity-based timeouts replace fixed per-stage timeouts)._ | — | — |

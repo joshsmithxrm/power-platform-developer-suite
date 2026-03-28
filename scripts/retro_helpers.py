@@ -63,43 +63,33 @@ def extract_transcript_signals(jsonl_path):
                         content = event.get("message", {}).get("content", [])
                     else:
                         content = event.get("content", "")
-                    if isinstance(content, list):
+
+                    # Normalize: wrap string content into a list for uniform processing
+                    if isinstance(content, str):
+                        result_texts = [content] if content else []
+                    elif isinstance(content, list):
+                        result_texts = []
                         for block in content:
-                            if block.get("type") == "tool_result":
-                                result_text = block.get("content", "")
-                                if isinstance(result_text, str):
-                                    if (
-                                        "Exit code:" in result_text
-                                        and "Exit code: 0" not in result_text
-                                    ):
-                                        signals["tool_failures"].append(
-                                            {
-                                                "tool": "Bash",
-                                                "error": result_text[:200],
-                                            }
-                                        )
-                                    if (
-                                        "file not found"
-                                        in result_text.lower()
-                                        or "no such file"
-                                        in result_text.lower()
-                                    ):
-                                        signals["tool_failures"].append(
-                                            {
-                                                "tool": "Read",
-                                                "error": result_text[:200],
-                                            }
-                                        )
-                                    if (
-                                        "old_string not found"
-                                        in result_text.lower()
-                                    ):
-                                        signals["tool_failures"].append(
-                                            {
-                                                "tool": "Edit",
-                                                "error": result_text[:200],
-                                            }
-                                        )
+                            if isinstance(block, dict) and block.get("type") == "tool_result":
+                                rt = block.get("content", "")
+                                if isinstance(rt, str):
+                                    result_texts.append(rt)
+                    else:
+                        result_texts = []
+
+                    for result_text in result_texts:
+                        if "Exit code:" in result_text and "Exit code: 0" not in result_text:
+                            signals["tool_failures"].append(
+                                {"tool": "Bash", "error": result_text[:200]}
+                            )
+                        if "file not found" in result_text.lower() or "no such file" in result_text.lower():
+                            signals["tool_failures"].append(
+                                {"tool": "Read", "error": result_text[:200]}
+                            )
+                        if "old_string not found" in result_text.lower():
+                            signals["tool_failures"].append(
+                                {"tool": "Edit", "error": result_text[:200]}
+                            )
 
                 # Track commands for repetition detection
                 if event_type == "assistant":

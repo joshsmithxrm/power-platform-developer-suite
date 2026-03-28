@@ -91,6 +91,13 @@ EOF
 
 Omit the `Closes` lines if there are no linked issues. Keep title under 70 characters. Use conventional commit format.
 
+**Immediately after PR creation, write state** (before any step that could fail or be interrupted):
+
+```bash
+python scripts/workflow-state.py set pr.url "{pr-url}"
+python scripts/workflow-state.py set pr.created now
+```
+
 ### 4. Wait for Gemini Review
 
 Gemini posts review comments within 2-3 minutes of PR creation. Do NOT skip this step.
@@ -179,19 +186,15 @@ CI: running — check PR page for status.
 Awaiting your review.
 ```
 
-### 7. Write Workflow State
-After PR is created:
-
-```bash
-python scripts/workflow-state.py set pr.url "{pr-url}"
-python scripts/workflow-state.py set pr.created now
-```
+### 7. Write Triage State
 
 After Gemini comments are triaged (step 5 complete):
 
 ```bash
 python scripts/workflow-state.py set pr.gemini_triaged true
 ```
+
+Note: `pr.url` and `pr.created` are already written in Step 3, immediately after PR creation. This ensures state is consistent even if the session terminates before reaching this step.
 
 The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 5.
 
@@ -239,9 +242,13 @@ Platform-specific detachment is handled by the caller (the skill executor):
 
 The monitor handles: CI polling, Gemini stabilization, triage dispatch, draft→ready conversion, retro, and notification — all as a background process that survives session exit.
 
-### 10. Retro (Interactive Mode)
+> **Note:** If Steps 4-8 already completed (triage done, PR converted to ready, notification sent), the monitor should skip triage and draft→ready conversion. It only needs to handle CI polling, retro, and notification for CI completion. Check `pr.gemini_triaged` in workflow state to determine if triage was already performed.
 
-In interactive mode (not pipeline, not pr-monitor), also spawn a retro subagent after PR creation:
+### 10. Retro (Interactive Mode — only if pr-monitor was NOT launched)
+
+If Step 9 launched the pr-monitor, **skip this step** — the monitor already handles retro as part of its lifecycle. Running retro here AND in the monitor causes double retro.
+
+Only spawn a retro subagent if the pr-monitor was NOT launched (e.g., in pipeline mode or if monitor launch failed):
 
 ```
 Agent tool:
@@ -250,4 +257,4 @@ Agent tool:
   run_in_background: true
 ```
 
-This is a best-effort retro that runs while the user continues working. The pr-monitor also runs its own retro — this is intentional for coverage.
+This is a fallback retro for cases where the pr-monitor is not running.

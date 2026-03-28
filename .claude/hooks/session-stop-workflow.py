@@ -26,6 +26,10 @@ def main():
     except (json.JSONDecodeError, EOFError):
         pass
 
+    # Re-entry guard: if stop hook is calling itself, exit cleanly
+    if hook_input.get("stop_hook_active"):
+        sys.exit(0)
+
     project_dir = get_project_dir()
 
     # Get current branch

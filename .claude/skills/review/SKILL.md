@@ -24,6 +24,9 @@ $ARGUMENTS = optional scope (e.g., `src/PPDS.Cli/Tui/` to limit review). Default
 ### Step 1: Gather Review Material
 
 ```bash
+# Ensure local main ref is current (worktrees can be stale)
+git fetch origin main --quiet
+
 git diff main...HEAD --stat
 git diff main...HEAD
 ```

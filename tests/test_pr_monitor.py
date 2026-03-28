@@ -101,9 +101,10 @@ class TestCiFailure:
         result = pr_monitor.read_result(wt)
         assert result["status"] == "ci_failed"
         mock_notify.assert_called_once()
-        # Verify failure details are passed to notification
+        # Verify worktree and PR number are passed to notification
         notify_args = mock_notify.call_args
-        assert notify_args is not None, "run_notify should be called with arguments"
+        assert notify_args[0][0] == wt, "run_notify must receive worktree path"
+        assert notify_args[0][1] == 99, "run_notify must receive PR number"
 
 
 class TestCiTimeout:
@@ -409,27 +410,43 @@ class TestGeminiTimeout:
         logger = _make_logger(tmp_path)
 
         # Return incrementing counts so it never stabilizes
-        call_num = [0]
+        poll_count = [0]
 
         def varying_counts(*args, **kwargs):
-            call_num[0] += 1
             cmd = args[0] if args else kwargs.get("args", [])
             if cmd and "view" in cmd:
                 return subprocess.CompletedProcess(
                     args=[], returncode=0, stdout="owner/repo", stderr=""
                 )
-            # Each poll returns a different count so it never stabilizes
+            if cmd and "--jq" in cmd and "length" in cmd[cmd.index("--jq") + 1]:
+                # Count query — return incrementing counts to prevent stabilization
+                poll_count[0] += 1
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=str(poll_count[0]), stderr=""
+                )
+            # Full fetch query — return JSON array
             return subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=str(call_num[0]), stderr=""
+                args=[], returncode=0, stdout="[]", stderr=""
             )
 
+        # Use a small positive max_wait so the loop body actually executes
+        time_calls = [0]
+
+        def advancing_time():
+            time_calls[0] += 1
+            return time_calls[0] * 2.0  # 2s per call, timeout at 5s
+
         with patch("pr_monitor.subprocess.run", side_effect=varying_counts), \
-             patch("pr_monitor.GEMINI_MAX_WAIT", 0), \
-             patch("pr_monitor.GEMINI_POLL_INTERVAL", 0):
+             patch("pr_monitor.GEMINI_MAX_WAIT", 5), \
+             patch("pr_monitor.GEMINI_POLL_INTERVAL", 0), \
+             patch("pr_monitor.time.time", side_effect=advancing_time), \
+             patch("pr_monitor.time.sleep"):
             result = pr_monitor.poll_gemini_comments(wt, 5, logger)
 
         # Should return empty since never got stable count and timed out
         assert result == []
+        # Verify polling actually happened (loop body executed)
+        assert poll_count[0] >= 1, f"Expected at least 1 poll attempt, got {poll_count[0]}"
 
 
 class TestPidFileLifecycle:

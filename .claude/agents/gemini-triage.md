@@ -31,7 +31,7 @@ After processing all comments, push any fixes (`git push`) and output this JSON 
 ```json
 [
   {
-    "id": "<comment_id>",
+    "id": <comment_id>,
     "action": "fixed" | "dismissed",
     "description": "Brief explanation of what was done",
     "commit": "<sha>" | null

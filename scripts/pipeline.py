@@ -154,6 +154,27 @@ def verify_outcome(worktree_path, stage, pre_commit_count):
     return True
 
 
+def should_converge(state):
+    """Decide whether converge stage should run based on review state.
+
+    Returns (should_run, reason) tuple. Extracted from main() for testability.
+    """
+    review = state.get("review", {})
+    review_passed = review.get("passed", False)
+    review_findings = review.get("findings", 0)
+    try:
+        review_findings = int(review_findings)
+    except (TypeError, ValueError):
+        review_findings = 0
+
+    if review_passed and review_findings == 0:
+        return False, "review passed with zero findings"
+    elif review_passed and review_findings > 0:
+        return True, f"review passed with {review_findings} findings"
+    else:
+        return True, "review FAIL"
+
+
 def find_last_completed_stage(log_path):
     """Parse pipeline.log to find the last completed stage for --resume."""
     if not os.path.exists(log_path):
@@ -164,8 +185,11 @@ def find_last_completed_stage(log_path):
             for line in f:
                 if "] DONE" in line:
                     # Extract stage name from "[stage] DONE"
-                    bracket_start = line.index("[") + 1
-                    bracket_end = line.index("]")
+                    try:
+                        bracket_start = line.index("[") + 1
+                        bracket_end = line.index("]")
+                    except ValueError:
+                        continue  # Malformed log line — skip
                     stage_name = line[bracket_start:bracket_end]
                     # Normalize converge round names back to base stage
                     if stage_name.startswith("converge"):
@@ -681,7 +705,10 @@ def process_retro_findings(worktree_path, logger, repo_root):
         finding_id = finding.get("id", "R-??")
         title = f"retro: {desc[:70]}"
 
-        existing = _find_duplicate_issue(title, repo_root)
+        try:
+            existing = _find_duplicate_issue(title, repo_root)
+        except Exception:
+            existing = None  # Best-effort dedup — file new issue on failure
         if existing:
             _handle_duplicate(finding, existing, repo_root, logger, worktree_path)
             continue
@@ -753,7 +780,11 @@ def ensure_retro_summary_updated(worktree_path, logger, repo_root):
             "schema_version": 1,
             "total_retros": 0,
             "findings_by_category": {},
-            "metrics": {},
+            "metrics": {
+                "avg_fix_ratio": 0.0,
+                "pipeline_success_rate": 0.0,
+                "avg_convergence_rounds": 0.0,
+            },
             "last_updated": "",
         }
 
@@ -1034,8 +1065,10 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     qa = state.get("qa", {})
     review = state.get("review", {})
     body_parts.append(f"- [{'x' if gates.get('passed') else ' '}] /gates passed")
-    body_parts.append(f"- [{'x' if any(verify.values()) else ' '}] /verify completed")
-    body_parts.append(f"- [{'x' if any(qa.values()) else ' '}] /qa completed")
+    verify_done = isinstance(verify, dict) and any(v for v in verify.values() if isinstance(v, str) and v)
+    qa_done = isinstance(qa, dict) and any(v for v in qa.values() if isinstance(v, str) and v)
+    body_parts.append(f"- [{'x' if verify_done else ' '}] /verify completed")
+    body_parts.append(f"- [{'x' if qa_done else ' '}] /qa completed")
     body_parts.append(f"- [{'x' if review.get('passed') else ' '}] /review completed")
     body_parts.append("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
     pr_body = "\n".join(body_parts)
@@ -1049,7 +1082,8 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
         return 1, logger
 
-    pr_url = result.stdout.strip()
+    # gh pr create may output warnings on earlier lines; URL is always the last line
+    pr_url = result.stdout.strip().splitlines()[-1].strip() if result.stdout.strip() else ""
     # Extract PR number from URL (expect format: https://github.com/owner/repo/pull/123)
     pr_number = pr_url.rstrip("/").split("/")[-1]
     if not pr_number.isdigit():
@@ -1418,11 +1452,16 @@ def main():
                 prompt = f"/{stage}"
                 exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run)
                 if exit_code != 0:
-                    log(logger, "pipeline", "FAILED", failed_stage=stage)
-                    _pipeline_fail(stage)
+                    # Review FAIL must advance to converge, not abort (AC-20)
+                    if stage == "review":
+                        log(logger, "review", "FAIL_WILL_CONVERGE",
+                            reason="review failed — advancing to converge stage")
+                    else:
+                        log(logger, "pipeline", "FAILED", failed_stage=stage)
+                        _pipeline_fail(stage)
 
-                # P4: Outcome verification + retry
-                if not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
+                # P4: Outcome verification + retry (skip for review — converge handles it)
+                if stage != "review" and not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
                     log(logger, stage, "OUTCOME_MISS", reason="expected state not set, retrying")
                     exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run)
                     if exit_code != 0:
@@ -1431,22 +1470,12 @@ def main():
 
             elif stage == "converge":
                 state = read_state(worktree_path)
-                review = state.get("review", {})
-                review_passed = review.get("passed", False)
-                review_findings = review.get("findings", 0)
-                try:
-                    review_findings = int(review_findings)
-                except (TypeError, ValueError):
-                    review_findings = 0
+                run_converge, reason = should_converge(state)
 
-                if review_passed and review_findings == 0:
-                    log(logger, "converge", "SKIPPED", reason="review passed with zero findings")
+                if not run_converge:
+                    log(logger, "converge", "SKIPPED", reason=reason)
                     continue
-                elif review_passed and review_findings > 0:
-                    log(logger, "converge", "TRIGGERED",
-                        reason=f"review passed with {review_findings} findings")
-                else:
-                    log(logger, "converge", "TRIGGERED", reason="review FAIL")
+                log(logger, "converge", "TRIGGERED", reason=reason)
 
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
