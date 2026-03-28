@@ -440,7 +440,7 @@ function Show-Dashboard {
     $mergedRaw = git -C $Root branch --merged main 2>$null
     $mergedBranches = @()
     if ($mergedRaw) {
-        $mergedBranches = @($mergedRaw | ForEach-Object { $_.Trim().TrimStart('* ') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' })
+        $mergedBranches = @($mergedRaw | ForEach-Object { ($_ -replace '^\s*\*?\s*', '') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' -and $_ -ne '' })
     }
 
     # PR statuses
@@ -857,7 +857,7 @@ function Invoke-Clean {
     $mergedRaw = git -C $Root branch --merged main 2>$null
     $mergedBranches = @()
     if ($mergedRaw) {
-        $mergedBranches = @($mergedRaw | ForEach-Object { $_.Trim().TrimStart('* ') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' })
+        $mergedBranches = @($mergedRaw | ForEach-Object { ($_ -replace '^\s*\*?\s*', '') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' -and $_ -ne '' })
     }
 
     $toClean = @()

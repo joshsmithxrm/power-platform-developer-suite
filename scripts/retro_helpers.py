@@ -59,7 +59,10 @@ def extract_transcript_signals(jsonl_path):
                     and isinstance(event.get("message", {}).get("content"), list)
                     and any(b.get("type") == "tool_result" for b in event["message"]["content"] if isinstance(b, dict))
                 ):
-                    content = event.get("content", "")
+                    if event_type == "assistant":
+                        content = event.get("message", {}).get("content", [])
+                    else:
+                        content = event.get("content", "")
                     if isinstance(content, list):
                         for block in content:
                             if block.get("type") == "tool_result":

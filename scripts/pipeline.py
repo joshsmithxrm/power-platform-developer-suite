@@ -737,7 +737,7 @@ def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
 
         if count > 0 and count == last_count:
             stable_polls += 1
-            if stable_polls >= 1:
+            if stable_polls >= 2:
                 break  # Stable — two consecutive polls with same count
         else:
             stable_polls = 0
@@ -954,8 +954,12 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         return 1, logger
 
     pr_url = result.stdout.strip()
-    # Extract PR number from URL
+    # Extract PR number from URL (expect format: https://github.com/owner/repo/pull/123)
     pr_number = pr_url.rstrip("/").split("/")[-1]
+    if not pr_number.isdigit():
+        log(logger, "pr", "PR_NUMBER_INVALID", url=pr_url, extracted=pr_number)
+        log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
+        return 1, logger
     log(logger, "pr", "PR_CREATED", url=pr_url, draft=True)
 
     # Write workflow state immediately
@@ -1432,7 +1436,7 @@ def main():
             _result_written = True
         print(f"\nPipeline complete in {duration}s.", file=sys.stderr)
         if pr_url:
-            print(f"PR: {pr_url}")
+            print(f"PR: {pr_url}", file=sys.stderr)
 
     except PipelineFailure:
         duration = int(time.time() - pipeline_start)

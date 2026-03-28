@@ -850,7 +850,7 @@ class TestPrGeminiStabilization:
         source = inspect.getsource(pipeline.poll_gemini)
         assert "stable_polls" in source, \
             "poll_gemini must track stable polls for stabilization"
-        assert "stable_polls >= 1" in source, \
+        assert "stable_polls >= 2" in source, \
             "poll_gemini must stop after two consecutive same-count polls"
 
 

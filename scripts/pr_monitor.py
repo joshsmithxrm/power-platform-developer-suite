@@ -7,8 +7,8 @@ Designed to run detached from the creating terminal so the caller can
 return to the REPL immediately.
 
 Usage:
-    python scripts/pr-monitor.py --worktree <path> --pr <number>
-    python scripts/pr-monitor.py --worktree <path> --pr <number> --resume
+    python scripts/pr_monitor.py --worktree <path> --pr <number>
+    python scripts/pr_monitor.py --worktree <path> --pr <number> --resume
 
 Platform detachment (caller side):
     Windows:  Popen(creationflags=CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP)
@@ -461,6 +461,41 @@ def mark_pr_ready(worktree, pr_number, logger):
         return False
 
 
+def post_replies(worktree, pr_number, triage_results, logger):
+    """Post threaded replies to Gemini review comments from triage results."""
+    if SHAKEDOWN:
+        logger.log("replies", "SHAKEDOWN_SKIPPED")
+        return
+
+    repo = get_repo_slug(worktree)
+    if not repo:
+        logger.log("replies", "ERROR", reason="Cannot determine repo slug")
+        return
+
+    for item in triage_results:
+        comment_id = item.get("id")
+        action = item.get("action", "unknown")
+        description = item.get("description", "")
+        commit_sha = item.get("commit")
+
+        if action == "fixed" and commit_sha:
+            body = f"Fixed in {commit_sha} — {description}"
+        elif action == "dismissed":
+            body = f"Not applicable — {description}"
+        else:
+            body = description or "Reviewed."
+
+        try:
+            subprocess.run(
+                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
+                 "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
+                cwd=worktree, capture_output=True, text=True, timeout=15,
+            )
+            logger.log("replies", "POSTED", comment_id=comment_id, action=action)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            logger.log("replies", "FAILED", comment_id=comment_id)
+
+
 def run_retro(worktree, logger):
     """Run claude -p '/retro' for retrospective."""
     if SHAKEDOWN:
@@ -649,6 +684,16 @@ def run_monitor(worktree, pr_number, resume=False):
                 worktree, pr_number, comments, logger, result,
                 step_key, triage_iteration,
             )
+
+            # Post threaded replies to Gemini comments
+            if triage_results:
+                try:
+                    post_replies(worktree, pr_number, triage_results, logger)
+                    mark_step(result, f"replies_{triage_iteration}", "done")
+                except Exception as e:
+                    logger.log("replies", "EXCEPTION", error=str(e))
+                    mark_step(result, f"replies_{triage_iteration}", "error")
+                write_result(worktree, result)
 
             # Re-poll CI after triage commits
             ci_recheck_key = f"ci_recheck_{triage_iteration}"
