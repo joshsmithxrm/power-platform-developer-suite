@@ -1,27 +1,30 @@
 # Retro Filing
 
-**Status:** Draft
+**Status:** Draft (v2.0 — retro overhaul: transcript reading, isolation, auto-trigger, issue updates)
 **Last Updated:** 2026-03-27
-**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [.claude/skills/retro/](../.claude/skills/retro/)
+**Code:** [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/retro_helpers.py](../scripts/retro_helpers.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/skills/retro/](../.claude/skills/retro/)
 **Surfaces:** N/A
 
 ---
 
 ## Overview
 
-Pipeline retro auto-files GitHub issues for every `issue-only` finding via `process_retro_findings()`. It doesn't distinguish between actionable code bugs and observational metrics. Result: ~50% of retro-filed issues are noise (timing gaps, fix ratios, thrashing counts) that require triage effort to close. Additionally, pipeline retries file duplicate issues for the same finding.
+The retro system has two problems. First, filing quality: pipeline retro auto-files GitHub issues for every `issue-only` finding via `process_retro_findings()`, but doesn't distinguish between actionable code bugs and observational metrics — ~50% of filed issues are noise. Second, coverage: retro is blind to what actually happened in sessions. It reads mechanical metrics (pipeline.log, git log) but not transcript content. Interactive sessions skip retro entirely. When retro does run interactively, it is contaminated by implementation context.
 
 ### Goals
 
 - **Issue-worthiness criteria**: Only file GitHub issues for findings that identify specific, fixable code defects
 - **Noise reduction**: Observational metrics and single-run anomalies stay in the retro report without becoming issues
-- **Duplicate prevention**: Same finding is not filed as multiple issues across pipeline retries or worktrees
+- **Duplicate prevention**: Same finding updates existing issues instead of creating duplicates
+- **Transcript reading**: Retro reads both user AND assistant messages from all sessions on a branch
+- **Context isolation**: Retro runs as a separate agent, not in the implementation context window
+- **Automatic trigger**: Retro runs after every PR (via pr-monitor), not only in pipeline mode
 
 ### Non-Goals
 
-- **Changing retro analysis depth**: The retro skill still analyzes all findings — this only affects which ones become GitHub issues
+- **Changing retro analysis depth**: The retro skill still analyzes all findings — this affects filing behavior and input sources
 - **Auto-heal implementation**: `auto-fix` and `draft-fix` tiers are unchanged; auto-heal is a separate concern
-- **Retro skill restructuring**: The skill prompt gets criteria additions, not a rewrite
+- **Real-time session monitoring**: Retro runs after the fact, not during sessions
 
 ---
 
@@ -108,7 +111,7 @@ Before filing a GitHub issue for an `issue-only` finding, `process_retro_finding
 2. Extract search prefix: first 50 characters of the title
 3. Run `gh issue list --search "{prefix}" --state open --json number,title --limit 5`
 4. For each returned issue, check if title starts with the same prefix
-5. If match found: log `ISSUE_SKIPPED_DUPLICATE` with the existing issue number, skip filing
+5. If match found: log `ISSUE_UPDATED_DUPLICATE` with the existing issue number, call `_handle_duplicate()` to post a comment on the existing issue with new occurrence details, then continue to the next finding
 6. If no match: proceed with `gh issue create`
 
 **Why 50-char prefix match:** Pipeline retries may produce the same finding with slightly different trailing text (e.g., different timing numbers). Matching on a prefix catches these while avoiding false positives from unrelated issues.
@@ -178,7 +181,7 @@ def _find_duplicate_issue(title, repo_root):
     return None
 ```
 
-Updated filing loop:
+Updated filing loop (uses `_handle_duplicate` to update existing issues instead of skipping — see [Duplicate Handling](#duplicate-handling) below):
 
 ```python
 observations = [f for f in findings if f.get("tier") == "observation"]
@@ -188,19 +191,151 @@ log(
     auto_fix=len(auto_fixes), draft_fix=len(draft_fixes),
     issue_only=len(issues), observation=len(observations),
 )
+```
 
+The filing loop itself is defined in the [Duplicate Handling](#duplicate-handling) section below (the `ISSUE_UPDATED_DUPLICATE` + `_handle_duplicate` version).
+
+### Transcript Discovery and Reading
+
+**Problem:** Pipeline retro reads `pipeline.log` and `git log` only — mechanical metrics. It does not read transcript content (what the AI actually did, what errors occurred, what the user corrected). Interactive retro reads user messages but NOT assistant messages. Neither reads across sessions.
+
+**Transcript sources (in priority order):**
+
+| Source | Location | What it contains |
+|--------|----------|-----------------|
+| Pipeline stage JSONL | `.workflow/stages/{stage}.jsonl` | Full assistant output — tool calls, text, errors |
+| Pipeline stage logs | `.workflow/stages/{stage}.log` | Extracted assistant text (human-readable) |
+| Pipeline log | `.workflow/pipeline.log` | Stage timing, heartbeats, events |
+| Claude session transcripts | `~/.claude/projects/{hashed-path}/*.jsonl` (direct filesystem read) | Interactive session history |
+| PR monitor log | `.workflow/pr-monitor.log` | CI status, Gemini triage, notification events |
+| Workflow state | `.workflow/state.json` | Phase transitions, stop hook enforcement logging |
+
+**Discovery flow:**
+
+```
+1. List all .workflow/stages/*.jsonl files (pipeline sessions)
+2. List all .workflow/stages/*.log files (extracted text)
+3. Read .workflow/pipeline.log for stage events
+4. Read interactive session transcripts from Claude Code's local storage:
+   Scan ~/.claude/projects/ for directories matching the repo path hash
+   Read *.jsonl files, filter by timestamp (sessions during this branch's lifetime)
+5. Read .workflow/state.json for enforcement events
+6. Read .workflow/pr-monitor.log if exists
+```
+
+**Content extraction from JSONL:** Use the same `extract_text_from_jsonl()` logic from pipeline-observability (extracts `assistant` message text blocks). For retro purposes, also extract:
+- `tool_use` events: which tools were called, which files were modified
+- `tool_result` events: which tool calls failed (non-zero exit, error messages)
+- User messages (in interactive transcripts): corrections, frustrations, repeated commands
+
+**What retro should detect from transcripts:**
+
+| Signal | Source | Example |
+|--------|--------|---------|
+| User corrections | User messages | "No, I said X not Y", "That's wrong", "Try again" |
+| Tool failures | tool_result events | Bash exit code != 0, Read file not found |
+| Repeated commands | User messages | Same command issued 3+ times ("finish the workflow") |
+| Agent retries | assistant messages | Same tool call with same args issued multiple times |
+| Session crashes | Session list | Short sessions (<2 min), abrupt endings |
+| Skill loading failures | assistant messages | "Skill not found", "Unknown command" |
+| Stop hook ignored | state.json | `stop_hook_count > 1` — agent ignored enforcement |
+| Unnecessary decision points | User messages | User says "just do it", "don't ask", "proceed" |
+
+### Context Isolation
+
+**Problem:** When retro runs in the same context window as implementation, the retro agent has access to implementation details, tool outputs, and prior conversation. This biases the retro — it focuses on what it remembers from the session rather than systematically analyzing transcripts.
+
+**Evidence:** PR #725: retro ran in the same session as implementation. It reported 3 findings, all from the last 30 minutes of work. It missed a pattern of 4 repeated "finish the workflow" commands from the first hour.
+
+**Fix:** Retro always runs as a separate `claude -p` session. No shared context with implementation.
+
+**Pipeline mode (already isolated):** Retro is a separate stage in `pipeline.py` — each stage gets a fresh context window. No change needed.
+
+**Interactive mode (new):** When a user runs `/retro` interactively, it should spawn a subagent (`subagent_type: "general-purpose"`) with ONLY:
+- The transcript files (JSONL, logs)
+- The retro skill instructions
+- The constitution
+- The workflow state
+
+It does NOT receive the conversation history from the implementation session. The subagent returns findings to the parent session, which writes them to state and handles filing.
+
+**pr-monitor mode (new):** `pr_monitor.py` runs `claude -p "/retro"` in the worktree — inherently isolated (separate process, fresh context).
+
+### Automatic Trigger
+
+**Problem:** Interactive sessions skip retro entirely. The user has to manually run `/retro`, which rarely happens. When it does happen, it's in the same context (contaminated).
+
+**Fix:** Retro is triggered automatically by:
+
+| Trigger | Mechanism | Isolation |
+|---------|-----------|-----------|
+| Pipeline completion (success) | Last stage in pipeline.py sequence | Separate `claude -p` session |
+| Pipeline failure | `except PipelineFailure` block in pipeline.py (see pipeline-observability) | Separate `claude -p` session |
+| PR monitor completion | Step 7 of pr_monitor.py, before notification | Separate `claude -p` session |
+| Interactive PR creation | `/pr` skill spawns retro subagent after PR is created | Subagent (isolated context) |
+
+**No stop-hook trigger:** The stop hook is NOT a good trigger for retro. It fires unpredictably (e.g., feat/workflow-overhaul design session 2026-03-27: stop hook fired 6 times as false positives from stale local main). Retro is triggered by completion events (PR created, pipeline done), not by session lifecycle.
+
+### Issue Updates Instead of Skip
+
+**Problem (updated):** The v1 spec skipped duplicate issues entirely. But recurring findings carry important information — "this happened again" is a signal that the original issue is more serious than initially thought, or that a fix didn't stick.
+
+**Fix:** When a finding matches an existing open issue, post a comment with the new occurrence instead of skipping.
+
+**Updated `_find_duplicate_issue()` behavior:**
+
+```python
+def _handle_duplicate(finding, existing_issue_number, repo_root):
+    """Post a comment on the existing issue with new occurrence details."""
+    # Resolve branch from state.json or git
+    branch = "unknown"
+    state_path = os.path.join(repo_root, ".workflow", "state.json")
+    try:
+        with open(state_path) as f:
+            branch = json.load(f).get("branch", "unknown")
+    except (OSError, json.JSONDecodeError):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_root, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                branch = result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    body = f"""### Retro observation ({datetime.now().strftime('%Y-%m-%d')})
+**Branch:** {branch}
+**Session:** {finding.get('id', 'unknown')}
+**Details:** {finding.get('description', 'No description')}
+**Evidence:** {finding.get('contributing_factors', ['None'])[0] if finding.get('contributing_factors') else 'None'}
+
+This finding was also observed in a previous retro. Updating existing issue rather than filing duplicate."""
+
+    subprocess.run(
+        ["gh", "issue", "comment", str(existing_issue_number),
+         "--body", body],
+        cwd=repo_root, capture_output=True, text=True, timeout=15,
+    )
+```
+
+**Updated filing loop:**
+
+```python
 for finding in issues:
     desc = finding.get("description", "No description")
     title = f"retro: {desc[:70]}"
 
     existing = _find_duplicate_issue(title, repo_root)
     if existing:
-        log(logger, "retro", "ISSUE_SKIPPED_DUPLICATE",
+        log(logger, "retro", "ISSUE_UPDATED_DUPLICATE",
             finding=finding.get("id", "R-??"), existing=f"#{existing}")
+        _handle_duplicate(finding, existing, repo_root)
         continue
 
     # ... existing gh issue create logic ...
 ```
+
+**Why update instead of skip:** A finding that appears in 3 consecutive retros is not the same as a finding that appears once. The comment trail creates a history: "first seen on feat/X, also on feat/Y, also on feat/Z." This pattern visibility helps prioritize fixes.
 
 ### Constraints
 
@@ -208,6 +343,8 @@ for finding in issues:
 - `process_retro_findings()` trusts the AI's classification; it does not second-guess tier assignments
 - Duplicate check is best-effort — if `gh issue list` fails, file the issue anyway (prefer duplicates over lost findings)
 - The `observation` tier is stored in `retro-findings.json` and `.retros/summary.json` for trend analysis — it's not discarded, just not filed
+- Transcript reading is additive — retro still reads pipeline.log and git log in addition to transcripts
+- PPDS_SHAKEDOWN=1 suppresses all issue filing and commenting (shakedown findings stay in report only)
 
 ---
 
@@ -221,9 +358,18 @@ for finding in issues:
 | AC-04 | When `retro-findings.json` contains findings with `tier == "observation"`, `process_retro_findings()` does not call `gh issue create` for them | `test_observation_tier_not_filed` | 🔲 |
 | AC-05 | `_find_duplicate_issue()` returns existing issue number when open issue with matching title prefix exists | `test_find_duplicate_returns_existing_issue` | 🔲 |
 | AC-06 | `_find_duplicate_issue()` returns None when no matching open issue exists | `test_find_duplicate_returns_none_when_no_match` | 🔲 |
-| AC-07 | `process_retro_findings()` skips filing and logs `ISSUE_SKIPPED_DUPLICATE` when duplicate exists | `test_skip_duplicate_issue_filing` | 🔲 |
+| AC-07 | `process_retro_findings()` updates existing issue (posts comment) and logs `ISSUE_UPDATED_DUPLICATE` when duplicate exists | `test_update_duplicate_issue` | 🔲 |
 | AC-08 | `process_retro_findings()` files issue when `_find_duplicate_issue()` fails (best-effort dedup) | `test_files_issue_when_dedup_check_fails` | 🔲 |
 | AC-09 | `observation` findings are written to `retro-findings.json` and `.retros/summary.json` (not discarded) | `test_observations_persisted_in_store` | 🔲 |
+| AC-10 | `extract_transcript_signals(jsonl_path)` returns structured signals: user corrections, tool failures, repeated commands from JSONL | `test_extract_transcript_signals` (unit test with fixture JSONL containing known patterns) | 🔲 |
+| AC-11 | `extract_transcript_signals()` identifies user correction patterns: messages containing "no", "wrong", "try again", "that's not", or 3+ repetitions of same command | `test_user_correction_detection` | 🔲 |
+| AC-12 | `extract_transcript_signals()` identifies tool failures: Bash tool_result with non-zero exit code, Read with "file not found", Edit with "old_string not found" | `test_tool_failure_detection` | 🔲 |
+| AC-13 | `extract_enforcement_signals(state_path)` returns stop hook block count and timestamps from `stop_hook_count` field in state | `test_enforcement_signal_extraction` | 🔲 |
+| AC-14 | Interactive `/retro` dispatches subagent with `subagent_type: "general-purpose"` — subagent receives only transcript files, constitution, and state (no conversation history) | Manual — run `/retro` in interactive session, verify subagent dispatch in tool calls | 🔲 |
+| AC-15 | `pr_monitor.py` triggers retro as penultimate step (step 7), passing worktree path for transcript access (cross-ref: canonical in workflow-enforcement.md) | `test_pr_monitor.py::test_retro_trigger` | 🔲 |
+| AC-16 | Duplicate issue comment includes branch name, session ID, new evidence, and "also observed" preamble | `test_duplicate_comment_format` | 🔲 |
+| AC-17 | `PPDS_SHAKEDOWN=1` suppresses all `gh issue create` and `gh issue comment` calls | `test_shakedown_suppresses_all_issue_ops` | 🔲 |
+| AC-18 | Interactive `/pr` skill spawns retro subagent after PR is created (isolated, best-effort) (cross-ref: canonical in workflow-enforcement.md) | Manual — run `/pr` interactively, verify retro subagent dispatched after PR creation | 🔲 |
 
 ### Edge Cases
 
@@ -233,6 +379,12 @@ for finding in issues:
 | `gh issue list` times out during dedup | Network failure | File the issue anyway (best-effort dedup) |
 | Duplicate check returns similar but non-matching title | "retro: Pipeline fails" vs "retro: Pipeline retry" | Not a match (prefix differs after char ~20), file both |
 | Finding with empty description | `description: ""` | Title becomes `retro: `, dedup matches any other empty-desc finding |
+| No JSONL files exist (first session on branch) | Empty `.workflow/stages/` | Retro falls back to pipeline.log + git log only |
+| JSONL contains only tool_use events (no text) | Agent used tools but produced no text | Extract tool names and files modified — still useful signal |
+| Claude Code local storage path not found (`~/.claude/projects/` missing) | Different Claude Code version or portable install | Skip interactive transcript reading, log warning, continue with pipeline JSONL only |
+| Retro subagent stalls in interactive mode | Agent takes >5 min | Stall-based timeout kills subagent. Parent session reports "retro incomplete" |
+| `gh issue comment` fails | Network error | Log warning, continue with next finding. Best-effort. |
+| Same finding appears in 5 consecutive retros | 5 comments on same issue | Each comment adds to the trail. Human reviewer sees pattern and can prioritize. |
 
 ---
 
@@ -283,3 +435,4 @@ for finding in issues:
 | Date | Change |
 |------|--------|
 | 2026-03-27 | Initial spec — issue #722 |
+| 2026-03-27 | v2.0 — retro overhaul: (1) transcript discovery and reading (JSONL + stage logs + interactive sessions), (2) content extraction for user corrections, tool failures, repeated commands, enforcement patterns, (3) context isolation — retro as separate agent/subagent, (4) automatic trigger via pr-monitor and /pr, (5) issue updates instead of skip on duplicates (post comment with new occurrence), (6) PPDS_SHAKEDOWN suppression. |

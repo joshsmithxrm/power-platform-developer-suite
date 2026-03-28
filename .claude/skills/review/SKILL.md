@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review
+description: Bias-isolated code review — reviewer sees only the diff, constitution, and spec ACs, never the implementation plan or task context
 ---
 
 # Review
@@ -24,6 +24,9 @@ $ARGUMENTS = optional scope (e.g., `src/PPDS.Cli/Tui/` to limit review). Default
 ### Step 1: Gather Review Material
 
 ```bash
+# Ensure local main ref is current (worktrees can be stale)
+git fetch origin main --quiet
+
 git diff main...HEAD --stat
 git diff main...HEAD
 ```
@@ -37,7 +40,25 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 - Read each relevant spec — extract ONLY the `## Acceptance Criteria` section
 - Do NOT read any plan files, task descriptions, or implementation notes
 
+### Step 2b: Load QA Findings for Dedup
+
+Before dispatching reviewers, read existing QA findings from state:
+
+```bash
+python scripts/workflow-state.py get qa_findings
+```
+
+Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
+
 ### Step 3: Dispatch Impartial Reviewer
+For large diffs (>10 files), use per-file chunking instead of a single subagent:
+
+1. Group changed files by directory (max 5 files per chunk, or files ≤50 lines can be grouped together)
+2. Dispatch up to 5 parallel subagents, one per chunk — each gets the same constitution + ACs but only their file subset
+3. Stall timeout: if a subagent makes no progress for 3 minutes, skip that chunk with a "review incomplete" note (not a hard failure)
+4. After all per-file reviews complete, run one cross-file consistency pass checking: type mismatches, missing imports, interface/caller drift
+5. Merge findings from all subagents, deduplicate by file:line
+
 
 Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, and ACs. This is the bias prevention mechanism: the reviewer sees code, not intent.
 
@@ -110,6 +131,12 @@ Include total counts and a clear verdict:
 - **FAIL**: any critical findings
 
 ## Workflow State
+
+On review start, set the phase:
+
+```bash
+python scripts/workflow-state.py set phase reviewing
+```
 
 After review completes (all findings evaluated and verdict rendered), run:
 

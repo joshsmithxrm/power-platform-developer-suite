@@ -108,3 +108,6 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 # Python
 __pycache__/
 *.pyc
+
+# Shakedown scenarios (synthetic test data)
+.shakedown/

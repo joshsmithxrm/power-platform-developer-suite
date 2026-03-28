@@ -1,9 +1,14 @@
 ---
 name: implement
-description: Implement Plan
+description: Execute a checked-in implementation plan end-to-end using parallel agents. Use when a spec and plan exist in .plans/ and you're ready to build.
 ---
 
 # Implement Plan
+
+## Usage
+
+`/implement` — read spec and plan from `.plans/`, execute phases
+`/implement specs/my-feature.md` — explicit spec path
 
 ## Pipeline Mode Detection
 
@@ -102,11 +107,11 @@ python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
 python scripts/workflow-state.py set spec "{spec-path}"
 python scripts/workflow-state.py set plan "$ARGUMENTS"
 python scripts/workflow-state.py set started now
+python scripts/workflow-state.py set phase implementing
 ```
 
 ### Step 4: Create Task Tracking
-- Use TaskCreate to build a task list from the plan phases
-- Set up dependencies between tasks using addBlockedBy/addBlocks
+- Use TodoWrite to build a task list from the plan phases
 - Mark any already-completed work as done
 
 ### Step 4.5: Assess Model Selection
@@ -122,7 +127,7 @@ Do not hardcode model IDs in the plan. Assess at dispatch time based on the phas
 For EACH phase in the plan, repeat this cycle:
 
 **A. Dispatch Agents**
-- For ALL independent tasks within the current phase, dispatch background agents using the Task tool with `run_in_background: true`
+- For ALL independent tasks within the current phase, dispatch background agents using the Agent tool with `run_in_background: true`
 - For parallel streams in a phase group (e.g., "Phase 2-4: PARALLEL"), dispatch ALL streams simultaneously
 - Each agent prompt MUST include:
   - The specific task/subtask from the plan with full requirements
@@ -131,6 +136,7 @@ For EACH phase in the plan, repeat this cycle:
   - Build verification command to run before finishing
   - Test command to run and verify
   - The spec context block from Step 2 (constitution + relevant AC tables)
+  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values.
   - Reminder: no shell redirections (2>&1, >, >>)
   - Self-check gate: before reporting completion, run the relevant gate checks for your changed files. For TypeScript/extension changes: `npm run typecheck:all --prefix src/PPDS.Extension` and `npx eslint --quiet {changed-files}`. For C# changes: `dotnet build {project}.csproj -v q`. Report gate results in your summary — do not silently suppress failures.
 - Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
@@ -159,7 +165,9 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
   1. The spec AC table `Test` column is filled in (not empty, not "❌ no test yet")
   2. The referenced test method exists in the codebase
   3. The test passes: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
-  If any AC is missing a test, the phase gate FAILS. Do not proceed — dispatch an agent to write the missing tests. This is not optional — Constitution I6 makes untested ACs a defect.
+  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes.
+  5. **Negative verification:** For bug-fix or threshold ACs, the test SHOULD demonstrate failure when the condition is not met (e.g., assert the function returns a different value with wrong input), not just that the happy path works.
+  If any AC is missing a test or has only a structural/source-inspection test, the phase gate FAILS. Do not proceed — dispatch an agent to write proper behavioral tests. This is not optional — Constitution I6 makes untested ACs a defect.
 - If the phase touches extension code (`src/PPDS.Extension/` directory):
   Invoke `/verify extension` to check daemon status, tree views, and panel state.
   Then invoke `/qa extension` to dispatch a blind verifier agent that tests the UI without seeing source code.
@@ -171,12 +179,14 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 - If the phase touches CLI commands (`src/PPDS.Cli/Commands/`, not `Serve/`):
   Invoke `/qa cli` to verify command output matches expectations.
 - Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
+- After all sub-skill invocations (/verify, /qa) complete, restore phase: `python scripts/workflow-state.py set phase implementing`
 
 **D. Review**
 - Invoke `/review` to dispatch an impartial reviewer for the phase's work
 - The reviewer receives ONLY the diff, constitution, and ACs — NO implementation context (no plan, no task descriptions). It reviews code against specs, not against the plan.
 - If the review identifies issues, dispatch fix agents before committing
 - Only proceed to commit when review passes
+- After review completes, restore phase: `python scripts/workflow-state.py set phase implementing`
 
 **E. Commit the Phase**
 - Stage all files for this phase: `git add` specific files (not `git add -A`)
@@ -228,8 +238,8 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 - Verify `.workflow/state.json` shows fresh timestamps for gates, verify, qa, and review
 - All timestamps must be more recent than the `started` timestamp
 
-**G. Continue Pipeline**
-After final state check passes, proceed IMMEDIATELY to the tail verification pipeline. Do NOT stop to present a summary. The pipeline is: gates → verify → qa → review → pr. Execute end-to-end unless a step fails.
+**G. Submit**
+After final state check passes, proceed IMMEDIATELY to `/pr`. Do NOT stop to present a summary — Steps 6A–6D already ran the full verification pipeline (gates → verify → qa → review), so go directly to PR submission.
 
 ## Rules
 

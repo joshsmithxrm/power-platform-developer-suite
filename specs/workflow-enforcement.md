@@ -1,9 +1,9 @@
 # Workflow Enforcement
 
-**Status:** Draft (v6.0 — work-type routing in /start, context file consolidation)
-**Version:** 6.0
+**Status:** Draft (v7.0 — comprehensive workflow overhaul: phase-aware hooks, post-PR monitor, shakedown, retro trigger)
+**Version:** 7.0
 **Last Updated:** 2026-03-27
-**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
+**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
 
 ---
@@ -129,6 +129,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 {
   "branch": "feat/import-jobs",
   "work_type": "new feature",
+  "phase": "implementing",
   "spec": "specs/import-jobs.md",
   "issues": [602, 596],
   "plan": ".plans/2026-03-16-import-jobs.md",
@@ -163,7 +164,25 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 3. **State invalidation on commit:** The Post-Commit Hook (see below) clears `gates.passed` (sets to `null`) after every successful commit because the codebase has changed since gates last ran. `verify`, `qa`, and `review` timestamps are NOT automatically cleared on commit — they track cumulative coverage across the session.
 4. Skills are responsible for writing their own entries. No central coordinator.
 5. File is gitignored — it is per-session state, not committed.
-6. **Converge cycle handling:** `/converge` clears `gates.passed` before starting its fix cycle. After the final fix cycle completes and all fixes are committed, `/converge` runs `/gates` one final time. The Post-Commit Hook clears `gates.passed` on each fix commit, but `/converge`'s final `/gates` run writes a fresh `gates.passed` + `gates.commit_ref` matching the final HEAD. This prevents deadlock: the sequence is always fix → commit → (gates cleared) → final gates → (gates fresh against HEAD).
+6. **Phase lifecycle:** The `phase` field tracks what kind of work the session is doing. Every entry point MUST set it. Phase determines stop hook enforcement behavior.
+
+   | Phase | Set by | Stop hook behavior |
+   |-------|--------|-------------------|
+   | `starting` | `/start` (initial state) | Skip enforcement |
+   | `investigating` | `/investigate` | Skip enforcement |
+   | `design` | `/design` | Skip enforcement |
+   | `implementing` | `/implement`, `/design` on handoff | Full enforcement |
+   | `pipeline` | `pipeline.py` on startup | Already skipped via `PPDS_PIPELINE=1` (step 1, before phase check) |
+   | `reviewing` | `/review` | Skip enforcement (mid-workflow) |
+   | `qa` | `/qa` | Skip enforcement (mid-workflow) |
+   | `shakedown` | `/shakedown` | Skip enforcement (validation phase) |
+   | `retro` | `/retro` | Skip enforcement (retrospective phase) |
+   | `pr` | `/pr` | Skip enforcement (PR creation is its own gate) |
+   | null/missing | Legacy state files, manual sessions | Full enforcement (safe default) |
+
+   Note: `pipeline` phase is intentionally absent from the stop hook's step-5 bypass list because `PPDS_PIPELINE=1` catches it in step 1 (env var check fires before phase check).
+
+7. **Converge cycle handling:** `/converge` clears `gates.passed` before starting its fix cycle. After the final fix cycle completes and all fixes are committed, `/converge` runs `/gates` one final time. The Post-Commit Hook clears `gates.passed` on each fix commit, but `/converge`'s final `/gates` run writes a fresh `gates.passed` + `gates.commit_ref` matching the final HEAD. This prevents deadlock: the sequence is always fix → commit → (gates cleared) → final gates → (gates fresh against HEAD).
 
 ### Hook Specifications
 
@@ -256,14 +275,20 @@ Run these before creating a PR.
 
 **Pipeline mode:** When `PPDS_PIPELINE=1` is set, the hook exits 0 immediately. The pipeline orchestrator handles stage sequencing via `state.json` — the Stop hook's workflow enforcement is redundant and harmful in headless mode. Without this bypass, the hook blocks the implement stage from exiting because gates/verify/review haven't run yet (they are separate pipeline stages), creating an infinite retry loop.
 
+**Shakedown mode:** When `PPDS_SHAKEDOWN=1` is set, the hook exits 0 immediately. Shakedown runs exercise the workflow to test it — enforcement during testing would block the test itself.
+
 **Behavior (all modes — in order):**
-1. **Pipeline check (first):** If `PPDS_PIPELINE=1` is set, exit 0 immediately. All subsequent checks are skipped.
+1. **Pipeline check (first):** If `PPDS_PIPELINE=1` or `PPDS_SHAKEDOWN=1` is set, exit 0 immediately. All subsequent checks are skipped.
 2. **Infinite loop guard:** If `stop_hook_active` is set in hook input, exit 0 (prevents re-entry).
 3. **Main branch:** If on `main` or `master`, exit 0.
 4. Read `.workflow/state.json` if it exists. If missing, exit 0.
-5. **Design-only bypass:** If the only changed files (vs main) are under non-code prefixes (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`), exit 0 — this was a design session. Note: `.claude/` is NOT a non-code prefix — process code requires workflow enforcement.
-6. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
-7. If all steps complete, emit summary to stderr and exit 0.
+5. **Phase-aware bypass:** Read `phase` from state. If phase is `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`, or `pr`, exit 0 — these phases do not owe gates/verify/qa/review. Only `implementing` and null/missing phases trigger enforcement. This replaces the previous "design-only bypass" which used `git diff` against local `main` and was unreliable (see Design Decisions: Why Phase-Based Stop Hook).
+6. **Code change detection:** Compare changed files using `origin/main...HEAD` (not local `main` — local main can be arbitrarily stale after worktree creation). If only non-code prefixes changed (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`), exit 0.
+7. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
+8. **Enforcement logging:** On block, write to state file: `stop_hook_blocked: true`, `stop_hook_count: N` (increment), `stop_hook_last: <timestamp>`. This enables retro to detect "stop hook fired N times, agent ignored all N" as a finding.
+9. If all steps complete, emit summary to stderr and exit 0.
+
+**Critical fix — `origin/main` instead of `main`:** The previous implementation used `git diff --name-only main...HEAD` which compared against the local `main` branch. In worktrees created from main, local `main` is a snapshot from worktree creation time — it does not auto-update. If PRs are merged to remote main after the worktree is created, local `main` falls behind, and the diff shows committed code that is already on remote main as "changes on this branch." This caused false-positive enforcement in design sessions with zero actual code changes. Using `origin/main` (updated by `git fetch` which `/start` already runs) eliminates this class of false positives.
 
 **Output:**
 ```
@@ -284,12 +309,17 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 
 | Skill | Writes to state |
 |-------|----------------|
-| `/implement` | `branch`, `spec`, `plan`, `started`, `implemented`. Interactive mode mandatory tail: runs `/gates` → `/verify` → `/qa` → `/review` → `/converge` after final phase. In pipeline mode (`PPDS_PIPELINE=1`): skips tail — pipeline orchestrator runs subsequent stages as separate sessions. |
+| `/start` | `branch`, `started`, `issues`, `work_type`, `phase: "starting"` |
+| `/investigate` | `phase: "investigating"` |
+| `/design` | `phase: "design"`. On handoff to implement: `phase: "implementing"`, `spec`. |
+| `/implement` | `phase: "implementing"`, `spec`, `plan`, `implemented`. Interactive mode mandatory tail: runs `/gates` → `/verify` → `/qa` → `/review` → `/converge` after final phase. In pipeline mode (`PPDS_PIPELINE=1`): skips tail — pipeline orchestrator runs subsequent stages as separate sessions. |
 | `/gates` | `gates.passed`, `gates.commit_ref` |
 | `/verify` | `verify.{surface}` (ext, tui, mcp, cli) |
 | `/qa` | `qa.{surface}` |
 | `/review` | `review.passed`, `review.findings` |
 | `/converge` | Clears `gates.passed` when starting a fix cycle (code is changing). Re-runs gates at end. |
+| `/pr` | `phase: "pr"`, `pr.url`, `pr.created`, `pr.gemini_triaged` |
+| `pipeline.py` | `phase: "pipeline"` (on startup, before first stage) |
 
 #### Existing Skills — Renames and Restructuring
 
@@ -308,10 +338,11 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 
 | Skill | Purpose | Key Behavior |
 |-------|---------|-------------|
-| `/design` | Brainstorm → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Check for `.plans/context.md` — if found, load design context and offer "proceed to spec writing or brainstorm further?" Verify proposal against each Constraint and Known Concern from context file. Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. **Anti-pattern update:** "Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/pr`). Enhancements with existing specs use `/implement` directly." |
+| `/design` | Brainstorm → challenge → spec → plan. Replaces `superpowers:brainstorming`. | **Requires worktree** — errors if on main ("Run `/start` first"). Step 1: Load constitution + spec template + search existing specs for overlapping scope (update existing spec if found). Check for `.plans/context.md` — if found, load design context and offer "proceed to spec writing or brainstorm further?" Verify proposal against each Constraint and Known Concern from context file. Step 2: Brainstorm (one question at a time, explore 2-3 approaches, converge). **Step 2b: Challenge** — after architecture is approved but before spec writing, dispatch challenger agent (Sonnet subagent) with ONLY the architecture summary + constraints + constitution. Challenger evaluates 8 dimensions: completeness, consistency, feasibility, failure modes, security, performance, testability, missing alternatives. Fix must-fix findings, dismiss acceptable risks with rationale, present challenger report to user. Step 3: Write spec, run `/review` against it, present spec + findings + fixes to user. Step 4: On approval, write implementation plan to `.plans/`, run `/review` against it, present plan + findings to user. Step 5: On approval, commit spec (plan is gitignored). Step 6: Handoff — offer headless pipeline (`pipeline.py --worktree <path> --from implement`), interactive (`/implement`), or defer. Do NOT use plan mode. **Anti-pattern update:** "Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/pr`). Enhancements with existing specs use `/implement` directly." |
 | `/pr` | Rebase → draft PR → Gemini triage → mark ready → notify. | **Interactive mode:** Rebases on main. Creates draft PR. Polls for Gemini reviews (30s interval, 90s min wait, 5 min max). Triages each comment (fix valid, dismiss invalid with rationale). Replies to EACH comment individually. Converts draft → ready (`gh pr ready`). Notifies user. Writes `pr.url`, `pr.created`, `pr.gemini_triaged` to workflow state. **Pipeline mode:** Orchestration is scripted in `pipeline.py` (see PR Stage Orchestration). Only the triage step invokes AI via the `gemini-triage` agent profile (Sonnet). |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
+| `/shakedown-workflow` | Behavioral integration test for workflow changes. | Creates throwaway worktrees from current branch, runs synthetic scenarios (feature, bug fix, resume) through the full pipeline with `PPDS_SHAKEDOWN=1`, collects transcripts, runs comprehensive retro, produces shakedown report. Iterates until clean. See Workflow Shakedown section. |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
 | `/status` | Display current workflow state with live pipeline monitoring. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. When a pipeline is running (`.workflow/pipeline.lock` exists with live PID): parses `.workflow/pipeline.log` for stage progress and last heartbeat; parses the active stage's `.jsonl` file to show current tool call in progress, files created/modified this stage, commits made, elapsed time, and last activity timestamp. When no pipeline is running: reads `.workflow/stages/{stage}.log` for completed stage summaries. No state writes. |
@@ -413,7 +444,7 @@ stdout and stderr merge into `.workflow/stages/{stage}.jsonl`. No PIPE — elimi
 |--------|-----|----------------|
 | `output_bytes` | `os.path.getsize(stage_jsonl_path)` | Agent process is running and streaming events |
 | `git_changes` | `git status --porcelain \| wc -l` | Agent is modifying files in the worktree |
-| `commits` | `git rev-list --count main..HEAD` | Agent has committed work product |
+| `commits` | `git rev-list --count origin/main..HEAD` | Agent has committed work product |
 
 Activity classification:
 - **active**: `output_bytes` increased since last heartbeat OR `git_changes` increased OR `commits` increased
@@ -474,20 +505,20 @@ def is_pid_alive(pid):
 
 Note: `os.kill(pid, 0)` works on Windows in Python 3.x — it calls `OpenProcess` internally.
 
-#### Default Stage Timeouts
+#### Stage Timeouts
 
-| Stage | Timeout | Rationale |
-|-------|---------|-----------|
-| implement | 45 min | Largest stage — multiple phases, many commits |
-| gates | 15 min | Build + unit tests |
-| verify | 20 min | Multi-surface verification |
-| qa | 20 min | Blind verification (three-agent) |
-| review | 15 min | Code review analysis |
-| converge (per round) | 15 min | Fix + re-gate per round |
-| pr | 10 min | PR creation and Gemini triage |
-| retro | 10 min | Post-mortem analysis |
+**Replaced by activity-based timeouts** — see [pipeline-observability.md](./pipeline-observability.md) AC-12 through AC-15. Fixed per-stage timeouts are removed. All stages use stall-based timeout (5 min idle) + hard ceiling (60 min). The table below is retained for reference only:
 
-Overridable via `--stage-timeout <seconds>` CLI flag (applies to all stages).
+| Stage | Previous fixed timeout | Notes |
+|-------|----------------------|-------|
+| implement | 45 min | Now: runs until stall or 60 min ceiling |
+| gates | 15 min | Now: killed at 5 min if stuck |
+| verify | 20 min | Now: runs until stall or 60 min ceiling |
+| qa | 20 min | Now: runs until stall or 60 min ceiling |
+| review | 15 min | Now: killed at 5 min if stuck |
+| converge (per round) | 15 min | Now: runs until stall or 60 min ceiling |
+| pr | 10 min | Now: killed at 5 min if stuck |
+| retro | 10 min | Now: killed at 5 min if stuck |
 
 #### PR Stage Orchestration (Pipeline Mode)
 
@@ -628,6 +659,229 @@ Do not create PRs, post comments, or modify workflow state — the pipeline hand
 **Version pinning:** `model: sonnet` floats to the latest Sonnet version intentionally. Triage quality is validated by the converge loop (bad fixes get caught by gates/review), so version drift is self-correcting. Pinning would require manual updates and provide minimal stability benefit for this use case.
 
 **Tool restrictions:** No Agent (can't spawn subagents), no web access. The triage agent reads code, edits code, runs git commands. Nothing else.
+
+#### Post-PR Monitor (Decoupled Background Process)
+
+**Script:** `scripts/pr_monitor.py`
+
+**Purpose:** After `/pr` creates a draft PR, the session can exit. The PR monitor runs as a background process — decoupled from any Claude session — handling CI monitoring, Gemini triage, draft→ready conversion, retro, and notification.
+
+**Launch:** `/pr` (or pipeline PR stage) spawns the monitor as a detached process:
+```python
+import sys, subprocess, platform
+
+log_path = f"{worktree_path}/.workflow/pr-monitor.log"
+log_file = open(log_path, "w")
+
+cmd = ["python", "scripts/pr_monitor.py",
+       "--worktree", worktree_path,
+       "--pr", str(pr_number)]
+
+if platform.system() == "Windows":
+    # On Windows, MINGW terminals use job objects with KILL_ON_JOB_CLOSE.
+    # start_new_session=True only sets CREATE_NEW_PROCESS_GROUP, which does
+    # NOT escape the job object. Use CREATE_BREAKAWAY_FROM_JOB to detach.
+    # Fallback: use pythonw.exe (no console window, no job inheritance).
+    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    proc = subprocess.Popen(
+        cmd, cwd=repo_root,
+        stdout=log_file, stderr=subprocess.STDOUT,
+        creationflags=CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP,
+    )
+else:
+    proc = subprocess.Popen(
+        cmd, cwd=repo_root,
+        stdout=log_file, stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+log_file.close()  # Parent closes its handle; child inherits the fd
+
+```
+
+**Flow:**
+
+```
+pr_monitor.py --worktree <path> --pr <number>
+│
+├─ 1. Write PID to .workflow/pr-monitor.pid
+│
+├─ 2. Poll CI status (30s interval, 15 min max)
+│     gh pr checks <number> --json name,state,conclusion
+│     Wait for all checks to complete (pass or fail)
+│     If 15 min elapsed with checks still pending:
+│       Log CI_TIMEOUT, notify user "CI still running after 15 min", exit 1
+│       User can re-launch with --resume after CI completes
+│
+├─ 3. Poll Gemini review (30s interval, 90s min wait, 5 min max)
+│     gh api repos/{owner}/{repo}/pulls/{number}/reviews
+│     gh api repos/{owner}/{repo}/pulls/{number}/comments
+│     Stabilization: same comment count on 2 consecutive polls
+│     If 5 min elapsed: stop polling, proceed with whatever comments exist
+│
+├─ 4. If CI failed:
+│     Log CI failure details
+│     Write .workflow/pr-monitor-result.json {status: "ci_failed", ...}
+│     python .claude/hooks/notify.py --title "CI Failed" --body "..."
+│     Exit 1
+│
+├─ 5. If inline comments > 0:
+│     Spawn claude -p with triage prompt (same as pipeline gemini-triage)
+│     Wait for triage to complete
+│     Post threaded replies via gh api
+│     If triage made commits: re-poll CI (loop back to step 2, max 3 loops)
+│     If max loops exceeded: notify "triage/CI loop exceeded", exit 1
+│
+├─ 6. Convert draft → ready
+│     gh pr ready <number>
+│
+├─ 7. Run retro (penultimate step)
+│     claude -p "/retro" in worktree context
+│     Best-effort — retro failure doesn't block notification
+│
+├─ 8. Desktop notification
+│     python .claude/hooks/notify.py --title "PR Ready" --url <url>
+│
+├─ 9. Write .workflow/pr-monitor-result.json
+│     {status: "ready", ci: "passed", gemini_comments: N,
+│      triaged: N, fixes: N, retro_ran: true/false}
+│
+└─ 10. Clean up PID file, exit 0
+```
+
+**CI failure handling:** On CI red, the monitor notifies the user with failure details and exits. It does NOT attempt to fix CI failures or wait indefinitely. The user decides whether to fix and re-push. After fixing, the user can re-launch the monitor: `python scripts/pr_monitor.py --worktree <path> --pr <number> --resume`. The `--resume` flag reads `pr-monitor-result.json` and skips steps already completed.
+
+**Resume sub-state model:** `pr-monitor-result.json` tracks completion of each sub-step independently:
+
+```json
+{
+  "status": "ci_failed",
+  "steps_completed": {
+    "ci_poll": false,
+    "gemini_poll": true,
+    "gemini_comments": 3,
+    "triage": false,
+    "draft_to_ready": false,
+    "retro": false,
+    "notify": false
+  }
+}
+```
+
+On `--resume`, the monitor reads `steps_completed` and skips any step marked `true`. This distinguishes "Gemini polled but triage not run" from "Gemini not polled" — solving the sub-state ambiguity.
+
+**Retro trigger chain:** The pr-monitor runs retro as step 7 — after all PR work is done but before notification. This closes the loop: every PR gets a retro regardless of whether the session that created it is still alive. The retro runs in the worktree context with access to all `.workflow/stages/*.jsonl` files and workflow state.
+
+**Session independence:** The monitor writes its own log (`.workflow/pr-monitor.log`) and result file. It does not read from or write to any Claude session. It can outlive the session, the terminal, even a system restart (re-launch with `--resume`).
+
+#### Workflow Shakedown
+
+**New skill:** `/shakedown-workflow`
+
+**Purpose:** Behavioral integration test for workflow infrastructure changes. Runs real tasks through the modified workflow in throwaway worktrees to verify hooks, skills, pipeline, and retro work end-to-end before shipping workflow changes.
+
+**Distinct from `/shakedown`:** The existing `/shakedown` tests product code across surfaces (extension, TUI, CLI). `/shakedown-workflow` tests the workflow process itself.
+
+**Synthetic test scenarios:** Canned prompts in `.shakedown/` (gitignored):
+
+| Scenario | File | What it exercises |
+|----------|------|-------------------|
+| Feature path | `.shakedown/feature.md` | `/start` → `/design` → pipeline (implement → gates → verify → qa → review → pr) |
+| Bug fix path | `.shakedown/bugfix.md` | `/start` → `/implement` → gates → verify → pr |
+| Resume path | `.shakedown/resume.md` | Partial state file → new session → verify pickup + continuation |
+
+**Flow:**
+
+```
+/shakedown-workflow [--paths feature,bug,resume] [--parallel]
+│
+├─ 1. Verify current branch has workflow changes
+│     (git diff --name-only origin/main...HEAD | grep -E '^\.(claude|shakedown)/|^scripts/')
+│
+├─ 2. Create throwaway worktrees branched from CURRENT branch
+│     git worktree add .worktrees/shakedown-feature feat/shakedown-feature
+│     git worktree add .worktrees/shakedown-bugfix feat/shakedown-bugfix
+│     Each inherits the modified .claude/, scripts/, specs/ from this branch
+│
+├─ 3. Initialize each worktree with its scenario
+│     Copy .shakedown/{scenario}.md → .plans/context.md in each worktree
+│     Write .workflow/state.json with appropriate work_type and phase
+│
+├─ 4. Launch pipelines (parallel if --parallel, sequential otherwise)
+│     PPDS_SHAKEDOWN=1 python scripts/pipeline.py \
+│       --worktree .worktrees/shakedown-feature --from implement
+│     PPDS_SHAKEDOWN=1 suppresses:
+│       - gh issue create in process_retro_findings()
+│       - gh pr create in /pr stage (or creates PR with [SHAKEDOWN] prefix, draft-only)
+│       - Desktop notifications
+│
+├─ 5. Collect results from all worktrees
+│     Read .workflow/pipeline-result.json from each
+│     Read .workflow/retro-findings.json from each
+│     Read all .workflow/stages/*.log from each
+│
+├─ 6. Run comprehensive retro across ALL shakedown sessions
+│     claude -p with combined transcript context from all worktrees
+│     Focus: did the workflow work? Not: did the synthetic task succeed?
+│
+├─ 7. Produce shakedown report
+│     .workflow/shakedown-report.json:
+│     {
+│       "paths_tested": ["feature", "bugfix"],
+│       "results": {
+│         "feature": {"status": "complete", "issues": [...]},
+│         "bugfix": {"status": "failed", "failed_stage": "gates", "issues": [...]}
+│       },
+│       "workflow_findings": [...],
+│       "recommendation": "3 findings need fixing before PR"
+│     }
+│
+├─ 8. Clean up throwaway worktrees
+│     git worktree remove .worktrees/shakedown-feature --force
+│     git worktree remove .worktrees/shakedown-bugfix --force
+│
+└─ 9. Present report to user (if interactive) or write to .workflow/ (if headless)
+```
+
+**`PPDS_SHAKEDOWN=1` environment variable:** Checked by:
+- `process_retro_findings()` in pipeline.py — skips `gh issue create` for all tiers
+- `/pr` stage — skips PR creation entirely (logs `PR_SKIPPED_SHAKEDOWN`; the PR is not the artifact under test, the workflow process is)
+- `notify.py` — suppresses desktop notifications
+- Stop hook — exits 0 immediately (same as pipeline mode)
+
+**Iterative loop:** After shakedown identifies issues, the developer fixes them on the workflow branch and re-runs `/shakedown-workflow`. The cycle repeats until the shakedown report shows zero workflow findings. Only then is the workflow branch PR'd.
+
+**Resume path testing:** The resume scenario is special — it doesn't run a full pipeline. Instead:
+1. Write a partial `.workflow/state.json` (gates passed, verify done, no QA/review)
+2. Launch a new Claude session in the worktree
+3. Verify the session-start hook correctly shows the partial state
+4. Verify the agent picks up at QA (the next missing step)
+5. Verify the stop hook fires correctly when QA/review are still missing
+
+#### Hook Path Doubling Fix
+
+**Problem:** In worktrees, the stop hook command `python ".claude/hooks/session-stop-workflow.py"` fails with a doubled path: `.worktrees/workflow-overhaul/.worktrees/workflow-overhaul/.claude/hooks/...`. Claude Code appears to resolve relative hook command paths against `CLAUDE_PROJECT_DIR`, which in worktrees is already the worktree path — producing `worktree + worktree + relative`.
+
+**Root cause investigation:** Before implementing a fix, determine whether:
+- `CLAUDE_PROJECT_DIR` is set to the doubled path when the hook runs (Claude Code bug)
+- Claude Code prepends the project dir to relative paths in hook commands (by design)
+- The doubling only occurs in worktrees (not in the main repo checkout)
+
+**Workaround (if Claude Code bug confirmed):** Use `git rev-parse --git-common-dir` to resolve the main repo root at runtime. Note: `--show-toplevel` returns the worktree path in worktrees (NOT the main repo root where `.claude/` lives). `--git-common-dir` returns the path to the shared `.git` directory, from which we can derive the repo root:
+
+```json
+{
+  "command": "python -c \"import subprocess,sys,os; gdir=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip(); root=os.path.dirname(gdir) if not gdir.endswith('.git') else os.path.dirname(os.path.dirname(gdir)); root=os.path.normpath(os.path.join(os.getcwd(),root)) if not os.path.isabs(root) else root; sys.path.insert(0,root); exec(open(os.path.join(root,'.claude','hooks','session-stop-workflow.py')).read())\"",
+  "event": "Stop"
+}
+```
+
+**Why `--git-common-dir` not `--show-toplevel`:** In a worktree at `.worktrees/foo/`, `--show-toplevel` returns `.worktrees/foo/` — the worktree root, not the main repo. `.claude/hooks/` doesn't live in the worktree; it's in the main repo (git shares `.claude/` via the worktree mechanism). `--git-common-dir` returns the path to the shared git directory (e.g., `../../.git` from a worktree), and its parent is always the main repo root.
+
+**Alternative (if Claude Code fix available):** File as a Claude Code bug. If fixed upstream, revert to the simple relative path form.
+
+**All hooks affected:** This fix applies to all hook commands in `.claude/settings.json`, not just the stop hook. The session-start hook and pre-commit hooks have the same potential doubling issue.
 
 #### Pipeline Log Format
 
@@ -784,10 +1038,10 @@ After all skills in this spec are implemented:
 | AC-54 | Pipeline sets `PPDS_PIPELINE=1` in subprocess environment | `test_pipeline.py::test_sets_pipeline_env_var` | 🔲 |
 | AC-55 | Stage output written to `.workflow/stages/{stage}.log` file (not PIPE) | `test_pipeline.py::test_stage_output_goes_to_file` | 🔲 |
 | AC-56 | Pipeline logs heartbeat every 60s with elapsed time, PID, output bytes, and activity status | `test_pipeline.py::test_heartbeat_logging` | 🔲 |
-| AC-57 | Per-stage timeout terminates subprocess when exceeded | `test_pipeline.py::test_timeout_kills_subprocess` | 🔲 |
+| ~~AC-57~~ | ~~Per-stage timeout terminates subprocess when exceeded~~ Superseded by pipeline-observability AC-13 (hard ceiling) | `test_pipeline.py::test_timeout_kills_subprocess` | N/A |
 | AC-58 | Exit code logged immediately when subprocess finishes | `test_pipeline.py::test_logs_exit_code_on_completion` | 🔲 |
 | AC-59 | Last 20 lines of stage output written to pipeline.log after stage completes | `test_pipeline.py::test_captures_output_tail` | 🔲 |
-| AC-60 | `--stage-timeout` CLI flag overrides default stage timeouts | `test_pipeline.py::test_stage_timeout_cli_override` | 🔲 |
+| ~~AC-60~~ | _Superseded by pipeline-observability AC-12 through AC-15 (activity-based timeouts replace fixed per-stage timeouts)._ | — | — |
 | AC-61 | Dry-run mode works with new process management (no subprocess spawned) | `test_pipeline.py::test_dry_run_skips_subprocess` | 🔲 |
 | AC-62 | `/start` works from feature branches — resolves main repo root and creates worktree from there | Manual: run `/start` from a worktree, verify new worktree created | 🔲 |
 | AC-63 | `/status` shows pipeline stage progress including heartbeat data when pipeline is running | Manual: run `/status` during pipeline execution, verify stage timing shown | 🔲 |
@@ -827,6 +1081,35 @@ After all skills in this spec are implemented:
 | AC-97 | `/start` includes design-context from `/investigate` conversation in `.plans/context.md` when present | Manual: run `/investigate` then `/start` in same session, verify context file includes investigation output | 🔲 |
 | AC-98 | `/design` reads `.plans/context.md` (not `design-context.md`) at Step 1 and offers proceed/brainstorm choice when found | `grep "context.md" .claude/skills/design/SKILL.md` returns match in Step 1 | 🔲 |
 | AC-99 | `/implement` Step 0 prompts user when no relevant spec is found: "No spec found. Run `/design` or continue without?" | Manual: run `/implement` with no spec in workflow state and no matching spec in `specs/`, verify prompt | 🔲 |
+| AC-100 | Stop hook uses `origin/main...HEAD` (not local `main...HEAD`) for code change detection — no false positives from stale local main | `test_pipeline.py::test_stop_hook_uses_origin_main` | 🔲 |
+| AC-101 | Stop hook reads `phase` from state and skips enforcement for `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`, `pr` phases | `test_pipeline.py::test_stop_hook_phase_bypass` | 🔲 |
+| AC-102 | Stop hook enforces workflow for `implementing` phase and null/missing phase (safe default) | `test_pipeline.py::test_stop_hook_enforces_implementing_phase` | 🔲 |
+| AC-103 | Stop hook exits 0 immediately when `PPDS_SHAKEDOWN=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_shakedown_mode` | 🔲 |
+| AC-104 | Stop hook writes `stop_hook_blocked: true`, `stop_hook_count: N`, `stop_hook_last: <timestamp>` to state file on block — retro can detect repeated ignored blocks | `test_pipeline.py::test_stop_hook_enforcement_logging` | 🔲 |
+| AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `qa`, `/shakedown-workflow` → `shakedown`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
+| AC-106 | `pr_monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
+| AC-107 | `pr_monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
+| AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends notification with failure details, exits 1 | `test_pr_monitor.py::test_ci_failure_notify_and_exit` | 🔲 |
+| AC-109 | `pr_monitor.py --resume` skips already-completed steps by reading `pr-monitor-result.json` | `test_pr_monitor.py::test_resume_skips_completed` | 🔲 |
+| AC-110 | `pr_monitor.py` spawns `claude -p` triage when inline comments > 0, waits for completion, posts threaded replies | `test_pr_monitor.py::test_triage_on_inline_comments` | 🔲 |
+| AC-111 | `pr_monitor.py` re-polls CI after triage commits (loop back to CI check) | `test_pr_monitor.py::test_repoll_ci_after_triage` | 🔲 |
+| AC-112 | `pr_monitor.py` runs `claude -p "/retro"` as penultimate step before notification | `test_pr_monitor.py::test_retro_runs_before_notify` | 🔲 |
+| AC-113 | `pr_monitor.py` converts draft → ready via `gh pr ready` after all checks pass | `test_pr_monitor.py::test_draft_to_ready` | 🔲 |
+| AC-114 | `pr_monitor.py` writes `.workflow/pr-monitor-result.json` with status, ci result, comment counts, triage summary, retro status | `test_pr_monitor.py::test_result_json_schema` | 🔲 |
+| AC-115 | `/shakedown-workflow` creates throwaway worktrees branched from current branch (not main) — worktrees inherit modified `.claude/`, `scripts/`, `specs/` | Manual: run `/shakedown-workflow`, verify worktree branch parent | 🔲 |
+| AC-116 | `/shakedown-workflow` sets `PPDS_SHAKEDOWN=1` in pipeline subprocess environment | `test_pipeline.py::test_shakedown_env_var` | 🔲 |
+| AC-117 | `PPDS_SHAKEDOWN=1` suppresses `gh issue create` in `process_retro_findings()` | `test_pipeline.py::test_shakedown_suppresses_issue_filing` | 🔲 |
+| AC-118 | `PPDS_SHAKEDOWN=1` suppresses `gh pr create` entirely — PR stage logs `PR_SKIPPED_SHAKEDOWN` and exits 0 | `test_pipeline.py::test_shakedown_skips_pr_creation` | 🔲 |
+| AC-119 | `PPDS_SHAKEDOWN=1` suppresses desktop notifications — `notify.py` exits 0 without sending when env var is set | `test_pipeline.py::test_shakedown_suppresses_notify` | 🔲 |
+| AC-120 | `/shakedown-workflow` collects results from all test worktrees and produces `.workflow/shakedown-report.json` | Manual: run `/shakedown-workflow`, verify report file | 🔲 |
+| AC-121 | `/shakedown-workflow` runs comprehensive retro across all shakedown session transcripts | Manual: verify retro covers all worktree transcripts | 🔲 |
+| AC-122 | `/shakedown-workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
+| AC-123 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
+| AC-124 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
+| AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
+| AC-126 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
+| AC-127 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
+| AC-128 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
 
 ### Edge Cases
 
@@ -843,6 +1126,16 @@ After all skills in this spec are implemented:
 | User runs `/design` on main without a worktree | Errors with "Run `/start` first" message. No spec or plan is created. |
 | User runs `/start` with uninterpretable input | AI asks for clarification. If still unclear, proposes a generic name and asks for confirmation. |
 | `/pr` CI or Gemini review takes longer than 5 minutes | `/pr` stops polling, reports current status and what's still pending. User can re-check later with natural language. |
+| Stop hook fires during `/design` session with no code changes | Phase is `design` → hook exits 0 immediately. No enforcement, no false positive. |
+| Stop hook fires on branch where local main is stale | Hook uses `origin/main...HEAD` → only real branch changes detected. |
+| Stop hook fires repeatedly, agent ignores it | `stop_hook_count` increments in state. Retro detects pattern: "stop hook fired N times, ignored N times." |
+| State file has no `phase` field (legacy) | Treated as null → full enforcement applies (safe default). |
+| `pr_monitor.py` parent process exits | Monitor runs in its own process group (`start_new_session=True`). Continues independently. |
+| `pr_monitor.py` CI fails, user fixes and re-pushes | User re-launches with `--resume`. Monitor reads prior result, skips Gemini polling (already done), re-polls CI. |
+| `pr_monitor.py` triage agent fails | Monitor skips triage, converts draft → ready with "triage incomplete" annotation. Continues to retro + notify. |
+| Shakedown PR accidentally merged | PRs created with `[SHAKEDOWN]` prefix are draft-only, never converted to ready. Merge protection (reviewers required) prevents accidental merge. |
+| Shakedown worktree cleanup fails (locked files) | Log warning, continue with other worktrees. Stale worktrees cleaned up by `/cleanup`. |
+| Hook path doubled in worktree | Git-root resolution workaround bypasses Claude Code's project dir resolution. |
 | Pipeline stage timeout exceeded | Process terminated, `TIMEOUT` logged to pipeline.log, pipeline exits 1. |
 | Pipeline subprocess crashes immediately (exit 1 in <1s) | Exit code logged, pipeline proceeds to failure handling. |
 | Pipeline subprocess completes work but process doesn't exit | Timeout fires, process killed, pipeline logs TIMEOUT and continues to next stage if outcome verified. |
@@ -1036,6 +1329,60 @@ After all skills in this spec are implemented:
 - Positive: Single debugging skill with both discipline and domain specificity.
 - Negative: We must maintain the debugging discipline content ourselves. Mitigated by the content being stable (debugging fundamentals don't change).
 
+### Why Phase-Based Stop Hook Instead of Git Diff Heuristic?
+
+**Context:** The v6.0 stop hook used `git diff --name-only main...HEAD` to detect whether a session had code changes. If only `specs/`, `.plans/`, `docs/` changed, it skipped enforcement (design-only bypass). This failed in two ways: (1) it compared against local `main` which was stale after worktree creation, producing false positives on branches with zero real changes; (2) it couldn't distinguish "in design phase with code from prior PRs on branch" from "actively implementing new code."
+
+**Evidence:** Stop hook fired 6 times during a `/design` session on `feat/workflow-overhaul` (2026-03-27). The branch had zero commits beyond `origin/main`, but local `main` was 3 commits behind. The diff showed `.claude/`, `scripts/`, `specs/` changes — all from previously-merged PRs. Agent ignored all 6 blocks. Zero enforcement achieved.
+
+**Decision:** Replace git-diff heuristic with explicit `phase` field in workflow state. Each skill writes its phase on entry. Stop hook reads the phase and only enforces during `implementing` (and null/missing for backward compatibility).
+
+**Alternatives considered:**
+- **Fix only the `origin/main` reference:** Solves the stale-main bug but not the "design session with code on branch" problem. A feature branch that has code from `/implement` but is now in a `/review` session would still be blocked.
+- **Time-since-last-commit heuristic:** If no commit in >30 min, assume design session. Fragile — long-running implementations also pause between commits.
+- **Explicit "enforcement enabled" flag:** Skills would set/clear a flag. Isomorphic to phase but less informative — phase tells you WHY enforcement is or isn't active.
+
+**Consequences:**
+- Positive: Stop hook behavior is deterministic and predictable — you can read the phase in state.json to know exactly what the hook will do.
+- Positive: No git operations needed in the phase check path — faster, no timeout risk.
+- Negative: Requires every entry point to set the phase. Mitigated by listing all entry points in the phase lifecycle table and testing via AC-105.
+
+### Why Decoupled Post-PR Monitor Instead of In-Session Polling?
+
+**Context:** The v5.0 pipeline PR stage polls for Gemini reviews synchronously within the pipeline session. When the pipeline exits, the PR is in draft state with un-triaged Gemini comments. CI status is not monitored. User gets no notification when PR is ready.
+
+**Evidence:** PR #735: Gemini commented 4 min after creation, pipeline had already exited. PR #726: Gemini had no comments but user was not notified. PR #725: Gemini comments addressed only because session was interactive.
+
+**Decision:** `scripts/pr_monitor.py` runs as a background process (`start_new_session=True`), decoupled from the Claude session. Handles CI polling, Gemini triage, draft→ready, retro, and notification autonomously.
+
+**Alternatives considered:**
+- **Keep in-session, extend timeout:** Still couples PR lifecycle to session lifetime. Session crashes → PR abandoned.
+- **GitHub webhook:** Ideal but requires infrastructure (server, auth, routing). Deferred to roadmap.
+- **Cron job polling all open PRs:** Over-engineered for the current scale (1-3 active PRs at a time).
+
+**Consequences:**
+- Positive: PR lifecycle survives session exit, crashes, terminal closures. Re-launchable with `--resume`.
+- Positive: Retro runs as final step — every PR gets a retro regardless of session state.
+- Negative: Another background process to manage. Mitigated by PID file, logging, and cleanup in `/cleanup` skill.
+
+### Why Workflow Shakedown Instead of Unit Tests for Skills?
+
+**Context:** Workflow changes (hooks, skills, pipeline scripts) need behavioral testing. Unit tests verify code correctness but not process correctness. The stop hook Python parses correctly but fires at the wrong time — a unit test for parsing wouldn't catch this.
+
+**Evidence:** 0% pipeline success rate across 4 retros. Each failure was a behavioral issue (QA doesn't commit, review stalls, converge skipped) — not a code bug. All Python scripts parsed and ran; they just did the wrong thing in context.
+
+**Decision:** `/shakedown-workflow` creates throwaway worktrees from the current branch and runs synthetic scenarios through the full pipeline. Tests the PROCESS, not the CODE.
+
+**Alternatives considered:**
+- **More unit tests:** Necessary but not sufficient. Can't test "does the stop hook fire during design?" without running a real design session.
+- **Manual testing:** Current approach. Results in the death spiral: ship → discover bugs on real work → stall → fix → ship → more bugs.
+- **Dedicated test harness mocking Claude sessions:** High implementation cost, low fidelity — the mock wouldn't exercise real Claude behavior (tool calls, session lifecycle, hook triggering).
+
+**Consequences:**
+- Positive: Catches behavioral issues before they hit real work. Breaks the death spiral.
+- Positive: Throwaway worktrees mean zero risk — failed shakedowns don't pollute real work or backlog.
+- Negative: Each shakedown run costs compute (multiple pipeline runs). Acceptable — catching issues early saves far more compute than debugging them in production.
+
 ---
 
 ## Extension Points
@@ -1128,15 +1475,16 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
 | 2026-03-26 | v5.0 — pipeline observability and PR orchestration: (1) stream-json output for real-time stage logs, (2) multi-signal activity detection, (3) JSONL post-processing, (4) pipeline lock file, (5) /status live JSONL monitoring, (6) scripted PR stage with draft→ready flow, (7) gemini-triage agent profile (Sonnet), (8) pipeline-result.json + notify on completion/failure. |
 | 2026-03-27 | v6.0 — work-type routing: (1) `/start` classifies work type (user-confirmed, labels as hints), (2) `.plans/context.md` written to worktree with issue details + work type + next step, (3) work-type-aware guidance replaces hardcoded `/design`, (4) `work_type` field in workflow state, (5) `/design` reads `context.md` instead of `design-context.md`, (6) `/design` anti-patterns updated for bug-fix path, (7) `/implement` Step 0 fallback when no spec found. |
+| 2026-03-27 | v7.0 — comprehensive workflow overhaul: (1) phase-aware stop hook replaces git-diff heuristic, (2) `origin/main` in all hooks/heartbeat replaces stale local `main`, (3) enforcement logging in state for retro detection, (4) `PPDS_SHAKEDOWN=1` env var, (5) post-PR monitor (`pr_monitor.py`) — decoupled background process for CI/Gemini/triage/retro/notify, (6) `/shakedown-workflow` skill — behavioral integration test for workflow changes, (7) hook path doubling investigation + workaround, (8) phase lifecycle for all entry points. Addresses issues #731, #727, #732, #730, #734, #712, #733, #728, #729, #723, #724, #715, #662. |
 
 ---
 
 ## Roadmap
 
 - **GitHub-triggered pipelines:** Trigger implementation from GitHub issues or webhooks. Requires persisted workflow state and session handoff mechanism.
-- **PR monitoring webhook:** Replace Gemini polling with GitHub webhook notification. Eliminates polling entirely.
-- **CI status monitoring in PR stage:** Poll CI checks after Gemini triage. Report green/red in pipeline-result.json. Currently deferred — `/gates` already verifies locally.
+- **PR monitoring webhook:** Replace Gemini polling with GitHub webhook notification. Eliminates pr_monitor.py polling entirely.
 - **Cross-worktree status aggregation:** `/status` from main shows all active pipelines across worktrees. Currently each worktree's status is independent.
 - **Worktree auto-cleanup:** SessionStart hook checks for stale worktrees (no commits in >7 days) and prompts for cleanup.
 - **Cross-session workflow continuity:** Persist workflow state to git (not gitignored) so a new session can pick up where a previous session left off.
 - **Devcontainer support for `/start`:** Offer to open worktree in devcontainer as alternative to system default shell.
+- **Shakedown scenario library:** Expand `.shakedown/` with more scenarios — investigation path, multi-issue batch, pipeline recovery from failure.

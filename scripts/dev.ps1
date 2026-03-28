@@ -440,7 +440,7 @@ function Show-Dashboard {
     $mergedRaw = git -C $Root branch --merged main 2>$null
     $mergedBranches = @()
     if ($mergedRaw) {
-        $mergedBranches = @($mergedRaw | ForEach-Object { $_.Trim().TrimStart('* ') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' })
+        $mergedBranches = @($mergedRaw | ForEach-Object { ($_ -replace '^\s*\*?\s*', '') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' -and $_ -ne '' })
     }
 
     # PR statuses
@@ -717,6 +717,12 @@ function Resolve-WorktreePath {
         return $null
     }
 
+    # Exact match first — "workflow-overhaul" should not be ambiguous with "workflow-update"
+    $exact = Join-Path $wtDir $Prefix
+    if (Test-Path $exact -PathType Container) {
+        return $exact
+    }
+
     $dirs = @(Get-ChildItem -Directory $wtDir | Where-Object { $_.Name -like "$Prefix*" })
 
     if ($dirs.Count -eq 0) {
@@ -796,11 +802,13 @@ function Invoke-Pipeline {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
             $spec = $state.spec
+            $branch = $state.branch
         } catch { Write-Host "  Warning: failed to read state: $_" -ForegroundColor DarkYellow }
     }
 
     $args_ = @($pipelineScript, '--worktree', $wtPath)
     if ($spec) { $args_ += @('--spec', $spec) }
+    if ($branch) { $args_ += @('--branch', $branch) }
 
     $proc = Start-Process python -ArgumentList $args_ -PassThru -WorkingDirectory $Root
     $procId = $proc.Id
@@ -851,7 +859,7 @@ function Invoke-Clean {
     $mergedRaw = git -C $Root branch --merged main 2>$null
     $mergedBranches = @()
     if ($mergedRaw) {
-        $mergedBranches = @($mergedRaw | ForEach-Object { $_.Trim().TrimStart('* ') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' })
+        $mergedBranches = @($mergedRaw | ForEach-Object { ($_ -replace '^\s*\*?\s*', '') } | Where-Object { $_ -ne 'main' -and $_ -ne 'master' -and $_ -ne '' })
     }
 
     $toClean = @()
@@ -948,7 +956,7 @@ if ($Completions) {
 
 # Parse args
 $command = if ($Args_ -and $Args_.Count -gt 0) { $Args_[0] } else { $null }
-$restArgs = if ($Args_ -and $Args_.Count -gt 1) { $Args_[1..($Args_.Count - 1)] } else { @() }
+$restArgs = [string[]]@(if ($Args_ -and $Args_.Count -gt 1) { $Args_[1..($Args_.Count - 1)] } else { @() })
 
 # No args — dashboard
 if (-not $command) {

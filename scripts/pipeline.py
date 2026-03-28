@@ -88,7 +88,7 @@ def log(logger, stage, event, **extra):
     console_parts = [f"[{local_time()}] {stage}: {event}"]
     for k, v in extra.items():
         console_parts.append(f"{k}={v}")
-    print(" ".join(console_parts))
+    print(" ".join(console_parts), file=sys.stderr)
 
 
 def open_logger(log_path, mode="a"):
@@ -113,7 +113,7 @@ def get_commit_count(worktree_path):
     """Get number of commits ahead of main."""
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "main..HEAD"],
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
             cwd=worktree_path,
             capture_output=True,
             text=True,
@@ -154,6 +154,27 @@ def verify_outcome(worktree_path, stage, pre_commit_count):
     return True
 
 
+def should_converge(state):
+    """Decide whether converge stage should run based on review state.
+
+    Returns (should_run, reason) tuple. Extracted from main() for testability.
+    """
+    review = state.get("review", {})
+    review_passed = review.get("passed", False)
+    review_findings = review.get("findings", 0)
+    try:
+        review_findings = int(review_findings)
+    except (TypeError, ValueError):
+        review_findings = 0
+
+    if review_passed and review_findings == 0:
+        return False, "review passed with zero findings"
+    elif review_passed and review_findings > 0:
+        return True, f"review passed with {review_findings} findings"
+    else:
+        return True, "review FAIL"
+
+
 def find_last_completed_stage(log_path):
     """Parse pipeline.log to find the last completed stage for --resume."""
     if not os.path.exists(log_path):
@@ -164,8 +185,11 @@ def find_last_completed_stage(log_path):
             for line in f:
                 if "] DONE" in line:
                     # Extract stage name from "[stage] DONE"
-                    bracket_start = line.index("[") + 1
-                    bracket_end = line.index("]")
+                    try:
+                        bracket_start = line.index("[") + 1
+                        bracket_end = line.index("]")
+                    except ValueError:
+                        continue  # Malformed log line — skip
                     stage_name = line[bracket_start:bracket_end]
                     # Normalize converge round names back to base stage
                     if stage_name.startswith("converge"):
@@ -174,8 +198,8 @@ def find_last_completed_stage(log_path):
                         stage_name = "converge"
                     elif stage_name.startswith("verify-r"):
                         stage_name = "converge"
-                    elif stage_name.startswith("qa-"):
-                        stage_name = "qa"
+                    elif stage_name.startswith("qa-r"):
+                        stage_name = "converge"
                     elif stage_name.startswith("review-r"):
                         stage_name = "converge"
                     if stage_name in STAGES:
@@ -231,6 +255,24 @@ def release_lock(lock_path):
         pass
 
 
+def classify_activity(current_size, last_size, git_changes, last_git_changes,
+                      commits, last_commits, consecutive_idle):
+    """Classify heartbeat activity based on multi-signal detection.
+
+    Returns (activity_string, updated_consecutive_idle).
+    """
+    output_grew = current_size > last_size
+    git_grew = git_changes > last_git_changes
+    commits_grew = commits > last_commits
+
+    if output_grew or git_grew or commits_grew:
+        return "active", 0
+    else:
+        consecutive_idle += 1
+        activity = "stalled" if consecutive_idle >= 3 else "idle"
+        return activity, consecutive_idle
+
+
 def get_git_activity(worktree_path):
     """Get git working tree changes and commit count. Returns (changes, commits)."""
     changes = 0
@@ -246,7 +288,7 @@ def get_git_activity(worktree_path):
         pass
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "main..HEAD"],
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
             cwd=worktree_path, capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
@@ -392,16 +434,12 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
 
                 git_changes, commits = get_git_activity(worktree_path)
 
-                output_grew = current_size > last_log_size
-                git_grew = git_changes > last_git_changes
-                commits_grew = commits > last_commits
-
-                if output_grew or git_grew or commits_grew:
-                    activity = "active"
-                    consecutive_idle = 0
-                else:
-                    consecutive_idle += 1
-                    activity = "stalled" if consecutive_idle >= 3 else "idle"
+                activity, consecutive_idle = classify_activity(
+                    current_size, last_log_size,
+                    git_changes, last_git_changes,
+                    commits, last_commits,
+                    consecutive_idle,
+                )
 
                 last_log_size = current_size
                 last_git_changes = git_changes
@@ -580,6 +618,48 @@ def _find_duplicate_issue(title, repo_root):
     return None
 
 
+def _handle_duplicate(finding, existing_issue_number, repo_root, logger, worktree_path):
+    """Post structured comment on existing issue for duplicate findings."""
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "retro", "SHAKEDOWN_SKIPPED_COMMENT",
+            finding=finding.get("id", "R-??"), issue=existing_issue_number)
+        return
+
+    state = read_state(worktree_path) if worktree_path else {}
+    branch = state.get("branch", "unknown")
+    finding_id = finding.get("id", "R-??")
+    desc = finding.get("description", "No description")
+
+    comment_body = (
+        f"## Also observed: {finding_id}\n\n"
+        f"**Branch:** `{branch}`\n"
+        f"**Finding:** {finding_id}\n"
+        f"**Evidence:** {desc}\n\n"
+        "---\n*Also observed by pipeline retro.*"
+    )
+
+    gh_env = os.environ.copy()
+    gh_env["MSYS_NO_PATHCONV"] = "1"
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "comment", str(existing_issue_number),
+             "--body", comment_body],
+            cwd=repo_root, capture_output=True, text=True, timeout=30,
+            env=gh_env,
+        )
+        if result.returncode == 0:
+            log(logger, "retro", "ISSUE_UPDATED_DUPLICATE",
+                finding=finding_id, existing=f"#{existing_issue_number}")
+        else:
+            log(logger, "retro", "ISSUE_COMMENT_FAILED",
+                finding=finding_id, issue=existing_issue_number,
+                error=result.stderr[:200] if result.stderr else "unknown")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        log(logger, "retro", "ISSUE_COMMENT_FAILED",
+            finding=finding_id, issue=existing_issue_number)
+
+
 def process_retro_findings(worktree_path, logger, repo_root):
     """Process retro findings for auto-heal."""
     findings_path = os.path.join(worktree_path, ".workflow", "retro-findings.json")
@@ -610,6 +690,12 @@ def process_retro_findings(worktree_path, logger, repo_root):
         issue_only=len(issues), observation=len(observations),
     )
 
+    # PPDS_SHAKEDOWN suppresses all issue filing and commenting
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "retro", "SHAKEDOWN_SKIPPED_ALL_ISSUES",
+            issue_count=len(issues))
+        return
+
     gh_env = os.environ.copy()
     gh_env["MSYS_NO_PATHCONV"] = "1"
 
@@ -619,10 +705,12 @@ def process_retro_findings(worktree_path, logger, repo_root):
         finding_id = finding.get("id", "R-??")
         title = f"retro: {desc[:70]}"
 
-        existing = _find_duplicate_issue(title, repo_root)
+        try:
+            existing = _find_duplicate_issue(title, repo_root)
+        except Exception:
+            existing = None  # Best-effort dedup — file new issue on failure
         if existing:
-            log(logger, "retro", "ISSUE_SKIPPED_DUPLICATE",
-                finding=finding_id, existing=f"#{existing}")
+            _handle_duplicate(finding, existing, repo_root, logger, worktree_path)
             continue
 
         body = f"## Retro Finding {finding_id}\n\n{desc}\n\n**Recommended fix:** {fix}"
@@ -633,17 +721,6 @@ def process_retro_findings(worktree_path, logger, repo_root):
         body += "\n\n---\n*Filed automatically by pipeline retro.*"
 
         try:
-            title = f"retro: {desc[:70]}"
-            existing = subprocess.run(
-                ["gh", "issue", "list", "--search", f'"{title}" in:title',
-                 "--state", "open", "--json", "number", "--jq", "length"],
-                cwd=repo_root, capture_output=True, text=True, timeout=15,
-                env=gh_env,
-            )
-            if existing.returncode == 0 and existing.stdout.strip() not in ("", "0"):
-                log(logger, "retro", "ISSUE_EXISTS", finding=finding_id)
-                continue
-
             subprocess.run(
                 ["gh", "issue", "create", "--title", title, "--body", body],
                 cwd=repo_root, capture_output=True, text=True, timeout=30, check=True,
@@ -657,6 +734,84 @@ def process_retro_findings(worktree_path, logger, repo_root):
     if fixable:
         log(logger, "retro", "AUTO_HEAL_AVAILABLE", count=len(fixable),
             note="Auto-heal not yet implemented")
+
+
+def ensure_retro_summary_updated(worktree_path, logger, repo_root):
+    """Fallback: update .retros/summary.json if retro skill didn't reach Step 10.
+
+    The retro skill is responsible for writing summary.json in its Step 10, but if
+    the headless retro session times out before that step, the persistent store is
+    never updated. This function checks whether the store was updated today, and if
+    not, performs a minimal append of findings from retro-findings.json.
+    """
+    findings_path = os.path.join(worktree_path, ".workflow", "retro-findings.json")
+    if not os.path.exists(findings_path):
+        return  # No findings to persist
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    summary_path = os.path.join(repo_root, ".retros", "summary.json")
+
+    # Check if summary.json was already updated today (by the retro skill's Step 10)
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r") as f:
+                store = json.load(f)
+            if store.get("last_updated") == today:
+                return  # Already updated — retro skill completed Step 10
+        except (json.JSONDecodeError, OSError):
+            store = None
+    else:
+        store = None
+
+    # Load findings
+    try:
+        with open(findings_path, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    findings = data.get("findings", [])
+    if not findings:
+        return
+
+    # Seed or reuse existing store
+    if store is None or store.get("schema_version") != 1:
+        store = {
+            "schema_version": 1,
+            "total_retros": 0,
+            "findings_by_category": {},
+            "metrics": {
+                "avg_fix_ratio": 0.0,
+                "pipeline_success_rate": 0.0,
+                "avg_convergence_rounds": 0.0,
+            },
+            "last_updated": "",
+        }
+
+    # Determine branch name from worktree
+    branch = os.path.basename(worktree_path)
+
+    # Append findings by category
+    for finding in findings:
+        category = finding.get("category", "uncategorized")
+        entry = {
+            "date": today,
+            "branch": branch,
+            "finding_id": finding.get("id", "R-??"),
+        }
+        store.setdefault("findings_by_category", {}).setdefault(category, []).append(entry)
+
+    store["total_retros"] = store.get("total_retros", 0) + 1
+    store["last_updated"] = today
+
+    # Write back
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+    try:
+        with open(summary_path, "w") as f:
+            json.dump(store, f, indent=2)
+        log(logger, "retro", "SUMMARY_FALLBACK_WRITTEN", path=summary_path)
+    except OSError as e:
+        log(logger, "retro", "SUMMARY_FALLBACK_FAILED", reason=str(e))
 
 
 def get_repo_slug(worktree_path):
@@ -706,7 +861,7 @@ def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
 
         if count > 0 and count == last_count:
             stable_polls += 1
-            if stable_polls >= 1:
+            if stable_polls >= 2:
                 break  # Stable — two consecutive polls with same count
         else:
             stable_polls = 0
@@ -812,6 +967,12 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     log(logger, "pr", "START")
     start = time.time()
 
+    # PPDS_SHAKEDOWN: skip PR creation entirely
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        log(logger, "pr", "PR_SKIPPED_SHAKEDOWN")
+        log(logger, "pr", "DONE", exit=0, duration="0s", mode="shakedown")
+        return 0, logger
+
     def _check_timeout():
         """Check if stage hard ceiling exceeded. Logs and returns True if timed out."""
         if (time.time() - start) > HARD_CEILING:
@@ -826,10 +987,13 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         return 0, logger
 
     # 1. Rebase on main
-    subprocess.run(
+    fetch = subprocess.run(
         ["git", "fetch", "origin", "main"],
         cwd=worktree_path, capture_output=True, text=True, timeout=30,
     )
+    if fetch.returncode != 0:
+        log(logger, "pr", "FETCH_FAILED", error=fetch.stderr[:200] if fetch.stderr else "unknown")
+        # Continue anyway — rebase will use whatever origin/main we have
     result = subprocess.run(
         ["git", "rebase", "origin/main"],
         cwd=worktree_path, capture_output=True, text=True, timeout=60,
@@ -901,8 +1065,10 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     qa = state.get("qa", {})
     review = state.get("review", {})
     body_parts.append(f"- [{'x' if gates.get('passed') else ' '}] /gates passed")
-    body_parts.append(f"- [{'x' if any(verify.values()) else ' '}] /verify completed")
-    body_parts.append(f"- [{'x' if any(qa.values()) else ' '}] /qa completed")
+    verify_done = isinstance(verify, dict) and any(v for v in verify.values() if isinstance(v, str) and v)
+    qa_done = isinstance(qa, dict) and any(v for v in qa.values() if isinstance(v, str) and v)
+    body_parts.append(f"- [{'x' if verify_done else ' '}] /verify completed")
+    body_parts.append(f"- [{'x' if qa_done else ' '}] /qa completed")
     body_parts.append(f"- [{'x' if review.get('passed') else ' '}] /review completed")
     body_parts.append("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
     pr_body = "\n".join(body_parts)
@@ -916,9 +1082,14 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
         return 1, logger
 
-    pr_url = result.stdout.strip()
-    # Extract PR number from URL
+    # gh pr create may output warnings on earlier lines; URL is always the last line
+    pr_url = result.stdout.strip().splitlines()[-1].strip() if result.stdout.strip() else ""
+    # Extract PR number from URL (expect format: https://github.com/owner/repo/pull/123)
     pr_number = pr_url.rstrip("/").split("/")[-1]
+    if not pr_number.isdigit():
+        log(logger, "pr", "PR_NUMBER_INVALID", url=pr_url, extracted=pr_number)
+        log(logger, "pr", "DONE", exit=1, duration=f"{int(time.time() - start)}s")
+        return 1, logger
     log(logger, "pr", "PR_CREATED", url=pr_url, draft=True)
 
     # Write workflow state immediately
@@ -1007,7 +1178,16 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
 
 def _read_last_lines(worktree_path, stage_name, n=50):
     """Read last N lines from a stage's .log file. Returns list of strings."""
-    log_path = os.path.join(worktree_path, ".workflow", "stages", f"{stage_name}.log")
+    stage_dir = Path(worktree_path) / ".workflow" / "stages"
+    log_path = stage_dir / f"{stage_name}.log"
+
+    # For converge stage, the actual logs are converge-r1.log, converge-r2.log, etc.
+    # Fall back to the most recent converge-r*.log if converge.log doesn't exist.
+    if not log_path.exists() and stage_name == "converge":
+        candidates = sorted(stage_dir.glob("converge-r*.log"))
+        if candidates:
+            log_path = candidates[-1]
+
     try:
         with open(log_path, "r", errors="replace") as f:
             lines = f.readlines()
@@ -1123,9 +1303,9 @@ def main():
         last_done = find_last_completed_stage(candidate_log)
         if last_done and last_done in STAGES:
             start_idx = STAGES.index(last_done) + 1
-            print(f"Resuming after '{last_done}' (stage {start_idx + 1}/{len(STAGES)})")
+            print(f"Resuming after '{last_done}' (stage {start_idx + 1}/{len(STAGES)})", file=sys.stderr)
         else:
-            print("No completed stages found in pipeline.log, starting from beginning.")
+            print("No completed stages found in pipeline.log, starting from beginning.", file=sys.stderr)
 
     # Set up worktree
     if args.worktree:
@@ -1150,21 +1330,7 @@ def main():
     log_path = os.path.join(log_dir, "pipeline.log")
 
     mode = "a" if (args.from_stage or args.resume) else "w"
-    logger = open_logger(log_path, mode)
-
-    log(
-        logger, "pipeline",
-        "START" if not (args.from_stage or args.resume) else "RESUME",
-        plan=source_rel, name=name, branch=branch,
-        from_stage=args.from_stage or ("auto" if args.resume else "worktree"),
-    )
-
-    # Acquire pipeline lock
-    lock_path = os.path.join(log_dir, "pipeline.lock")
-    if not acquire_lock(lock_path, logger):
-        logger.close()
-        sys.exit(1)
-
+    # Initialize before try so finally block never hits NameError
     pipeline_start = time.time()
     pr_url = None
     stage_durations = {}
@@ -1172,15 +1338,39 @@ def main():
     _failed_log_stage = None  # actual log filename (may differ from display name)
     _failed_reason = None
     _result_written = False
+    lock_acquired = False
 
-    def _pipeline_fail(stage_name, reason=None, log_stage=None):
-        nonlocal _failed_stage, _failed_log_stage, _failed_reason
-        _failed_stage = stage_name
-        _failed_log_stage = log_stage or stage_name
-        _failed_reason = reason
-        raise PipelineFailure(f"{stage_name}: {reason}")
-
+    logger = open_logger(log_path, mode)
     try:
+
+        log(
+            logger, "pipeline",
+            "START" if not (args.from_stage or args.resume) else "RESUME",
+            plan=source_rel, name=name, branch=branch,
+            from_stage=args.from_stage or ("auto" if args.resume else "worktree"),
+        )
+
+        # Acquire pipeline lock
+        lock_path = os.path.join(log_dir, "pipeline.lock")
+        if not acquire_lock(lock_path, logger):
+            logger.close()
+            sys.exit(1)
+        lock_acquired = True
+
+        # Write pipeline phase to state (if worktree exists)
+        if worktree_path and os.path.exists(worktree_path):
+            subprocess.run(
+                ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
+                cwd=worktree_path, capture_output=True, text=True, timeout=10,
+            )
+
+        def _pipeline_fail(stage_name, reason=None, log_stage=None):
+            nonlocal _failed_stage, _failed_log_stage, _failed_reason
+            _failed_stage = stage_name
+            _failed_log_stage = log_stage or stage_name
+            _failed_reason = reason
+            raise PipelineFailure(f"{stage_name}: {reason}")
+
         for i, stage in enumerate(STAGES):
             if i < start_idx:
                 continue
@@ -1262,11 +1452,16 @@ def main():
                 prompt = f"/{stage}"
                 exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run)
                 if exit_code != 0:
-                    log(logger, "pipeline", "FAILED", failed_stage=stage)
-                    _pipeline_fail(stage)
+                    # Review FAIL must advance to converge, not abort (AC-20)
+                    if stage == "review":
+                        log(logger, "review", "FAIL_WILL_CONVERGE",
+                            reason="review failed — advancing to converge stage")
+                    else:
+                        log(logger, "pipeline", "FAILED", failed_stage=stage)
+                        _pipeline_fail(stage)
 
-                # P4: Outcome verification + retry
-                if not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
+                # P4: Outcome verification + retry (skip for review — converge handles it)
+                if stage != "review" and not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
                     log(logger, stage, "OUTCOME_MISS", reason="expected state not set, retrying")
                     exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run)
                     if exit_code != 0:
@@ -1274,9 +1469,13 @@ def main():
                         _pipeline_fail(stage)
 
             elif stage == "converge":
-                if check_review_passed(worktree_path):
-                    log(logger, "converge", "SKIPPED", reason="review already passed")
+                state = read_state(worktree_path)
+                run_converge, reason = should_converge(state)
+
+                if not run_converge:
+                    log(logger, "converge", "SKIPPED", reason=reason)
                     continue
+                log(logger, "converge", "TRIGGERED", reason=reason)
 
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
@@ -1335,6 +1534,8 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+                # Fallback: update summary.json if retro skill timed out before Step 10
+                ensure_retro_summary_updated(worktree_path, logger, repo_root)
 
             # Auto-commit stranded files between stages (#717)
             if worktree_path and stage not in ("worktree", "retro", "pr"):
@@ -1369,9 +1570,9 @@ def main():
             write_result(worktree_path, "complete", duration, stage_durations,
                          pr_url=pr_url)
             _result_written = True
-        print(f"\nPipeline complete in {duration}s.")
+        print(f"\nPipeline complete in {duration}s.", file=sys.stderr)
         if pr_url:
-            print(f"PR: {pr_url}")
+            print(f"PR: {pr_url}", file=sys.stderr)
 
     except PipelineFailure:
         duration = int(time.time() - pipeline_start)
@@ -1394,6 +1595,8 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+                # Fallback: update summary.json if retro skill timed out before Step 10
+                ensure_retro_summary_updated(worktree_path, logger, repo_root)
             except Exception:
                 log(logger, "retro", "FAILED_NON_BLOCKING")
 
@@ -1417,7 +1620,8 @@ def main():
             duration = int(time.time() - pipeline_start)
             write_result(worktree_path, "failed", duration, stage_durations,
                          failed_stage=_failed_stage, error=_failed_reason)
-        release_lock(lock_path)
+        if lock_acquired:
+            release_lock(lock_path)
         logger.close()
 
 

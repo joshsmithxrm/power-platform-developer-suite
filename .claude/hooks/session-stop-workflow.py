@@ -8,14 +8,15 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _pathfix import get_project_dir
 
 
 def main():
-    # Pipeline mode: orchestrator handles stage sequencing
-    if os.environ.get("PPDS_PIPELINE"):
+    # Pipeline/shakedown mode: orchestrator handles stage sequencing
+    if os.environ.get("PPDS_PIPELINE") or os.environ.get("PPDS_SHAKEDOWN"):
         sys.exit(0)
 
     # Read stdin
@@ -25,7 +26,7 @@ def main():
     except (json.JSONDecodeError, EOFError):
         pass
 
-    # If we already blocked once, allow stop to prevent infinite loop
+    # Re-entry guard: if stop hook is calling itself, exit cleanly
     if hook_input.get("stop_hook_active"):
         sys.exit(0)
 
@@ -63,6 +64,15 @@ def main():
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
+    # If stop hook has already blocked 3+ times, allow stop to prevent infinite loop
+    if state.get("stop_hook_count", 0) >= 3:
+        sys.exit(0)
+
+    # Phase-aware bypass: non-implementing phases don't need workflow enforcement
+    phase = state.get("phase")
+    if phase in ("starting", "investigating", "design", "reviewing", "qa", "shakedown", "retro", "pr"):
+        sys.exit(0)
+
     # Get current HEAD for staleness check
     head_sha = None
     try:
@@ -78,11 +88,11 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Planning/spec phase: skip enforcement if no source code changes beyond main
+    # Code change detection: skip enforcement if no source code changes beyond main
     # (spec updates and docs don't owe gates/verify/review)
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "main...HEAD"],
+            ["git", "diff", "--name-only", "origin/main...HEAD"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -135,7 +145,11 @@ def main():
     gates = state.get("gates", {})
     gates_ref = gates.get("commit_ref")
     gates_passed = gates.get("passed")
-    gates_current = gates_passed and gates_ref and head_sha and gates_ref == head_sha
+    if head_sha is None:
+        # git rev-parse failed — cannot determine staleness, skip stale check
+        gates_current = gates_passed
+    else:
+        gates_current = gates_passed and gates_ref and gates_ref == head_sha
     if not gates_current:
         if gates_passed:
             missing.append("/gates (stale — code changed since last run)")
@@ -170,7 +184,7 @@ def main():
 
     # Uncommitted changes
     if uncommitted > 0:
-        missing.append(f"uncommitted changes ({uncommitted} files)")
+        missing.append(f"commit or stash {uncommitted} uncommitted files before proceeding")
 
     # --- Build status summary (always emitted) ---
     lines = [f"Workflow status for {branch}:"]
@@ -202,8 +216,25 @@ def main():
         lines.insert(0, "BLOCKED — incomplete workflow steps:")
         next_step = missing[0]
         lines.append("")
-        lines.append(f"You MUST now run: {next_step}")
-        lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
+        if next_step.startswith("/"):
+            lines.append(f"You MUST now run: {next_step}")
+            lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
+        else:
+            lines.append(f"You MUST now: {next_step}")
+            lines.append("Do not summarize. Do not ask permission. Do this immediately.")
+
+        # Enforcement logging — track block count for retro detection
+        # Note: read-modify-write without file locking. Safe because each
+        # worktree has its own state.json (worktree-per-session pattern).
+        try:
+            state["stop_hook_blocked"] = True
+            state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
+            state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2)
+                f.write("\n")
+        except OSError:
+            pass
 
         output = {
             "decision": "block",

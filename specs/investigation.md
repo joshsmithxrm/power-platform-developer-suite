@@ -413,8 +413,8 @@ The `is_allowed_path` function (line 34) normalizes paths but the `.worktrees/` 
 | AC-19 | Skill frontmatter validation catches missing name or description | `test_verify_workflow.py::test_skill_frontmatter_missing_name` | 🔲 |
 | AC-20 | Agent frontmatter validation catches invalid tool names | `test_verify_workflow.py::test_agent_frontmatter_invalid_tool` | 🔲 |
 | AC-21 | Dead link detection finds references to non-existent files | `test_verify_workflow.py::test_dead_link_detection` | 🔲 |
-| AC-22 | `/start` skill writes `.plans/context.md` to worktree when context is present in conversation (canonical: workflow-enforcement AC-95, AC-97) | `grep "context.md" .claude/skills/start/SKILL.md` returns match in write logic | 🔲 |
-| AC-23 | `/design` skill loads `.plans/context.md` at Step 1 and offers proceed/brainstorm choice (canonical: workflow-enforcement AC-98) | `grep "context.md" .claude/skills/design/SKILL.md` returns match in Step 1 section | 🔲 |
+| ~~AC-22~~ | _Removed — duplicate of workflow-enforcement AC-95, AC-97. See `specs/workflow-enforcement.md`._ | — | — |
+| ~~AC-23~~ | _Removed — duplicate of workflow-enforcement AC-98. See `specs/workflow-enforcement.md`._ | — | — |
 | AC-24 | session-stop-workflow.py `non_code_prefixes` does not contain `.claude/` | `python -c "exec(open('.claude/hooks/session-stop-workflow.py').read()); assert '.claude/' not in non_code_prefixes"` or equivalent grep | 🔲 |
 | AC-25 | session-stop-workflow.py and pr-gate.py `valid_surfaces` contains `"workflow"` | `grep '"workflow"' .claude/hooks/session-stop-workflow.py .claude/hooks/pr-gate.py` returns matches in valid_surfaces tuples | 🔲 |
 | AC-26 | session-start-workflow.py references `/design` not `/spec` in guidance text | `grep '/spec' .claude/hooks/session-start-workflow.py` returns no matches | 🔲 |

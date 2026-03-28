@@ -7,6 +7,14 @@ description: Conduct a structured retrospective on recent work sessions. Use whe
 
 Structured analysis of recent work sessions. Collects evidence and presents it to the user — the USER provides judgment, not the AI.
 
+## Phase Registration (MUST run first)
+
+```bash
+python scripts/workflow-state.py set phase retro
+```
+
+This enables the stop-hook bypass for the retro phase (no workflow enforcement during retrospectives).
+
 ## Quality Bar (READ BEFORE STARTING)
 
 - Commit messages are the AI's self-reported summary — exactly the thing that needs verification.
@@ -59,7 +67,7 @@ git log --since="2 days ago" --format="%H %ai" --no-merges
 
 This is where the old retro failed. The interactive session (main repo) is where the real user interaction happens. The worktree transcripts are headless pipeline sessions with zero user input.
 
-**Search main repo transcripts by PR number or branch name:**
+**Search main repo transcripts by PR number or branch name** (grep -l for file names only — safe because it matches filenames, not line content):
 
 ```bash
 # Find main repo transcript directory
@@ -269,3 +277,50 @@ run went" or "there's no specific code to change," classify as `observation` ins
 - "Duplicate PR stage runs when PR already exists" — missing guard, concrete fix
 
 The pipeline orchestrator reads this file for auto-heal decisions.
+
+## Transcript Signal Extraction
+
+Before manual transcript reading, run the automated signal extractor:
+
+```bash
+python -c "
+import sys; sys.path.insert(0, 'scripts')
+from retro_helpers import extract_transcript_signals, extract_enforcement_signals, discover_transcripts
+transcripts = discover_transcripts('.')
+for t in transcripts:
+    signals = extract_transcript_signals(t)
+    if signals['user_corrections'] or signals['tool_failures'] or signals['repeated_commands']:
+        print(f'=== {t} ===')
+        print(f'  Corrections: {len(signals[\"user_corrections\"])}')
+        print(f'  Tool failures: {len(signals[\"tool_failures\"])}')
+        print(f'  Repeated commands: {len(signals[\"repeated_commands\"])}')
+state_signals = extract_enforcement_signals('.workflow/state.json')
+if state_signals['stop_hook_count'] > 0:
+    print(f'Stop hook blocked {state_signals[\"stop_hook_count\"]} times')
+"
+```
+
+Use these signals as starting points for investigation. They highlight sessions that need deeper review.
+
+## Interactive Isolation
+
+In interactive mode (not pipeline, not pr-monitor), dispatch retro as a subagent for isolation:
+
+```
+Agent tool:
+  subagent_type: general-purpose
+  prompt: |
+    Run a retrospective analysis. You receive ONLY:
+    - Transcript files (listed below)
+    - Constitution (specs/CONSTITUTION.md)
+    - Workflow state (.workflow/state.json)
+    
+    Do NOT access conversation history. Analyze the transcripts independently.
+    
+    Transcripts: {list of discovered transcript paths}
+    
+    Follow the retro analysis process and output structured findings.
+  run_in_background: false
+```
+
+The subagent returns findings; the parent session writes them to state and handles filing.

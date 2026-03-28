@@ -15,6 +15,12 @@ Pre-commitment exploration that gathers context, researches options, synthesizes
 
 ## Process
 
+### Preamble: Set Phase
+
+```bash
+python scripts/workflow-state.py set phase investigating
+```
+
 ### Preamble: Ceremony Level
 
 Ask the user: **"Quick exploration or full investigation?"**

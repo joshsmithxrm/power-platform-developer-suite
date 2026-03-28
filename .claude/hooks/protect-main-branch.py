@@ -53,7 +53,7 @@ def is_allowed_path(file_path: str) -> bool:
     )
 
 def main() -> None:
-    if os.environ.get("PPDS_PIPELINE"):
+    if os.environ.get("PPDS_PIPELINE") or os.environ.get("PPDS_SHAKEDOWN"):
         sys.exit(0)
 
     branch = get_current_branch()
@@ -74,9 +74,10 @@ def main() -> None:
 
     print(
         "BLOCKED: You are on the main branch. "
-        "Use /start to create a feature worktree."
+        "Use /start to create a feature worktree.",
+        file=sys.stderr,
     )
-    print("  Run /start from your Claude session on main.")
+    print("  Run /start from your Claude session on main.", file=sys.stderr)
     sys.exit(2)
 
 
