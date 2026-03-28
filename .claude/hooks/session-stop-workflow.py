@@ -66,7 +66,7 @@ def main():
 
     # Phase-aware bypass: non-implementing phases don't need workflow enforcement
     phase = state.get("phase")
-    if phase in ("starting", "investigating", "design", "reviewing", "pr"):
+    if phase in ("starting", "investigating", "design", "reviewing", "qa", "shakedown", "retro", "pr"):
         sys.exit(0)
 
     # Get current HEAD for staleness check

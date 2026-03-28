@@ -1671,7 +1671,7 @@ class TestStopHookPhaseBypass:
         assert 'state.get("phase")' in content, (
             "Stop hook must read phase from state"
         )
-        for phase in ("starting", "investigating", "design", "reviewing", "pr"):
+        for phase in ("starting", "investigating", "design", "reviewing", "qa", "shakedown", "retro", "pr"):
             assert f'"{phase}"' in content, (
                 f"Stop hook must bypass for phase: {phase}"
             )

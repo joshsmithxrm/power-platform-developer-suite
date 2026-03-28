@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement Plan
+description: Execute a checked-in implementation plan end-to-end using parallel agents. Use when a spec and plan exist in .plans/ and you're ready to build.
 ---
 
 # Implement Plan
@@ -235,8 +235,8 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 - Verify `.workflow/state.json` shows fresh timestamps for gates, verify, qa, and review
 - All timestamps must be more recent than the `started` timestamp
 
-**G. Continue Pipeline**
-After final state check passes, proceed IMMEDIATELY to the tail verification pipeline. Do NOT stop to present a summary. The pipeline is: gates → verify → qa → review → pr. Execute end-to-end unless a step fails.
+**G. Submit**
+After final state check passes, proceed IMMEDIATELY to `/pr`. Do NOT stop to present a summary — Steps 6A–6D already ran the full verification pipeline (gates → verify → qa → review), so go directly to PR submission.
 
 ## Rules
 
