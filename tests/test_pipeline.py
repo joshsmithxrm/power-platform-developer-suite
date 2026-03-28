@@ -215,7 +215,7 @@ class TestExitCode:
 # ---------------------------------------------------------------------------
 class TestOutputTail:
     def test_captures_output_tail(self):
-        """AC-59: Last 20 lines of stage output in pipeline.log."""
+        """AC-59: Last 20 lines of stage output via _read_last_lines."""
         import pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -229,12 +229,19 @@ class TestOutputTail:
                 for i in range(30):
                     f.write(f"output line {i}\n")
 
-            # Verify we can read the last 20 lines
-            with open(stage_log, "r") as f:
-                lines = f.readlines()
-            assert len(lines) == 30
-            assert len(lines[-20:]) == 20
-            assert "output line 10" in lines[-20:][0]
+            # Call the actual production function
+            lines = pipeline._read_last_lines(tmpdir, "test", n=20)
+            assert len(lines) == 20
+            assert lines[0] == "output line 10"
+            assert lines[-1] == "output line 29"
+
+    def test_read_last_lines_missing_file(self):
+        """_read_last_lines returns empty list for missing file."""
+        import pipeline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lines = pipeline._read_last_lines(tmpdir, "nonexistent", n=20)
+            assert lines == []
 
 
 
@@ -366,81 +373,38 @@ class TestHeartbeatMultiSignal:
 class TestActivityClassification:
     def test_active_when_output_grows(self):
         """AC-69: Activity is 'active' when output_bytes increases."""
-        # Test the logic inline — output grew
-        last_log_size, last_git_changes, last_commits = 100, 3, 2
-        current_size, git_changes, commits = 200, 3, 2
-        consecutive_idle = 5
-
-        output_grew = current_size > last_log_size
-        git_grew = git_changes > last_git_changes
-        commits_grew = commits > last_commits
-
-        if output_grew or git_grew or commits_grew:
-            activity = "active"
-            consecutive_idle = 0
-        else:
-            consecutive_idle += 1
-            activity = "stalled" if consecutive_idle >= 3 else "idle"
-
+        import pipeline
+        activity, idle = pipeline.classify_activity(200, 100, 3, 3, 2, 2, 5)
         assert activity == "active"
-        assert consecutive_idle == 0
+        assert idle == 0
 
     def test_active_when_git_changes(self):
         """AC-69: Activity is 'active' when git_changes increases."""
-        last_log_size, last_git_changes, last_commits = 100, 3, 2
-        current_size, git_changes, commits = 100, 5, 2  # Only git changed
-        consecutive_idle = 0
-
-        output_grew = current_size > last_log_size
-        git_grew = git_changes > last_git_changes
-        commits_grew = commits > last_commits
-
-        if output_grew or git_grew or commits_grew:
-            activity = "active"
-        else:
-            activity = "idle"
-
+        import pipeline
+        activity, idle = pipeline.classify_activity(100, 100, 5, 3, 2, 2, 0)
         assert activity == "active"
+        assert idle == 0
+
+    def test_active_when_commits_grow(self):
+        """AC-69: Activity is 'active' when commits increase."""
+        import pipeline
+        activity, idle = pipeline.classify_activity(100, 100, 3, 3, 3, 2, 0)
+        assert activity == "active"
+        assert idle == 0
 
     def test_idle_when_nothing_changes(self):
         """AC-69: Activity is 'idle' when no signal changes."""
-        last_log_size, last_git_changes, last_commits = 100, 3, 2
-        current_size, git_changes, commits = 100, 3, 2
-        consecutive_idle = 1
-
-        output_grew = current_size > last_log_size
-        git_grew = git_changes > last_git_changes
-        commits_grew = commits > last_commits
-
-        if output_grew or git_grew or commits_grew:
-            activity = "active"
-            consecutive_idle = 0
-        else:
-            consecutive_idle += 1
-            activity = "stalled" if consecutive_idle >= 3 else "idle"
-
+        import pipeline
+        activity, idle = pipeline.classify_activity(100, 100, 3, 3, 2, 2, 1)
         assert activity == "idle"
-        assert consecutive_idle == 2
+        assert idle == 2
 
     def test_stalled_after_three_idle(self):
         """AC-69: Activity is 'stalled' after 3+ consecutive idle heartbeats."""
-        consecutive_idle = 2  # Already idle twice
-        current_size, git_changes, commits = 100, 3, 2
-        last_log_size, last_git_changes, last_commits = 100, 3, 2
-
-        output_grew = current_size > last_log_size
-        git_grew = git_changes > last_git_changes
-        commits_grew = commits > last_commits
-
-        if output_grew or git_grew or commits_grew:
-            activity = "active"
-            consecutive_idle = 0
-        else:
-            consecutive_idle += 1
-            activity = "stalled" if consecutive_idle >= 3 else "idle"
-
+        import pipeline
+        activity, idle = pipeline.classify_activity(100, 100, 3, 3, 2, 2, 2)
         assert activity == "stalled"
-        assert consecutive_idle == 3
+        assert idle == 3
 
 
 # ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ def main():
         sys.exit(0)
 
     # If stop hook has already blocked 3+ times, allow stop to prevent infinite loop
-    if state.get("stop_hook_count", 0) > 3:
+    if state.get("stop_hook_count", 0) >= 3:
         sys.exit(0)
 
     # Phase-aware bypass: non-implementing phases don't need workflow enforcement

@@ -44,14 +44,18 @@ def show_toast(title, msg, url):
         # winotify not installed — skip silently
         return
 
-    toast = Notification(
-        app_id="Claude Code",
-        title=title,
-        msg=msg,
-        launch=url,
-    )
-    toast.set_audio(audio.Default, loop=False)
-    toast.show()
+    try:
+        toast = Notification(
+            app_id="Claude Code",
+            title=title,
+            msg=msg,
+            launch=url,
+        )
+        toast.set_audio(audio.Default, loop=False)
+        toast.show()
+    except Exception:
+        # OS-level toast failure should not break hook lifecycle
+        pass
 
 
 def main():

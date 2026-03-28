@@ -150,9 +150,8 @@ class TestResumeSkips:
              patch("pr_monitor.run_notify"):
             pr_monitor.run_monitor(wt, 1, resume=True)
 
-        # poll_ci should NOT have been called for the initial CI step
-        # (it may be called zero times since CI was already completed)
-        # The key assertion is that the result was read and CI was skipped
+        # poll_ci should NOT have been called — CI was already completed
+        mock_ci.assert_not_called()
         result = pr_monitor.read_result(wt)
         assert result["steps_completed"]["ci"]["status"] == "pass"
 

@@ -231,6 +231,24 @@ def release_lock(lock_path):
         pass
 
 
+def classify_activity(current_size, last_size, git_changes, last_git_changes,
+                      commits, last_commits, consecutive_idle):
+    """Classify heartbeat activity based on multi-signal detection.
+
+    Returns (activity_string, updated_consecutive_idle).
+    """
+    output_grew = current_size > last_size
+    git_grew = git_changes > last_git_changes
+    commits_grew = commits > last_commits
+
+    if output_grew or git_grew or commits_grew:
+        return "active", 0
+    else:
+        consecutive_idle += 1
+        activity = "stalled" if consecutive_idle >= 3 else "idle"
+        return activity, consecutive_idle
+
+
 def get_git_activity(worktree_path):
     """Get git working tree changes and commit count. Returns (changes, commits)."""
     changes = 0
@@ -392,16 +410,12 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
 
                 git_changes, commits = get_git_activity(worktree_path)
 
-                output_grew = current_size > last_log_size
-                git_grew = git_changes > last_git_changes
-                commits_grew = commits > last_commits
-
-                if output_grew or git_grew or commits_grew:
-                    activity = "active"
-                    consecutive_idle = 0
-                else:
-                    consecutive_idle += 1
-                    activity = "stalled" if consecutive_idle >= 3 else "idle"
+                activity, consecutive_idle = classify_activity(
+                    current_size, last_log_size,
+                    git_changes, last_git_changes,
+                    commits, last_commits,
+                    consecutive_idle,
+                )
 
                 last_log_size = current_size
                 last_git_changes = git_changes
@@ -604,15 +618,20 @@ def _handle_duplicate(finding, existing_issue_number, repo_root, logger, worktre
     gh_env["MSYS_NO_PATHCONV"] = "1"
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["gh", "issue", "comment", str(existing_issue_number),
              "--body", comment_body],
             cwd=repo_root, capture_output=True, text=True, timeout=30,
             env=gh_env,
         )
-        log(logger, "retro", "ISSUE_UPDATED_DUPLICATE",
-            finding=finding_id, existing=f"#{existing_issue_number}")
-    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+        if result.returncode == 0:
+            log(logger, "retro", "ISSUE_UPDATED_DUPLICATE",
+                finding=finding_id, existing=f"#{existing_issue_number}")
+        else:
+            log(logger, "retro", "ISSUE_COMMENT_FAILED",
+                finding=finding_id, issue=existing_issue_number,
+                error=result.stderr[:200] if result.stderr else "unknown")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         log(logger, "retro", "ISSUE_COMMENT_FAILED",
             finding=finding_id, issue=existing_issue_number)
 
@@ -863,10 +882,13 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         return 0, logger
 
     # 1. Rebase on main
-    subprocess.run(
+    fetch = subprocess.run(
         ["git", "fetch", "origin", "main"],
         cwd=worktree_path, capture_output=True, text=True, timeout=30,
     )
+    if fetch.returncode != 0:
+        log(logger, "pr", "FETCH_FAILED", error=fetch.stderr[:200] if fetch.stderr else "unknown")
+        # Continue anyway — rebase will use whatever origin/main we have
     result = subprocess.run(
         ["git", "rebase", "origin/main"],
         cwd=worktree_path, capture_output=True, text=True, timeout=60,
