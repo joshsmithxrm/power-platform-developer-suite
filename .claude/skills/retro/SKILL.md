@@ -7,6 +7,14 @@ description: Conduct a structured retrospective on recent work sessions. Use whe
 
 Structured analysis of recent work sessions. Collects evidence and presents it to the user — the USER provides judgment, not the AI.
 
+## Phase Registration (MUST run first)
+
+```bash
+python scripts/workflow-state.py set phase retro
+```
+
+This enables the stop-hook bypass for the retro phase (no workflow enforcement during retrospectives).
+
 ## Quality Bar (READ BEFORE STARTING)
 
 - Commit messages are the AI's self-reported summary — exactly the thing that needs verification.

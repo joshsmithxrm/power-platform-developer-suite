@@ -173,7 +173,10 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
    | `design` | `/design` | Skip enforcement |
    | `implementing` | `/implement`, `/design` on handoff | Full enforcement |
    | `pipeline` | `pipeline.py` on startup | Already skipped via `PPDS_PIPELINE=1` (step 1, before phase check) |
-   | `reviewing` | `/review`, `/qa` | Skip enforcement (mid-workflow) |
+   | `reviewing` | `/review` | Skip enforcement (mid-workflow) |
+   | `qa` | `/qa` | Skip enforcement (mid-workflow) |
+   | `shakedown` | `/shakedown` | Skip enforcement (validation phase) |
+   | `retro` | `/retro` | Skip enforcement (retrospective phase) |
    | `pr` | `/pr` | Skip enforcement (PR creation is its own gate) |
    | null/missing | Legacy state files, manual sessions | Full enforcement (safe default) |
 
@@ -279,7 +282,7 @@ Run these before creating a PR.
 2. **Infinite loop guard:** If `stop_hook_active` is set in hook input, exit 0 (prevents re-entry).
 3. **Main branch:** If on `main` or `master`, exit 0.
 4. Read `.workflow/state.json` if it exists. If missing, exit 0.
-5. **Phase-aware bypass:** Read `phase` from state. If phase is `starting`, `investigating`, `design`, `reviewing`, or `pr`, exit 0 — these phases do not owe gates/verify/qa/review. Only `implementing` and null/missing phases trigger enforcement. This replaces the previous "design-only bypass" which used `git diff` against local `main` and was unreliable (see Design Decisions: Why Phase-Based Stop Hook).
+5. **Phase-aware bypass:** Read `phase` from state. If phase is `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`, or `pr`, exit 0 — these phases do not owe gates/verify/qa/review. Only `implementing` and null/missing phases trigger enforcement. This replaces the previous "design-only bypass" which used `git diff` against local `main` and was unreliable (see Design Decisions: Why Phase-Based Stop Hook).
 6. **Code change detection:** Compare changed files using `origin/main...HEAD` (not local `main` — local main can be arbitrarily stale after worktree creation). If only non-code prefixes changed (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`), exit 0.
 7. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
 8. **Enforcement logging:** On block, write to state file: `stop_hook_blocked: true`, `stop_hook_count: N` (increment), `stop_hook_last: <timestamp>`. This enables retro to detect "stop hook fired N times, agent ignored all N" as a finding.
@@ -1038,7 +1041,7 @@ After all skills in this spec are implemented:
 | AC-57 | Per-stage timeout terminates subprocess when exceeded | `test_pipeline.py::test_timeout_kills_subprocess` | 🔲 |
 | AC-58 | Exit code logged immediately when subprocess finishes | `test_pipeline.py::test_logs_exit_code_on_completion` | 🔲 |
 | AC-59 | Last 20 lines of stage output written to pipeline.log after stage completes | `test_pipeline.py::test_captures_output_tail` | 🔲 |
-| AC-60 | `--stage-timeout` CLI flag overrides default stage timeouts | `test_pipeline.py::test_stage_timeout_cli_override` | 🔲 |
+| ~~AC-60~~ | _Superseded by pipeline-observability AC-12 through AC-15 (activity-based timeouts replace fixed per-stage timeouts)._ | — | — |
 | AC-61 | Dry-run mode works with new process management (no subprocess spawned) | `test_pipeline.py::test_dry_run_skips_subprocess` | 🔲 |
 | AC-62 | `/start` works from feature branches — resolves main repo root and creates worktree from there | Manual: run `/start` from a worktree, verify new worktree created | 🔲 |
 | AC-63 | `/status` shows pipeline stage progress including heartbeat data when pipeline is running | Manual: run `/status` during pipeline execution, verify stage timing shown | 🔲 |
@@ -1097,16 +1100,16 @@ After all skills in this spec are implemented:
 | AC-116 | `/shakedown-workflow` sets `PPDS_SHAKEDOWN=1` in pipeline subprocess environment | `test_pipeline.py::test_shakedown_env_var` | 🔲 |
 | AC-117 | `PPDS_SHAKEDOWN=1` suppresses `gh issue create` in `process_retro_findings()` | `test_pipeline.py::test_shakedown_suppresses_issue_filing` | 🔲 |
 | AC-118 | `PPDS_SHAKEDOWN=1` suppresses `gh pr create` entirely — PR stage logs `PR_SKIPPED_SHAKEDOWN` and exits 0 | `test_pipeline.py::test_shakedown_skips_pr_creation` | 🔲 |
-| AC-118b | `PPDS_SHAKEDOWN=1` suppresses desktop notifications — `notify.py` exits 0 without sending when env var is set | `test_pipeline.py::test_shakedown_suppresses_notify` | 🔲 |
-| AC-119 | `/shakedown-workflow` collects results from all test worktrees and produces `.workflow/shakedown-report.json` | Manual: run `/shakedown-workflow`, verify report file | 🔲 |
-| AC-120 | `/shakedown-workflow` runs comprehensive retro across all shakedown session transcripts | Manual: verify retro covers all worktree transcripts | 🔲 |
-| AC-121 | `/shakedown-workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
-| AC-122 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
-| AC-123 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
-| AC-124 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
-| AC-125 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
-| AC-126 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
-| AC-127 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
+| AC-119 | `PPDS_SHAKEDOWN=1` suppresses desktop notifications — `notify.py` exits 0 without sending when env var is set | `test_pipeline.py::test_shakedown_suppresses_notify` | 🔲 |
+| AC-120 | `/shakedown-workflow` collects results from all test worktrees and produces `.workflow/shakedown-report.json` | Manual: run `/shakedown-workflow`, verify report file | 🔲 |
+| AC-121 | `/shakedown-workflow` runs comprehensive retro across all shakedown session transcripts | Manual: verify retro covers all worktree transcripts | 🔲 |
+| AC-122 | `/shakedown-workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
+| AC-123 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
+| AC-124 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
+| AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
+| AC-126 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
+| AC-127 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
+| AC-128 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
 
 ### Edge Cases
 

@@ -141,7 +141,11 @@ def main():
     gates = state.get("gates", {})
     gates_ref = gates.get("commit_ref")
     gates_passed = gates.get("passed")
-    gates_current = gates_passed and gates_ref and head_sha and gates_ref == head_sha
+    if head_sha is None:
+        # git rev-parse failed — cannot determine staleness, skip stale check
+        gates_current = gates_passed
+    else:
+        gates_current = gates_passed and gates_ref and gates_ref == head_sha
     if not gates_current:
         if gates_passed:
             missing.append("/gates (stale — code changed since last run)")
@@ -176,7 +180,7 @@ def main():
 
     # Uncommitted changes
     if uncommitted > 0:
-        missing.append(f"uncommitted changes ({uncommitted} files)")
+        missing.append(f"commit or stash {uncommitted} uncommitted files before proceeding")
 
     # --- Build status summary (always emitted) ---
     lines = [f"Workflow status for {branch}:"]
@@ -208,8 +212,12 @@ def main():
         lines.insert(0, "BLOCKED — incomplete workflow steps:")
         next_step = missing[0]
         lines.append("")
-        lines.append(f"You MUST now run: {next_step}")
-        lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
+        if next_step.startswith("/"):
+            lines.append(f"You MUST now run: {next_step}")
+            lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
+        else:
+            lines.append(f"You MUST now: {next_step}")
+            lines.append("Do not summarize. Do not ask permission. Do this immediately.")
 
         # Enforcement logging — track block count for retro detection
         # Note: read-modify-write without file locking. Safe because each

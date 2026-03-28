@@ -181,7 +181,7 @@ def _find_duplicate_issue(title, repo_root):
     return None
 ```
 
-Updated filing loop:
+Updated filing loop (uses `_handle_duplicate` to update existing issues instead of skipping — see [Duplicate Handling](#duplicate-handling) below):
 
 ```python
 observations = [f for f in findings if f.get("tier") == "observation"]
@@ -191,19 +191,9 @@ log(
     auto_fix=len(auto_fixes), draft_fix=len(draft_fixes),
     issue_only=len(issues), observation=len(observations),
 )
-
-for finding in issues:
-    desc = finding.get("description", "No description")
-    title = f"retro: {desc[:70]}"
-
-    existing = _find_duplicate_issue(title, repo_root)
-    if existing:
-        log(logger, "retro", "ISSUE_SKIPPED_DUPLICATE",
-            finding=finding.get("id", "R-??"), existing=f"#{existing}")
-        continue
-
-    # ... existing gh issue create logic ...
 ```
+
+The filing loop itself is defined in the [Duplicate Handling](#duplicate-handling) section below (the `ISSUE_UPDATED_DUPLICATE` + `_handle_duplicate` version).
 
 ### Transcript Discovery and Reading
 

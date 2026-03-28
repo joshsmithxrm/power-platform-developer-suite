@@ -802,11 +802,13 @@ function Invoke-Pipeline {
         try {
             $state = Get-Content $statePath -Raw | ConvertFrom-Json
             $spec = $state.spec
+            $branch = $state.branch
         } catch { Write-Host "  Warning: failed to read state: $_" -ForegroundColor DarkYellow }
     }
 
     $args_ = @($pipelineScript, '--worktree', $wtPath)
     if ($spec) { $args_ += @('--spec', $spec) }
+    if ($branch) { $args_ += @('--branch', $branch) }
 
     $proc = Start-Process python -ArgumentList $args_ -PassThru -WorkingDirectory $Root
     $procId = $proc.Id

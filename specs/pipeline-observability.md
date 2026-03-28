@@ -335,10 +335,8 @@ Any of these three signals resets the idle counter. This already covers the conc
 {
   "qa_partial": {
     "phase1_completed": "2026-03-26T10:00:00Z",
-    "phase1_cli_passed": 7,
-    "phase1_cli_total": 7,
-    "phase1_tui_passed": 8,
-    "phase1_tui_total": 8
+    "phase1_checks_passed": 7,
+    "phase1_checks_total": 7
   },
   "qa": {
     "ext": null
@@ -352,10 +350,8 @@ Any of these three signals resets the idle counter. This already covers the conc
 
 ```bash
 python scripts/workflow-state.py set qa_partial.phase1_completed now
-python scripts/workflow-state.py set qa_partial.phase1_cli_passed 7
-python scripts/workflow-state.py set qa_partial.phase1_cli_total 7
-python scripts/workflow-state.py set qa_partial.phase1_tui_passed 8
-python scripts/workflow-state.py set qa_partial.phase1_tui_total 8
+python scripts/workflow-state.py set qa_partial.phase1_checks_passed 7
+python scripts/workflow-state.py set qa_partial.phase1_checks_total 7
 ```
 
 When QA fully passes, the existing `qa.ext` timestamp is written (unchanged). The `qa_partial` key persists as a record of per-phase results.
@@ -672,10 +668,10 @@ else:
 | AC-19 | Review includes a cross-file consistency pass after per-file review — checks type mismatches, missing imports, interface/caller drift | Manual — observe cross-file pass in review stage logs | 🔲 |
 | AC-20 | Pipeline runs converge stage after review FAIL (not just review PASS) — review FAIL triggers converge, not pipeline exit | `test_pipeline_runs_converge_on_review_fail` | 🔲 |
 | AC-21 | Pipeline skips converge when review passes with zero findings | `test_pipeline_skips_converge_on_zero_findings` | 🔲 |
-| AC-21b | Pipeline runs converge when review passes with non-zero findings (findings exist but none critical/important) | `test_pipeline_runs_converge_on_pass_with_findings` | 🔲 |
-| AC-22 | QA writes findings to `qa_findings` array in workflow state (id, surface, description, file, severity, fixed, fix_commit) | Manual — run QA, read state file, verify `qa_findings` entries | 🔲 |
-| AC-23 | Review reads `qa_findings` from state and passes to subagents as "already found by QA" context | Manual — run QA then review, observe review skipping duplicate findings | 🔲 |
-| AC-24 | Review does not re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem | Manual — verify dedup in review output | 🔲 |
+| AC-22 | Pipeline runs converge when review passes with non-zero findings (findings exist but none critical/important) | `test_pipeline_runs_converge_on_pass_with_findings` | 🔲 |
+| AC-23 | QA writes findings to `qa_findings` array in workflow state (id, surface, description, file, severity, fixed, fix_commit) | Manual — run QA, read state file, verify `qa_findings` entries | 🔲 |
+| AC-24 | Review reads `qa_findings` from state and passes to subagents as "already found by QA" context | Manual — run QA then review, observe review skipping duplicate findings | 🔲 |
+| AC-25 | Review does not re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem | Manual — verify dedup in review output | 🔲 |
 
 ### Edge Cases
 

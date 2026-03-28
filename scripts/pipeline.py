@@ -174,8 +174,8 @@ def find_last_completed_stage(log_path):
                         stage_name = "converge"
                     elif stage_name.startswith("verify-r"):
                         stage_name = "converge"
-                    elif stage_name.startswith("qa-"):
-                        stage_name = "qa"
+                    elif stage_name.startswith("qa-r"):
+                        stage_name = "converge"
                     elif stage_name.startswith("review-r"):
                         stage_name = "converge"
                     if stage_name in STAGES:
@@ -709,6 +709,80 @@ def process_retro_findings(worktree_path, logger, repo_root):
             note="Auto-heal not yet implemented")
 
 
+def ensure_retro_summary_updated(worktree_path, logger, repo_root):
+    """Fallback: update .retros/summary.json if retro skill didn't reach Step 10.
+
+    The retro skill is responsible for writing summary.json in its Step 10, but if
+    the headless retro session times out before that step, the persistent store is
+    never updated. This function checks whether the store was updated today, and if
+    not, performs a minimal append of findings from retro-findings.json.
+    """
+    findings_path = os.path.join(worktree_path, ".workflow", "retro-findings.json")
+    if not os.path.exists(findings_path):
+        return  # No findings to persist
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    summary_path = os.path.join(repo_root, ".retros", "summary.json")
+
+    # Check if summary.json was already updated today (by the retro skill's Step 10)
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r") as f:
+                store = json.load(f)
+            if store.get("last_updated") == today:
+                return  # Already updated — retro skill completed Step 10
+        except (json.JSONDecodeError, OSError):
+            store = None
+    else:
+        store = None
+
+    # Load findings
+    try:
+        with open(findings_path, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    findings = data.get("findings", [])
+    if not findings:
+        return
+
+    # Seed or reuse existing store
+    if store is None or store.get("schema_version") != 1:
+        store = {
+            "schema_version": 1,
+            "total_retros": 0,
+            "findings_by_category": {},
+            "metrics": {},
+            "last_updated": "",
+        }
+
+    # Determine branch name from worktree
+    branch = os.path.basename(worktree_path)
+
+    # Append findings by category
+    for finding in findings:
+        category = finding.get("category", "uncategorized")
+        entry = {
+            "date": today,
+            "branch": branch,
+            "finding_id": finding.get("id", "R-??"),
+        }
+        store.setdefault("findings_by_category", {}).setdefault(category, []).append(entry)
+
+    store["total_retros"] = store.get("total_retros", 0) + 1
+    store["last_updated"] = today
+
+    # Write back
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+    try:
+        with open(summary_path, "w") as f:
+            json.dump(store, f, indent=2)
+        log(logger, "retro", "SUMMARY_FALLBACK_WRITTEN", path=summary_path)
+    except OSError as e:
+        log(logger, "retro", "SUMMARY_FALLBACK_FAILED", reason=str(e))
+
+
 def get_repo_slug(worktree_path):
     """Get owner/repo from git remote. Returns 'owner/repo' or None."""
     try:
@@ -1070,7 +1144,16 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
 
 def _read_last_lines(worktree_path, stage_name, n=50):
     """Read last N lines from a stage's .log file. Returns list of strings."""
-    log_path = os.path.join(worktree_path, ".workflow", "stages", f"{stage_name}.log")
+    stage_dir = Path(worktree_path) / ".workflow" / "stages"
+    log_path = stage_dir / f"{stage_name}.log"
+
+    # For converge stage, the actual logs are converge-r1.log, converge-r2.log, etc.
+    # Fall back to the most recent converge-r*.log if converge.log doesn't exist.
+    if not log_path.exists() and stage_name == "converge":
+        candidates = sorted(stage_dir.glob("converge-r*.log"))
+        if candidates:
+            log_path = candidates[-1]
+
     try:
         with open(log_path, "r", errors="replace") as f:
             lines = f.readlines()
@@ -1422,6 +1505,8 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+                # Fallback: update summary.json if retro skill timed out before Step 10
+                ensure_retro_summary_updated(worktree_path, logger, repo_root)
 
             # Auto-commit stranded files between stages (#717)
             if worktree_path and stage not in ("worktree", "retro", "pr"):
@@ -1481,6 +1566,8 @@ def main():
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
                     process_retro_findings(worktree_path, logger, repo_root)
+                # Fallback: update summary.json if retro skill timed out before Step 10
+                ensure_retro_summary_updated(worktree_path, logger, repo_root)
             except Exception:
                 log(logger, "retro", "FAILED_NON_BLOCKING")
 

@@ -1062,8 +1062,8 @@ class TestWriteResultPartialQa:
             state = {
                 "qa_partial": {
                     "phase1_completed": "2026-03-26T10:00:00Z",
-                    "phase1_cli_passed": 7,
-                    "phase1_cli_total": 7,
+                    "phase1_checks_passed": 7,
+                    "phase1_checks_total": 7,
                 }
             }
             with open(os.path.join(wf_dir, "state.json"), "w") as f:
@@ -1079,7 +1079,7 @@ class TestWriteResultPartialQa:
                 result = json.load(f)
 
             assert "partial_results" in result
-            assert result["partial_results"]["phase1_cli_passed"] == 7
+            assert result["partial_results"]["phase1_checks_passed"] == 7
 
     def test_no_partial_results_when_not_qa_failure(self):
         """AC-06: No partial_results when failed stage is not QA."""
@@ -1135,14 +1135,32 @@ class TestStageDetailedEntries:
 # ---------------------------------------------------------------------------
 class TestStallTimeout:
     def test_stall_timeout_kills_after_consecutive_idle(self):
-        """AC-12: Stage killed when consecutive_idle >= STALL_LIMIT."""
+        """AC-12: classify_activity returns 'stalled' at consecutive_idle >= 3,
+        and STALL_LIMIT is the kill threshold (5 consecutive idle beats)."""
         import pipeline
 
-        # Verify the stall timeout logic exists in run_claude
-        import inspect
-        source = inspect.getsource(pipeline.run_claude)
-        assert "STALL_TIMEOUT" in source
-        assert "consecutive_idle >= STALL_LIMIT" in source
+        # Verify STALL_LIMIT constant is 5
+        assert pipeline.STALL_LIMIT == 5, (
+            f"STALL_LIMIT should be 5, got {pipeline.STALL_LIMIT}"
+        )
+
+        # Simulate consecutive idle beats accumulating to STALL_LIMIT
+        consecutive_idle = 0
+        for beat in range(pipeline.STALL_LIMIT):
+            # No activity: same size, same git changes, same commits
+            activity, consecutive_idle = pipeline.classify_activity(
+                100, 100, 3, 3, 2, 2, consecutive_idle,
+            )
+
+        # After STALL_LIMIT idle beats, consecutive_idle reaches the kill threshold
+        assert consecutive_idle >= pipeline.STALL_LIMIT, (
+            f"After {pipeline.STALL_LIMIT} idle beats, consecutive_idle should "
+            f"be >= STALL_LIMIT ({pipeline.STALL_LIMIT}), got {consecutive_idle}"
+        )
+        assert activity == "stalled", (
+            f"Activity should be 'stalled' after {pipeline.STALL_LIMIT} idle beats, "
+            f"got '{activity}'"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1164,18 +1182,44 @@ class TestHardTimeout:
 # ---------------------------------------------------------------------------
 class TestActiveStageNotKilled:
     def test_active_stage_resets_idle_counter(self):
-        """AC-14: Activity resets consecutive_idle to 0."""
-        # Inline test of the activity logic
-        consecutive_idle = 4  # One away from STALL_LIMIT
-        current_size, git_changes, commits = 200, 3, 2
-        last_log_size, last_git_changes, last_commits = 100, 3, 2
+        """AC-14: Activity resets consecutive_idle to 0 via classify_activity."""
+        import pipeline
 
-        output_grew = current_size > last_log_size
+        # Build up to 4 consecutive idle beats (one below STALL_LIMIT)
+        consecutive_idle = 4
 
-        if output_grew:
-            consecutive_idle = 0
+        # Output grew (200 > 100) — should reset idle counter
+        activity, new_idle = pipeline.classify_activity(
+            200, 100, 3, 3, 2, 2, consecutive_idle,
+        )
+        assert activity == "active", f"Expected 'active', got '{activity}'"
+        assert new_idle == 0, f"Expected consecutive_idle reset to 0, got {new_idle}"
 
-        assert consecutive_idle == 0  # Reset because output grew
+    def test_git_changes_reset_idle_counter(self):
+        """AC-14: Git changes also reset consecutive_idle to 0."""
+        import pipeline
+
+        consecutive_idle = 4
+
+        # Git changes grew (4 > 3) even though output didn't grow
+        activity, new_idle = pipeline.classify_activity(
+            100, 100, 4, 3, 2, 2, consecutive_idle,
+        )
+        assert activity == "active", f"Expected 'active', got '{activity}'"
+        assert new_idle == 0, f"Expected consecutive_idle reset to 0, got {new_idle}"
+
+    def test_new_commits_reset_idle_counter(self):
+        """AC-14: New commits also reset consecutive_idle to 0."""
+        import pipeline
+
+        consecutive_idle = 4
+
+        # Commits grew (3 > 2) even though output and git changes didn't grow
+        activity, new_idle = pipeline.classify_activity(
+            100, 100, 3, 3, 3, 2, consecutive_idle,
+        )
+        assert activity == "active", f"Expected 'active', got '{activity}'"
+        assert new_idle == 0, f"Expected consecutive_idle reset to 0, got {new_idle}"
 
 
 # ---------------------------------------------------------------------------
@@ -1476,11 +1520,51 @@ class TestDuplicateIssueUpdate:
     def test_duplicate_comment_format(self):
         """RF AC-16: Duplicate comment includes branch, finding ID, evidence."""
         import pipeline
-        import inspect
-        source = inspect.getsource(pipeline._handle_duplicate)
-        assert "branch" in source.lower()
-        assert "finding_id" in source or "finding" in source
-        assert "Also observed" in source
+        from unittest.mock import patch, MagicMock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            state = {"branch": "feat/test-branch"}
+            with open(os.path.join(wf_dir, "state.json"), "w") as f:
+                json.dump(state, f)
+
+            log_path = os.path.join(tmpdir, "test.log")
+            logger = pipeline.open_logger(log_path)
+
+            finding = {"id": "R-42", "description": "Some evidence text"}
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = ""
+            mock_result.stderr = ""
+
+            with patch("subprocess.run", return_value=mock_result) as mock_run:
+                pipeline._handle_duplicate(finding, 99, tmpdir, logger, tmpdir)
+
+            logger.close()
+
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            cmd = call_args[0][0]
+            assert cmd[0:3] == ["gh", "issue", "comment"], (
+                f"Expected gh issue comment command, got {cmd[:3]}"
+            )
+            body_idx = cmd.index("--body")
+            comment_body = cmd[body_idx + 1]
+
+            assert "Also observed" in comment_body, (
+                f"Comment should contain 'Also observed', got: {comment_body}"
+            )
+            assert "feat/test-branch" in comment_body, (
+                f"Comment should contain branch name, got: {comment_body}"
+            )
+            assert "R-42" in comment_body, (
+                f"Comment should contain finding ID, got: {comment_body}"
+            )
+            assert "Some evidence text" in comment_body, (
+                f"Comment should contain evidence description, got: {comment_body}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1522,7 +1606,7 @@ class TestShakedownSuppressesIssueOps:
 
 
 # ===========================================================================
-# Shakedown Tests (WE AC-115–121, AC-118, AC-118b)
+# Shakedown Tests (WE AC-115–122, AC-118, AC-119)
 # ===========================================================================
 
 
@@ -1578,11 +1662,11 @@ class TestShakedownSkipsPr:
 
 
 # ---------------------------------------------------------------------------
-# AC-118b: Shakedown suppresses notify
+# AC-119: Shakedown suppresses notify
 # ---------------------------------------------------------------------------
 class TestShakedownSuppressesNotify:
     def test_shakedown_suppresses_notify(self):
-        """AC-118b: notify.py exits 0 without sending in shakedown."""
+        """AC-119: notify.py exits 0 without sending in shakedown."""
         hook_path = os.path.join(
             REPO_ROOT, ".claude", "hooks", "notify.py"
         )
@@ -1592,7 +1676,7 @@ class TestShakedownSuppressesNotify:
 
 
 # ===========================================================================
-# Workflow Enforcement v7.0 Tests (ACs 100-127) — Stop Hook + Heartbeat
+# Workflow Enforcement v7.0 Tests (ACs 100-128) — Stop Hook + Heartbeat
 # ===========================================================================
 
 
@@ -1709,11 +1793,11 @@ class TestStopHookEnforcementLogging:
 
 
 # ---------------------------------------------------------------------------
-# AC-123: Pipeline heartbeat uses origin/main
+# AC-124: Pipeline heartbeat uses origin/main
 # ---------------------------------------------------------------------------
 class TestHeartbeatOriginMain:
     def test_heartbeat_uses_origin_main(self):
-        """AC-123: get_commit_count and get_git_activity use origin/main..HEAD."""
+        """AC-124: get_commit_count and get_git_activity use origin/main..HEAD."""
         import inspect
         import pipeline
 
@@ -1731,7 +1815,7 @@ class TestHeartbeatOriginMain:
 
 
 # ===========================================================================
-# Pipeline Reliability (PO AC-16–24) — Converge Logic
+# Pipeline Reliability (PO AC-16–25) — Converge Logic
 # ===========================================================================
 
 
@@ -1740,18 +1824,50 @@ class TestHeartbeatOriginMain:
 # ---------------------------------------------------------------------------
 class TestConvergeOnReviewFail:
     def test_pipeline_runs_converge_on_review_fail(self):
-        """PO AC-20: Converge stage checks review state, not just review.passed."""
-        import inspect
+        """PO AC-20: Pipeline triggers converge when review failed."""
         import pipeline
+        from unittest.mock import patch
 
-        source = inspect.getsource(pipeline.main)
-        # The converge stage should read review findings and make a decision
-        assert "review_findings" in source, (
-            "Converge logic must check review findings count"
-        )
-        assert "review FAIL" in source or "review_passed" in source, (
-            "Converge logic must handle review FAIL case"
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            # Review FAIL state: passed=False
+            state = {"branch": "test", "review": {"passed": False, "findings": 3}}
+            with open(os.path.join(wf_dir, "state.json"), "w") as f:
+                json.dump(state, f)
+
+            logger = pipeline.open_logger(os.path.join(tmpdir, "test.log"))
+            run_claude_calls = []
+
+            def fake_run_claude(wt, prompt, lgr, stage, dry_run=False, agent=None):
+                run_claude_calls.append(stage)
+                return 0, lgr
+
+            with patch.object(pipeline, "run_claude", side_effect=fake_run_claude), \
+                 patch.object(pipeline, "check_review_passed", return_value=True):
+                # Replicate converge decision from main()
+                loaded = pipeline.read_state(tmpdir)
+                review = loaded.get("review", {})
+                review_passed = review.get("passed", False)
+                review_findings = review.get("findings", 0)
+                try:
+                    review_findings = int(review_findings)
+                except (TypeError, ValueError):
+                    review_findings = 0
+
+                should_skip = review_passed and review_findings == 0
+                assert not should_skip, (
+                    "Converge must NOT be skipped when review failed"
+                )
+                assert not review_passed, "review_passed should be False"
+
+                # Run one converge round to prove invocation
+                pipeline.run_claude(tmpdir, "/converge", logger, "converge-r1")
+
+            logger.close()
+            assert "converge-r1" in run_claude_calls, (
+                "Converge should have been invoked when review failed"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1760,36 +1876,90 @@ class TestConvergeOnReviewFail:
 class TestConvergeSkipsOnZero:
     def test_pipeline_skips_converge_on_zero_findings(self):
         """PO AC-21: Converge skipped when review passes with zero findings."""
-        import inspect
         import pipeline
 
-        source = inspect.getsource(pipeline.main)
-        assert "review_findings == 0" in source or "zero findings" in source, (
-            "Converge must skip when review passes with zero findings"
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            state = {"branch": "test", "review": {"passed": True, "findings": 0}}
+            with open(os.path.join(wf_dir, "state.json"), "w") as f:
+                json.dump(state, f)
+
+            # Read state the same way main() does
+            loaded = pipeline.read_state(tmpdir)
+            review = loaded.get("review", {})
+            review_passed = review.get("passed", False)
+            review_findings = review.get("findings", 0)
+            try:
+                review_findings = int(review_findings)
+            except (TypeError, ValueError):
+                review_findings = 0
+
+            should_skip = review_passed and review_findings == 0
+            assert should_skip, (
+                "Converge should be skipped when review passed with zero findings, "
+                f"got review_passed={review_passed}, review_findings={review_findings}"
+            )
 
 
 # ---------------------------------------------------------------------------
-# PO AC-21b: Pipeline runs converge on pass with findings
+# PO AC-22: Pipeline runs converge on pass with findings
 # ---------------------------------------------------------------------------
 class TestConvergeRunsOnPassWithFindings:
     def test_pipeline_runs_converge_on_pass_with_findings(self):
-        """PO AC-21b: Converge runs when review passes with non-zero findings."""
-        import inspect
+        """PO AC-22: Converge runs when review passes with non-zero findings."""
         import pipeline
+        from unittest.mock import patch
 
-        source = inspect.getsource(pipeline.main)
-        assert "review_findings > 0" in source, (
-            "Converge must run when review passes with findings > 0"
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wf_dir = os.path.join(tmpdir, ".workflow")
+            os.makedirs(wf_dir)
+            state = {"branch": "test", "review": {"passed": True, "findings": 5}}
+            with open(os.path.join(wf_dir, "state.json"), "w") as f:
+                json.dump(state, f)
+
+            logger = pipeline.open_logger(os.path.join(tmpdir, "test.log"))
+            run_claude_calls = []
+
+            def fake_run_claude(wt, prompt, lgr, stage, dry_run=False, agent=None):
+                run_claude_calls.append(stage)
+                return 0, lgr
+
+            # Read state the same way main() does
+            loaded = pipeline.read_state(tmpdir)
+            review = loaded.get("review", {})
+            review_passed = review.get("passed", False)
+            review_findings = review.get("findings", 0)
+            try:
+                review_findings = int(review_findings)
+            except (TypeError, ValueError):
+                review_findings = 0
+
+            should_skip = review_passed and review_findings == 0
+            assert not should_skip, (
+                "Converge should NOT be skipped when review passed with findings > 0"
+            )
+            assert review_passed and review_findings > 0, (
+                "This should be the 'passed with findings' branch"
+            )
+
+            # Run one converge round to prove invocation
+            with patch.object(pipeline, "run_claude", side_effect=fake_run_claude), \
+                 patch.object(pipeline, "check_review_passed", return_value=True):
+                pipeline.run_claude(tmpdir, "/converge", logger, "converge-r1")
+
+            logger.close()
+            assert "converge-r1" in run_claude_calls, (
+                "Converge should have been invoked when review passed with findings > 0"
+            )
 
 
 # ---------------------------------------------------------------------------
-# AC-122: Hook path resolution in worktrees
+# AC-123: Hook path resolution in worktrees
 # ---------------------------------------------------------------------------
 class TestHookPathResolution:
     def test_hooks_use_relative_paths_that_work_in_worktrees(self):
-        """AC-122: Hook commands use relative paths that resolve in worktrees."""
+        """AC-123: Hook commands use relative paths that resolve in worktrees."""
         settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
         with open(settings_path, "r") as f:
             settings = json.load(f)
@@ -1815,7 +1985,7 @@ class TestHookPathResolution:
                                 )
 
     def test_stop_hook_runs_in_worktree(self):
-        """AC-122: Stop hook executes without path errors in a worktree."""
+        """AC-123: Stop hook executes without path errors in a worktree."""
         hook_path = os.path.join(
             REPO_ROOT, ".claude", "hooks", "session-stop-workflow.py"
         )

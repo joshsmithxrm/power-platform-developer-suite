@@ -359,9 +359,9 @@ def run_triage(worktree, pr_number, comments, logger):
             cwd=worktree,
             env=env,
             stdout=stage_log_file,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
-        _, stderr_data = proc.communicate(timeout=1800)  # 30 min hard ceiling
+        proc.wait(timeout=1800)  # 30 min hard ceiling
         exit_code = proc.returncode
     except subprocess.TimeoutExpired:
         proc.terminate()
@@ -534,9 +534,9 @@ def run_retro(worktree, logger):
             cwd=worktree,
             env=env,
             stdout=stage_log_file,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
-        _, _ = proc.communicate(timeout=600)  # 10 min ceiling
+        proc.wait(timeout=600)  # 10 min ceiling
         exit_code = proc.returncode
     except subprocess.TimeoutExpired:
         proc.terminate()
@@ -675,6 +675,11 @@ def run_monitor(worktree, pr_number, resume=False):
 
             if resume and step_completed(result, step_key):
                 logger.log("triage", "RESUMED", iteration=triage_iteration)
+                # Re-poll to get fresh comments for next iteration;
+                # without this, the loop would reuse stale comments/inline_count.
+                comments = _step_gemini(worktree, pr_number, logger, result,
+                                        step_suffix=f"_r{triage_iteration}")
+                inline_count = len(comments)
                 continue
 
             logger.log("triage", "ITERATION",

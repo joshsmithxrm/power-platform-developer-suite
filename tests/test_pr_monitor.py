@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for pr-monitor.py (WE AC-106–114, AC-124–127, retro-filing AC-15)."""
+"""Tests for pr-monitor.py (WE AC-106–114, AC-125–128, retro-filing AC-15)."""
 import json
 import os
 import subprocess
@@ -107,7 +107,7 @@ class TestCiFailure:
 
 
 class TestCiTimeout:
-    """AC-124: poll_ci returns 'timeout' after CI_MAX_WAIT."""
+    """AC-125: poll_ci returns 'timeout' after CI_MAX_WAIT."""
 
     def test_ci_timeout_returns_timeout(self, tmp_path):
         """poll_ci returns 'timeout' when checks remain pending past max wait."""
@@ -174,9 +174,9 @@ class TestTriageOnComments:
 
         # The mock Popen stdout is redirected to the stage log file by
         # run_triage.  We need the JSONL content to appear in that file
-        # after communicate() returns.  Since run_triage opens the file
-        # itself and passes it as stdout, we simulate writing by having
-        # communicate() write to the file before returning.
+        # after wait() returns.  Since run_triage opens the file itself
+        # and passes it as stdout, we simulate writing by having wait()
+        # write to the file before returning.
         triage_output = json.dumps([
             {"id": 1, "action": "fixed", "description": "renamed var",
              "commit": "abc123"}
@@ -186,14 +186,14 @@ class TestTriageOnComments:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
 
-        def fake_communicate(timeout=None):
+        def fake_wait(timeout=None):
             # run_triage passes the opened file as stdout to Popen.
             # Write the JSONL event into it so _parse_triage_output finds it.
             with open(jsonl_path, "w") as f:
                 f.write(jsonl_event + "\n")
-            return (b"", b"")
+            return 0
 
-        mock_proc.communicate.side_effect = fake_communicate
+        mock_proc.wait.side_effect = fake_wait
 
         with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
             logger = _make_logger(tmp_path)
@@ -267,7 +267,7 @@ class TestRepollCi:
 
 
 class TestTriageCiLoopLimit:
-    """AC-126: Max 3 triage -> CI iterations."""
+    """AC-127: Max 3 triage -> CI iterations."""
 
     def test_triage_ci_loop_limit(self, tmp_path):
         """Triage loop stops after MAX_TRIAGE_ITERATIONS even if comments persist."""
@@ -401,7 +401,7 @@ class TestResultJsonSchema:
 
 
 class TestGeminiTimeout:
-    """AC-125: Gemini polling stops after GEMINI_MAX_WAIT (5 min)."""
+    """AC-126: Gemini polling stops after GEMINI_MAX_WAIT (5 min)."""
 
     def test_gemini_timeout(self, tmp_path):
         """poll_gemini_comments returns empty list after max wait with no stable count."""
@@ -433,7 +433,7 @@ class TestGeminiTimeout:
 
 
 class TestPidFileLifecycle:
-    """AC-127: PID file written on start and cleaned on exit."""
+    """AC-128: PID file written on start and cleaned on exit."""
 
     def test_pid_file_written(self, tmp_path):
         """write_pid creates .workflow/pr-monitor.pid with current PID."""
@@ -515,7 +515,7 @@ class TestRetroTrigger:
         logger = _make_logger(tmp_path)
 
         mock_proc = MagicMock()
-        mock_proc.communicate.return_value = (b"", b"")
+        mock_proc.wait.return_value = 0
         mock_proc.returncode = 0
 
         # Create the stage log directory so the open() succeeds
