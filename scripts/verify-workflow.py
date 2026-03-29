@@ -471,7 +471,13 @@ def main():
             "  %(prog)s --list       Show available scenarios\n"
             "\n"
             "stdout carries machine-readable JSON; progress goes to stderr.\n"
-            "Exit 0 when all pass; exit 1 on failure (detail field has diagnostics)."
+            "Exit 0 when all pass; exit 1 on failure.\n"
+            "\n"
+            "JSON fields per scenario:\n"
+            "  status       \"pass\" or \"fail\"\n"
+            "  duration_ms  wall-clock milliseconds\n"
+            "  detail       null on pass; diagnostic string on fail,\n"
+            "               e.g. \"Expected exit code 2, got 0\""
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
