@@ -205,7 +205,13 @@ If `.retros/summary.json` exists:
 - Verify `schema_version == 1`
 If the file does not exist, this check passes (the store is optional until first retro).
 
-**Check 8: Workflow state write**
+**Check 8: Behavioral scenario tests**
+```bash
+python scripts/verify-workflow.py
+```
+Runs behavioral scenarios against workflow hooks and state management. Parses JSON output from stdout; any failed scenario is a check failure.
+
+**Check 9: Workflow state write**
 On all checks passing:
 ```bash
 python scripts/workflow-state.py set verify.workflow now

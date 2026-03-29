@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Last Updated:** 2026-03-28
-**Code:** [scripts/verify-workflow.py](../scripts/verify-workflow.py)
+**Code:** [scripts/verify-workflow.py](../scripts/verify-workflow.py), [scripts/verify_workflow_checks.py](../scripts/verify_workflow_checks.py)
 **Surfaces:** N/A
 
 ---
@@ -34,7 +34,7 @@ Fills the behavioral testing gap between structural validation (`/verify workflo
 ```
 Claude Code (or /shakedown-workflow)
     │
-    │  python scripts/verify-workflow.py <scenario|--all>
+    │  python scripts/verify-workflow.py [scenario]
     ▼
 ┌─────────────────────────────────┐
 │  verify-workflow.py              │
@@ -107,7 +107,7 @@ No daemon, no long-lived process. Each scenario is a plain Python function that 
 
 **Exercise:** Run `python .claude/hooks/session-stop-workflow.py` with stdin JSON `{}` (empty object, no `stop_hook_active`).
 
-**Assert:** Exit code 0. Stdout JSON contains `"decision": "block"`. (The stop hook always exits 0 but communicates block/allow via the JSON `decision` field on stdout.)
+**Assert:** Exit code 2. Stdout JSON contains `"decision": "block"`. (The stop hook exits 2 when blocking, communicating the block decision via both exit code and JSON `decision` field on stdout.)
 
 **Teardown:** Restore original state.
 
@@ -356,7 +356,7 @@ def test_stop_hook_blocks(ctx: ScenarioContext) -> ScenarioResult:
 
 ### `/verify workflow` (structural layer)
 
-After its existing 8 structural checks, `/verify workflow` calls `python scripts/verify-workflow.py --all` as check 9. If the behavioral tests fail, `/verify workflow` reports the failure.
+After its existing 7 structural checks, `/verify workflow` calls `python scripts/verify-workflow.py` as check 8. If the behavioral tests fail, `/verify workflow` reports the failure.
 
 ### `/workflow-verify` skill
 
@@ -366,7 +366,7 @@ The skill document is updated to reference the tool:
 
 ### `/shakedown-workflow` (integration layer)
 
-Calls `python scripts/verify-workflow.py --all` inside each throwaway worktree. The worktree inherits the current branch's hooks and scripts, so the scenarios test the modified code.
+Calls `python scripts/verify-workflow.py` inside each throwaway worktree. The worktree inherits the current branch's hooks and scripts, so the scenarios test the modified code.
 
 ---
 

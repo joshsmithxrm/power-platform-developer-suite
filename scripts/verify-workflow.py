@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import time
+import typing
 from dataclasses import asdict, dataclass
 
 
@@ -28,13 +29,6 @@ class ScenarioResult:
     status: str          # "pass" or "fail"
     duration_ms: int     # wall-clock milliseconds
     detail: str | None   # failure detail, None on pass
-
-
-@dataclass
-class Summary:
-    total: int
-    passed: int
-    failed: int
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +53,7 @@ def get_project_root() -> str:
 # Scenario registry
 # ---------------------------------------------------------------------------
 
-SCENARIOS: dict[str, callable] = {}
+SCENARIOS: dict[str, "typing.Callable"] = {}
 
 
 def scenario(name: str):
@@ -256,6 +250,8 @@ def test_stop_hook_blocks(ctx: ScenarioContext) -> ScenarioResult:
         "stop_hook_count": 0,
     })
     result = ctx.run_hook("session-stop-workflow.py", stdin_json={})
+    if result.returncode != 2:
+        return fail(ctx, f"Expected exit code 2, got {result.returncode}")
     try:
         output = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -547,10 +543,16 @@ def main():
     if all_passed and args.scenario is None and len(results) > 0:
         state_py = os.path.join(project_root, "scripts", "workflow-state.py")
         try:
-            subprocess.run(
+            state_result = subprocess.run(
                 [sys.executable, state_py, "set", "verify.workflow", "now"],
                 capture_output=True, text=True, timeout=10,
             )
+            if state_result.returncode != 0:
+                print(
+                    f"WARNING: workflow-state.py exited {state_result.returncode}: "
+                    f"{state_result.stderr.strip()}",
+                    file=sys.stderr,
+                )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print("WARNING: Could not write verify.workflow timestamp", file=sys.stderr)
 

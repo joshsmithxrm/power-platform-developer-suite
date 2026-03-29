@@ -155,7 +155,7 @@ def check_retro_store_schema(store_path: str) -> list[str]:
 
 
 def check_behavioral_tests(repo_root: str) -> list[str]:
-    """Check 8: Run verify-workflow.py behavioral scenario tests.
+    """Check 8 (behavioral): Run verify-workflow.py scenario tests.
 
     Returns list of error messages (empty = pass).
     """
