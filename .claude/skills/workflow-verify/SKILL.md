@@ -114,6 +114,23 @@ python scripts/workflow-state.py set-null gates.passed
 python scripts/workflow-state.py delete
 ```
 
+## Automated Behavioral Tests
+
+Run `python scripts/verify-workflow.py` for automated behavioral scenario tests against workflow hooks and state management.
+
+```bash
+# Run all scenarios (writes verify.workflow timestamp on pass)
+python scripts/verify-workflow.py
+
+# Run a single scenario
+python scripts/verify-workflow.py hook-stop-block
+
+# List available scenarios
+python scripts/verify-workflow.py --list
+```
+
+Scenarios test: stop hook block/allow, PR gate block/allow, state invalidation, session-start completeness, resume detection. Each scenario sets up state, exercises a hook via subprocess, and asserts the result.
+
 ## Common Pitfalls
 
 - **Windows path escaping in JSON:** Use forward slashes or double-backslash. `$CLAUDE_PROJECT_DIR` uses forward slashes.
