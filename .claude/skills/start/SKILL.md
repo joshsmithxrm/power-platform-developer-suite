@@ -163,7 +163,7 @@ Write `.plans/context.md` to the new worktree with issue details and routing gui
 
 If no issues and no investigation context in conversation — skip this step, no file written.
 
-### Step 6: Open Terminal
+### Step 6: Open Terminal with Claude
 
 Detect platform:
 
@@ -171,16 +171,22 @@ Detect platform:
 uname -s
 ```
 
+Determine the claude launch command based on work type:
+- **Bug fix:** `claude` (no auto-skill — user codes the fix manually)
+- **Enhancement/refactor:** `claude '/implement'`
+- **New feature:** `claude '/design'`
+- **Docs:** `claude` (no auto-skill — user edits docs manually)
+
 **Windows (MINGW/MSYS):**
 ```bash
-start pwsh -NoExit -WorkingDirectory "<absolute-path-to-worktree>"
+start pwsh -NoExit -Command "Set-Location '<absolute-path-to-worktree>'; <claude-command>"
 ```
 
 **Linux/Mac:** No reliable cross-distro terminal launch. Print instructions:
 ```
 Worktree created. Open a terminal there:
   cd <path-to-worktree>
-  claude
+  <claude-command>
 ```
 
 ### Step 7: Print Guidance
@@ -193,7 +199,7 @@ Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
 Work type: Bug fix
 
-Terminal opened. Run `claude` then code the fix + regression test.
+Claude opened in worktree. Code the fix + regression test.
 When done: `/gates` → `/verify` → `/pr`
 ```
 
@@ -203,7 +209,7 @@ Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
 Work type: Enhancement/refactor
 
-Terminal opened. Run `claude` then `/implement` to start.
+Claude launched with /implement in worktree.
 ```
 
 **New feature:**
@@ -212,7 +218,7 @@ Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
 Work type: New feature
 
-Terminal opened. Run `claude` then `/design` to start.
+Claude launched with /design in worktree.
 ```
 
 **Docs:**
@@ -221,15 +227,15 @@ Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
 Work type: Docs
 
-Terminal opened. Run `claude` then edit docs and commit.
-No design or implement needed. When done: `/pr`
+Claude opened in worktree. Edit docs and commit.
+When done: `/pr`
 ```
 
-If terminal launch failed, replace "Terminal opened. Run `claude`" with:
+If terminal launch failed, replace the launch confirmation with:
 ```
 Could not open terminal automatically. Run:
   cd .worktrees/<name>
-  claude
+  <claude-command>
 ```
 
 ## Rules
