@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import subprocess
+import sys
 
 
 def check_skill_frontmatter(skill_path: str) -> list[str]:
@@ -148,5 +150,48 @@ def check_retro_store_schema(store_path: str) -> list[str]:
             f"{store_path}: schema_version is {data.get('schema_version')}, expected 1 — "
             "rebuild the store"
         )
+
+    return errors
+
+
+def check_behavioral_tests(repo_root: str) -> list[str]:
+    """Check 8: Run verify-workflow.py behavioral scenario tests.
+
+    Returns list of error messages (empty = pass).
+    """
+    script_path = os.path.join(repo_root, "scripts", "verify-workflow.py")
+    if not os.path.isfile(script_path):
+        return [f"Behavioral test script not found: {script_path}"]
+
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True, text=True, timeout=60,
+            cwd=repo_root,
+        )
+    except subprocess.TimeoutExpired:
+        return ["Behavioral tests timed out (>60s)"]
+    except FileNotFoundError:
+        return [f"Cannot execute: {script_path}"]
+
+    # Parse JSON output from stdout
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return [f"Behavioral tests produced invalid JSON: {result.stdout[:200]}"]
+
+    errors = []
+    summary = report.get("summary", {})
+    failed = summary.get("failed", 0)
+
+    if failed > 0:
+        # Report each failed scenario
+        for name, scenario in report.get("scenarios", {}).items():
+            if scenario.get("status") == "fail":
+                detail = scenario.get("detail", "no detail")
+                errors.append(f"Behavioral test '{name}' failed: {detail}")
+
+    if result.returncode != 0 and not errors:
+        errors.append(f"Behavioral tests exited with code {result.returncode}")
 
     return errors
