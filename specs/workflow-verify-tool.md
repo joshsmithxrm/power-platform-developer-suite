@@ -283,7 +283,7 @@ class Summary:
 def test_stop_hook_blocks(ctx: ScenarioContext) -> ScenarioResult:
     ctx.write_state({"phase": "implementing", "gates": {"passed": None}, "stop_hook_count": 0})
     result = ctx.run_hook("session-stop-workflow.py", stdin_json={})
-    # Stop hook always exits 0; block/allow communicated via JSON on stdout
+    # Stop hook exits 2 to block; decision is also in stdout JSON
     output = json.loads(result.stdout)
     assert output.get("decision") == "block"
     return ScenarioResult(status="pass", duration_ms=ctx.elapsed_ms(), detail=None)
