@@ -238,7 +238,7 @@ def has_code_changes(project_root: str) -> bool:
 
 @scenario("hook-stop-block")
 def test_stop_hook_blocks(ctx: ScenarioContext) -> ScenarioResult:
-    """Stop hook blocks when phase=implementing and steps incomplete."""
+    """Stop hook prevents session exit when work is in progress and steps remain."""
     project_root = get_project_root()
     if not has_code_changes(project_root):
         return ScenarioResult(
@@ -267,7 +267,7 @@ def test_stop_hook_blocks(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("hook-stop-allow")
 def test_stop_hook_allows(ctx: ScenarioContext) -> ScenarioResult:
-    """Stop hook allows for all non-enforcing phases."""
+    """Stop hook permits session exit during non-coding phases (design, review, QA)."""
     project_root = get_project_root()
     if not has_code_changes(project_root):
         return ScenarioResult(
@@ -305,7 +305,7 @@ def test_stop_hook_allows(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("hook-pr-block")
 def test_pr_gate_blocks(ctx: ScenarioContext) -> ScenarioResult:
-    """PR gate exits 2 when gates not current."""
+    """PR gate blocks pull request creation when required checks haven't passed."""
     ctx.write_state({
         "branch": "feat/test",
         "phase": "implementing",
@@ -320,7 +320,7 @@ def test_pr_gate_blocks(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("hook-pr-allow")
 def test_pr_gate_allows(ctx: ScenarioContext) -> ScenarioResult:
-    """PR gate exits 0 when all steps current."""
+    """PR gate allows pull request creation when all required steps are complete."""
     project_root = get_project_root()
     head_sha = get_head_sha(project_root)
     ctx.write_state({
@@ -344,7 +344,7 @@ def test_pr_gate_allows(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("state-invalidation")
 def test_state_invalidation(ctx: ScenarioContext) -> ScenarioResult:
-    """Post-commit hook clears gates.passed after a commit."""
+    """New commit invalidates prior check results, requiring re-verification."""
     ctx.write_state({
         "branch": "feat/test",
         "phase": "implementing",
@@ -360,7 +360,7 @@ def test_state_invalidation(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("session-start-completeness")
 def test_session_start_completeness(ctx: ScenarioContext) -> ScenarioResult:
-    """Session-start reports only incomplete steps in Required line."""
+    """Session start shows only remaining required steps, not already-completed ones."""
     project_root = get_project_root()
     head_sha = get_head_sha(project_root)
     ctx.write_state({
@@ -388,7 +388,7 @@ def test_session_start_completeness(ctx: ScenarioContext) -> ScenarioResult:
 
 @scenario("resume-detection")
 def test_resume_detection(ctx: ScenarioContext) -> ScenarioResult:
-    """Session-start lists only remaining incomplete steps when resuming."""
+    """Resuming a session shows only the steps still needed, not those already done."""
     project_root = get_project_root()
     head_sha = get_head_sha(project_root)
     ctx.write_state({
@@ -537,6 +537,10 @@ def main():
     }
 
     print(json.dumps(report, indent=2))
+
+    # Human-readable summary on stderr
+    verdict = "PASS" if all_passed else "FAIL"
+    print(f"{passed_count} passed, {failed_count} failed: {verdict}", file=sys.stderr)
 
     # Write verify.workflow timestamp on all-pass when running ALL scenarios (AC-16)
     if all_passed and args.scenario is None and len(results) > 0:
