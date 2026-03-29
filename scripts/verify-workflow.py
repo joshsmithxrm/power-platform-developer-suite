@@ -463,26 +463,46 @@ def run_scenarios(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Behavioral scenario tests for workflow infrastructure.",
+        description=(
+            "Verify that git hooks and session-state machinery behave correctly. "
+            "Runs behavioral scenarios that exercise workflow hooks against "
+            "synthetic state, then reports results as JSON on stdout."
+        ),
+        epilog=(
+            "examples:\n"
+            "  %(prog)s              Run all scenarios, JSON to stdout\n"
+            "  %(prog)s hook-pr-block  Run one scenario\n"
+            "  %(prog)s --list       Show available scenarios\n"
+            "\n"
+            "stdout carries machine-readable JSON; progress goes to stderr."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "scenario",
         nargs="?",
         default=None,
-        help="Run a single scenario by name",
+        help="Run a single scenario by name (omit to run all)",
     )
     parser.add_argument(
         "--list",
         action="store_true",
         dest="list_scenarios",
-        help="List available scenario names",
+        help="List available scenarios with descriptions",
     )
-    args = parser.parse_args()
+    args, remaining = parser.parse_known_args()
+    if remaining:
+        print(
+            f"Unexpected arguments: {' '.join(remaining)}. Use --help.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    # --list: print scenario names to stdout
+    # --list: print scenario names with descriptions to stdout
     if args.list_scenarios:
         for name in sorted(SCENARIOS):
-            print(name)
+            desc = (SCENARIOS[name].__doc__ or "").split("\n")[0].strip()
+            print(f"{name:30s}  {desc}" if desc else name)
         sys.exit(0)
 
     # Validate scenario name
