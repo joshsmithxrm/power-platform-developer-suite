@@ -474,7 +474,8 @@ def main():
             "  %(prog)s hook-pr-block  Run one scenario\n"
             "  %(prog)s --list       Show available scenarios\n"
             "\n"
-            "stdout carries machine-readable JSON; progress goes to stderr."
+            "stdout carries machine-readable JSON; progress goes to stderr.\n"
+            "Exit 0 when all pass; exit 1 on failure (detail field has diagnostics)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
