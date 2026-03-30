@@ -54,6 +54,7 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v6
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         directory: ./coverage
         flags: unittests
         fail_ci_if_error: false  # Don't fail build if upload fails
