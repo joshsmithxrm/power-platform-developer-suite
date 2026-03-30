@@ -29,6 +29,13 @@ namespace PPDS.Migration.Models
             = new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>();
 
         /// <summary>
+        /// Gets or sets the file column data.
+        /// Key is entity logical name, value is the list of file column data for records of that entity.
+        /// </summary>
+        public IReadOnlyDictionary<string, IReadOnlyList<FileColumnData>> FileData { get; set; }
+            = new Dictionary<string, IReadOnlyList<FileColumnData>>();
+
+        /// <summary>
         /// Gets or sets the export timestamp.
         /// </summary>
         public DateTime ExportedAt { get; set; }

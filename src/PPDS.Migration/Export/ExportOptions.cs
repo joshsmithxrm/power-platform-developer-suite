@@ -24,5 +24,12 @@ namespace PPDS.Migration.Export
         /// Default: 100
         /// </summary>
         public int ProgressInterval { get; set; } = 100;
+
+        /// <summary>
+        /// Gets or sets whether to include file column binary data in the export.
+        /// When true, file column data is downloaded and stored in the ZIP archive.
+        /// Default: false
+        /// </summary>
+        public bool IncludeFileData { get; set; } = false;
     }
 }

@@ -186,4 +186,44 @@ public class FieldSchemaTests
 
         field.Precision.Should().Be(2);
     }
+
+    [Fact]
+    public void IsFileColumn_ReturnsTrueForFileType()
+    {
+        var field = new FieldSchema { Type = "file" };
+
+        field.IsFileColumn.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsFileColumn_IsCaseInsensitive()
+    {
+        var field = new FieldSchema { Type = "File" };
+
+        field.IsFileColumn.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsFileColumn_ReturnsFalseForStringType()
+    {
+        var field = new FieldSchema { Type = "string" };
+
+        field.IsFileColumn.Should().BeFalse();
+    }
+
+    [Fact]
+    public void MaxFileSizeKB_DefaultsToNull()
+    {
+        var field = new FieldSchema();
+
+        field.MaxFileSizeKB.Should().BeNull();
+    }
+
+    [Fact]
+    public void MaxFileSizeKB_CanBeSet()
+    {
+        var field = new FieldSchema { MaxFileSizeKB = 32768 };
+
+        field.MaxFileSizeKB.Should().Be(32768);
+    }
 }

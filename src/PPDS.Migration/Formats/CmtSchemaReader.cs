@@ -200,7 +200,8 @@ namespace PPDS.Migration.Formats
                 IsValidForUpdate = isValidForUpdate,
                 DateMode = dateMode,
                 MaxLength = ParseInt(element.Attribute("maxlength")?.Value),
-                Precision = ParseInt(element.Attribute("precision")?.Value)
+                Precision = ParseInt(element.Attribute("precision")?.Value),
+                MaxFileSizeKB = ParseInt(element.Attribute("maxFileSizeKB")?.Value)
             };
         }
 

@@ -329,6 +329,10 @@ namespace PPDS.Migration.Formats
                     {
                         await writer.WriteAttributeStringAsync(null, "lookupType", null, field.LookupEntity).ConfigureAwait(false);
                     }
+                    if (field.MaxFileSizeKB.HasValue)
+                    {
+                        await writer.WriteAttributeStringAsync(null, "maxFileSizeKB", null, field.MaxFileSizeKB.Value.ToString()).ConfigureAwait(false);
+                    }
                     await writer.WriteEndElementAsync().ConfigureAwait(false); // field
                 }
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // fields

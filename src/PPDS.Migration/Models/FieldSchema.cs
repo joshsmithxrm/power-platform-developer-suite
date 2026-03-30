@@ -84,6 +84,16 @@ namespace PPDS.Migration.Models
         public bool IsPolymorphicLookup => Type.Equals("customer", StringComparison.OrdinalIgnoreCase) ||
                                            Type.Equals("owner", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Gets whether this field is a file column type.
+        /// </summary>
+        public bool IsFileColumn => Type.Equals("file", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Gets or sets the maximum file size in KB for file columns.
+        /// </summary>
+        public int? MaxFileSizeKB { get; set; }
+
         /// <inheritdoc />
         public override string ToString() => $"{LogicalName} ({Type})";
     }
