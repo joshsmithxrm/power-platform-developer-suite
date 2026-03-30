@@ -664,7 +664,7 @@
     "knip": "^6.1.0",
     "stylelint": "^17.6.0",
     "stylelint-config-standard": "^40.0.0",
-    "typescript": "^5.0.0",
+    "typescript": "^6.0.2",
     "typescript-eslint": "^8.57.1",
     "vitest": "^4.1.2"
   },
