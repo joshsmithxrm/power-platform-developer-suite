@@ -133,13 +133,30 @@ python scripts/workflow-state.py set spec specs/<name>.md
 
 ### Step 6: Handoff
 
-Update phase and proceed directly to implementation:
+Update phase for handoff to implementation:
 
 ```bash
 python scripts/workflow-state.py set phase implementing
 ```
 
-Invoke `/implement` immediately. The user's approval of the plan in Step 4 is the signal to proceed — do not present options or wait for further input.
+Present three options:
+
+```
+Spec committed. Choose next step:
+
+  1. Launch headless pipeline (recommended)
+     → python scripts/pipeline.py --worktree <cwd> --spec specs/<name>.md --from implement
+
+  2. Continue interactively
+     → /implement
+
+  3. Defer (pick up later)
+     → Spec is committed on branch feat/<name>. Resume anytime.
+```
+
+If the user chooses option 1, run the pipeline command in the background.
+If option 2, invoke `/implement` immediately.
+If option 3, note the spec path and stop.
 
 ## Key Principles
 
