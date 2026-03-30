@@ -14,6 +14,7 @@ using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
+using PPDS.Migration.Constants;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import.Handlers;
@@ -1170,10 +1171,10 @@ namespace PPDS.Migration.Import
 
             // Force team.isdefault to false to prevent conflicts with existing default teams
             // This matches CMT behavior - default teams should not be imported as defaults
-            if (record.LogicalName.Equals("team", StringComparison.OrdinalIgnoreCase) &&
-                prepared.Contains("isdefault"))
+            if (record.LogicalName.Equals(EntityNames.Team, StringComparison.OrdinalIgnoreCase) &&
+                prepared.Contains(AttributeNames.IsDefault))
             {
-                prepared["isdefault"] = false;
+                prepared[AttributeNames.IsDefault] = false;
             }
 
             return prepared;
@@ -1212,7 +1213,7 @@ namespace PPDS.Migration.Import
                 if (options.UserMappings.UseCurrentUserAsDefault && options.CurrentUserId.HasValue)
                 {
                     _logger?.LogDebug("User {UserId} not found in mappings, using current user fallback", er.Id);
-                    return new EntityReference("systemuser", options.CurrentUserId.Value);
+                    return new EntityReference(EntityNames.SystemUser, options.CurrentUserId.Value);
                 }
 
                 // User mapping exists but no mapping found and no fallback available
@@ -1231,8 +1232,8 @@ namespace PPDS.Migration.Import
 
         private static bool IsUserReference(string entityLogicalName)
         {
-            return entityLogicalName.Equals("systemuser", StringComparison.OrdinalIgnoreCase) ||
-                   entityLogicalName.Equals("team", StringComparison.OrdinalIgnoreCase);
+            return entityLogicalName.Equals(EntityNames.SystemUser, StringComparison.OrdinalIgnoreCase) ||
+                   entityLogicalName.Equals(EntityNames.Team, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

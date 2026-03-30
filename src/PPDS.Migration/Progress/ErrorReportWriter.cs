@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Migration.Constants;
 using PPDS.Migration.Import;
 
 namespace PPDS.Migration.Progress
@@ -179,13 +180,13 @@ namespace PPDS.Migration.Progress
             }
 
             // systemuser/team does not exist - common cross-environment issue
-            if (message.Contains("systemuser", StringComparison.OrdinalIgnoreCase) &&
+            if (message.Contains(EntityNames.SystemUser, StringComparison.OrdinalIgnoreCase) &&
                 message.Contains("Does Not Exist", StringComparison.OrdinalIgnoreCase))
             {
                 return "MISSING_USER";
             }
 
-            if (message.Contains("team", StringComparison.OrdinalIgnoreCase) &&
+            if (message.Contains(EntityNames.Team, StringComparison.OrdinalIgnoreCase) &&
                 message.Contains("Does Not Exist", StringComparison.OrdinalIgnoreCase))
             {
                 return "MISSING_TEAM";
