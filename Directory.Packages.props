@@ -4,7 +4,7 @@
   </PropertyGroup>
 
   <ItemGroup Label="Azure and Identity">
-    <PackageVersion Include="Azure.Identity" Version="1.17.1" />
+    <PackageVersion Include="Azure.Identity" Version="1.19.0" />
     <PackageVersion Include="Devlooped.CredentialManager" Version="2.7.0" />
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.4" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.83.1" />
