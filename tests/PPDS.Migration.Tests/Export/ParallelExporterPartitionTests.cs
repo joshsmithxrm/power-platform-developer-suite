@@ -378,7 +378,7 @@ public class ParallelExporterPartitionTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
-                var index = Interlocked.Increment(ref getClientCallCount);
+                Interlocked.Increment(ref getClientCallCount);
                 var client = new Mock<IPooledClient>();
 
                 client

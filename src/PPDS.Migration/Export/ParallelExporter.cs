@@ -262,7 +262,7 @@ namespace PPDS.Migration.Export
             if (partitionCount > 1)
             {
                 return await ExportEntityPartitionedAsync(
-                    entitySchema, partitionCount, options, progress, cancellationToken).ConfigureAwait(false);
+                    entitySchema, partitionCount, recordCount, options, progress, cancellationToken).ConfigureAwait(false);
             }
 
             return await ExportEntitySequentialAsync(
@@ -363,13 +363,14 @@ namespace PPDS.Migration.Export
         private async Task<EntityExportResultWithData> ExportEntityPartitionedAsync(
             EntitySchema entitySchema,
             int partitionCount,
+            long recordCount,
             ExportOptions options,
             IProgressReporter? progress,
             CancellationToken cancellationToken)
         {
             var entityStopwatch = Stopwatch.StartNew();
             var allRecords = new ConcurrentBag<Entity>();
-            var totalExported = 0;
+            long totalExported = 0;
 
             try
             {
@@ -406,8 +407,8 @@ namespace PPDS.Migration.Export
                         {
                             Phase = MigrationPhase.Exporting,
                             Entity = entitySchema.LogicalName,
-                            Current = currentTotal,
-                            Total = currentTotal,
+                            Current = (int)currentTotal,
+                            Total = recordCount > 0 ? (int)recordCount : (int)currentTotal,
                             RecordsPerSecond = rps
                         });
                     }).ConfigureAwait(false);
@@ -762,9 +763,9 @@ namespace PPDS.Migration.Export
                     var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
                     var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
 
-                    if (aliased?.Value is int count)
+                    if (aliased?.Value != null)
                     {
-                        counts[entity.LogicalName] = count;
+                        counts[entity.LogicalName] = Convert.ToInt64(aliased.Value);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
