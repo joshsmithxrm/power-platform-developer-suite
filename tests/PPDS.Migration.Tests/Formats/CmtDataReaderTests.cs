@@ -2,6 +2,7 @@ using System.IO.Compression;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using PPDS.Migration.Formats;
+using PPDS.Migration.Models;
 using Xunit;
 
 namespace PPDS.Migration.Tests.Formats;
@@ -179,6 +180,104 @@ public class CmtDataReaderTests
         osv.Value.Should().Be(int.Parse(value));
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ReadAsync_FileColumnData_PopulatesFileData()
+    {
+        // Arrange — create ZIP with data.xml containing file column field + files/ entry
+        var recordId = Guid.NewGuid();
+        var fileBytes = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
+
+        var stream = CreateTestArchiveWithFiles(
+            schemaXml: @"<entities><entity name=""account"" displayname=""Account""><fields>
+                <field name=""accountid"" type=""guid"" displayname=""ID"" primaryKey=""true"" />
+                <field name=""cr_document"" type=""file"" displayname=""Document"" />
+            </fields></entity></entities>",
+            dataXml: $@"<entities><entity name=""account""><records>
+                <record id=""{recordId}"">
+                    <field name=""cr_document"" value=""files/account/{recordId}_cr_document.bin"" type=""file"" filename=""report.pdf"" mimetype=""application/pdf"" />
+                </record>
+            </records><m2mrelationships /></entity></entities>",
+            files: new Dictionary<string, byte[]>
+            {
+                { $"files/account/{recordId}_cr_document.bin", fileBytes }
+            }
+        );
+
+        var schemaReader = new CmtSchemaReader();
+        var reader = new CmtDataReader(schemaReader);
+
+        // Act
+        var result = await reader.ReadAsync(stream);
+
+        // Assert — file data populated from ZIP
+        result.FileData.Should().ContainKey("account");
+        result.FileData["account"].Should().HaveCount(1);
+        var file = result.FileData["account"][0];
+        file.RecordId.Should().Be(recordId);
+        file.FieldName.Should().Be("cr_document");
+        file.FileName.Should().Be("report.pdf");
+        file.MimeType.Should().Be("application/pdf");
+        file.Data.Should().Equal(fileBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ReadAsync_NoFilesDirectory_FileDataEmpty()
+    {
+        var stream = CreateTestArchive(
+            schemaXml: @"<entities><entity name=""account"" displayname=""Account""><fields><field name=""name"" type=""string"" displayname=""Name"" /></fields></entity></entities>",
+            dataXml: @"<entities><entity name=""account""><records><record id=""11111111-1111-1111-1111-111111111111""><field name=""name"" value=""Test"" /></record></records><m2mrelationships /></entity></entities>"
+        );
+
+        var schemaReader = new CmtSchemaReader();
+        var reader = new CmtDataReader(schemaReader);
+
+        var result = await reader.ReadAsync(stream);
+
+        result.FileData.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ReadAsync_FileColumnData_StripsFileColumnMarkersFromEntityAttributes()
+    {
+        // Arrange — file column fields should not remain as FileColumnValue in entity attributes
+        // after reading, because they would leak into Dataverse requests during import
+        var recordId = Guid.NewGuid();
+        var fileBytes = new byte[] { 0x01, 0x02 };
+
+        var stream = CreateTestArchiveWithFiles(
+            schemaXml: @"<entities><entity name=""account"" displayname=""Account""><fields>
+                <field name=""accountid"" type=""guid"" displayname=""ID"" primaryKey=""true"" />
+                <field name=""cr_document"" type=""file"" displayname=""Document"" />
+            </fields></entity></entities>",
+            dataXml: $@"<entities><entity name=""account""><records>
+                <record id=""{recordId}"">
+                    <field name=""cr_document"" value=""files/account/{recordId}_cr_document.bin"" type=""file"" filename=""doc.pdf"" mimetype=""application/pdf"" />
+                </record>
+            </records><m2mrelationships /></entity></entities>",
+            files: new Dictionary<string, byte[]>
+            {
+                { $"files/account/{recordId}_cr_document.bin", fileBytes }
+            }
+        );
+
+        var schemaReader = new CmtSchemaReader();
+        var reader = new CmtDataReader(schemaReader);
+
+        // Act
+        var result = await reader.ReadAsync(stream);
+
+        // Assert — FileColumnValue markers stripped from entity attributes
+        var record = result.EntityData["account"].First();
+        record.Contains("cr_document").Should().BeFalse(
+            "file column markers must be stripped so they don't leak into Dataverse import requests");
+
+        // File data should still be in FileData collection
+        result.FileData["account"].Should().HaveCount(1);
+    }
+
     private static MemoryStream CreateTestArchive(string schemaXml, string dataXml)
     {
         var stream = new MemoryStream();
@@ -194,6 +293,35 @@ public class CmtDataReaderTests
             using (var writer = new StreamWriter(dataEntry.Open()))
             {
                 writer.Write(dataXml);
+            }
+        }
+
+        stream.Position = 0;
+        return stream;
+    }
+
+    private static MemoryStream CreateTestArchiveWithFiles(string schemaXml, string dataXml, Dictionary<string, byte[]> files)
+    {
+        var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var schemaEntry = archive.CreateEntry("data_schema.xml");
+            using (var writer = new StreamWriter(schemaEntry.Open()))
+            {
+                writer.Write(schemaXml);
+            }
+
+            var dataEntry = archive.CreateEntry("data.xml");
+            using (var writer = new StreamWriter(dataEntry.Open()))
+            {
+                writer.Write(dataXml);
+            }
+
+            foreach (var (path, data) in files)
+            {
+                var fileEntry = archive.CreateEntry(path);
+                using var fileStream = fileEntry.Open();
+                fileStream.Write(data, 0, data.Length);
             }
         }
 

@@ -43,6 +43,7 @@ namespace PPDS.Migration.Import
         private readonly IReadOnlyList<IStateTransitionHandler> _stateTransitionHandlers;
         private readonly IReadOnlyList<IPostImportHandler> _postImportHandlers;
         private readonly StateTransitionProcessor? _stateTransitionProcessor;
+        private readonly FileColumnProcessor? _fileColumnProcessor;
         private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
@@ -95,6 +96,7 @@ namespace PPDS.Migration.Import
             IEnumerable<IStateTransitionHandler>? stateTransitionHandlers = null,
             IEnumerable<IPostImportHandler>? postImportHandlers = null,
             StateTransitionProcessor? stateTransitionProcessor = null,
+            FileColumnProcessor? fileColumnProcessor = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
@@ -106,6 +108,7 @@ namespace PPDS.Migration.Import
             _stateTransitionHandlers = stateTransitionHandlers?.ToList() ?? (IReadOnlyList<IStateTransitionHandler>)Array.Empty<IStateTransitionHandler>();
             _postImportHandlers = postImportHandlers?.ToList() ?? (IReadOnlyList<IPostImportHandler>)Array.Empty<IPostImportHandler>();
             _stateTransitionProcessor = stateTransitionProcessor;
+            _fileColumnProcessor = fileColumnProcessor;
             _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
             _logger = logger;
@@ -199,6 +202,20 @@ namespace PPDS.Migration.Import
                     .ConfigureAwait(false);
                 var phase2Duration = deferredResult.Duration;
 
+                // Phase 2.5: Upload file column data (before state transitions —
+                // records must still be mutable; closed/inactive records reject file uploads)
+                PhaseResult fileColumnResult;
+                if (_fileColumnProcessor != null && data.FileData.Count > 0)
+                {
+                    context.OutputManager?.LogProgress("Starting file column upload phase");
+                    fileColumnResult = await _fileColumnProcessor.ProcessAsync(context, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    fileColumnResult = PhaseResult.Skipped();
+                }
+
                 // Phase 3: Process state transitions
                 PhaseResult stateTransitionResult;
                 if (_stateTransitionProcessor != null)
@@ -242,8 +259,8 @@ namespace PPDS.Migration.Import
 
                 stopwatch.Stop();
 
-                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships in {Duration}",
-                    totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, stopwatch.Elapsed);
+                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships, {Files} files in {Duration}",
+                    totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, fileColumnResult.SuccessCount, stopwatch.Elapsed);
 
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,

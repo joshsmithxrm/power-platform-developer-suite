@@ -17,6 +17,7 @@ public class MigrationDataTests
         data.RelationshipData.Should().NotBeNull().And.BeEmpty();
         data.ExportedAt.Should().Be(default(DateTime));
         data.SourceEnvironment.Should().BeNull();
+        data.FileData.Should().NotBeNull().And.BeEmpty();
     }
 
     [Fact]
@@ -88,6 +89,41 @@ public class MigrationDataTests
         var data = new MigrationData { EntityData = entityData };
 
         data.EntityData["account"].Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void FileData_DefaultsToEmpty()
+    {
+        var data = new MigrationData();
+
+        data.FileData.Should().NotBeNull().And.BeEmpty();
+    }
+
+    [Fact]
+    public void FileData_CanBeSetAndRetrieved()
+    {
+        var fileData = new Dictionary<string, IReadOnlyList<FileColumnData>>
+        {
+            {
+                "account", new List<FileColumnData>
+                {
+                    new FileColumnData
+                    {
+                        RecordId = Guid.NewGuid(),
+                        FieldName = "myfilecolumn",
+                        FileName = "report.pdf",
+                        MimeType = "application/pdf",
+                        Data = new byte[] { 1, 2, 3 }
+                    }
+                }
+            }
+        };
+
+        var data = new MigrationData { FileData = fileData };
+
+        data.FileData.Should().HaveCount(1);
+        data.FileData["account"].Should().HaveCount(1);
+        data.FileData["account"][0].FileName.Should().Be("report.pdf");
     }
 }
 

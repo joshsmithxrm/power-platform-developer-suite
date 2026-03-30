@@ -39,4 +39,22 @@ public class ExportOptionsTests
 
         options.ProgressInterval.Should().Be(500);
     }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void IncludeFileData_DefaultsFalse()
+    {
+        var options = new ExportOptions();
+
+        options.IncludeFileData.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void IncludeFileData_CanBeEnabled()
+    {
+        var options = new ExportOptions { IncludeFileData = true };
+
+        options.IncludeFileData.Should().BeTrue();
+    }
 }
