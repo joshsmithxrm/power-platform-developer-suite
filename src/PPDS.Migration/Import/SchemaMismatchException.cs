@@ -27,7 +27,7 @@ namespace PPDS.Migration.Import
         public SchemaMismatchException(string message, Dictionary<string, List<string>> missingColumns)
             : base(message)
         {
-            MissingColumns = missingColumns;
+            MissingColumns = missingColumns ?? new Dictionary<string, List<string>>();
         }
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace PPDS.Migration.Import
         public SchemaMismatchException(string message, Dictionary<string, List<string>> missingColumns, Exception innerException)
             : base(message, innerException)
         {
-            MissingColumns = missingColumns;
+            MissingColumns = missingColumns ?? new Dictionary<string, List<string>>();
         }
     }
 }
