@@ -59,6 +59,28 @@ public static class ExportCommand
                 result.AddError("--batch-size cannot exceed 5000 (Dataverse limit)");
         });
 
+        var pageParallelOption = new Option<int>("--page-parallel")
+        {
+            Description = "Partitions per entity for page-level parallelism (0=auto, 1=disabled)",
+            DefaultValueFactory = _ => 0
+        };
+        pageParallelOption.Validators.Add(result =>
+        {
+            if (result.GetValue(pageParallelOption) < 0)
+                result.AddError("--page-parallel must be at least 0");
+        });
+
+        var pageParallelThresholdOption = new Option<int>("--page-parallel-threshold")
+        {
+            Description = "Minimum records before page-level parallelism activates",
+            DefaultValueFactory = _ => 5000
+        };
+        pageParallelThresholdOption.Validators.Add(result =>
+        {
+            if (result.GetValue(pageParallelThresholdOption) < 1)
+                result.AddError("--page-parallel-threshold must be at least 1");
+        });
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
         {
             Description = "Output format",
@@ -85,6 +107,8 @@ public static class ExportCommand
             DataCommandGroup.EnvironmentOption,
             parallelOption,
             batchSizeOption,
+            pageParallelOption,
+            pageParallelThresholdOption,
             outputFormatOption,
             verboseOption,
             debugOption
@@ -98,12 +122,15 @@ public static class ExportCommand
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var parallel = parseResult.GetValue(parallelOption);
             var batchSize = parseResult.GetValue(batchSizeOption);
+            var pageParallel = parseResult.GetValue(pageParallelOption);
+            var pageParallelThreshold = parseResult.GetValue(pageParallelThresholdOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteAsync(
                 profile, environment, schema, output, parallel, batchSize,
+                pageParallel, pageParallelThreshold,
                 outputFormat, verbose, debug, cancellationToken);
         });
 
@@ -117,6 +144,8 @@ public static class ExportCommand
         FileInfo output,
         int parallel,
         int batchSize,
+        int pageParallel,
+        int pageParallelThreshold,
         OutputFormat outputFormat,
         bool verbose,
         bool debug,
@@ -146,7 +175,9 @@ public static class ExportCommand
             var exportOptions = new ExportOptions
             {
                 DegreeOfParallelism = parallel,
-                PageSize = batchSize
+                PageSize = batchSize,
+                PageLevelParallelism = pageParallel,
+                PageLevelParallelismThreshold = pageParallelThreshold
             };
 
             var result = await exporter.ExportAsync(

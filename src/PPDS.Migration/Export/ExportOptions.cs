@@ -31,5 +31,19 @@ namespace PPDS.Migration.Export
         /// Default: false
         /// </summary>
         public bool IncludeFileData { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets the number of GUID range partitions per entity for page-level parallelism.
+        /// 0 = auto (determined from record count), 1 = disabled (sequential only).
+        /// Default: 0
+        /// </summary>
+        public int PageLevelParallelism { get; set; }
+
+        /// <summary>
+        /// Gets or sets the minimum record count before page-level parallelism activates.
+        /// Entities with fewer records than this threshold use sequential paging.
+        /// Default: 5000
+        /// </summary>
+        public int PageLevelParallelismThreshold { get; set; } = 5000;
     }
 }

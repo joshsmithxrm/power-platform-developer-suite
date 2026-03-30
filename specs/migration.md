@@ -469,6 +469,11 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | AC-41 | Progress reports phase (1-4), entity, record counts, rate, and ETA | `ProgressReporterTests.ReportsAllFourPhases` | 🔲 |
 | AC-42 | Schema validation detects missing columns and reports | `SchemaValidatorTests.DetectsMissingColumns` | 🔲 |
 | AC-43 | Bulk fallback works for unsupported entities | `BulkOperationProberTests.FallsBackForUnsupportedEntities` | 🔲 |
+| AC-44 | Single-entity export uses GUID range partitioning when record count exceeds threshold | `ParallelExporterPartitionTests.UsesPartitioningAboveThreshold` | ✅ |
+| AC-45 | Single-entity export uses sequential paging when record count is below threshold | `ParallelExporterPartitionTests.UsesSequentialBelowThreshold` | ✅ |
+| AC-46 | GUID partitions cover full space without gaps or overlaps | `GuidPartitionerTests.PartitionsCoverFullGuidSpace` | ✅ |
+| AC-47 | Each partition runs on its own pooled connection independently | `ParallelExporterPartitionTests.UsesPartitioningAboveThreshold` | ✅ |
+| AC-48 | Progress aggregates across all partitions for a single entity | `ParallelExporterPartitionTests.ProgressAggregatesAcrossPartitions` | ✅ |
 
 ### Edge Cases
 
@@ -1001,6 +1006,8 @@ private static readonly Dictionary<string, string> MatchFields = new()
 | `DegreeOfParallelism` | int | No | CPU x 2 | Entity-level parallelism |
 | `PageSize` | int | No | 5000 | Records per FetchXML page |
 | `ProgressInterval` | int | No | 100 | Report progress every N records |
+| `PageLevelParallelism` | int | No | 0 (auto) | GUID range partitions per entity (0=auto, 1=disabled) |
+| `PageLevelParallelismThreshold` | int | No | 5000 | Minimum records before page-level parallelism activates |
 | `IncludeFileData` | bool | No | false | Download and include file column binary data |
 
 ### ImportOptions
