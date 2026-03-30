@@ -10,6 +10,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Pooling;
+using PPDS.Migration.Constants;
 using PPDS.Migration.Models;
 
 namespace PPDS.Migration.Import
@@ -28,7 +29,7 @@ namespace PPDS.Migration.Import
         private static readonly Dictionary<string, string> MatchFieldOverrides = new(StringComparer.OrdinalIgnoreCase)
         {
             ["transactioncurrency"] = "isocurrencycode",
-            ["businessunit"] = "name",
+            [EntityNames.BusinessUnit] = "name",
             ["role"] = "name",
             ["uom"] = "name",
             ["uomschedule"] = "name"

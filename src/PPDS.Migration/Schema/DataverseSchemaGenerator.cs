@@ -78,12 +78,13 @@ namespace PPDS.Migration.Schema
             IProgressReporter? progress = null,
             CancellationToken cancellationToken = default)
         {
+            progress ??= IProgressReporter.Silent;
             options ??= new SchemaGeneratorOptions();
             var entityNames = entityLogicalNames.ToList();
 
             _logger?.LogInformation("Generating schema for {Count} entities", entityNames.Count);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = $"Generating schema for {entityNames.Count} entities..."
@@ -99,7 +100,7 @@ namespace PPDS.Migration.Schema
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Analyzing,
                     Entity = entityName,

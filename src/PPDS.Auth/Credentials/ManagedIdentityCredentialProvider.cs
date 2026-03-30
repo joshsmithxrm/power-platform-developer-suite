@@ -61,8 +61,8 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     {
         _clientId = clientId;
         _credential = string.IsNullOrEmpty(clientId)
-            ? new ManagedIdentityCredential()
-            : new ManagedIdentityCredential(clientId);
+            ? new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned)
+            : new ManagedIdentityCredential(ManagedIdentityId.FromUserAssignedClientId(clientId));
     }
 
     /// <summary>

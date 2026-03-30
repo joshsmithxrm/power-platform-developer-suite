@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Progress;
 
 namespace PPDS.Migration.Import
@@ -66,6 +67,7 @@ namespace PPDS.Migration.Import
         /// <param name="records">The records to process.</param>
         /// <param name="operationType">The type of bulk operation.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="fallbackExecutor">Executor for individual operations when bulk isn't supported.</param>
         /// <param name="progress">Optional progress reporter.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
@@ -75,6 +77,7 @@ namespace PPDS.Migration.Import
             IReadOnlyList<Entity> records,
             BulkOperationType operationType,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             Func<string, IReadOnlyList<Entity>, Task<BulkOperationResult>> fallbackExecutor,
             IProgress<ProgressSnapshot>? progress,
             CancellationToken cancellationToken)
@@ -99,7 +102,7 @@ namespace PPDS.Migration.Import
             // Probe with first record
             var probeRecord = records.Take(1).ToList();
             var probeResult = await ExecuteBulkOperationAsync(
-                entityName, probeRecord, operationType, options, null, cancellationToken).ConfigureAwait(false);
+                entityName, probeRecord, operationType, options, clientOptions, null, cancellationToken).ConfigureAwait(false);
 
             if (IsBulkNotSupportedFailure(probeResult, 1))
             {
@@ -116,7 +119,7 @@ namespace PPDS.Migration.Import
             {
                 var remainingRecords = records.Skip(1).ToList();
                 var remainingResult = await ExecuteBulkOperationAsync(
-                    entityName, remainingRecords, operationType, options, progress, cancellationToken).ConfigureAwait(false);
+                    entityName, remainingRecords, operationType, options, clientOptions, progress, cancellationToken).ConfigureAwait(false);
 
                 // Merge probe result with remaining result
                 return MergeBulkResults(probeResult, remainingResult);
@@ -143,17 +146,18 @@ namespace PPDS.Migration.Import
             IReadOnlyList<Entity> records,
             BulkOperationType operationType,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             IProgress<ProgressSnapshot>? progress,
             CancellationToken cancellationToken)
         {
             return operationType switch
             {
                 BulkOperationType.Create => await _bulkExecutor.CreateMultipleAsync(
-                    entityName, records, options, progress, cancellationToken).ConfigureAwait(false),
+                    entityName, records, options, clientOptions, progress, cancellationToken).ConfigureAwait(false),
                 BulkOperationType.Update => await _bulkExecutor.UpdateMultipleAsync(
-                    entityName, records, options, progress, cancellationToken).ConfigureAwait(false),
+                    entityName, records, options, clientOptions, progress, cancellationToken).ConfigureAwait(false),
                 BulkOperationType.Upsert => await _bulkExecutor.UpsertMultipleAsync(
-                    entityName, records, options, progress, cancellationToken).ConfigureAwait(false),
+                    entityName, records, options, clientOptions, progress, cancellationToken).ConfigureAwait(false),
                 _ => throw new ArgumentOutOfRangeException(nameof(operationType), operationType, "Unknown bulk operation type")
             };
         }

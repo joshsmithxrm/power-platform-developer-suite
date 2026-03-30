@@ -10,9 +10,11 @@ using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
+using PPDS.Migration.Constants;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import.Handlers;
@@ -41,6 +43,7 @@ namespace PPDS.Migration.Import
         private readonly IReadOnlyList<IStateTransitionHandler> _stateTransitionHandlers;
         private readonly IReadOnlyList<IPostImportHandler> _postImportHandlers;
         private readonly StateTransitionProcessor? _stateTransitionProcessor;
+        private readonly FileColumnProcessor? _fileColumnProcessor;
         private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
@@ -93,6 +96,7 @@ namespace PPDS.Migration.Import
             IEnumerable<IStateTransitionHandler>? stateTransitionHandlers = null,
             IEnumerable<IPostImportHandler>? postImportHandlers = null,
             StateTransitionProcessor? stateTransitionProcessor = null,
+            FileColumnProcessor? fileColumnProcessor = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
@@ -104,6 +108,7 @@ namespace PPDS.Migration.Import
             _stateTransitionHandlers = stateTransitionHandlers?.ToList() ?? (IReadOnlyList<IStateTransitionHandler>)Array.Empty<IStateTransitionHandler>();
             _postImportHandlers = postImportHandlers?.ToList() ?? (IReadOnlyList<IPostImportHandler>)Array.Empty<IPostImportHandler>();
             _stateTransitionProcessor = stateTransitionProcessor;
+            _fileColumnProcessor = fileColumnProcessor;
             _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
             _logger = logger;
@@ -116,7 +121,9 @@ namespace PPDS.Migration.Import
             IProgressReporter? progress = null,
             CancellationToken cancellationToken = default)
         {
-            progress?.Report(new ProgressEventArgs
+            progress ??= IProgressReporter.Silent;
+
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Reading data archive..."
@@ -124,7 +131,7 @@ namespace PPDS.Migration.Import
 
             var data = await _dataReader.ReadAsync(dataPath, progress, cancellationToken).ConfigureAwait(false);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Building dependency graph..."
@@ -147,7 +154,16 @@ namespace PPDS.Migration.Import
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
+            progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
+
+            if (options.ImpersonateOwners && options.UserMappings == null)
+            {
+                throw new InvalidOperationException(
+                    "ImpersonateOwners requires UserMappings to be configured. " +
+                    "Provide a user mapping file with source-to-target user ID mappings.");
+            }
+
             var stopwatch = Stopwatch.StartNew();
             var idMappings = new IdMappingCollection();
             var entityResults = new ConcurrentBag<EntityImportResult>();
@@ -185,6 +201,20 @@ namespace PPDS.Migration.Import
                 var deferredResult = await _deferredFieldProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 var phase2Duration = deferredResult.Duration;
+
+                // Phase 2.5: Upload file column data (before state transitions —
+                // records must still be mutable; closed/inactive records reject file uploads)
+                PhaseResult fileColumnResult;
+                if (_fileColumnProcessor != null && data.FileData.Count > 0)
+                {
+                    context.OutputManager?.LogProgress("Starting file column upload phase");
+                    fileColumnResult = await _fileColumnProcessor.ProcessAsync(context, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    fileColumnResult = PhaseResult.Skipped();
+                }
 
                 // Phase 3: Process state transitions
                 PhaseResult stateTransitionResult;
@@ -229,8 +259,8 @@ namespace PPDS.Migration.Import
 
                 stopwatch.Stop();
 
-                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships in {Duration}",
-                    totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, stopwatch.Elapsed);
+                _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships, {Files} files in {Duration}",
+                    totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, fileColumnResult.SuccessCount, stopwatch.Elapsed);
 
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,
@@ -259,7 +289,7 @@ namespace PPDS.Migration.Import
         private async Task<FieldMetadataCollection> ValidateSchemaAndHandleMissingColumnsAsync(
             MigrationData data,
             ImportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             IWarningCollector warnings,
             CancellationToken cancellationToken)
         {
@@ -278,7 +308,7 @@ namespace PPDS.Migration.Import
                 _logger?.LogError("Schema mismatch detected: {Count} columns missing in target",
                     mismatchResult.TotalMissingCount);
 
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Analyzing,
                     Message = $"Schema mismatch: {mismatchResult.TotalMissingCount} column(s) not found in target"
@@ -307,7 +337,7 @@ namespace PPDS.Migration.Import
                 });
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = $"Warning: Skipping {mismatchResult.TotalMissingCount} column(s) not found in target"
@@ -322,7 +352,7 @@ namespace PPDS.Migration.Import
         private async Task<IReadOnlyList<Guid>> DisablePluginsForImportAsync(
             MigrationData data,
             ImportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             if (!options.RespectDisablePluginsSetting || _pluginStepManager == null)
@@ -340,7 +370,7 @@ namespace PPDS.Migration.Import
                 return Array.Empty<Guid>();
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = $"Disabling plugins for {entitiesToDisablePlugins.Count} entities..."
@@ -365,7 +395,7 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task EnablePluginsAfterImportAsync(
             IReadOnlyList<Guid> disabledPluginSteps,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             IWarningCollector warnings)
         {
             if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
@@ -373,7 +403,7 @@ namespace PPDS.Migration.Import
                 return;
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Complete,
                 Message = $"Re-enabling {disabledPluginSteps.Count} plugin steps..."
@@ -421,7 +451,7 @@ namespace PPDS.Migration.Import
 
                 context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
 
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Importing,
                     TierNumber = tier.TierNumber,
@@ -509,7 +539,7 @@ namespace PPDS.Migration.Import
                     ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
                     : $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
 
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Importing,
                     TierNumber = tier.TierNumber,
@@ -543,7 +573,7 @@ namespace PPDS.Migration.Import
             TimeSpan phase2Duration,
             TimeSpan phase3Duration,
             ImportOptions options,
-            IProgressReporter? progress)
+            IProgressReporter progress)
         {
             var result = new ImportResult
             {
@@ -590,7 +620,7 @@ namespace PPDS.Migration.Import
             var totalUpdated = hasUpdated ? (int?)updatedAgg : null;
             var totalFailureCount = recordFailureCount + relationshipResult.FailureCount;
 
-            progress?.Complete(new MigrationResult
+            progress.Complete(new MigrationResult
             {
                 Success = result.Success,
                 SourceRecordCount = sourceRecordCount,
@@ -622,10 +652,10 @@ namespace PPDS.Migration.Import
             TimeSpan duration,
             Exception ex,
             ImportOptions options,
-            IProgressReporter? progress)
+            IProgressReporter progress)
         {
             var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
-            progress?.Error(ex, "Import failed");
+            progress.Error(ex, "Import failed");
 
             var exceptionError = new MigrationError
             {
@@ -701,6 +731,7 @@ namespace PPDS.Migration.Import
 
             // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
+            List<Guid?>? ownerMappingList = options.ImpersonateOwners ? new List<Guid?>() : null;
             foreach (var record in records)
             {
                 // Step 1: Apply record filters
@@ -774,28 +805,41 @@ namespace PPDS.Migration.Import
                     }
                 }
 
+                // Extract owner mapping BEFORE PrepareRecordForImport may strip ownerid
+                // Built alongside preparedRecords to keep indices aligned after filtering
+                if (ownerMappingList != null)
+                {
+                    Guid? mappedOwner = null;
+                    if (record.Contains("ownerid") && record["ownerid"] is EntityReference ownerRef)
+                    {
+                        if (options.UserMappings!.TryGetMappedUserId(ownerRef.Id, out var mappedId))
+                        {
+                            mappedOwner = mappedId;
+                        }
+                    }
+                    ownerMappingList.Add(mappedOwner);
+                }
+
                 var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
                 preparedRecords.Add(prepared);
             }
 
+            // Convert to array for ExecuteWithOwnerGroupingAsync
+            var ownerMapping = ownerMappingList?.ToArray();
+
             // Create progress adapter that bridges BulkOperationExecutor progress to IProgressReporter
-            var progressAdapter = progress != null
-                ? new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
-                {
-                    progress.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Importing,
-                        Entity = entityName,
-                        TierNumber = tierNumber,
-                        Current = (int)snapshot.Processed,
-                        Total = (int)snapshot.Total,
-                        SuccessCount = (int)snapshot.Succeeded,
-                        FailureCount = (int)snapshot.Failed,
-                        RecordsPerSecond = snapshot.RatePerSecond,
-                        EstimatedRemaining = snapshot.EstimatedRemaining
-                    });
-                })
-                : null;
+            var progressAdapter = ProgressAdapterFactory.Create(progress, snapshot => new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Importing,
+                Entity = entityName,
+                TierNumber = tierNumber,
+                Current = (int)snapshot.Processed,
+                Total = (int)snapshot.Total,
+                SuccessCount = (int)snapshot.Succeeded,
+                FailureCount = (int)snapshot.Failed,
+                RecordsPerSecond = snapshot.RatePerSecond,
+                EstimatedRemaining = snapshot.EstimatedRemaining
+            });
 
             // Pass ALL records to BulkOperationExecutor - it handles batching dynamically
             var bulkOptions = new BulkOperationOptions
@@ -818,14 +862,25 @@ namespace PPDS.Migration.Import
                     _ => BulkOperationType.Upsert
                 };
 
-                bulkResult = await _prober.ExecuteWithProbeAsync(
-                    entityName,
-                    preparedRecords,
-                    operationType,
-                    bulkOptions,
-                    async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, cancellationToken).ConfigureAwait(false),
-                    progressAdapter,
-                    cancellationToken).ConfigureAwait(false);
+                if (options.ImpersonateOwners && ownerMapping != null)
+                {
+                    // Group records by mapped owner for impersonation
+                    bulkResult = await ExecuteWithOwnerGroupingAsync(
+                        entityName, preparedRecords, ownerMapping, operationType, bulkOptions,
+                        effectiveMode, options, progressAdapter, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    bulkResult = await _prober.ExecuteWithProbeAsync(
+                        entityName,
+                        preparedRecords,
+                        operationType,
+                        bulkOptions,
+                        null,
+                        async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, null, cancellationToken).ConfigureAwait(false),
+                        progressAdapter,
+                        cancellationToken).ConfigureAwait(false);
+                }
 
                 // Emit warning if bulk fallback occurred during this call (not previously known)
                 if (!wasKnownBulkNotSupported && _prober.IsKnownBulkNotSupported(entityName))
@@ -844,8 +899,17 @@ namespace PPDS.Migration.Import
             }
             else
             {
-                // UseBulkApis is false - use individual operations directly
-                bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, effectiveMode, options, cancellationToken).ConfigureAwait(false);
+                if (options.ImpersonateOwners && ownerMapping != null)
+                {
+                    bulkResult = await ExecuteWithOwnerGroupingAsync(
+                        entityName, preparedRecords, ownerMapping, BulkOperationType.Upsert, bulkOptions,
+                        effectiveMode, options, null, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    // UseBulkApis is false - use individual operations directly
+                    bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, effectiveMode, options, null, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Track ID mappings - for bulk operations, IDs are preserved from Entity.Id
@@ -889,6 +953,7 @@ namespace PPDS.Migration.Import
             List<Entity> records,
             ImportMode effectiveMode,
             ImportOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             var createdIds = new List<Guid>();
@@ -896,7 +961,7 @@ namespace PPDS.Migration.Import
             var successCount = 0;
             var failureCount = 0;
 
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await using var client = await _connectionPool.GetClientAsync(clientOptions, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             for (var i = 0; i < records.Count; i++)
             {
@@ -957,6 +1022,113 @@ namespace PPDS.Migration.Import
             };
         }
 
+        private async Task<BulkOperationResult> ExecuteWithOwnerGroupingAsync(
+            string entityName,
+            List<Entity> preparedRecords,
+            Guid?[] ownerMapping,
+            BulkOperationType operationType,
+            BulkOperationOptions bulkOptions,
+            ImportMode effectiveMode,
+            ImportOptions options,
+            IProgress<Dataverse.Progress.ProgressSnapshot>? progress,
+            CancellationToken cancellationToken)
+        {
+            // Group record indices by mapped owner
+            // Use Guid.Empty as sentinel for unmapped records (no impersonation)
+            var groups = new Dictionary<Guid, List<int>>();
+            for (int i = 0; i < preparedRecords.Count; i++)
+            {
+                var owner = ownerMapping[i] ?? Guid.Empty;
+                if (!groups.TryGetValue(owner, out var indices))
+                {
+                    indices = new List<int>();
+                    groups[owner] = indices;
+                }
+                indices.Add(i);
+            }
+
+            var mappedOwnerCount = groups.Count(g => g.Key != Guid.Empty);
+            var unmappedCount = groups.TryGetValue(Guid.Empty, out var unmappedGroup) ? unmappedGroup.Count : 0;
+
+            _logger?.LogInformation(
+                "Impersonation grouping for {Entity}: {Groups} owner groups ({Owners} distinct owners, {Unmapped} unmapped)",
+                entityName, groups.Count,
+                mappedOwnerCount,
+                unmappedCount);
+
+            // Execute each owner group
+            var allErrors = new List<BulkOperationError>();
+            var totalSuccess = 0;
+            var totalFailure = 0;
+            int? totalCreated = null;
+            int? totalUpdated = null;
+
+            foreach (var (ownerId, indices) in groups)
+            {
+                var groupRecords = indices.Select(i => preparedRecords[i]).ToList();
+                var clientOptions = ownerId != Guid.Empty
+                    ? new DataverseClientOptions { CallerId = ownerId }
+                    : null;
+
+                BulkOperationResult groupResult;
+                if (options.UseBulkApis)
+                {
+                    groupResult = await _prober.ExecuteWithProbeAsync(
+                        entityName,
+                        groupRecords,
+                        operationType,
+                        bulkOptions,
+                        clientOptions,
+                        async (_, recs) => await ExecuteIndividualOperationsAsync(
+                            entityName, recs.ToList(), effectiveMode, options, clientOptions, cancellationToken).ConfigureAwait(false),
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    groupResult = await ExecuteIndividualOperationsAsync(
+                        entityName, groupRecords, effectiveMode, options, clientOptions, cancellationToken).ConfigureAwait(false);
+                }
+
+                totalSuccess += groupResult.SuccessCount;
+                totalFailure += groupResult.FailureCount;
+
+                // Remap error indices back to original positions
+                foreach (var error in groupResult.Errors)
+                {
+                    allErrors.Add(new BulkOperationError
+                    {
+                        Index = error.Index < indices.Count ? indices[error.Index] : error.Index,
+                        RecordId = error.RecordId,
+                        ErrorCode = error.ErrorCode,
+                        Message = error.Message,
+                        FieldName = error.FieldName,
+                        FieldValueDescription = error.FieldValueDescription,
+                        Diagnostics = error.Diagnostics
+                    });
+                }
+
+                if (groupResult.CreatedCount.HasValue)
+                {
+                    totalCreated = (totalCreated ?? 0) + groupResult.CreatedCount.Value;
+                }
+                if (groupResult.UpdatedCount.HasValue)
+                {
+                    totalUpdated = (totalUpdated ?? 0) + groupResult.UpdatedCount.Value;
+                }
+            }
+
+            return new BulkOperationResult
+            {
+                SuccessCount = totalSuccess,
+                FailureCount = totalFailure,
+                Errors = allErrors,
+                Duration = TimeSpan.Zero,
+                CreatedCount = totalCreated,
+                UpdatedCount = totalUpdated
+            };
+        }
+
         private Entity PrepareRecordForImport(
             Entity record,
             HashSet<string> deferredFields,
@@ -1014,10 +1186,10 @@ namespace PPDS.Migration.Import
 
             // Force team.isdefault to false to prevent conflicts with existing default teams
             // This matches CMT behavior - default teams should not be imported as defaults
-            if (record.LogicalName.Equals("team", StringComparison.OrdinalIgnoreCase) &&
-                prepared.Contains("isdefault"))
+            if (record.LogicalName.Equals(EntityNames.Team, StringComparison.OrdinalIgnoreCase) &&
+                prepared.Contains(AttributeNames.IsDefault))
             {
-                prepared["isdefault"] = false;
+                prepared[AttributeNames.IsDefault] = false;
             }
 
             return prepared;
@@ -1056,7 +1228,7 @@ namespace PPDS.Migration.Import
                 if (options.UserMappings.UseCurrentUserAsDefault && options.CurrentUserId.HasValue)
                 {
                     _logger?.LogDebug("User {UserId} not found in mappings, using current user fallback", er.Id);
-                    return new EntityReference("systemuser", options.CurrentUserId.Value);
+                    return new EntityReference(EntityNames.SystemUser, options.CurrentUserId.Value);
                 }
 
                 // User mapping exists but no mapping found and no fallback available
@@ -1075,8 +1247,8 @@ namespace PPDS.Migration.Import
 
         private static bool IsUserReference(string entityLogicalName)
         {
-            return entityLogicalName.Equals("systemuser", StringComparison.OrdinalIgnoreCase) ||
-                   entityLogicalName.Equals("team", StringComparison.OrdinalIgnoreCase);
+            return entityLogicalName.Equals(EntityNames.SystemUser, StringComparison.OrdinalIgnoreCase) ||
+                   entityLogicalName.Equals(EntityNames.Team, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

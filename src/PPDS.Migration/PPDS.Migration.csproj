@@ -64,4 +64,8 @@ dependency-aware tiered import, and CMT format compatibility for automated pipel
     <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PPDS.Migration.Tests" Key="0024000004800000940000000602000000240000525341310004000001000100fd60c68a24162670a78d0ca688efd0f67de1cff85e4c53a31d9c88db38bee7f660dbd13f4d14904a1b58cf7030f583141523294250481038b4fddaf2722417637c6163caa819650db377b213ce3af6be19b65f57bb7990d66e8a8c70b3fce36c65553a8effba1dfca34773da4f58218ac27bbe2d43d2c1ad920111487ada17da" />
+  </ItemGroup>
+
 </Project>

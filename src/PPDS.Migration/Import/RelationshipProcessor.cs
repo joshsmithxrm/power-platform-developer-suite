@@ -194,7 +194,7 @@ namespace PPDS.Migration.Import
                         // Report progress (throttled to reduce log verbosity)
                         if (ShouldReportProgress(current, totalTargetAssociations))
                         {
-                            context.Progress?.Report(new ProgressEventArgs
+                            context.Progress.Report(new ProgressEventArgs
                             {
                                 Phase = MigrationPhase.ProcessingRelationships,
                                 Entity = entityName,
@@ -223,7 +223,7 @@ namespace PPDS.Migration.Import
                             // Report progress (throttled to reduce log verbosity)
                             if (ShouldReportProgress(current, totalTargetAssociations))
                             {
-                                context.Progress?.Report(new ProgressEventArgs
+                                context.Progress.Report(new ProgressEventArgs
                                 {
                                     Phase = MigrationPhase.ProcessingRelationships,
                                     Entity = entityName,
@@ -263,7 +263,7 @@ namespace PPDS.Migration.Import
             // Report final completion (parallel counting may not hit exact total)
             if (totalTargetAssociations > 0)
             {
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.ProcessingRelationships,
                     Entity = "M2M",

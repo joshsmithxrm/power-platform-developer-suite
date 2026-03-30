@@ -39,4 +39,54 @@ public class ExportOptionsTests
 
         options.ProgressInterval.Should().Be(500);
     }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void IncludeFileData_DefaultsFalse()
+    {
+        var options = new ExportOptions();
+
+        options.IncludeFileData.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void IncludeFileData_CanBeEnabled()
+    {
+        var options = new ExportOptions { IncludeFileData = true };
+
+        options.IncludeFileData.Should().BeTrue();
+    }
+
+    [Fact]
+    public void PageLevelParallelism_DefaultsToZero()
+    {
+        var options = new ExportOptions();
+
+        options.PageLevelParallelism.Should().Be(0);
+    }
+
+    [Fact]
+    public void PageLevelParallelismThreshold_DefaultsTo5000()
+    {
+        var options = new ExportOptions();
+
+        options.PageLevelParallelismThreshold.Should().Be(5000);
+    }
+
+    [Fact]
+    public void PageLevelParallelism_CanBeSet()
+    {
+        var options = new ExportOptions { PageLevelParallelism = 8 };
+
+        options.PageLevelParallelism.Should().Be(8);
+    }
+
+    [Fact]
+    public void PageLevelParallelismThreshold_CanBeSet()
+    {
+        var options = new ExportOptions { PageLevelParallelismThreshold = 10000 };
+
+        options.PageLevelParallelismThreshold.Should().Be(10000);
+    }
 }

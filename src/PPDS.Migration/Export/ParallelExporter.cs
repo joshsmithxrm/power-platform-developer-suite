@@ -14,6 +14,7 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
+using PPDS.Migration.Import;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
@@ -27,6 +28,7 @@ namespace PPDS.Migration.Export
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly ICmtSchemaReader _schemaReader;
         private readonly ICmtDataWriter _dataWriter;
+        private readonly FileColumnTransferHelper? _fileTransferHelper;
         private readonly ExportOptions _defaultOptions;
         private readonly ILogger<ParallelExporter>? _logger;
 
@@ -53,16 +55,19 @@ namespace PPDS.Migration.Export
         /// <param name="connectionPool">The connection pool.</param>
         /// <param name="schemaReader">The schema reader.</param>
         /// <param name="dataWriter">The data writer.</param>
+        /// <param name="fileTransferHelper">Optional file column transfer helper for downloading file data.</param>
         /// <param name="migrationOptions">Migration options from DI.</param>
         /// <param name="logger">The logger.</param>
         public ParallelExporter(
             IDataverseConnectionPool connectionPool,
             ICmtSchemaReader schemaReader,
             ICmtDataWriter dataWriter,
+            FileColumnTransferHelper? fileTransferHelper = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             ILogger<ParallelExporter>? logger = null)
             : this(connectionPool, schemaReader, dataWriter)
         {
+            _fileTransferHelper = fileTransferHelper;
             _defaultOptions = migrationOptions?.Value.Export ?? new ExportOptions();
             _logger = logger;
         }
@@ -75,7 +80,9 @@ namespace PPDS.Migration.Export
             IProgressReporter? progress = null,
             CancellationToken cancellationToken = default)
         {
-            progress?.Report(new ProgressEventArgs
+            progress ??= IProgressReporter.Silent;
+
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Parsing schema..."
@@ -97,6 +104,7 @@ namespace PPDS.Migration.Export
             if (schema == null) throw new ArgumentNullException(nameof(schema));
             if (string.IsNullOrEmpty(outputPath)) throw new ArgumentNullException(nameof(outputPath));
 
+            progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
             var stopwatch = Stopwatch.StartNew();
             var entityResults = new ConcurrentBag<EntityExportResult>();
@@ -106,7 +114,7 @@ namespace PPDS.Migration.Export
             _logger?.LogInformation("Starting parallel export of {Count} entities with parallelism {Parallelism}",
                 schema.Entities.Count, options.DegreeOfParallelism);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Exporting,
                 Message = $"Exporting {schema.Entities.Count} entities..."
@@ -114,6 +122,10 @@ namespace PPDS.Migration.Export
 
             try
             {
+                // Pre-fetch approximate record counts for partition routing
+                var recordCounts = await GetEntityRecordCountsAsync(
+                    schema.Entities, cancellationToken).ConfigureAwait(false);
+
                 // Export all entities in parallel
                 await Parallel.ForEachAsync(
                     schema.Entities,
@@ -124,7 +136,8 @@ namespace PPDS.Migration.Export
                     },
                     async (entitySchema, ct) =>
                     {
-                        var result = await ExportEntityAsync(entitySchema, options, progress, ct).ConfigureAwait(false);
+                        recordCounts.TryGetValue(entitySchema.LogicalName, out var recordCount);
+                        var result = await ExportEntityAsync(entitySchema, options, progress, recordCount, ct).ConfigureAwait(false);
                         entityResults.Add(result);
 
                         if (result.Success && result.Records != null)
@@ -143,7 +156,7 @@ namespace PPDS.Migration.Export
                     }).ConfigureAwait(false);
 
                 // Export M2M relationships
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Exporting,
                     Message = "Exporting M2M relationships..."
@@ -152,8 +165,22 @@ namespace PPDS.Migration.Export
                 var relationshipData = await ExportM2MRelationshipsAsync(
                     schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
 
+                // Download file column data if opted in
+                var fileData = new Dictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+                if (options.IncludeFileData && _fileTransferHelper != null)
+                {
+                    progress.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Message = "Downloading file column data..."
+                    });
+
+                    fileData = await DownloadFileColumnDataAsync(
+                        schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
+                }
+
                 // Write to output file
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Exporting,
                     Message = "Writing output file..."
@@ -164,6 +191,7 @@ namespace PPDS.Migration.Export
                     Schema = schema,
                     EntityData = entityData,
                     RelationshipData = relationshipData,
+                    FileData = fileData,
                     ExportedAt = DateTime.UtcNow
                 };
 
@@ -187,7 +215,7 @@ namespace PPDS.Migration.Export
                     Errors = errors.ToArray()
                 };
 
-                progress?.Complete(new MigrationResult
+                progress.Complete(new MigrationResult
                 {
                     Success = result.Success,
                     RecordsProcessed = result.RecordsExported,
@@ -204,7 +232,7 @@ namespace PPDS.Migration.Export
                 _logger?.LogError(ex, "Export failed");
 
                 var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
-                progress?.Error(ex, "Export failed");
+                progress.Error(ex, "Export failed");
 
                 return new ExportResult
                 {
@@ -222,11 +250,29 @@ namespace PPDS.Migration.Export
                 };
             }
         }
-
         private async Task<EntityExportResultWithData> ExportEntityAsync(
             EntitySchema entitySchema,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
+            long recordCount,
+            CancellationToken cancellationToken)
+        {
+            var partitionCount = DeterminePartitionCount(recordCount, options);
+
+            if (partitionCount > 1)
+            {
+                return await ExportEntityPartitionedAsync(
+                    entitySchema, partitionCount, recordCount, options, progress, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await ExportEntitySequentialAsync(
+                entitySchema, options, progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<EntityExportResultWithData> ExportEntitySequentialAsync(
+            EntitySchema entitySchema,
+            ExportOptions options,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             var entityStopwatch = Stopwatch.StartNew();
@@ -234,7 +280,7 @@ namespace PPDS.Migration.Export
 
             try
             {
-                _logger?.LogDebug("Exporting entity {Entity}", entitySchema.LogicalName);
+                _logger?.LogDebug("Exporting entity {Entity} (sequential)", entitySchema.LogicalName);
 
                 await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -260,7 +306,7 @@ namespace PPDS.Migration.Export
                             ? records.Count / entityStopwatch.Elapsed.TotalSeconds
                             : 0;
 
-                        progress?.Report(new ProgressEventArgs
+                        progress.Report(new ProgressEventArgs
                         {
                             Phase = MigrationPhase.Exporting,
                             Entity = entitySchema.LogicalName,
@@ -314,11 +360,135 @@ namespace PPDS.Migration.Export
             }
         }
 
+        private async Task<EntityExportResultWithData> ExportEntityPartitionedAsync(
+            EntitySchema entitySchema,
+            int partitionCount,
+            long recordCount,
+            ExportOptions options,
+            IProgressReporter? progress,
+            CancellationToken cancellationToken)
+        {
+            var entityStopwatch = Stopwatch.StartNew();
+            var allRecords = new ConcurrentBag<Entity>();
+            long totalExported = 0;
+
+            try
+            {
+                _logger?.LogInformation("Exporting entity {Entity} with {Partitions} partitions (page-level parallelism)",
+                    entitySchema.LogicalName, partitionCount);
+
+                var partitions = GuidPartitioner.CreatePartitions(partitionCount);
+                var fetchXml = BuildFetchXml(entitySchema, options.PageSize);
+
+                await Parallel.ForEachAsync(
+                    partitions,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = partitionCount,
+                        CancellationToken = cancellationToken
+                    },
+                    async (partition, ct) =>
+                    {
+                        var partitionRecords = await ExportPartitionAsync(
+                            entitySchema, fetchXml, partition, options, ct).ConfigureAwait(false);
+
+                        foreach (var record in partitionRecords)
+                        {
+                            allRecords.Add(record);
+                        }
+
+                        var currentTotal = Interlocked.Add(ref totalExported, partitionRecords.Count);
+
+                        var rps = entityStopwatch.Elapsed.TotalSeconds > 0
+                            ? currentTotal / entityStopwatch.Elapsed.TotalSeconds
+                            : 0;
+
+                        progress?.Report(new ProgressEventArgs
+                        {
+                            Phase = MigrationPhase.Exporting,
+                            Entity = entitySchema.LogicalName,
+                            Current = (int)currentTotal,
+                            Total = (int)(recordCount > 0 ? Math.Max(recordCount, currentTotal) : currentTotal),
+                            RecordsPerSecond = rps
+                        });
+                    }).ConfigureAwait(false);
+
+                entityStopwatch.Stop();
+
+                var records = allRecords.ToList();
+
+                _logger?.LogDebug("Exported {Count} records from {Entity} in {Duration} ({Partitions} partitions)",
+                    records.Count, entitySchema.LogicalName, entityStopwatch.Elapsed, partitionCount);
+
+                return new EntityExportResultWithData
+                {
+                    EntityLogicalName = entitySchema.LogicalName,
+                    RecordCount = records.Count,
+                    Duration = entityStopwatch.Elapsed,
+                    Success = true,
+                    Records = records
+                };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                entityStopwatch.Stop();
+
+                var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
+                _logger?.LogError(ex, "Failed to export entity {Entity} (partitioned)", entitySchema.LogicalName);
+
+                return new EntityExportResultWithData
+                {
+                    EntityLogicalName = entitySchema.LogicalName,
+                    RecordCount = allRecords.Count,
+                    Duration = entityStopwatch.Elapsed,
+                    Success = false,
+                    ErrorMessage = safeMessage,
+                    Records = null
+                };
+            }
+        }
+
+        private async Task<List<Entity>> ExportPartitionAsync(
+            EntitySchema entitySchema,
+            string baseFetchXml,
+            GuidRange partition,
+            ExportOptions options,
+            CancellationToken cancellationToken)
+        {
+            var records = new List<Entity>();
+
+            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var fetchXml = AddPartitionFilter(baseFetchXml, entitySchema.PrimaryIdField, partition);
+            var pageNumber = 1;
+            string? pagingCookie = null;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
+                var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+
+                records.AddRange(response.Entities);
+
+                if (!response.MoreRecords)
+                {
+                    break;
+                }
+
+                pagingCookie = response.PagingCookie;
+                pageNumber++;
+            }
+
+            return records;
+        }
+
         private async Task<IReadOnlyDictionary<string, IReadOnlyList<ManyToManyRelationshipData>>> ExportM2MRelationshipsAsync(
             MigrationSchema schema,
             ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             ConcurrentBag<MigrationError> errors,
             CancellationToken cancellationToken)
         {
@@ -347,7 +517,7 @@ namespace PPDS.Migration.Export
                 {
                     // Report message-only (no Entity) to avoid 0/0 display
                     // Entity progress is reported inside ExportM2MRelationshipAsync with actual counts
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Message = $"Exporting {entitySchema.LogicalName} M2M {rel.Name}..."
@@ -388,7 +558,7 @@ namespace PPDS.Migration.Export
             RelationshipSchema rel,
             HashSet<Guid> exportedSourceIds,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -431,7 +601,7 @@ namespace PPDS.Migration.Export
                 // Report progress at intervals
                 if (associations.Count - lastReportedCount >= options.ProgressInterval || !response.MoreRecords)
                 {
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Entity = entitySchema.LogicalName,
@@ -466,6 +636,213 @@ namespace PPDS.Migration.Export
                 .ToList();
 
             return grouped;
+        }
+
+        private async Task<Dictionary<string, IReadOnlyList<FileColumnData>>> DownloadFileColumnDataAsync(
+            MigrationSchema schema,
+            ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
+            ExportOptions options,
+            IProgressReporter progress,
+            ConcurrentBag<MigrationError> errors,
+            CancellationToken cancellationToken)
+        {
+            var result = new ConcurrentDictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+            var downloadedFiles = 0;
+
+            foreach (var entitySchema in schema.Entities)
+            {
+                var fileColumns = entitySchema.Fields.Where(f => f.IsFileColumn).ToList();
+                if (fileColumns.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!entityData.TryGetValue(entitySchema.LogicalName, out var records) || records.Count == 0)
+                {
+                    continue;
+                }
+
+                var entityFileData = new ConcurrentBag<FileColumnData>();
+
+                await Parallel.ForEachAsync(
+                    records,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = options.DegreeOfParallelism,
+                        CancellationToken = cancellationToken
+                    },
+                    async (record, ct) =>
+                    {
+                        foreach (var fileColumn in fileColumns)
+                        {
+                            ct.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                var data = await _fileTransferHelper!.DownloadAsync(
+                                    entitySchema.LogicalName, record.Id, fileColumn.LogicalName, ct).ConfigureAwait(false);
+
+                                if (data.Length > 0)
+                                {
+                                    var filePath = $"files/{entitySchema.LogicalName}/{record.Id}_{fileColumn.LogicalName}.bin";
+
+                                    // Retrieve filename/mimetype from the download response metadata
+                                    // For now, use field name and generic type - Dataverse doesn't return these in download
+                                    var fileName = $"{fileColumn.LogicalName}.bin";
+                                    var mimeType = "application/octet-stream";
+
+                                    entityFileData.Add(new FileColumnData
+                                    {
+                                        RecordId = record.Id,
+                                        FieldName = fileColumn.LogicalName,
+                                        FileName = fileName,
+                                        MimeType = mimeType,
+                                        Data = data
+                                    });
+
+                                    // Set FileColumnValue marker in entity attributes for CmtDataWriter
+                                    record[fileColumn.LogicalName] = new FileColumnValue
+                                    {
+                                        FilePath = filePath,
+                                        FileName = fileName,
+                                        MimeType = mimeType
+                                    };
+
+                                    Interlocked.Increment(ref downloadedFiles);
+                                }
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                _logger?.LogWarning(ex, "Failed to download file column {Field} for {Entity}/{Record}",
+                                    fileColumn.LogicalName, entitySchema.LogicalName, record.Id);
+                                errors.Add(new MigrationError
+                                {
+                                    Phase = MigrationPhase.Exporting,
+                                    EntityLogicalName = entitySchema.LogicalName,
+                                    RecordId = record.Id,
+                                    Message = $"File column '{fileColumn.LogicalName}' download failed: {ex.Message}"
+                                });
+                            }
+                        }
+                    }).ConfigureAwait(false);
+
+                if (!entityFileData.IsEmpty)
+                {
+                    result[entitySchema.LogicalName] = entityFileData.ToList();
+
+                    progress.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = entitySchema.LogicalName,
+                        Message = $"Downloaded {entityFileData.Count} file(s) for {entitySchema.LogicalName}"
+                    });
+                }
+            }
+
+            _logger?.LogInformation("Downloaded {Count} file column data entries", downloadedFiles);
+            return new Dictionary<string, IReadOnlyList<FileColumnData>>(result, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task<Dictionary<string, long>> GetEntityRecordCountsAsync(
+            IReadOnlyList<EntitySchema> entities,
+            CancellationToken cancellationToken)
+        {
+            var counts = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            await Parallel.ForEachAsync(
+                entities,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+                    CancellationToken = cancellationToken
+                },
+                async (entity, ct) =>
+                {
+                    try
+                    {
+                        // Acquire and release per query to comply with D2 (don't hold across operations)
+                        await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: ct).ConfigureAwait(false);
+
+                        var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
+
+                        var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
+                        var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
+
+                        if (aliased?.Value != null)
+                        {
+                            counts[entity.LogicalName] = Convert.ToInt64(aliased.Value);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // If count fails for an entity, default to 0 (sequential export)
+                        _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
+                    }
+                }).ConfigureAwait(false);
+
+            return new Dictionary<string, long>(counts, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Determines the number of GUID range partitions to use for a single entity export.
+        /// </summary>
+        /// <param name="recordCount">Approximate record count for the entity.</param>
+        /// <param name="options">Export options controlling parallelism.</param>
+        /// <returns>1 for sequential export, or N for partitioned export.</returns>
+        public static int DeterminePartitionCount(long recordCount, ExportOptions options)
+        {
+            if (options.PageLevelParallelism == 1)
+                return 1;
+
+            // Explicit partition count always honored (user override)
+            if (options.PageLevelParallelism > 1)
+                return options.PageLevelParallelism;
+
+            // Auto mode: only partition above threshold
+            if (options.PageLevelParallelismThreshold <= 0 || recordCount <= options.PageLevelParallelismThreshold)
+                return 1;
+
+            // Auto: scale partitions with entity size, capped at 16
+            var auto = (int)(recordCount / options.PageLevelParallelismThreshold);
+            return Math.Min(16, Math.Max(2, auto));
+        }
+
+        /// <summary>
+        /// Adds GUID range filter conditions to FetchXML for partition-based export.
+        /// </summary>
+        /// <param name="fetchXml">Base FetchXML query.</param>
+        /// <param name="primaryKeyField">Primary key field name for the entity.</param>
+        /// <param name="partition">GUID range to filter by.</param>
+        /// <returns>Modified FetchXML with partition filter conditions.</returns>
+        public static string AddPartitionFilter(string fetchXml, string primaryKeyField, GuidRange partition)
+        {
+            if (partition.IsFull)
+                return fetchXml;
+
+            var doc = XDocument.Parse(fetchXml);
+            var entity = doc.Root!.Element("entity")!;
+
+            var filter = new XElement("filter", new XAttribute("type", "and"));
+
+            if (partition.LowerBound.HasValue)
+            {
+                filter.Add(new XElement("condition",
+                    new XAttribute("attribute", primaryKeyField),
+                    new XAttribute("operator", "ge"),
+                    new XAttribute("value", partition.LowerBound.Value.ToString())));
+            }
+
+            if (partition.UpperBound.HasValue)
+            {
+                filter.Add(new XElement("condition",
+                    new XAttribute("attribute", primaryKeyField),
+                    new XAttribute("operator", "lt"),
+                    new XAttribute("value", partition.UpperBound.Value.ToString())));
+            }
+
+            entity.Add(filter);
+
+            return doc.ToString(SaveOptions.DisableFormatting);
         }
 
         private string BuildFetchXml(EntitySchema entitySchema, int pageSize)

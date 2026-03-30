@@ -4,13 +4,13 @@
   </PropertyGroup>
 
   <ItemGroup Label="Azure and Identity">
-    <PackageVersion Include="Azure.Identity" Version="1.17.1" />
+    <PackageVersion Include="Azure.Identity" Version="1.19.0" />
     <PackageVersion Include="Devlooped.CredentialManager" Version="2.7.0" />
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.4" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.83.1" />
     <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.83.1" />
     <PackageVersion Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
-    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions">
@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Serialization and Security">
-    <PackageVersion Include="System.Text.Json" Version="9.0.12" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.5" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.5" />
   </ItemGroup>
 
@@ -65,7 +65,7 @@
 
   <ItemGroup Label="Testing">
     <PackageVersion Include="coverlet.collector" Version="8.0.1" />
-    <PackageVersion Include="FakeXrmEasy.v9" Version="3.8.0" />
+    <PackageVersion Include="FakeXrmEasy.v9" Version="3.9.0" />
     <PackageVersion Include="FluentAssertions" Version="8.9.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
     <PackageVersion Include="Moq" Version="4.20.72" />

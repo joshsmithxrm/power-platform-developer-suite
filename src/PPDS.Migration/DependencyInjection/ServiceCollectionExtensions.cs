@@ -102,6 +102,7 @@ namespace PPDS.Migration.DependencyInjection
             services.AddTransient<StateTransitionProcessor>();
             services.AddTransient<EntityReferenceMapper>();
             services.AddTransient<FileColumnTransferHelper>();
+            services.AddTransient<FileColumnProcessor>();
 
             // Import - Orchestration
             services.AddTransient<IPluginStepManager, PluginStepManager>();
