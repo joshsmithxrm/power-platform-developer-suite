@@ -747,8 +747,8 @@ public class TieredImporterTests
                 It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
-                (_, entities, _, _, _) => capturedContact = entities.FirstOrDefault())
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, entities, _, _, _, _) => capturedContact = entities.FirstOrDefault())
             .ReturnsAsync(new BulkOperationResult
             {
                 SuccessCount = 1,
@@ -808,8 +808,8 @@ public class TieredImporterTests
                 It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
-                (_, entities, _, _, _) => capturedEntity = entities.FirstOrDefault())
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, entities, _, _, _, _) => capturedEntity = entities.FirstOrDefault())
             .ReturnsAsync(new BulkOperationResult
             {
                 SuccessCount = 1,
@@ -869,8 +869,8 @@ public class TieredImporterTests
                 It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
-                (_, entities, _, _, _) => capturedEntity = entities.FirstOrDefault())
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, entities, _, _, _, _) => capturedEntity = entities.FirstOrDefault())
             .ReturnsAsync(new BulkOperationResult
             {
                 SuccessCount = 1,
@@ -939,8 +939,8 @@ public class TieredImporterTests
                 It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
-                (_, entities, _, _, _) => capturedEntity = entities.FirstOrDefault())
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, entities, _, _, _, _) => capturedEntity = entities.FirstOrDefault())
             .ReturnsAsync(new BulkOperationResult
             {
                 SuccessCount = 1,
@@ -1315,8 +1315,8 @@ public class TieredImporterTests
                 It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
-                (_, entities, _, _, _) => capturedEntity = entities.FirstOrDefault())
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, entities, _, _, _, _) => capturedEntity = entities.FirstOrDefault())
             .ReturnsAsync(new BulkOperationResult
             {
                 SuccessCount = 1,
@@ -1384,6 +1384,274 @@ public class TieredImporterTests
             It.IsAny<DataverseClientOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
             It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
+    #region ImpersonateOwners
+
+    [Fact]
+    public async Task ImpersonateOwners_WithoutUserMappings_Throws()
+    {
+        // Arrange
+        var records = new List<Entity>
+        {
+            new Entity("account") { Id = Guid.NewGuid(), ["name"] = "Contoso" }
+        };
+
+        var data = CreateMigrationData("account", records);
+        var plan = CreateSingleTierPlan("account");
+
+        var options = new ImportOptions
+        {
+            ImpersonateOwners = true,
+            UserMappings = null,
+            RespectDisablePluginsSetting = false
+        };
+
+        // Act
+        var act = async () => await _sut.ImportAsync(data, plan, options);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*ImpersonateOwners requires UserMappings*");
+    }
+
+    [Fact]
+    public async Task ImpersonateOwners_GroupsByOwner()
+    {
+        // Arrange
+        var sourceOwner1 = Guid.NewGuid();
+        var sourceOwner2 = Guid.NewGuid();
+        var targetOwner1 = Guid.NewGuid();
+        var targetOwner2 = Guid.NewGuid();
+
+        var records = new List<Entity>
+        {
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Contoso",
+                ["ownerid"] = new EntityReference("systemuser", sourceOwner1)
+            },
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Fabrikam",
+                ["ownerid"] = new EntityReference("systemuser", sourceOwner2)
+            },
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Northwind",
+                ["ownerid"] = new EntityReference("systemuser", sourceOwner1)
+            }
+        };
+
+        var data = CreateMigrationData("account", records);
+        var plan = CreateSingleTierPlan("account");
+
+        SetupSchemaValidatorNoMismatches();
+
+        // Track which DataverseClientOptions are used per call
+        var capturedClientOptions = new List<DataverseClientOptions?>();
+
+        _bulkExecutor.Setup(x => x.UpsertMultipleAsync(
+                "account",
+                It.IsAny<IEnumerable<Entity>>(),
+                It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
+                It.IsAny<IProgress<ProgressSnapshot>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, _, _, clientOpts, _, _) => capturedClientOptions.Add(clientOpts))
+            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, DataverseClientOptions? _, IProgress<ProgressSnapshot>? _, CancellationToken _) =>
+                new BulkOperationResult
+                {
+                    SuccessCount = entities.Count(),
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>()
+                });
+
+        var userMappings = new UserMappingCollection
+        {
+            Mappings = new Dictionary<Guid, PPDS.Migration.Models.UserMapping>
+            {
+                [sourceOwner1] = new PPDS.Migration.Models.UserMapping
+                {
+                    SourceUserId = sourceOwner1,
+                    TargetUserId = targetOwner1
+                },
+                [sourceOwner2] = new PPDS.Migration.Models.UserMapping
+                {
+                    SourceUserId = sourceOwner2,
+                    TargetUserId = targetOwner2
+                }
+            }
+        };
+
+        var options = new ImportOptions
+        {
+            ImpersonateOwners = true,
+            UserMappings = userMappings,
+            RespectDisablePluginsSetting = false
+        };
+
+        // Act
+        var result = await _sut.ImportAsync(data, plan, options);
+
+        // Assert
+        result.RecordsImported.Should().Be(3);
+        result.Success.Should().BeTrue();
+
+        // Should have called the bulk executor with distinct CallerId values for each owner group.
+        // Each group goes through probing (1 probe + remaining), so we expect multiple calls.
+        // But we can verify that the captured client options contain both target owners.
+        var callerIds = capturedClientOptions
+            .Where(o => o?.CallerId != null)
+            .Select(o => o!.CallerId!.Value)
+            .Distinct()
+            .ToList();
+
+        callerIds.Should().Contain(targetOwner1);
+        callerIds.Should().Contain(targetOwner2);
+    }
+
+    [Fact]
+    public async Task ImpersonateOwners_UnmappedOwner_NoImpersonation()
+    {
+        // Arrange
+        var unmappedOwnerId = Guid.NewGuid();
+
+        var records = new List<Entity>
+        {
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Contoso",
+                ["ownerid"] = new EntityReference("systemuser", unmappedOwnerId)
+            }
+        };
+
+        var data = CreateMigrationData("account", records);
+        var plan = CreateSingleTierPlan("account");
+
+        SetupSchemaValidatorNoMismatches();
+
+        var capturedClientOptions = new List<DataverseClientOptions?>();
+
+        _bulkExecutor.Setup(x => x.UpsertMultipleAsync(
+                "account",
+                It.IsAny<IEnumerable<Entity>>(),
+                It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
+                It.IsAny<IProgress<ProgressSnapshot>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, IEnumerable<Entity>, BulkOperationOptions, DataverseClientOptions?, IProgress<ProgressSnapshot>?, CancellationToken>(
+                (_, _, _, clientOpts, _, _) => capturedClientOptions.Add(clientOpts))
+            .ReturnsAsync(new BulkOperationResult
+            {
+                SuccessCount = 1,
+                FailureCount = 0,
+                Errors = Array.Empty<BulkOperationError>()
+            });
+
+        // UserMappings exists but has no mapping for the owner
+        var userMappings = new UserMappingCollection
+        {
+            Mappings = new Dictionary<Guid, PPDS.Migration.Models.UserMapping>(),
+            DefaultUserId = null,
+            UseCurrentUserAsDefault = false
+        };
+
+        var options = new ImportOptions
+        {
+            ImpersonateOwners = true,
+            UserMappings = userMappings,
+            RespectDisablePluginsSetting = false
+        };
+
+        // Act
+        var result = await _sut.ImportAsync(data, plan, options);
+
+        // Assert
+        result.RecordsImported.Should().Be(1);
+        result.Success.Should().BeTrue();
+
+        // All calls should have null clientOptions (no impersonation for unmapped owners)
+        capturedClientOptions.Should().AllSatisfy(o => o.Should().BeNull());
+    }
+
+    [Fact]
+    public async Task ImpersonateOwners_False_NoGrouping()
+    {
+        // Arrange
+        var ownerId = Guid.NewGuid();
+
+        var records = new List<Entity>
+        {
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Contoso",
+                ["ownerid"] = new EntityReference("systemuser", ownerId)
+            },
+            new Entity("account")
+            {
+                Id = Guid.NewGuid(),
+                ["name"] = "Fabrikam",
+                ["ownerid"] = new EntityReference("systemuser", ownerId)
+            }
+        };
+
+        var data = CreateMigrationData("account", records);
+        var plan = CreateSingleTierPlan("account");
+
+        SetupSchemaValidatorNoMismatches();
+
+        var capturedClientOptions = new List<DataverseClientOptions?>();
+
+        _bulkExecutor.SetupSequence(x => x.UpsertMultipleAsync(
+                "account",
+                It.IsAny<IEnumerable<Entity>>(),
+                It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
+                It.IsAny<IProgress<ProgressSnapshot>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BulkOperationResult
+            {
+                SuccessCount = 1,
+                FailureCount = 0,
+                Errors = Array.Empty<BulkOperationError>()
+            })
+            .ReturnsAsync(new BulkOperationResult
+            {
+                SuccessCount = 1,
+                FailureCount = 0,
+                Errors = Array.Empty<BulkOperationError>()
+            });
+
+        var options = new ImportOptions
+        {
+            ImpersonateOwners = false,
+            RespectDisablePluginsSetting = false
+        };
+
+        // Act
+        var result = await _sut.ImportAsync(data, plan, options);
+
+        // Assert
+        result.RecordsImported.Should().Be(2);
+        result.Success.Should().BeTrue();
+
+        // Verify the bulk executor was called with null clientOptions (no impersonation)
+        _bulkExecutor.Verify(x => x.UpsertMultipleAsync(
+            "account",
+            It.IsAny<IEnumerable<Entity>>(),
+            It.IsAny<BulkOperationOptions>(),
+            It.Is<DataverseClientOptions?>(o => o == null),
+            It.IsAny<IProgress<ProgressSnapshot>>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(2)); // probe + remaining
     }
 
     #endregion
