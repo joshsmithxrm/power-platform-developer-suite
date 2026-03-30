@@ -710,6 +710,7 @@ namespace PPDS.Migration.Import
 
             // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
+            List<Guid?>? ownerMappingList = options.ImpersonateOwners ? new List<Guid?>() : null;
             foreach (var record in records)
             {
                 // Step 1: Apply record filters
@@ -783,27 +784,27 @@ namespace PPDS.Migration.Import
                     }
                 }
 
+                // Extract owner mapping BEFORE PrepareRecordForImport may strip ownerid
+                // Built alongside preparedRecords to keep indices aligned after filtering
+                if (ownerMappingList != null)
+                {
+                    Guid? mappedOwner = null;
+                    if (record.Contains("ownerid") && record["ownerid"] is EntityReference ownerRef)
+                    {
+                        if (options.UserMappings!.TryGetMappedUserId(ownerRef.Id, out var mappedId))
+                        {
+                            mappedOwner = mappedId;
+                        }
+                    }
+                    ownerMappingList.Add(mappedOwner);
+                }
+
                 var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
                 preparedRecords.Add(prepared);
             }
 
-            // Build owner mapping for impersonation grouping
-            // Use original records (before prep) since PrepareRecordForImport may strip ownerid
-            Guid?[]? ownerMapping = null;
-            if (options.ImpersonateOwners)
-            {
-                ownerMapping = new Guid?[records.Count];
-                for (int i = 0; i < records.Count; i++)
-                {
-                    if (records[i].Contains("ownerid") && records[i]["ownerid"] is EntityReference ownerRef)
-                    {
-                        if (options.UserMappings!.TryGetMappedUserId(ownerRef.Id, out var mappedId))
-                        {
-                            ownerMapping[i] = mappedId;
-                        }
-                    }
-                }
-            }
+            // Convert to array for ExecuteWithOwnerGroupingAsync
+            var ownerMapping = ownerMappingList?.ToArray();
 
             // Create progress adapter that bridges BulkOperationExecutor progress to IProgressReporter
             var progressAdapter = progress != null

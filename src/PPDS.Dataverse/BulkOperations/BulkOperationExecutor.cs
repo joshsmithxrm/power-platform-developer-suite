@@ -129,7 +129,7 @@ namespace PPDS.Dataverse.BulkOperations
             // Get connection info for logging only - release immediately to avoid holding pool slot
             int recommended;
             {
-                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                await using var infoClient = await _connectionPool.GetClientAsync(options: clientOptions, cancellationToken: cancellationToken);
                 recommended = infoClient.RecommendedDegreesOfParallelism;
             }
 
@@ -195,7 +195,7 @@ namespace PPDS.Dataverse.BulkOperations
             // Get connection info for logging only - release immediately to avoid holding pool slot
             int recommended;
             {
-                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                await using var infoClient = await _connectionPool.GetClientAsync(options: clientOptions, cancellationToken: cancellationToken);
                 recommended = infoClient.RecommendedDegreesOfParallelism;
             }
 
@@ -261,7 +261,7 @@ namespace PPDS.Dataverse.BulkOperations
             // Get connection info for logging only - release immediately to avoid holding pool slot
             int recommended;
             {
-                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                await using var infoClient = await _connectionPool.GetClientAsync(options: clientOptions, cancellationToken: cancellationToken);
                 recommended = infoClient.RecommendedDegreesOfParallelism;
             }
 
@@ -327,7 +327,7 @@ namespace PPDS.Dataverse.BulkOperations
             // Get connection info for logging only - release immediately to avoid holding pool slot
             int recommended;
             {
-                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                await using var infoClient = await _connectionPool.GetClientAsync(options: clientOptions, cancellationToken: cancellationToken);
                 recommended = infoClient.RecommendedDegreesOfParallelism;
             }
 

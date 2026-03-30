@@ -1418,7 +1418,7 @@ public class TieredImporterTests
     }
 
     [Fact]
-    public async Task ImpersonateOwners_GroupsByOwner()
+    public async Task ImpersonatesViaClonePerOwnerGroup()
     {
         // Arrange
         var sourceOwner1 = Guid.NewGuid();
@@ -1518,7 +1518,7 @@ public class TieredImporterTests
     }
 
     [Fact]
-    public async Task ImpersonateOwners_UnmappedOwner_NoImpersonation()
+    public async Task FallsBackToServicePrincipalForUnmappedOwner()
     {
         // Arrange
         var unmappedOwnerId = Guid.NewGuid();
