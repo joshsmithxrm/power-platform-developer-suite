@@ -113,6 +113,10 @@ namespace PPDS.Migration.Formats
             // Read file column data from files/ directory in ZIP
             var fileData = await ReadFileDataFromArchiveAsync(archive, entityData, cancellationToken).ConfigureAwait(false);
 
+            // Strip FileColumnValue markers from entity attributes so they don't leak
+            // into Dataverse requests during import (they were only needed for metadata lookup above)
+            StripFileColumnMarkers(entityData);
+
             _logger?.LogInformation("Parsed data with {RecordCount} total records, {M2MCount} M2M relationship groups, and {FileCount} file column entries",
                 entityData.Values.Sum(v => v.Count),
                 relationshipData.Values.Sum(v => v.Count),
@@ -334,6 +338,25 @@ namespace PPDS.Migration.Formats
             }
 
             return new OptionSetValue(optionValue);
+        }
+
+        private static void StripFileColumnMarkers(IReadOnlyDictionary<string, IReadOnlyList<Entity>> entityData)
+        {
+            foreach (var records in entityData.Values)
+            {
+                foreach (var record in records)
+                {
+                    var fileColumnKeys = record.Attributes
+                        .Where(a => a.Value is FileColumnValue)
+                        .Select(a => a.Key)
+                        .ToList();
+
+                    foreach (var key in fileColumnKeys)
+                    {
+                        record.Attributes.Remove(key);
+                    }
+                }
+            }
         }
 
         private FileColumnValue? ParseFileColumnValue(string? value, XElement element)

@@ -238,6 +238,46 @@ public class CmtDataReaderTests
         result.FileData.Should().BeEmpty();
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ReadAsync_FileColumnData_StripsFileColumnMarkersFromEntityAttributes()
+    {
+        // Arrange — file column fields should not remain as FileColumnValue in entity attributes
+        // after reading, because they would leak into Dataverse requests during import
+        var recordId = Guid.NewGuid();
+        var fileBytes = new byte[] { 0x01, 0x02 };
+
+        var stream = CreateTestArchiveWithFiles(
+            schemaXml: @"<entities><entity name=""account"" displayname=""Account""><fields>
+                <field name=""accountid"" type=""guid"" displayname=""ID"" primaryKey=""true"" />
+                <field name=""cr_document"" type=""file"" displayname=""Document"" />
+            </fields></entity></entities>",
+            dataXml: $@"<entities><entity name=""account""><records>
+                <record id=""{recordId}"">
+                    <field name=""cr_document"" value=""files/account/{recordId}_cr_document.bin"" type=""file"" filename=""doc.pdf"" mimetype=""application/pdf"" />
+                </record>
+            </records><m2mrelationships /></entity></entities>",
+            files: new Dictionary<string, byte[]>
+            {
+                { $"files/account/{recordId}_cr_document.bin", fileBytes }
+            }
+        );
+
+        var schemaReader = new CmtSchemaReader();
+        var reader = new CmtDataReader(schemaReader);
+
+        // Act
+        var result = await reader.ReadAsync(stream);
+
+        // Assert — FileColumnValue markers stripped from entity attributes
+        var record = result.EntityData["account"].First();
+        record.Contains("cr_document").Should().BeFalse(
+            "file column markers must be stripped so they don't leak into Dataverse import requests");
+
+        // File data should still be in FileData collection
+        result.FileData["account"].Should().HaveCount(1);
+    }
+
     private static MemoryStream CreateTestArchive(string schemaXml, string dataXml)
     {
         var stream = new MemoryStream();
