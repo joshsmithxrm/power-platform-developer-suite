@@ -1,11 +1,22 @@
 ---
 name: start
-description: Create a worktree for new work and open a terminal there. Use when starting any new feature, bug fix, or task. Accepts freeform input — issues, descriptions, context. Runs from main.
+description: Create a worktree for new work and open a terminal there. Use when starting any new feature, bug fix, or task — including when the user says "start a worktree", "create a worktree", or describes work they want to begin. Accepts freeform input — issues, descriptions, context. Runs from main.
 ---
 
 # Start
 
 Bootstrap a feature worktree for new work. Parses freeform input to extract a name and issue numbers, creates the worktree, initializes workflow state, and opens a terminal in the worktree directory.
+
+## When to Use
+
+- "Start a worktree for..."
+- "Create a worktree for..."
+- "Set up a worktree"
+- "I need to work on..." (when no worktree exists yet)
+- "Let's start on..."
+- "Begin work on..."
+- "New feature/bug/task for..."
+- Any request that implies beginning new work in a fresh worktree
 
 ## Usage
 

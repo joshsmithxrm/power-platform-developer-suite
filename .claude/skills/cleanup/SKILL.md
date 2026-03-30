@@ -118,6 +118,25 @@ git worktree remove --force .worktrees/<name>
 - Skip locked worktrees — report them as skipped with reason
 - Report any removal failures and continue with the next worktree
 
+### 4b. Sweep Orphan Directories
+
+After removing merged worktrees, check for orphan directories — directories in `.worktrees/` that are not registered git worktrees (e.g., left behind when `git worktree remove` deregistered but failed to delete the directory).
+
+1. List all directories in `.worktrees/`:
+   ```bash
+   ls -d .worktrees/*/ 2>/dev/null
+   ```
+
+2. Compare against registered worktree paths from `git worktree list --porcelain` (already parsed in step 3). Extract the `worktree` lines to get the full path of each registered worktree.
+
+3. For each directory in `.worktrees/` that does NOT appear in the registered worktree list:
+   - **Guard:** Compare the directory's resolved absolute path against the main worktree path (the first `worktree` entry in `git worktree list --porcelain`). If they match, skip it — never remove the main worktree.
+   - If `--dry-run`: add to orphan report, do NOT delete
+   - Otherwise: `rm -rf .worktrees/<name>`
+   - On Windows, if the orphan is a junction/symlink, remove the link itself — do not follow into the target directory
+
+4. If `rm -rf` fails (e.g., permission denied), log as failed in the report and continue with the next orphan.
+
 ### 5. Delete Local Branches
 
 After worktrees are removed, delete their local branches:
@@ -174,6 +193,12 @@ Present a summary:
 - feature/old-thing (regular → -d)
 - fix/stale-fix (squash → -D)
 
+### Orphans Removed
+| Directory | Status |
+|-----------|--------|
+| .worktrees/old-thing | Removed |
+| .worktrees/stale-dir | Failed (permission denied) |
+
 ### Pruned Remote Refs
 - origin/feature/old-thing
 - origin/fix/stale-fix
@@ -192,6 +217,7 @@ Present a summary:
 
 ### Summary
 - Removed: N worktrees (N regular, N squash-merged), N branches
+- Orphans: N removed, N failed
 - Pruned: N remote refs
 - Rebased: N OK, N conflicts
 - Skipped: N locked, N not started
@@ -213,3 +239,6 @@ If `--dry-run` was specified, prefix the report title with `[DRY RUN]` and note 
 | Locked worktree | Skip with note in report |
 | Not on main branch | `git checkout main` before starting |
 | Branch has no remote tracking ref and is not in `--merged` | Classify as active — no signal to determine merge status |
+| `rm -rf` fails on orphan directory (permission denied) | Log as failed in report, continue with next orphan |
+| `.worktrees/` directory doesn't exist | Skip orphan sweep — nothing to check |
+| Orphan is a symlink/junction (Windows) | Remove the link itself, do not follow into the target |
