@@ -78,20 +78,27 @@ If no labels found, `gh` not authenticated, or no issues extracted — leave pre
 
 ### Step 3: Propose and Confirm
 
-Present the extracted name, issues, and work type to the user:
+Determine the claude launch command based on work type:
+- **Bug fix:** `claude` (no auto-skill — user codes the fix manually)
+- **Enhancement/refactor:** `claude '/implement'`
+- **New feature:** `claude '/design'`
+- **Docs:** `claude` (no auto-skill — user edits docs manually)
+
+Present the extracted name, issues, work type, and launch command to the user:
 
 ```
 I'll create:
-  Worktree: .worktrees/<name>
-  Branch:   feat/<name>
-  Issues:   #N, #M
+  Worktree:  .worktrees/<name>
+  Branch:    feat/<name>
+  Issues:    #N, #M
   Work type: (1) Bug fix  (2) Enhancement/refactor  (3) New feature  (4) Docs
              [pre-selected: Bug fix based on type:bug label]
+  Launch:    <claude-command>
 
 Good?
 ```
 
-Wait for user confirmation. If the user suggests a different name or work type, use that instead.
+Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead.
 
 ### Step 4: Check for Existing Worktree
 
@@ -182,11 +189,7 @@ Detect platform:
 uname -s
 ```
 
-Determine the claude launch command based on work type:
-- **Bug fix:** `claude` (no auto-skill — user codes the fix manually)
-- **Enhancement/refactor:** `claude '/implement'`
-- **New feature:** `claude '/design'`
-- **Docs:** `claude` (no auto-skill — user edits docs manually)
+Use the launch command confirmed in Step 3.
 
 **Windows (MINGW/MSYS):**
 ```bash
