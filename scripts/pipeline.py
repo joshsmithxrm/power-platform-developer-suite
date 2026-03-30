@@ -34,6 +34,7 @@ from pathlib import Path
 
 from triage_common import (
     build_triage_prompt,
+    format_reply_body,
     get_repo_slug as _get_repo_slug,
     parse_triage_stage_log,
     post_replies as _post_replies_common,
