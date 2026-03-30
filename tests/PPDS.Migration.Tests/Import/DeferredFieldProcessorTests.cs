@@ -7,6 +7,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
 using PPDS.Migration.Import;
@@ -74,9 +75,10 @@ public class DeferredFieldProcessorTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
+            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, DataverseClientOptions? _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
             {
                 var list = entities.ToList();
                 return new BulkOperationResult
@@ -99,6 +101,7 @@ public class DeferredFieldProcessorTests
             "account",
             It.IsAny<IEnumerable<Entity>>(),
             It.IsAny<BulkOperationOptions>(),
+            It.IsAny<DataverseClientOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
@@ -146,9 +149,10 @@ public class DeferredFieldProcessorTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
+            .ReturnsAsync((string _, IEnumerable<Entity> entities, BulkOperationOptions _, DataverseClientOptions? _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
             {
                 var batch = entities.ToList();
                 allUpdatedEntities.AddRange(batch);
@@ -174,6 +178,7 @@ public class DeferredFieldProcessorTests
             "account",
             It.IsAny<IEnumerable<Entity>>(),
             It.IsAny<BulkOperationOptions>(),
+            It.IsAny<DataverseClientOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
@@ -214,6 +219,7 @@ public class DeferredFieldProcessorTests
                 "team",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BulkOperationResult

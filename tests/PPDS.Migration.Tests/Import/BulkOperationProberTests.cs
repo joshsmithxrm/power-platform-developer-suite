@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Progress;
 using PPDS.Migration.Import;
 using Xunit;
@@ -40,6 +41,7 @@ public class BulkOperationProberTests
             null!,
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, _) => Task.FromResult(new BulkOperationResult()),
             null,
             CancellationToken.None);
@@ -58,6 +60,7 @@ public class BulkOperationProberTests
             Array.Empty<Entity>(),
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, _) => Task.FromResult(new BulkOperationResult()),
             null,
             CancellationToken.None);
@@ -97,6 +100,7 @@ public class BulkOperationProberTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(probeResult)
@@ -110,6 +114,7 @@ public class BulkOperationProberTests
             records,
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, _) =>
             {
                 fallbackCalled = true;
@@ -154,6 +159,7 @@ public class BulkOperationProberTests
                 "team",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(probeResult);
@@ -171,6 +177,7 @@ public class BulkOperationProberTests
             records,
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, recs) =>
             {
                 // Fallback receives ALL records (including the probe record)
@@ -211,6 +218,7 @@ public class BulkOperationProberTests
             records,
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, _) =>
             {
                 fallbackCalled = true;
@@ -226,6 +234,7 @@ public class BulkOperationProberTests
             It.IsAny<string>(),
             It.IsAny<IEnumerable<Entity>>(),
             It.IsAny<BulkOperationOptions>(),
+            It.IsAny<DataverseClientOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -250,6 +259,7 @@ public class BulkOperationProberTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(probeResult);
@@ -260,6 +270,7 @@ public class BulkOperationProberTests
             records,
             BulkOperationType.Upsert,
             new BulkOperationOptions(),
+            null, // clientOptions
             (_, _) => Task.FromResult(new BulkOperationResult()),
             null,
             CancellationToken.None);

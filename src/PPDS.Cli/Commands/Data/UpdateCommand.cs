@@ -460,8 +460,8 @@ public static class UpdateCommand
                 entity,
                 entitiesToUpdate,
                 options,
-                progress,
-                cancellationToken);
+                progress: progress,
+                cancellationToken: cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {

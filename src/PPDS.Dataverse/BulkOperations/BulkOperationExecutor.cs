@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -118,6 +119,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -152,7 +154,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Sequential execution for single batch or when parallelism unavailable
                 result = await ExecuteBatchesSequentiallyAsync(
                     batches,
-                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -162,7 +164,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Pool-managed parallel execution - pool semaphore limits concurrency
                 result = await ExecuteBatchesParallelAsync(
                     batches,
-                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -183,6 +185,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -217,7 +220,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Sequential execution for single batch or when parallelism unavailable
                 result = await ExecuteBatchesSequentiallyAsync(
                     batches,
-                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -227,7 +230,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Pool-managed parallel execution - pool semaphore limits concurrency
                 result = await ExecuteBatchesParallelAsync(
                     batches,
-                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -248,6 +251,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -282,7 +286,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Sequential execution for single batch or when parallelism unavailable
                 result = await ExecuteBatchesSequentiallyAsync(
                     batches,
-                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -292,7 +296,7 @@ namespace PPDS.Dataverse.BulkOperations
                 // Pool-managed parallel execution - pool semaphore limits concurrency
                 result = await ExecuteBatchesParallelAsync(
                     batches,
-                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, clientOptions, ct),
                     tracker,
                     progress,
                     cancellationToken);
@@ -313,6 +317,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Guid> ids,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -332,8 +337,8 @@ namespace PPDS.Dataverse.BulkOperations
 
             // Select the appropriate batch execution function based on table type
             Func<List<Guid>, CancellationToken, Task<BulkOperationResult>> executeBatch = options.ElasticTable
-                ? (batch, ct) => ExecuteElasticDeleteBatchAsync(entityLogicalName, batch, options, ct)
-                : (batch, ct) => ExecuteStandardDeleteBatchAsync(entityLogicalName, batch, options, ct);
+                ? (batch, ct) => ExecuteElasticDeleteBatchAsync(entityLogicalName, batch, options, clientOptions, ct)
+                : (batch, ct) => ExecuteStandardDeleteBatchAsync(entityLogicalName, batch, options, clientOptions, ct);
 
             // Determine parallelism: user override or pool's DOP-based recommendation
             var parallelism = options.MaxParallelBatches ?? _connectionPool.GetTotalRecommendedParallelism();
@@ -371,17 +376,18 @@ namespace PPDS.Dataverse.BulkOperations
         /// <summary>
         /// Gets a connection from the pool with retry logic for pool exhaustion.
         /// </summary>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>A pooled client.</returns>
         /// <exception cref="PoolExhaustedException">Thrown when the pool remains exhausted after all retries.</exception>
-        private async Task<IPooledClient> GetClientWithRetryAsync(CancellationToken cancellationToken)
+        private async Task<IPooledClient> GetClientWithRetryAsync(DataverseClientOptions? clientOptions, CancellationToken cancellationToken)
         {
             // Attempts are 1-indexed for clearer logging
             for (int attempt = 1; attempt <= MaxPoolExhaustionRetries; attempt++)
             {
                 try
                 {
-                    return await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                    return await _connectionPool.GetClientAsync(options: clientOptions, cancellationToken: cancellationToken);
                 }
                 catch (PoolExhaustedException) when (attempt < MaxPoolExhaustionRetries)
                 {
@@ -698,6 +704,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<T> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             Func<IPooledClient, List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
             CancellationToken cancellationToken)
         {
@@ -714,7 +721,7 @@ namespace PPDS.Dataverse.BulkOperations
 
                 try
                 {
-                    client = await GetClientWithRetryAsync(cancellationToken);
+                    client = await GetClientWithRetryAsync(clientOptions, cancellationToken);
                     connectionName = client.ConnectionName;
 
                     // PRE-FLIGHT GUARD: Don't execute if connection is known to be throttled.
@@ -745,7 +752,7 @@ namespace PPDS.Dataverse.BulkOperations
                         await client.DisposeAsync();
                         client = null;
 
-                        client = await GetClientWithRetryAsync(cancellationToken);
+                        client = await GetClientWithRetryAsync(clientOptions, cancellationToken);
                         connectionName = client.ConnectionName;
                     }
 
@@ -960,6 +967,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             return ExecuteBatchWithThrottleHandlingAsync(
@@ -967,6 +975,7 @@ namespace PPDS.Dataverse.BulkOperations
                 entityLogicalName,
                 batch,
                 options,
+                clientOptions,
                 (client, b, ct) => ExecuteCreateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
                 cancellationToken);
         }
@@ -1020,6 +1029,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             return ExecuteBatchWithThrottleHandlingAsync(
@@ -1027,6 +1037,7 @@ namespace PPDS.Dataverse.BulkOperations
                 entityLogicalName,
                 batch,
                 options,
+                clientOptions,
                 (client, b, ct) => ExecuteUpdateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
                 cancellationToken);
         }
@@ -1079,6 +1090,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             return ExecuteBatchWithThrottleHandlingAsync(
@@ -1086,6 +1098,7 @@ namespace PPDS.Dataverse.BulkOperations
                 entityLogicalName,
                 batch,
                 options,
+                clientOptions,
                 (client, b, ct) => ExecuteUpsertMultipleCoreAsync(client, entityLogicalName, b, options, ct),
                 cancellationToken);
         }
@@ -1160,6 +1173,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             return ExecuteBatchWithThrottleHandlingAsync(
@@ -1167,6 +1181,7 @@ namespace PPDS.Dataverse.BulkOperations
                 entityLogicalName,
                 batch,
                 options,
+                clientOptions,
                 (client, b, ct) => ExecuteElasticDeleteCoreAsync(client, entityLogicalName, b, options, ct),
                 cancellationToken);
         }
@@ -1222,6 +1237,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             return ExecuteBatchWithThrottleHandlingAsync(
@@ -1229,6 +1245,7 @@ namespace PPDS.Dataverse.BulkOperations
                 entityLogicalName,
                 batch,
                 options,
+                clientOptions,
                 (client, b, ct) => ExecuteStandardDeleteCoreAsync(client, entityLogicalName, b, options, ct),
                 cancellationToken);
         }

@@ -411,8 +411,8 @@ public static class DeleteCommand
                 entity,
                 idsToDelete,
                 options,
-                progress,
-                cancellationToken);
+                progress: progress,
+                cancellationToken: cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {

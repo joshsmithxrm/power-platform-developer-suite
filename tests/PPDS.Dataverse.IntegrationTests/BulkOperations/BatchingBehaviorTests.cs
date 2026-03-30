@@ -88,7 +88,7 @@ public class BatchingBehaviorTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.CreateMultipleAsync(EntityName, entities, options, progress);
+        await Executor.CreateMultipleAsync(EntityName, entities, options, progress: progress);
 
         // Assert - Should have 3 batches: 10, 10, 5
         progress.Reports.Should().HaveCount(3);
@@ -111,7 +111,7 @@ public class BatchingBehaviorTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.UpdateMultipleAsync(EntityName, updateEntities, options, progress);
+        await Executor.UpdateMultipleAsync(EntityName, updateEntities, options, progress: progress);
 
         // Assert - Should have 3 batches: 10, 10, 5
         progress.Reports.Should().HaveCount(3);
@@ -131,7 +131,7 @@ public class BatchingBehaviorTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.DeleteMultipleAsync(EntityName, createResult.CreatedIds!.ToList(), options, progress);
+        await Executor.DeleteMultipleAsync(EntityName, createResult.CreatedIds!.ToList(), options, progress: progress);
 
         // Assert - Should have 3 batches: 10, 10, 5
         progress.Reports.Should().HaveCount(3);
@@ -151,7 +151,7 @@ public class BatchingBehaviorTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.CreateMultipleAsync(EntityName, entities, options, progress);
+        await Executor.CreateMultipleAsync(EntityName, entities, options, progress: progress);
 
         // Assert
         progress.LastReport!.Total.Should().Be(100);

@@ -823,6 +823,7 @@ namespace PPDS.Migration.Import
                     preparedRecords,
                     operationType,
                     bulkOptions,
+                    null, // clientOptions — Phase 3b will wire impersonation here
                     async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, cancellationToken).ConfigureAwait(false),
                     progressAdapter,
                     cancellationToken).ConfigureAwait(false);

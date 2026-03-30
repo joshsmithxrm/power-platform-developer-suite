@@ -3,6 +3,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Moq;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
 using PPDS.Migration.Analysis;
@@ -232,6 +233,7 @@ public class TieredImporterTests
                 entityName,
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(probeResult)
@@ -309,6 +311,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback(() => importOrder.Add("account"))
@@ -324,6 +327,7 @@ public class TieredImporterTests
                 "contact",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback(() => importOrder.Add("contact"))
@@ -406,6 +410,7 @@ public class TieredImporterTests
                     entityName,
                     It.IsAny<IEnumerable<Entity>>(),
                     It.IsAny<BulkOperationOptions>(),
+                    It.IsAny<DataverseClientOptions>(),
                     It.IsAny<IProgress<ProgressSnapshot>>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(async () =>
@@ -660,6 +665,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Simulated failure"));
@@ -722,6 +728,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BulkOperationResult
@@ -737,6 +744,7 @@ public class TieredImporterTests
                 "contact",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
@@ -797,6 +805,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
@@ -857,6 +866,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
@@ -926,6 +936,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
@@ -987,6 +998,7 @@ public class TieredImporterTests
                 "team",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BulkOperationResult
@@ -1140,6 +1152,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BulkOperationResult
@@ -1154,6 +1167,7 @@ public class TieredImporterTests
                 "contact",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BulkOperationResult
@@ -1208,6 +1222,7 @@ public class TieredImporterTests
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Connection pool exhausted"));
@@ -1297,6 +1312,7 @@ public class TieredImporterTests
                 "team",
                 It.IsAny<IEnumerable<Entity>>(),
                 It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
                 It.IsAny<IProgress<ProgressSnapshot>>(),
                 It.IsAny<CancellationToken>()))
             .Callback<string, IEnumerable<Entity>, BulkOperationOptions, IProgress<ProgressSnapshot>?, CancellationToken>(
@@ -1365,6 +1381,7 @@ public class TieredImporterTests
             It.IsAny<string>(),
             It.IsAny<IEnumerable<Entity>>(),
             It.IsAny<BulkOperationOptions>(),
+            It.IsAny<DataverseClientOptions>(),
             It.IsAny<IProgress<ProgressSnapshot>>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }

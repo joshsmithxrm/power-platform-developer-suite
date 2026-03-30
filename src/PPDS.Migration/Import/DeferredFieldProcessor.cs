@@ -177,6 +177,7 @@ namespace PPDS.Migration.Import
                 updates,
                 BulkOperationType.Update,
                 bulkOptions,
+                null, // clientOptions
                 async (_, recs) => await ExecuteIndividualUpdatesAsync(entityName, recs.ToList(), fieldList, context, cancellationToken).ConfigureAwait(false),
                 progressAdapter,
                 cancellationToken).ConfigureAwait(false);
