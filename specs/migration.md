@@ -458,10 +458,10 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | AC-30 | Date shifting: `relative` mode shifts by whole weeks since export | `DateShifterTests.RelativeShiftsByWeeks` | 🔲 |
 | AC-31 | Date shifting: `relativeDaily` mode shifts by whole days since export | `DateShifterTests.RelativeDailyShiftsByDays` | 🔲 |
 | AC-32 | Date shifting: `relativeExact` mode shifts by exact elapsed time | `DateShifterTests.RelativeExactShiftsByExactTime` | 🔲 |
-| AC-33 | File column export: files stored in `files/{entity}/{recordid}_{field}.bin` in ZIP | `ParallelExporterTests.ExportsFileColumnsToFilesDirectory` | 🔲 |
-| AC-34 | File column export: field element carries `filename` and `mimetype` attributes | `CmtDataWriterTests.WritesFileMetadataAttributes` | 🔲 |
-| AC-35 | File column import: chunked upload via 4MB blocks | `FileColumnTransferHelperTests.UploadsInFourMegabyteChunks` | 🔲 |
-| AC-36 | File column export disabled by default (`IncludeFileData=false`) | `ParallelExporterTests.SkipsFileColumnsWhenNotOptedIn` | 🔲 |
+| AC-33 | File column export: files stored in `files/{entity}/{recordid}_{field}.bin` in ZIP | `CmtDataWriterTests.WriteAsync_WithFileData_CreatesFilesDirectoryInZip` | ✅ |
+| AC-34 | File column export: field element carries `filename` and `mimetype` attributes | `CmtDataWriterTests.WriteAsync_FileColumnValue_WritesMetadataAttributes` | ✅ |
+| AC-35 | File column import: chunked upload via 4MB blocks | `FileColumnTransferHelperTests.UploadsInFourMegabyteChunks` | ✅ |
+| AC-36 | File column export disabled by default (`IncludeFileData=false`) | `ExportOptionsTests.IncludeFileData_DefaultsFalse` | ✅ |
 | AC-37 | Per-entity `importMode` attribute overrides global mode | `TieredImporterTests.PerEntityModeOverridesGlobal` | 🔲 |
 | AC-38 | Per-entity `importMode="skip"` excludes entity from import | `TieredImporterTests.SkipModeExcludesEntity` | 🔲 |
 | AC-39 | Owner impersonation: records grouped by owner, clone per group with `CallerAADObjectId` | `TieredImporterTests.ImpersonatesViaClonePerOwnerGroup` | 🔲 |
