@@ -158,18 +158,15 @@ namespace PPDS.Migration.Import
             };
 
             // Create progress adapter
-            var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
+            var progressAdapter = ProgressAdapterFactory.Create(context.Progress, snapshot => new ProgressEventArgs
             {
-                context.Progress.Report(new ProgressEventArgs
-                {
-                    Phase = MigrationPhase.ProcessingDeferredFields,
-                    Entity = entityName,
-                    Field = fieldList,
-                    Current = (int)snapshot.Processed,
-                    Total = updates.Count,
-                    SuccessCount = (int)snapshot.Succeeded,
-                    Message = $"Updating deferred fields: {fieldList}"
-                });
+                Phase = MigrationPhase.ProcessingDeferredFields,
+                Entity = entityName,
+                Field = fieldList,
+                Current = (int)snapshot.Processed,
+                Total = updates.Count,
+                SuccessCount = (int)snapshot.Succeeded,
+                Message = $"Updating deferred fields: {fieldList}"
             });
 
             var result = await _prober.ExecuteWithProbeAsync(

@@ -811,20 +811,17 @@ namespace PPDS.Migration.Import
             var ownerMapping = ownerMappingList?.ToArray();
 
             // Create progress adapter that bridges BulkOperationExecutor progress to IProgressReporter
-            var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
+            var progressAdapter = ProgressAdapterFactory.Create(progress, snapshot => new ProgressEventArgs
             {
-                progress.Report(new ProgressEventArgs
-                {
-                    Phase = MigrationPhase.Importing,
-                    Entity = entityName,
-                    TierNumber = tierNumber,
-                    Current = (int)snapshot.Processed,
-                    Total = (int)snapshot.Total,
-                    SuccessCount = (int)snapshot.Succeeded,
-                    FailureCount = (int)snapshot.Failed,
-                    RecordsPerSecond = snapshot.RatePerSecond,
-                    EstimatedRemaining = snapshot.EstimatedRemaining
-                });
+                Phase = MigrationPhase.Importing,
+                Entity = entityName,
+                TierNumber = tierNumber,
+                Current = (int)snapshot.Processed,
+                Total = (int)snapshot.Total,
+                SuccessCount = (int)snapshot.Succeeded,
+                FailureCount = (int)snapshot.Failed,
+                RecordsPerSecond = snapshot.RatePerSecond,
+                EstimatedRemaining = snapshot.EstimatedRemaining
             });
 
             // Pass ALL records to BulkOperationExecutor - it handles batching dynamically
