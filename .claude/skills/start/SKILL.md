@@ -84,6 +84,8 @@ Determine the claude launch command based on work type:
 - **New feature:** `claude '/design'`
 - **Docs:** `claude` (no auto-skill — user edits docs manually)
 
+If no work type is pre-selected (Step 2b left it empty), show `Launch: (depends on work type)` and resolve the launch command after the user picks a work type.
+
 Present the extracted name, issues, work type, and launch command to the user:
 
 ```
@@ -255,7 +257,7 @@ Could not open terminal automatically. Run:
 ## Rules
 
 1. **Works from any branch** — if on a feature branch, resolves main repo root automatically.
-2. **Always confirm** — propose name, issues, and work type, wait for user approval.
+2. **Always confirm** — propose name, issues, work type, and launch command, wait for user approval.
 3. **No duplicate worktrees** — check before creating, offer resume.
 4. **Platform detection** — use `uname -s`, not hardcoded assumptions.
 5. **Workflow state** — always initialize state in the new worktree.
