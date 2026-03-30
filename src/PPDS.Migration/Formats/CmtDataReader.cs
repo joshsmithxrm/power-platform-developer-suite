@@ -393,6 +393,13 @@ namespace PPDS.Migration.Formats
 
             var fileDataByEntity = new Dictionary<string, List<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
 
+            // Build O(1) lookup dictionaries per entity to avoid O(N*M) linear search
+            var recordLookups = new Dictionary<string, Dictionary<Guid, Entity>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (entName, records) in entityData)
+            {
+                recordLookups[entName] = records.ToDictionary(r => r.Id);
+            }
+
             foreach (var entry in fileEntries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -427,14 +434,12 @@ namespace PPDS.Migration.Formats
                 var originalFileName = string.Empty;
                 var mimeType = string.Empty;
 
-                if (entityData.TryGetValue(entityName, out var records))
+                if (recordLookups.TryGetValue(entityName, out var lookup) &&
+                    lookup.TryGetValue(recordId, out var record) &&
+                    record.Contains(fieldName) && record[fieldName] is FileColumnValue fcv)
                 {
-                    var record = records.FirstOrDefault(r => r.Id == recordId);
-                    if (record != null && record.Contains(fieldName) && record[fieldName] is FileColumnValue fcv)
-                    {
-                        originalFileName = fcv.FileName;
-                        mimeType = fcv.MimeType;
-                    }
+                    originalFileName = fcv.FileName;
+                    mimeType = fcv.MimeType;
                 }
 
                 // Read binary data

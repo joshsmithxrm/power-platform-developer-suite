@@ -358,7 +358,7 @@ public class FileColumnProcessorTests
         var sourceId = Guid.NewGuid();
         var targetId = Guid.NewGuid();
 
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel(); // Pre-cancel
 
         var fileData = new Dictionary<string, IReadOnlyList<FileColumnData>>
