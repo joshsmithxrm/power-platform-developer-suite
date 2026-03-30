@@ -346,8 +346,8 @@ public sealed class CsvDataLoader
                 BypassPowerAutomateFlows = options.BypassFlows,
                 ContinueOnError = options.ContinueOnError
             },
-            progress,
-            cancellationToken);
+            progress: progress,
+            cancellationToken: cancellationToken);
 
         // 8. Map bulk operation errors
         foreach (var bulkError in bulkResult.Errors)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Progress;
 
 namespace PPDS.Dataverse.BulkOperations
@@ -19,6 +20,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to create.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
@@ -26,6 +28,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
@@ -35,6 +38,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to update.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
@@ -42,6 +46,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
@@ -51,6 +56,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to upsert.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
@@ -58,6 +64,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
@@ -67,6 +74,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="ids">The IDs of the records to delete.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="clientOptions">Optional per-request connection options (e.g., CallerId for impersonation).</param>
         /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
@@ -74,6 +82,7 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Guid> ids,
             BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
     }

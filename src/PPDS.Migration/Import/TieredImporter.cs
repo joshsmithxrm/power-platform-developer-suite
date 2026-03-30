@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
@@ -148,6 +149,14 @@ namespace PPDS.Migration.Import
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
             options ??= _defaultOptions;
+
+            if (options.ImpersonateOwners && options.UserMappings == null)
+            {
+                throw new InvalidOperationException(
+                    "ImpersonateOwners requires UserMappings to be configured. " +
+                    "Provide a user mapping file with source-to-target user ID mappings.");
+            }
+
             var stopwatch = Stopwatch.StartNew();
             var idMappings = new IdMappingCollection();
             var entityResults = new ConcurrentBag<EntityImportResult>();
@@ -701,6 +710,7 @@ namespace PPDS.Migration.Import
 
             // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
+            List<Guid?>? ownerMappingList = options.ImpersonateOwners ? new List<Guid?>() : null;
             foreach (var record in records)
             {
                 // Step 1: Apply record filters
@@ -774,9 +784,27 @@ namespace PPDS.Migration.Import
                     }
                 }
 
+                // Extract owner mapping BEFORE PrepareRecordForImport may strip ownerid
+                // Built alongside preparedRecords to keep indices aligned after filtering
+                if (ownerMappingList != null)
+                {
+                    Guid? mappedOwner = null;
+                    if (record.Contains("ownerid") && record["ownerid"] is EntityReference ownerRef)
+                    {
+                        if (options.UserMappings!.TryGetMappedUserId(ownerRef.Id, out var mappedId))
+                        {
+                            mappedOwner = mappedId;
+                        }
+                    }
+                    ownerMappingList.Add(mappedOwner);
+                }
+
                 var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
                 preparedRecords.Add(prepared);
             }
+
+            // Convert to array for ExecuteWithOwnerGroupingAsync
+            var ownerMapping = ownerMappingList?.ToArray();
 
             // Create progress adapter that bridges BulkOperationExecutor progress to IProgressReporter
             var progressAdapter = progress != null
@@ -818,14 +846,25 @@ namespace PPDS.Migration.Import
                     _ => BulkOperationType.Upsert
                 };
 
-                bulkResult = await _prober.ExecuteWithProbeAsync(
-                    entityName,
-                    preparedRecords,
-                    operationType,
-                    bulkOptions,
-                    async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, cancellationToken).ConfigureAwait(false),
-                    progressAdapter,
-                    cancellationToken).ConfigureAwait(false);
+                if (options.ImpersonateOwners && ownerMapping != null)
+                {
+                    // Group records by mapped owner for impersonation
+                    bulkResult = await ExecuteWithOwnerGroupingAsync(
+                        entityName, preparedRecords, ownerMapping, operationType, bulkOptions,
+                        effectiveMode, options, progressAdapter, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    bulkResult = await _prober.ExecuteWithProbeAsync(
+                        entityName,
+                        preparedRecords,
+                        operationType,
+                        bulkOptions,
+                        null,
+                        async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), effectiveMode, options, null, cancellationToken).ConfigureAwait(false),
+                        progressAdapter,
+                        cancellationToken).ConfigureAwait(false);
+                }
 
                 // Emit warning if bulk fallback occurred during this call (not previously known)
                 if (!wasKnownBulkNotSupported && _prober.IsKnownBulkNotSupported(entityName))
@@ -844,8 +883,17 @@ namespace PPDS.Migration.Import
             }
             else
             {
-                // UseBulkApis is false - use individual operations directly
-                bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, effectiveMode, options, cancellationToken).ConfigureAwait(false);
+                if (options.ImpersonateOwners && ownerMapping != null)
+                {
+                    bulkResult = await ExecuteWithOwnerGroupingAsync(
+                        entityName, preparedRecords, ownerMapping, BulkOperationType.Upsert, bulkOptions,
+                        effectiveMode, options, null, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    // UseBulkApis is false - use individual operations directly
+                    bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, effectiveMode, options, null, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Track ID mappings - for bulk operations, IDs are preserved from Entity.Id
@@ -889,6 +937,7 @@ namespace PPDS.Migration.Import
             List<Entity> records,
             ImportMode effectiveMode,
             ImportOptions options,
+            DataverseClientOptions? clientOptions,
             CancellationToken cancellationToken)
         {
             var createdIds = new List<Guid>();
@@ -896,7 +945,7 @@ namespace PPDS.Migration.Import
             var successCount = 0;
             var failureCount = 0;
 
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await using var client = await _connectionPool.GetClientAsync(clientOptions, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             for (var i = 0; i < records.Count; i++)
             {
@@ -954,6 +1003,113 @@ namespace PPDS.Migration.Import
                 CreatedIds = createdIds,
                 Errors = errors,
                 Duration = TimeSpan.Zero
+            };
+        }
+
+        private async Task<BulkOperationResult> ExecuteWithOwnerGroupingAsync(
+            string entityName,
+            List<Entity> preparedRecords,
+            Guid?[] ownerMapping,
+            BulkOperationType operationType,
+            BulkOperationOptions bulkOptions,
+            ImportMode effectiveMode,
+            ImportOptions options,
+            IProgress<Dataverse.Progress.ProgressSnapshot>? progress,
+            CancellationToken cancellationToken)
+        {
+            // Group record indices by mapped owner
+            // Use Guid.Empty as sentinel for unmapped records (no impersonation)
+            var groups = new Dictionary<Guid, List<int>>();
+            for (int i = 0; i < preparedRecords.Count; i++)
+            {
+                var owner = ownerMapping[i] ?? Guid.Empty;
+                if (!groups.TryGetValue(owner, out var indices))
+                {
+                    indices = new List<int>();
+                    groups[owner] = indices;
+                }
+                indices.Add(i);
+            }
+
+            var mappedOwnerCount = groups.Count(g => g.Key != Guid.Empty);
+            var unmappedCount = groups.TryGetValue(Guid.Empty, out var unmappedGroup) ? unmappedGroup.Count : 0;
+
+            _logger?.LogInformation(
+                "Impersonation grouping for {Entity}: {Groups} owner groups ({Owners} distinct owners, {Unmapped} unmapped)",
+                entityName, groups.Count,
+                mappedOwnerCount,
+                unmappedCount);
+
+            // Execute each owner group
+            var allErrors = new List<BulkOperationError>();
+            var totalSuccess = 0;
+            var totalFailure = 0;
+            int? totalCreated = null;
+            int? totalUpdated = null;
+
+            foreach (var (ownerId, indices) in groups)
+            {
+                var groupRecords = indices.Select(i => preparedRecords[i]).ToList();
+                var clientOptions = ownerId != Guid.Empty
+                    ? new DataverseClientOptions { CallerId = ownerId }
+                    : null;
+
+                BulkOperationResult groupResult;
+                if (options.UseBulkApis)
+                {
+                    groupResult = await _prober.ExecuteWithProbeAsync(
+                        entityName,
+                        groupRecords,
+                        operationType,
+                        bulkOptions,
+                        clientOptions,
+                        async (_, recs) => await ExecuteIndividualOperationsAsync(
+                            entityName, recs.ToList(), effectiveMode, options, clientOptions, cancellationToken).ConfigureAwait(false),
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    groupResult = await ExecuteIndividualOperationsAsync(
+                        entityName, groupRecords, effectiveMode, options, clientOptions, cancellationToken).ConfigureAwait(false);
+                }
+
+                totalSuccess += groupResult.SuccessCount;
+                totalFailure += groupResult.FailureCount;
+
+                // Remap error indices back to original positions
+                foreach (var error in groupResult.Errors)
+                {
+                    allErrors.Add(new BulkOperationError
+                    {
+                        Index = error.Index < indices.Count ? indices[error.Index] : error.Index,
+                        RecordId = error.RecordId,
+                        ErrorCode = error.ErrorCode,
+                        Message = error.Message,
+                        FieldName = error.FieldName,
+                        FieldValueDescription = error.FieldValueDescription,
+                        Diagnostics = error.Diagnostics
+                    });
+                }
+
+                if (groupResult.CreatedCount.HasValue)
+                {
+                    totalCreated = (totalCreated ?? 0) + groupResult.CreatedCount.Value;
+                }
+                if (groupResult.UpdatedCount.HasValue)
+                {
+                    totalUpdated = (totalUpdated ?? 0) + groupResult.UpdatedCount.Value;
+                }
+            }
+
+            return new BulkOperationResult
+            {
+                SuccessCount = totalSuccess,
+                FailureCount = totalFailure,
+                Errors = allErrors,
+                Duration = TimeSpan.Zero,
+                CreatedCount = totalCreated,
+                UpdatedCount = totalUpdated
             };
         }
 

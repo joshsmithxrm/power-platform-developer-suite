@@ -383,8 +383,8 @@ public static class TruncateCommand
                 entity,
                 ids,
                 options,
-                batchProgress,
-                cancellationToken);
+                progress: batchProgress,
+                cancellationToken: cancellationToken);
 
             totalDeleted += result.SuccessCount;
             totalFailed += result.FailureCount;

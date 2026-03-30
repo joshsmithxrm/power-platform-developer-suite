@@ -91,7 +91,7 @@ public class ElasticTableTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.DeleteMultipleAsync(EntityName, idsToDelete, options, progress);
+        await Executor.DeleteMultipleAsync(EntityName, idsToDelete, options, progress: progress);
 
         // Assert
         progress.Reports.Should().NotBeEmpty();
@@ -226,7 +226,7 @@ public class ElasticTableTests : BulkOperationExecutorTestsBase
         var progress = CreateProgressReporter();
 
         // Act
-        await Executor.CreateMultipleAsync(EntityName, entities, options, progress);
+        await Executor.CreateMultipleAsync(EntityName, entities, options, progress: progress);
 
         // Assert
         progress.Reports.Should().HaveCount(3); // 3 batches of 10
