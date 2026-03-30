@@ -78,20 +78,29 @@ If no labels found, `gh` not authenticated, or no issues extracted — leave pre
 
 ### Step 3: Propose and Confirm
 
-Present the extracted name, issues, and work type to the user:
+Determine the claude launch command based on work type:
+- **Bug fix:** `claude` (no auto-skill — user codes the fix manually)
+- **Enhancement/refactor:** `claude '/implement'`
+- **New feature:** `claude '/design'`
+- **Docs:** `claude` (no auto-skill — user edits docs manually)
+
+If no work type is pre-selected (Step 2b left it empty), show `Launch: (depends on work type)` and resolve the launch command after the user picks a work type.
+
+Present the extracted name, issues, work type, and launch command to the user:
 
 ```
 I'll create:
-  Worktree: .worktrees/<name>
-  Branch:   feat/<name>
-  Issues:   #N, #M
+  Worktree:  .worktrees/<name>
+  Branch:    feat/<name>
+  Issues:    #N, #M
   Work type: (1) Bug fix  (2) Enhancement/refactor  (3) New feature  (4) Docs
              [pre-selected: Bug fix based on type:bug label]
+  Launch:    <claude-command>
 
 Good?
 ```
 
-Wait for user confirmation. If the user suggests a different name or work type, use that instead.
+Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead. The confirmed launch command is used in Steps 5, 5b, 6, and 7 — do not re-derive it from work type.
 
 ### Step 4: Check for Existing Worktree
 
@@ -126,9 +135,10 @@ For each extracted issue number:
 python scripts/workflow-state.py append issues <N>
 ```
 
-Record the confirmed work type:
+Record the confirmed work type and launch command:
 ```bash
 python scripts/workflow-state.py set work_type <type>
+python scripts/workflow-state.py set launch_command "<confirmed-claude-command>"
 ```
 
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
@@ -162,11 +172,11 @@ Write `.plans/context.md` to the new worktree with issue details and routing gui
    <routing guidance based on work type>
    ```
 
-   Routing guidance values:
-   - Bug fix → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
-   - Enhancement/refactor → "Run `/implement`"
-   - New feature → "Run `/design`"
-   - Docs → "Edit docs and commit. No design or implement needed. When done: `/pr`"
+   Routing guidance values (derived from the confirmed launch command, not re-derived from work type):
+   - `claude` (bug fix) → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
+   - `claude '/implement'` → "Run `/implement`"
+   - `claude '/design'` → "Run `/design`"
+   - `claude` (docs) → "Edit docs and commit. No design or implement needed. When done: `/pr`"
 
 4. If the conversation contains investigation context from a prior `/investigate` session, include it in the same `.plans/context.md` file under a `## Investigation Context` section.
 
@@ -182,11 +192,7 @@ Detect platform:
 uname -s
 ```
 
-Determine the claude launch command based on work type:
-- **Bug fix:** `claude` (no auto-skill — user codes the fix manually)
-- **Enhancement/refactor:** `claude '/implement'`
-- **New feature:** `claude '/design'`
-- **Docs:** `claude` (no auto-skill — user edits docs manually)
+Use the launch command confirmed in Step 3.
 
 **Windows (MINGW/MSYS):**
 ```bash
@@ -252,7 +258,7 @@ Could not open terminal automatically. Run:
 ## Rules
 
 1. **Works from any branch** — if on a feature branch, resolves main repo root automatically.
-2. **Always confirm** — propose name, issues, and work type, wait for user approval.
+2. **Always confirm** — propose name, issues, work type, and launch command, wait for user approval.
 3. **No duplicate worktrees** — check before creating, offer resume.
 4. **Platform detection** — use `uname -s`, not hardcoded assumptions.
 5. **Workflow state** — always initialize state in the new worktree.
