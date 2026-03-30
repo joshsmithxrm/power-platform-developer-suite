@@ -88,19 +88,34 @@ public class SilentProgressReporterTests
     public void OperationName_CanBeSetAndRead()
     {
         var silent = IProgressReporter.Silent;
+        var original = silent.OperationName;
 
-        silent.OperationName = "Export";
-
-        silent.OperationName.Should().Be("Export");
+        try
+        {
+            silent.OperationName = "Export";
+            silent.OperationName.Should().Be("Export");
+        }
+        finally
+        {
+            silent.OperationName = original;
+        }
     }
 
     [Fact]
-    public void OperationName_DefaultsToEmptyString()
+    public void OperationName_CanBeSetToEmpty()
     {
-        // Get a fresh reference — shared singleton, so reset to verify default behavior
         var silent = IProgressReporter.Silent;
-        silent.OperationName = string.Empty;
+        var original = silent.OperationName;
 
-        silent.OperationName.Should().BeEmpty();
+        try
+        {
+            silent.OperationName = "SomeValue";
+            silent.OperationName = string.Empty;
+            silent.OperationName.Should().BeEmpty();
+        }
+        finally
+        {
+            silent.OperationName = original;
+        }
     }
 }
