@@ -110,15 +110,20 @@ namespace PPDS.Migration.Formats
 
             var (entityData, relationshipData) = await ParseDataXmlAsync(dataMemoryStream, schema, progress, cancellationToken).ConfigureAwait(false);
 
-            _logger?.LogInformation("Parsed data with {RecordCount} total records and {M2MCount} M2M relationship groups",
+            // Read file column data from files/ directory in ZIP
+            var fileData = await ReadFileDataFromArchiveAsync(archive, entityData, cancellationToken).ConfigureAwait(false);
+
+            _logger?.LogInformation("Parsed data with {RecordCount} total records, {M2MCount} M2M relationship groups, and {FileCount} file column entries",
                 entityData.Values.Sum(v => v.Count),
-                relationshipData.Values.Sum(v => v.Count));
+                relationshipData.Values.Sum(v => v.Count),
+                fileData.Values.Sum(v => v.Count));
 
             return new MigrationData
             {
                 Schema = schema,
                 EntityData = entityData,
                 RelationshipData = relationshipData,
+                FileData = fileData,
                 ExportedAt = DateTime.UtcNow
             };
         }
@@ -290,6 +295,7 @@ namespace PPDS.Migration.Formats
                 "lookup" or "customer" or "owner" or "entityreference" or "partylist" => ParseEntityReference(element),
                 "optionset" or "optionsetvalue" or "picklist" => ParseOptionSetValue(value),
                 "state" or "status" => ParseOptionSetValue(value),
+                "file" => ParseFileColumnValue(value, element),
                 _ => value // Return as string for unknown types
             };
         }
@@ -328,6 +334,112 @@ namespace PPDS.Migration.Formats
             }
 
             return new OptionSetValue(optionValue);
+        }
+
+        private FileColumnValue? ParseFileColumnValue(string? value, XElement element)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+
+            return new FileColumnValue
+            {
+                FilePath = value,
+                FileName = element.Attribute("filename")?.Value ?? string.Empty,
+                MimeType = element.Attribute("mimetype")?.Value ?? string.Empty
+            };
+        }
+
+        private async Task<IReadOnlyDictionary<string, IReadOnlyList<FileColumnData>>> ReadFileDataFromArchiveAsync(
+            ZipArchive archive,
+            IReadOnlyDictionary<string, IReadOnlyList<Entity>> entityData,
+            CancellationToken cancellationToken)
+        {
+            var result = new Dictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+
+            // Find all entries under files/ prefix
+            var fileEntries = archive.Entries
+                .Where(e => e.FullName.StartsWith("files/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (fileEntries.Count == 0)
+            {
+                return result;
+            }
+
+            var fileDataByEntity = new Dictionary<string, List<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in fileEntries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Expected format: files/{entityname}/{recordid}_{fieldname}.bin
+                var parts = entry.FullName.Split('/');
+                if (parts.Length != 3)
+                {
+                    continue;
+                }
+
+                var entityName = parts[1];
+                var fileName = parts[2];
+
+                // Parse recordid and fieldname from filename: {recordid}_{fieldname}.bin
+                var binName = Path.GetFileNameWithoutExtension(fileName);
+                var underscoreIndex = binName.IndexOf('_');
+                if (underscoreIndex < 0)
+                {
+                    continue;
+                }
+
+                var recordIdStr = binName.Substring(0, underscoreIndex);
+                var fieldName = binName.Substring(underscoreIndex + 1);
+
+                if (!Guid.TryParse(recordIdStr, out var recordId))
+                {
+                    continue;
+                }
+
+                // Look up the original filename and mimetype from entity data (FileColumnValue in attributes)
+                var originalFileName = string.Empty;
+                var mimeType = string.Empty;
+
+                if (entityData.TryGetValue(entityName, out var records))
+                {
+                    var record = records.FirstOrDefault(r => r.Id == recordId);
+                    if (record != null && record.Contains(fieldName) && record[fieldName] is FileColumnValue fcv)
+                    {
+                        originalFileName = fcv.FileName;
+                        mimeType = fcv.MimeType;
+                    }
+                }
+
+                // Read binary data
+                using var entryStream = entry.Open();
+                using var memoryStream = new MemoryStream();
+                await entryStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
+
+                if (!fileDataByEntity.ContainsKey(entityName))
+                {
+                    fileDataByEntity[entityName] = new List<FileColumnData>();
+                }
+
+                fileDataByEntity[entityName].Add(new FileColumnData
+                {
+                    RecordId = recordId,
+                    FieldName = fieldName,
+                    FileName = originalFileName,
+                    MimeType = mimeType,
+                    Data = memoryStream.ToArray()
+                });
+            }
+
+            foreach (var (entityName, list) in fileDataByEntity)
+            {
+                result[entityName] = list;
+            }
+
+            return result;
         }
     }
 }

@@ -14,6 +14,7 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
+using PPDS.Migration.Import;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
@@ -27,6 +28,7 @@ namespace PPDS.Migration.Export
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly ICmtSchemaReader _schemaReader;
         private readonly ICmtDataWriter _dataWriter;
+        private readonly FileColumnTransferHelper? _fileTransferHelper;
         private readonly ExportOptions _defaultOptions;
         private readonly ILogger<ParallelExporter>? _logger;
 
@@ -53,16 +55,19 @@ namespace PPDS.Migration.Export
         /// <param name="connectionPool">The connection pool.</param>
         /// <param name="schemaReader">The schema reader.</param>
         /// <param name="dataWriter">The data writer.</param>
+        /// <param name="fileTransferHelper">Optional file column transfer helper for downloading file data.</param>
         /// <param name="migrationOptions">Migration options from DI.</param>
         /// <param name="logger">The logger.</param>
         public ParallelExporter(
             IDataverseConnectionPool connectionPool,
             ICmtSchemaReader schemaReader,
             ICmtDataWriter dataWriter,
+            FileColumnTransferHelper? fileTransferHelper = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             ILogger<ParallelExporter>? logger = null)
             : this(connectionPool, schemaReader, dataWriter)
         {
+            _fileTransferHelper = fileTransferHelper;
             _defaultOptions = migrationOptions?.Value.Export ?? new ExportOptions();
             _logger = logger;
         }
@@ -155,6 +160,20 @@ namespace PPDS.Migration.Export
                 var relationshipData = await ExportM2MRelationshipsAsync(
                     schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
 
+                // Download file column data if opted in
+                var fileData = new Dictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+                if (options.IncludeFileData && _fileTransferHelper != null)
+                {
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Message = "Downloading file column data..."
+                    });
+
+                    fileData = await DownloadFileColumnDataAsync(
+                        schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
+                }
+
                 // Write to output file
                 progress.Report(new ProgressEventArgs
                 {
@@ -167,6 +186,7 @@ namespace PPDS.Migration.Export
                     Schema = schema,
                     EntityData = entityData,
                     RelationshipData = relationshipData,
+                    FileData = fileData,
                     ExportedAt = DateTime.UtcNow
                 };
 
@@ -469,6 +489,111 @@ namespace PPDS.Migration.Export
                 .ToList();
 
             return grouped;
+        }
+
+        private async Task<Dictionary<string, IReadOnlyList<FileColumnData>>> DownloadFileColumnDataAsync(
+            MigrationSchema schema,
+            ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
+            ExportOptions options,
+            IProgressReporter? progress,
+            ConcurrentBag<MigrationError> errors,
+            CancellationToken cancellationToken)
+        {
+            var result = new ConcurrentDictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
+            var downloadedFiles = 0;
+
+            foreach (var entitySchema in schema.Entities)
+            {
+                var fileColumns = entitySchema.Fields.Where(f => f.IsFileColumn).ToList();
+                if (fileColumns.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!entityData.TryGetValue(entitySchema.LogicalName, out var records) || records.Count == 0)
+                {
+                    continue;
+                }
+
+                var entityFileData = new ConcurrentBag<FileColumnData>();
+
+                await Parallel.ForEachAsync(
+                    records,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = options.DegreeOfParallelism,
+                        CancellationToken = cancellationToken
+                    },
+                    async (record, ct) =>
+                    {
+                        foreach (var fileColumn in fileColumns)
+                        {
+                            ct.ThrowIfCancellationRequested();
+
+                            try
+                            {
+                                var data = await _fileTransferHelper!.DownloadAsync(
+                                    entitySchema.LogicalName, record.Id, fileColumn.LogicalName, ct).ConfigureAwait(false);
+
+                                if (data.Length > 0)
+                                {
+                                    var filePath = $"files/{entitySchema.LogicalName}/{record.Id}_{fileColumn.LogicalName}.bin";
+
+                                    // Retrieve filename/mimetype from the download response metadata
+                                    // For now, use field name and generic type - Dataverse doesn't return these in download
+                                    var fileName = $"{fileColumn.LogicalName}.bin";
+                                    var mimeType = "application/octet-stream";
+
+                                    entityFileData.Add(new FileColumnData
+                                    {
+                                        RecordId = record.Id,
+                                        FieldName = fileColumn.LogicalName,
+                                        FileName = fileName,
+                                        MimeType = mimeType,
+                                        Data = data
+                                    });
+
+                                    // Set FileColumnValue marker in entity attributes for CmtDataWriter
+                                    record[fileColumn.LogicalName] = new FileColumnValue
+                                    {
+                                        FilePath = filePath,
+                                        FileName = fileName,
+                                        MimeType = mimeType
+                                    };
+
+                                    Interlocked.Increment(ref downloadedFiles);
+                                }
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                _logger?.LogWarning(ex, "Failed to download file column {Field} for {Entity}/{Record}",
+                                    fileColumn.LogicalName, entitySchema.LogicalName, record.Id);
+                                errors.Add(new MigrationError
+                                {
+                                    Phase = MigrationPhase.Exporting,
+                                    EntityLogicalName = entitySchema.LogicalName,
+                                    RecordId = record.Id,
+                                    Message = $"File column '{fileColumn.LogicalName}' download failed: {ex.Message}"
+                                });
+                            }
+                        }
+                    }).ConfigureAwait(false);
+
+                if (!entityFileData.IsEmpty)
+                {
+                    result[entitySchema.LogicalName] = entityFileData.ToList();
+
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = entitySchema.LogicalName,
+                        Message = $"Downloaded {entityFileData.Count} file(s) for {entitySchema.LogicalName}"
+                    });
+                }
+            }
+
+            _logger?.LogInformation("Downloaded {Count} file column data entries", downloadedFiles);
+            return new Dictionary<string, IReadOnlyList<FileColumnData>>(result, StringComparer.OrdinalIgnoreCase);
         }
 
         private string BuildFetchXml(EntitySchema entitySchema, int pageSize)

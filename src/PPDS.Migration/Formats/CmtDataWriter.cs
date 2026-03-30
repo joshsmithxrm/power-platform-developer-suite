@@ -96,6 +96,28 @@ namespace PPDS.Migration.Formats
                 await WriteSchemaXmlAsync(data.Schema, schemaStream, cancellationToken).ConfigureAwait(false);
             }
 
+            // Write file column data to files/ directory in ZIP
+            if (data.FileData.Count > 0)
+            {
+                progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Exporting,
+                    Message = "Writing file column data..."
+                });
+
+                foreach (var (entityName, fileDataList) in data.FileData)
+                {
+                    foreach (var fileData in fileDataList)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var filePath = $"files/{entityName}/{fileData.RecordId}_{fileData.FieldName}.bin";
+                        var fileEntry = archive.CreateEntry(filePath, CompressionLevel.Optimal);
+                        using var fileStream = fileEntry.Open();
+                        await fileStream.WriteAsync(fileData.Data, 0, fileData.Data.Length, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+
             _logger?.LogInformation("Wrote {RecordCount} total records", data.TotalRecordCount);
         }
 
@@ -257,6 +279,12 @@ namespace PPDS.Migration.Formats
                     await writer.WriteAttributeStringAsync(null, "value", null, dbl.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
                     break;
 
+                case FileColumnValue fcv:
+                    await writer.WriteAttributeStringAsync(null, "value", null, fcv.FilePath).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "filename", null, fcv.FileName).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "mimetype", null, fcv.MimeType).ConfigureAwait(false);
+                    break;
+
                 default:
                     await writer.WriteAttributeStringAsync(null, "value", null, value.ToString() ?? string.Empty).ConfigureAwait(false);
                     break;
@@ -387,5 +415,16 @@ namespace PPDS.Migration.Formats
             await writer.WriteEndDocumentAsync().ConfigureAwait(false);
             await writer.FlushAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Marker value for file column data in entity attributes.
+    /// Used during serialization to emit file metadata attributes in data.xml.
+    /// </summary>
+    internal class FileColumnValue
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string MimeType { get; set; } = string.Empty;
     }
 }
