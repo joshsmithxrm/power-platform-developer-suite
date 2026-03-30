@@ -25,6 +25,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from triage_common import (
+    build_triage_prompt,
+    get_repo_slug as _get_repo_slug,
+    parse_triage_jsonl,
+    post_replies as _post_replies_common,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -149,19 +156,7 @@ def cleanup_pid(worktree):
 
 def get_repo_slug(worktree):
     """Get owner/repo from gh CLI. Returns 'owner/repo' or None."""
-    if SHAKEDOWN:
-        return "test-owner/test-repo"
-    try:
-        result = subprocess.run(
-            ["gh", "repo", "view", "--json", "nameWithOwner",
-             "--jq", ".nameWithOwner"],
-            cwd=worktree, capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return None
+    return _get_repo_slug(worktree, shakedown=bool(SHAKEDOWN))
 
 
 def poll_ci(worktree, pr_number, logger):
@@ -299,29 +294,7 @@ def run_triage(worktree, pr_number, comments, logger):
         logger.log("triage", "SHAKEDOWN_SKIPPED")
         return []
 
-    # Read spec from workflow state for context
-    state_path = os.path.join(worktree, ".workflow", "state.json")
-    spec_path = ""
-    try:
-        with open(state_path, "r") as f:
-            state = json.load(f)
-        spec_path = state.get("spec", "")
-    except (json.JSONDecodeError, OSError):
-        pass
-
-    prompt = (
-        f"Triage these Gemini review comments on PR #{pr_number}.\n\n"
-        f"Spec (read for design rationale): {spec_path}\n\n"
-        f"Comments:\n{json.dumps(comments, indent=2)}\n\n"
-        "For each comment:\n"
-        "1. Read the referenced file at the specified line\n"
-        "2. Evaluate: is this a valid finding?\n"
-        "3. If valid: fix the code and commit\n"
-        "4. If invalid: compose a brief dismissal rationale\n\n"
-        "After all comments, push fixes and output this JSON:\n"
-        '[{"id": <id>, "action": "fixed"|"dismissed", '
-        '"description": "...", "commit": "<sha>"|null}]'
-    )
+    prompt = build_triage_prompt(worktree, pr_number, comments)
 
     full_prompt = (
         "You are running in headless mode via the pr-monitor background process. "
@@ -391,52 +364,11 @@ def run_triage(worktree, pr_number, comments, logger):
         return None
 
     # Extract triage results from JSONL output
-    return _parse_triage_output(stage_jsonl_path, logger)
-
-
-def _parse_triage_output(jsonl_path, logger):
-    """Parse structured triage JSON from stage JSONL output."""
-    # First extract text from JSONL events
-    text_parts = []
-    try:
-        with open(jsonl_path, "r", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if event.get("type") == "result":
-                    result_text = event.get("result", "")
-                    if result_text:
-                        text_parts.append(result_text)
-                elif event.get("type") == "assistant":
-                    content = event.get("message", {}).get("content", [])
-                    for block in content:
-                        if block.get("type") == "text":
-                            text = block.get("text", "")
-                            if text:
-                                text_parts.append(text)
-    except OSError:
-        return None
-
-    combined = "\n".join(text_parts)
-    # Find JSON array using raw_decode
-    last_bracket = combined.rfind("[")
-    if last_bracket != -1:
-        try:
-            decoder = json.JSONDecoder()
-            obj, _ = decoder.raw_decode(combined[last_bracket:])
-            if isinstance(obj, list):
-                return obj
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    logger.log("triage", "PARSE_FAILED",
-               reason="No JSON array found in triage output")
-    return None
+    results = parse_triage_jsonl(stage_jsonl_path)
+    if results is None:
+        logger.log("triage", "PARSE_FAILED",
+                   reason="No JSON array found in triage output")
+    return results
 
 
 def mark_pr_ready(worktree, pr_number, logger):
@@ -463,44 +395,13 @@ def mark_pr_ready(worktree, pr_number, logger):
 
 def post_replies(worktree, pr_number, triage_results, logger):
     """Post threaded replies to Gemini review comments from triage results."""
-    if SHAKEDOWN:
-        logger.log("replies", "SHAKEDOWN_SKIPPED")
-        return
+    def _log_fn(event, **kwargs):
+        logger.log("replies", event, **kwargs)
 
-    repo = get_repo_slug(worktree)
-    if not repo:
-        logger.log("replies", "ERROR", reason="Cannot determine repo slug")
-        return
-
-    for item in triage_results:
-        comment_id = item.get("id")
-        if not comment_id:
-            logger.log("replies", "SKIPPED", reason="missing comment id")
-            continue
-        action = item.get("action", "unknown")
-        description = item.get("description", "")
-        commit_sha = item.get("commit")
-
-        if action == "fixed" and commit_sha:
-            body = f"Fixed in {commit_sha} — {description}"
-        elif action == "dismissed":
-            body = f"Not applicable — {description}"
-        else:
-            body = description or "Reviewed."
-
-        try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
-                 "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
-                cwd=worktree, capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode != 0:
-                logger.log("replies", "FAILED", comment_id=comment_id,
-                           error=result.stderr.strip()[:100])
-            else:
-                logger.log("replies", "POSTED", comment_id=comment_id, action=action)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            logger.log("replies", "FAILED", comment_id=comment_id)
+    _post_replies_common(
+        worktree, pr_number, triage_results, _log_fn,
+        shakedown=bool(SHAKEDOWN),
+    )
 
 
 def run_retro(worktree, logger):

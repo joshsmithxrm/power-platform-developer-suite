@@ -32,6 +32,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from triage_common import (
+    build_triage_prompt,
+    format_reply_body,
+    get_repo_slug as _get_repo_slug,
+    parse_triage_stage_log,
+    post_replies as _post_replies_common,
+)
+
 STAGES = [
     "worktree",
     "implement",
@@ -815,17 +823,8 @@ def ensure_retro_summary_updated(worktree_path, logger, repo_root):
 
 
 def get_repo_slug(worktree_path):
-    """Get owner/repo from git remote. Returns 'owner/repo' or None."""
-    try:
-        result = subprocess.run(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-            cwd=worktree_path, capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return None
+    """Get owner/repo from gh CLI. Returns 'owner/repo' or None."""
+    return _get_repo_slug(worktree_path)
 
 
 def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
@@ -889,22 +888,7 @@ def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
 
 def run_triage(worktree_path, pr_number, comments, logger, dry_run=False):
     """Invoke gemini-triage agent to fix/dismiss comments. Returns list or None."""
-    state = read_state(worktree_path)
-    spec_path = state.get("spec", "")
-
-    prompt = (
-        f"Triage these Gemini review comments on PR #{pr_number}.\n\n"
-        f"Spec (read for design rationale): {spec_path}\n\n"
-        f"Comments:\n{json.dumps(comments, indent=2)}\n\n"
-        "For each comment:\n"
-        "1. Read the referenced file at the specified line\n"
-        "2. Evaluate: is this a valid finding?\n"
-        "3. If valid: fix the code and commit\n"
-        "4. If invalid: compose a brief dismissal rationale\n\n"
-        "After all comments, push fixes and output this JSON:\n"
-        '[{"id": <id>, "action": "fixed"|"dismissed", '
-        '"description": "...", "commit": "<sha>"|null}]'
-    )
+    prompt = build_triage_prompt(worktree_path, pr_number, comments)
 
     exit_code, logger_out = run_claude(
         worktree_path, prompt, logger, "pr-triage",
@@ -915,51 +899,23 @@ def run_triage(worktree_path, pr_number, comments, logger, dry_run=False):
         return None
 
     # Parse structured output from the human-readable stage log
-    stage_log_dir = os.path.join(worktree_path, ".workflow", "stages")
-    stage_log_path = os.path.join(stage_log_dir, "pr-triage.log")
-    try:
-        with open(stage_log_path, "r", errors="replace") as f:
-            content = f.read()
-        # Find JSON array using raw_decode (handles trailing text correctly)
-        last_bracket = content.rfind("[")
-        if last_bracket != -1:
-            decoder = json.JSONDecoder()
-            obj, _ = decoder.raw_decode(content[last_bracket:])
-            if isinstance(obj, list):
-                return obj
-    except (OSError, json.JSONDecodeError, ValueError):
-        pass
-    return None
+    stage_log_path = os.path.join(
+        worktree_path, ".workflow", "stages", "pr-triage.log")
+    return parse_triage_stage_log(stage_log_path)
 
 
 def post_replies(worktree_path, pr_number, triage_results, logger):
     """Post threaded replies to Gemini comments from triage results."""
-    repo = get_repo_slug(worktree_path)
-    if not repo:
-        return
-
-    for item in triage_results:
-        comment_id = item.get("id")
-        action = item.get("action", "unknown")
-        description = item.get("description", "")
-        commit_sha = item.get("commit")
-
-        if action == "fixed" and commit_sha:
-            body = f"Fixed in {commit_sha} — {description}"
-        elif action == "dismissed":
-            body = f"Not applicable — {description}"
+    def _log_fn(event, **kwargs):
+        # Map triage_common log events to pipeline's log(logger, step, event) format
+        if event == "POSTED":
+            log(logger, "pr", "REPLY_POSTED", **kwargs)
+        elif event == "FAILED":
+            log(logger, "pr", "REPLY_FAILED", **kwargs)
         else:
-            body = description or "Reviewed."
+            log(logger, "pr", event, **kwargs)
 
-        try:
-            subprocess.run(
-                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
-                 "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
-                cwd=worktree_path, capture_output=True, text=True, timeout=15,
-            )
-            log(logger, "pr", "REPLY_POSTED", comment_id=comment_id, action=action)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            log(logger, "pr", "REPLY_FAILED", comment_id=comment_id)
+    _post_replies_common(worktree_path, pr_number, triage_results, _log_fn)
 
 
 def run_pr_stage(worktree_path, logger, dry_run=False):
