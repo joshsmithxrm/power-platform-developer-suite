@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using PPDS.Migration.Constants;
 
 namespace PPDS.Migration.Progress
 {
@@ -370,13 +371,13 @@ namespace PPDS.Migration.Progress
                 return string.Empty;
 
             // systemuser/team does not exist - common cross-environment issue
-            if (message.Contains("systemuser", StringComparison.OrdinalIgnoreCase) &&
+            if (message.Contains(EntityNames.SystemUser, StringComparison.OrdinalIgnoreCase) &&
                 message.Contains("Does Not Exist", StringComparison.OrdinalIgnoreCase))
             {
                 return "MISSING_USER";
             }
 
-            if (message.Contains("team", StringComparison.OrdinalIgnoreCase) &&
+            if (message.Contains(EntityNames.Team, StringComparison.OrdinalIgnoreCase) &&
                 message.Contains("Does Not Exist", StringComparison.OrdinalIgnoreCase))
             {
                 return "MISSING_TEAM";

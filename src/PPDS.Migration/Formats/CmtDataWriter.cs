@@ -59,6 +59,8 @@ namespace PPDS.Migration.Formats
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (stream == null) throw new ArgumentNullException(nameof(stream));
 
+            progress ??= IProgressReporter.Silent;
+
             using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
 
             // Write [Content_Types].xml (required by CMT)
@@ -69,7 +71,7 @@ namespace PPDS.Migration.Formats
             }
 
             // Write data.xml
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Exporting,
                 Message = "Writing data.xml..."
@@ -82,7 +84,7 @@ namespace PPDS.Migration.Formats
             }
 
             // Write schema
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Exporting,
                 Message = "Writing data_schema.xml..."
@@ -123,7 +125,7 @@ namespace PPDS.Migration.Formats
             await writer.FlushAsync().ConfigureAwait(false);
         }
 
-        private async Task WriteDataXmlAsync(MigrationData data, Stream stream, IProgressReporter? progress, CancellationToken cancellationToken)
+        private async Task WriteDataXmlAsync(MigrationData data, Stream stream, IProgressReporter progress, CancellationToken cancellationToken)
         {
             var settings = new XmlWriterSettings
             {

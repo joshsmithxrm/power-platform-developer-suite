@@ -40,9 +40,11 @@ namespace PPDS.Migration.Import
             IProgressReporter? progress,
             CancellationToken cancellationToken)
         {
+            progress ??= IProgressReporter.Silent;
+
             var result = new Dictionary<string, Dictionary<string, FieldValidity>>(StringComparer.OrdinalIgnoreCase);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Loading target environment field metadata..."

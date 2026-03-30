@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace PPDS.Migration.Import
 {
@@ -16,7 +17,7 @@ namespace PPDS.Migration.Import
         /// <summary>
         /// Gets the total count of missing columns across all entities.
         /// </summary>
-        public int TotalMissingCount { get; }
+        public int TotalMissingCount => MissingColumns.Values.Sum(list => list.Count);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SchemaMismatchException"/> class.
@@ -26,12 +27,7 @@ namespace PPDS.Migration.Import
         public SchemaMismatchException(string message, Dictionary<string, List<string>> missingColumns)
             : base(message)
         {
-            MissingColumns = missingColumns;
-            TotalMissingCount = 0;
-            foreach (var columns in missingColumns.Values)
-            {
-                TotalMissingCount += columns.Count;
-            }
+            MissingColumns = missingColumns ?? new Dictionary<string, List<string>>();
         }
 
         /// <summary>
@@ -43,12 +39,7 @@ namespace PPDS.Migration.Import
         public SchemaMismatchException(string message, Dictionary<string, List<string>> missingColumns, Exception innerException)
             : base(message, innerException)
         {
-            MissingColumns = missingColumns;
-            TotalMissingCount = 0;
-            foreach (var columns in missingColumns.Values)
-            {
-                TotalMissingCount += columns.Count;
-            }
+            MissingColumns = missingColumns ?? new Dictionary<string, List<string>>();
         }
     }
 }

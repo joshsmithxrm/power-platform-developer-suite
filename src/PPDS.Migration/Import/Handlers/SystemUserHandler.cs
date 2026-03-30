@@ -1,5 +1,6 @@
 using System;
 using Microsoft.Xrm.Sdk;
+using PPDS.Migration.Constants;
 
 namespace PPDS.Migration.Import.Handlers
 {
@@ -10,7 +11,7 @@ namespace PPDS.Migration.Import.Handlers
     {
         /// <inheritdoc />
         public bool CanHandle(string entityLogicalName)
-            => entityLogicalName.Equals("systemuser", StringComparison.OrdinalIgnoreCase);
+            => entityLogicalName.Equals(EntityNames.SystemUser, StringComparison.OrdinalIgnoreCase);
 
         /// <inheritdoc />
         public bool ShouldSkip(Entity record, ImportContext context)
