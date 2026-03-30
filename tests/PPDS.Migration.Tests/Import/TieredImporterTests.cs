@@ -1609,8 +1609,6 @@ public class TieredImporterTests
 
         SetupSchemaValidatorNoMismatches();
 
-        var capturedClientOptions = new List<DataverseClientOptions?>();
-
         _bulkExecutor.SetupSequence(x => x.UpsertMultipleAsync(
                 "account",
                 It.IsAny<IEnumerable<Entity>>(),

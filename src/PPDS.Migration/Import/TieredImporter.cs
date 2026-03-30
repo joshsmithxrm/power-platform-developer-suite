@@ -1032,7 +1032,7 @@ namespace PPDS.Migration.Import
             }
 
             var mappedOwnerCount = groups.Count(g => g.Key != Guid.Empty);
-            var unmappedCount = groups.ContainsKey(Guid.Empty) ? groups[Guid.Empty].Count : 0;
+            var unmappedCount = groups.TryGetValue(Guid.Empty, out var unmappedGroup) ? unmappedGroup.Count : 0;
 
             _logger?.LogInformation(
                 "Impersonation grouping for {Entity}: {Groups} owner groups ({Owners} distinct owners, {Unmapped} unmapped)",
