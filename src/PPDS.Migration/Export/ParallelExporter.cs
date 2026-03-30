@@ -164,7 +164,7 @@ namespace PPDS.Migration.Export
                 var fileData = new Dictionary<string, IReadOnlyList<FileColumnData>>(StringComparer.OrdinalIgnoreCase);
                 if (options.IncludeFileData && _fileTransferHelper != null)
                 {
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Message = "Downloading file column data..."
@@ -495,7 +495,7 @@ namespace PPDS.Migration.Export
             MigrationSchema schema,
             ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             ConcurrentBag<MigrationError> errors,
             CancellationToken cancellationToken)
         {
@@ -583,7 +583,7 @@ namespace PPDS.Migration.Export
                 {
                     result[entitySchema.LogicalName] = entityFileData.ToList();
 
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Entity = entitySchema.LogicalName,
