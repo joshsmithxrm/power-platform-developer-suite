@@ -100,7 +100,7 @@ I'll create:
 Good?
 ```
 
-Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead.
+Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead. The confirmed launch command is used in Steps 5, 5b, 6, and 7 — do not re-derive it from work type.
 
 ### Step 4: Check for Existing Worktree
 
@@ -135,9 +135,10 @@ For each extracted issue number:
 python scripts/workflow-state.py append issues <N>
 ```
 
-Record the confirmed work type:
+Record the confirmed work type and launch command:
 ```bash
 python scripts/workflow-state.py set work_type <type>
+python scripts/workflow-state.py set launch_command "<confirmed-claude-command>"
 ```
 
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
@@ -171,11 +172,11 @@ Write `.plans/context.md` to the new worktree with issue details and routing gui
    <routing guidance based on work type>
    ```
 
-   Routing guidance values:
-   - Bug fix → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
-   - Enhancement/refactor → "Run `/implement`"
-   - New feature → "Run `/design`"
-   - Docs → "Edit docs and commit. No design or implement needed. When done: `/pr`"
+   Routing guidance values (derived from the confirmed launch command, not re-derived from work type):
+   - `claude` (bug fix) → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
+   - `claude '/implement'` → "Run `/implement`"
+   - `claude '/design'` → "Run `/design`"
+   - `claude` (docs) → "Edit docs and commit. No design or implement needed. When done: `/pr`"
 
 4. If the conversation contains investigation context from a prior `/investigate` session, include it in the same `.plans/context.md` file under a `## Investigation Context` section.
 
