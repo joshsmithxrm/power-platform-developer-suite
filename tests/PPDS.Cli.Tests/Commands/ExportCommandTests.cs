@@ -86,6 +86,22 @@ public class ExportCommandTests : IDisposable
     }
 
     [Fact]
+    public void Create_HasOptionalPageParallelOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--page-parallel");
+        Assert.NotNull(option);
+        Assert.False(option.Required);
+    }
+
+    [Fact]
+    public void Create_HasOptionalPageParallelThresholdOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--page-parallel-threshold");
+        Assert.NotNull(option);
+        Assert.False(option.Required);
+    }
+
+    [Fact]
     public void Create_HasOptionalOutputFormatOption()
     {
         var option = _command.Options.FirstOrDefault(o => o.Name == "--output-format");
@@ -159,6 +175,27 @@ public class ExportCommandTests : IDisposable
     {
         var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --debug");
         Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithPageParallel_Succeeds()
+    {
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --page-parallel 8");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithPageParallelThreshold_Succeeds()
+    {
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --page-parallel-threshold 10000");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithPageParallelThresholdZero_HasError()
+    {
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --page-parallel-threshold 0");
+        Assert.NotEmpty(result.Errors);
     }
 
     #endregion
