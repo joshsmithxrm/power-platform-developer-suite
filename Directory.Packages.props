@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Serialization and Security">
-    <PackageVersion Include="System.Text.Json" Version="9.0.12" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.5" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.5" />
   </ItemGroup>
 
