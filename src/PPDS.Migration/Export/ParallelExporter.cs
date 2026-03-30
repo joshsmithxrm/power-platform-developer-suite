@@ -408,7 +408,7 @@ namespace PPDS.Migration.Export
                             Phase = MigrationPhase.Exporting,
                             Entity = entitySchema.LogicalName,
                             Current = (int)currentTotal,
-                            Total = recordCount > 0 ? (int)recordCount : (int)currentTotal,
+                            Total = (int)(recordCount > 0 ? Math.Max(recordCount, currentTotal) : currentTotal),
                             RecordsPerSecond = rps
                         });
                     }).ConfigureAwait(false);
@@ -747,35 +747,40 @@ namespace PPDS.Migration.Export
             IReadOnlyList<EntitySchema> entities,
             CancellationToken cancellationToken)
         {
-            var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            var counts = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var entity in entities)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
+            await Parallel.ForEachAsync(
+                entities,
+                new ParallelOptions
                 {
-                    // Acquire and release per query to comply with D2 (don't hold across operations)
-                    await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                    var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
-
-                    var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
-                    var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
-
-                    if (aliased?.Value != null)
+                    MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+                    CancellationToken = cancellationToken
+                },
+                async (entity, ct) =>
+                {
+                    try
                     {
-                        counts[entity.LogicalName] = Convert.ToInt64(aliased.Value);
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // If count fails for an entity, default to 0 (sequential export)
-                    _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
-                }
-            }
+                        // Acquire and release per query to comply with D2 (don't hold across operations)
+                        await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: ct).ConfigureAwait(false);
 
-            return counts;
+                        var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
+
+                        var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
+                        var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
+
+                        if (aliased?.Value != null)
+                        {
+                            counts[entity.LogicalName] = Convert.ToInt64(aliased.Value);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // If count fails for an entity, default to 0 (sequential export)
+                        _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
+                    }
+                }).ConfigureAwait(false);
+
+            return new Dictionary<string, long>(counts, StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
