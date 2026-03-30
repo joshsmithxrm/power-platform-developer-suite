@@ -33,7 +33,7 @@ namespace PPDS.Migration.Import
             Options = options ?? throw new ArgumentNullException(nameof(options));
             IdMappings = idMappings ?? throw new ArgumentNullException(nameof(idMappings));
             TargetFieldMetadata = targetFieldMetadata ?? throw new ArgumentNullException(nameof(targetFieldMetadata));
-            Progress = progress;
+            Progress = progress ?? IProgressReporter.Silent;
         }
 
         /// <summary>
@@ -65,9 +65,9 @@ namespace PPDS.Migration.Import
         public FieldMetadataCollection TargetFieldMetadata { get; }
 
         /// <summary>
-        /// Gets the optional progress reporter.
+        /// Gets the progress reporter (never null; defaults to <see cref="IProgressReporter.Silent"/>).
         /// </summary>
-        public IProgressReporter? Progress { get; }
+        public IProgressReporter Progress { get; }
 
         /// <summary>
         /// Gets or sets the target environment's root business unit ID.

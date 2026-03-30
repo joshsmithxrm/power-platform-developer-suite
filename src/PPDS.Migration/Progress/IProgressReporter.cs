@@ -37,5 +37,20 @@ namespace PPDS.Migration.Progress
         /// Use this between phases (e.g., between export and import in a copy operation).
         /// </summary>
         void Reset();
+
+        /// <summary>
+        /// A no-op reporter that silently discards all progress reports.
+        /// Use as a null object: <c>reporter ?? IProgressReporter.Silent</c>.
+        /// </summary>
+        static IProgressReporter Silent { get; } = new SilentProgressReporter();
+
+        private sealed class SilentProgressReporter : IProgressReporter
+        {
+            public string OperationName { get; set; } = string.Empty;
+            public void Report(ProgressEventArgs args) { }
+            public void Complete(MigrationResult result) { }
+            public void Error(Exception exception, string? context = null) { }
+            public void Reset() { }
+        }
     }
 }

@@ -73,7 +73,9 @@ namespace PPDS.Migration.Formats
                 throw new ArgumentNullException(nameof(stream));
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress ??= IProgressReporter.Silent;
+
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Opening data archive..."
@@ -124,7 +126,7 @@ namespace PPDS.Migration.Formats
         private async Task<(IReadOnlyDictionary<string, IReadOnlyList<Entity>>, IReadOnlyDictionary<string, IReadOnlyList<ManyToManyRelationshipData>>)> ParseDataXmlAsync(
             Stream stream,
             MigrationSchema schema,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
 #if NET8_0_OR_GREATER

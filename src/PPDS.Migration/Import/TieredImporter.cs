@@ -118,7 +118,9 @@ namespace PPDS.Migration.Import
             IProgressReporter? progress = null,
             CancellationToken cancellationToken = default)
         {
-            progress?.Report(new ProgressEventArgs
+            progress ??= IProgressReporter.Silent;
+
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Reading data archive..."
@@ -126,7 +128,7 @@ namespace PPDS.Migration.Import
 
             var data = await _dataReader.ReadAsync(dataPath, progress, cancellationToken).ConfigureAwait(false);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Building dependency graph..."
@@ -149,6 +151,7 @@ namespace PPDS.Migration.Import
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
+            progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
 
             if (options.ImpersonateOwners && options.UserMappings == null)
@@ -269,7 +272,7 @@ namespace PPDS.Migration.Import
         private async Task<FieldMetadataCollection> ValidateSchemaAndHandleMissingColumnsAsync(
             MigrationData data,
             ImportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             IWarningCollector warnings,
             CancellationToken cancellationToken)
         {
@@ -288,7 +291,7 @@ namespace PPDS.Migration.Import
                 _logger?.LogError("Schema mismatch detected: {Count} columns missing in target",
                     mismatchResult.TotalMissingCount);
 
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Analyzing,
                     Message = $"Schema mismatch: {mismatchResult.TotalMissingCount} column(s) not found in target"
@@ -317,7 +320,7 @@ namespace PPDS.Migration.Import
                 });
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = $"Warning: Skipping {mismatchResult.TotalMissingCount} column(s) not found in target"
@@ -332,7 +335,7 @@ namespace PPDS.Migration.Import
         private async Task<IReadOnlyList<Guid>> DisablePluginsForImportAsync(
             MigrationData data,
             ImportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             if (!options.RespectDisablePluginsSetting || _pluginStepManager == null)
@@ -350,7 +353,7 @@ namespace PPDS.Migration.Import
                 return Array.Empty<Guid>();
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = $"Disabling plugins for {entitiesToDisablePlugins.Count} entities..."
@@ -375,7 +378,7 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task EnablePluginsAfterImportAsync(
             IReadOnlyList<Guid> disabledPluginSteps,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             IWarningCollector warnings)
         {
             if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
@@ -383,7 +386,7 @@ namespace PPDS.Migration.Import
                 return;
             }
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Complete,
                 Message = $"Re-enabling {disabledPluginSteps.Count} plugin steps..."
@@ -431,7 +434,7 @@ namespace PPDS.Migration.Import
 
                 context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
 
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Importing,
                     TierNumber = tier.TierNumber,
@@ -519,7 +522,7 @@ namespace PPDS.Migration.Import
                     ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
                     : $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
 
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Importing,
                     TierNumber = tier.TierNumber,
@@ -553,7 +556,7 @@ namespace PPDS.Migration.Import
             TimeSpan phase2Duration,
             TimeSpan phase3Duration,
             ImportOptions options,
-            IProgressReporter? progress)
+            IProgressReporter progress)
         {
             var result = new ImportResult
             {
@@ -600,7 +603,7 @@ namespace PPDS.Migration.Import
             var totalUpdated = hasUpdated ? (int?)updatedAgg : null;
             var totalFailureCount = recordFailureCount + relationshipResult.FailureCount;
 
-            progress?.Complete(new MigrationResult
+            progress.Complete(new MigrationResult
             {
                 Success = result.Success,
                 SourceRecordCount = sourceRecordCount,
@@ -632,10 +635,10 @@ namespace PPDS.Migration.Import
             TimeSpan duration,
             Exception ex,
             ImportOptions options,
-            IProgressReporter? progress)
+            IProgressReporter progress)
         {
             var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
-            progress?.Error(ex, "Import failed");
+            progress.Error(ex, "Import failed");
 
             var exceptionError = new MigrationError
             {
@@ -808,23 +811,21 @@ namespace PPDS.Migration.Import
             var ownerMapping = ownerMappingList?.ToArray();
 
             // Create progress adapter that bridges BulkOperationExecutor progress to IProgressReporter
-            var progressAdapter = progress != null
-                ? new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
+            var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
+            {
+                progress.Report(new ProgressEventArgs
                 {
-                    progress.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Importing,
-                        Entity = entityName,
-                        TierNumber = tierNumber,
-                        Current = (int)snapshot.Processed,
-                        Total = (int)snapshot.Total,
-                        SuccessCount = (int)snapshot.Succeeded,
-                        FailureCount = (int)snapshot.Failed,
-                        RecordsPerSecond = snapshot.RatePerSecond,
-                        EstimatedRemaining = snapshot.EstimatedRemaining
-                    });
-                })
-                : null;
+                    Phase = MigrationPhase.Importing,
+                    Entity = entityName,
+                    TierNumber = tierNumber,
+                    Current = (int)snapshot.Processed,
+                    Total = (int)snapshot.Total,
+                    SuccessCount = (int)snapshot.Succeeded,
+                    FailureCount = (int)snapshot.Failed,
+                    RecordsPerSecond = snapshot.RatePerSecond,
+                    EstimatedRemaining = snapshot.EstimatedRemaining
+                });
+            });
 
             // Pass ALL records to BulkOperationExecutor - it handles batching dynamically
             var bulkOptions = new BulkOperationOptions

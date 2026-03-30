@@ -108,7 +108,7 @@ namespace PPDS.Migration.Import
                     updates.Count, entityName, fieldList);
 
                 // Report initial progress
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.ProcessingDeferredFields,
                     Entity = entityName,
@@ -160,7 +160,7 @@ namespace PPDS.Migration.Import
             // Create progress adapter
             var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
             {
-                context.Progress?.Report(new ProgressEventArgs
+                context.Progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.ProcessingDeferredFields,
                     Entity = entityName,
@@ -233,7 +233,7 @@ namespace PPDS.Migration.Import
                 // Report progress periodically (every 100 records)
                 if ((i + 1) % 100 == 0 || i == updates.Count - 1)
                 {
-                    context.Progress?.Report(new ProgressEventArgs
+                    context.Progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.ProcessingDeferredFields,
                         Entity = entityName,

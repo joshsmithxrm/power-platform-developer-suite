@@ -75,7 +75,9 @@ namespace PPDS.Migration.Export
             IProgressReporter? progress = null,
             CancellationToken cancellationToken = default)
         {
-            progress?.Report(new ProgressEventArgs
+            progress ??= IProgressReporter.Silent;
+
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
                 Message = "Parsing schema..."
@@ -97,6 +99,7 @@ namespace PPDS.Migration.Export
             if (schema == null) throw new ArgumentNullException(nameof(schema));
             if (string.IsNullOrEmpty(outputPath)) throw new ArgumentNullException(nameof(outputPath));
 
+            progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
             var stopwatch = Stopwatch.StartNew();
             var entityResults = new ConcurrentBag<EntityExportResult>();
@@ -106,7 +109,7 @@ namespace PPDS.Migration.Export
             _logger?.LogInformation("Starting parallel export of {Count} entities with parallelism {Parallelism}",
                 schema.Entities.Count, options.DegreeOfParallelism);
 
-            progress?.Report(new ProgressEventArgs
+            progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Exporting,
                 Message = $"Exporting {schema.Entities.Count} entities..."
@@ -143,7 +146,7 @@ namespace PPDS.Migration.Export
                     }).ConfigureAwait(false);
 
                 // Export M2M relationships
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Exporting,
                     Message = "Exporting M2M relationships..."
@@ -153,7 +156,7 @@ namespace PPDS.Migration.Export
                     schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
 
                 // Write to output file
-                progress?.Report(new ProgressEventArgs
+                progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Exporting,
                     Message = "Writing output file..."
@@ -187,7 +190,7 @@ namespace PPDS.Migration.Export
                     Errors = errors.ToArray()
                 };
 
-                progress?.Complete(new MigrationResult
+                progress.Complete(new MigrationResult
                 {
                     Success = result.Success,
                     RecordsProcessed = result.RecordsExported,
@@ -204,7 +207,7 @@ namespace PPDS.Migration.Export
                 _logger?.LogError(ex, "Export failed");
 
                 var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
-                progress?.Error(ex, "Export failed");
+                progress.Error(ex, "Export failed");
 
                 return new ExportResult
                 {
@@ -226,7 +229,7 @@ namespace PPDS.Migration.Export
         private async Task<EntityExportResultWithData> ExportEntityAsync(
             EntitySchema entitySchema,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             var entityStopwatch = Stopwatch.StartNew();
@@ -260,7 +263,7 @@ namespace PPDS.Migration.Export
                             ? records.Count / entityStopwatch.Elapsed.TotalSeconds
                             : 0;
 
-                        progress?.Report(new ProgressEventArgs
+                        progress.Report(new ProgressEventArgs
                         {
                             Phase = MigrationPhase.Exporting,
                             Entity = entitySchema.LogicalName,
@@ -318,7 +321,7 @@ namespace PPDS.Migration.Export
             MigrationSchema schema,
             ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             ConcurrentBag<MigrationError> errors,
             CancellationToken cancellationToken)
         {
@@ -347,7 +350,7 @@ namespace PPDS.Migration.Export
                 {
                     // Report message-only (no Entity) to avoid 0/0 display
                     // Entity progress is reported inside ExportM2MRelationshipAsync with actual counts
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Message = $"Exporting {entitySchema.LogicalName} M2M {rel.Name}..."
@@ -388,7 +391,7 @@ namespace PPDS.Migration.Export
             RelationshipSchema rel,
             HashSet<Guid> exportedSourceIds,
             ExportOptions options,
-            IProgressReporter? progress,
+            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -431,7 +434,7 @@ namespace PPDS.Migration.Export
                 // Report progress at intervals
                 if (associations.Count - lastReportedCount >= options.ProgressInterval || !response.MoreRecords)
                 {
-                    progress?.Report(new ProgressEventArgs
+                    progress.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
                         Entity = entitySchema.LogicalName,
