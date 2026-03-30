@@ -121,6 +121,35 @@ public class ParallelExporterPartitionTests
         result.Should().Be(2);
     }
 
+    [Fact]
+    public void DeterminePartitionCount_ExplicitValue_OverridesThreshold()
+    {
+        // Explicit PageLevelParallelism should be honored even below threshold
+        var options = new ExportOptions
+        {
+            PageLevelParallelism = 4,
+            PageLevelParallelismThreshold = 5000
+        };
+
+        var result = ParallelExporter.DeterminePartitionCount(100, options);
+
+        result.Should().Be(4);
+    }
+
+    [Fact]
+    public void DeterminePartitionCount_ZeroThreshold_Returns1()
+    {
+        var options = new ExportOptions
+        {
+            PageLevelParallelism = 0,
+            PageLevelParallelismThreshold = 0
+        };
+
+        var result = ParallelExporter.DeterminePartitionCount(100_000, options);
+
+        result.Should().Be(1);
+    }
+
     #endregion
 
     #region AddPartitionFilter

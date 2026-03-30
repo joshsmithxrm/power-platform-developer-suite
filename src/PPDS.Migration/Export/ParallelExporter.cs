@@ -748,36 +748,30 @@ namespace PPDS.Migration.Export
         {
             var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
-            try
+            foreach (var entity in entities)
             {
-                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                foreach (var entity in entities)
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    // Acquire and release per query to comply with D2 (don't hold across operations)
+                    await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-                    try
+                    var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
+
+                    var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
+                    var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
+
+                    if (aliased?.Value is int count)
                     {
-                        var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
-
-                        var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
-                        var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
-
-                        if (aliased?.Value is int count)
-                        {
-                            counts[entity.LogicalName] = count;
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        // If count fails for an entity, default to 0 (sequential export)
-                        _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
+                        counts[entity.LogicalName] = count;
                     }
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger?.LogWarning(ex, "Failed to pre-fetch record counts, all entities will use sequential export");
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // If count fails for an entity, default to 0 (sequential export)
+                    _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
+                }
             }
 
             return counts;
@@ -794,11 +788,13 @@ namespace PPDS.Migration.Export
             if (options.PageLevelParallelism == 1)
                 return 1;
 
-            if (recordCount <= options.PageLevelParallelismThreshold)
-                return 1;
-
+            // Explicit partition count always honored (user override)
             if (options.PageLevelParallelism > 1)
                 return options.PageLevelParallelism;
+
+            // Auto mode: only partition above threshold
+            if (options.PageLevelParallelismThreshold <= 0 || recordCount <= options.PageLevelParallelismThreshold)
+                return 1;
 
             // Auto: scale partitions with entity size, capped at 16
             var auto = (int)(recordCount / options.PageLevelParallelismThreshold);
