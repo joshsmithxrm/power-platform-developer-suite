@@ -35,6 +35,8 @@ _SURFACE_RULES = [
     ("src/PPDS.Migration/", "cli"),
     (".claude/", "workflow"),
     ("scripts/", "workflow"),
+    ("specs/", "workflow"),
+    ("docs/", "workflow"),
     ("CLAUDE.md", "workflow"),
 ]
 
