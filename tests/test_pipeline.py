@@ -2591,6 +2591,21 @@ class TestPrGateWorkflowOnlyNoQa:
             "Workflow-only diff should have empty non_workflow set — QA is skipped"
         )
 
+    def test_specs_docs_claudemd_are_workflow_surfaces(self):
+        """AC-133/AC-134: specs/, docs/, and CLAUDE.md map to 'workflow' surface."""
+        pr_gate = _load_pr_gate("pr_gate_134_new_paths")
+
+        mock_result = unittest.mock.MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "specs/workflow-enforcement.md\ndocs/BACKLOG.md\nCLAUDE.md"
+
+        with unittest.mock.patch("subprocess.run", return_value=mock_result):
+            surfaces = pr_gate.detect_affected_surfaces("/fake/project")
+
+        assert surfaces == {"workflow"}, (
+            f"Expected only 'workflow' for specs/docs/CLAUDE.md changes, got {surfaces}"
+        )
+
     def test_mixed_surfaces_require_qa_in_hook(self, tmp_path):
         """AC-134 negative: Non-workflow surfaces DO require QA.
 

@@ -3,7 +3,7 @@
 **Status:** Draft (v8.0 — commit-aware exit validation, PR-as-source-of-truth triage, CodeQL automation, Gemini retry)
 **Version:** 8.0
 **Last Updated:** 2026-03-30
-**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
+**Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/) | [CLAUDE.md](../CLAUDE.md)
 **Surfaces:** N/A
 
 ---
