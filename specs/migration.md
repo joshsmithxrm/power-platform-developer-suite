@@ -474,6 +474,10 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | AC-46 | GUID partitions cover full space without gaps or overlaps | `GuidPartitionerTests.PartitionsCoverFullGuidSpace` | ✅ |
 | AC-47 | Each partition runs on its own pooled connection independently | `ParallelExporterPartitionTests.UsesPartitioningAboveThreshold` | ✅ |
 | AC-48 | Progress aggregates across all partitions for a single entity | `ParallelExporterPartitionTests.ProgressAggregatesAcrossPartitions` | ✅ |
+| AC-49 | Export progress reports include `FilterApplied` flag per entity | `ProgressEventArgsTests.FilterApplied_DefaultsFalse` | ✅ |
+| AC-50 | Export progress shows "(filtered)" suffix when entity has FetchXmlFilter | `ConsoleProgressReporterTests.Report_ExportWithFilter_ShowsFilteredSuffix` | ✅ |
+| AC-51 | Export logs filter description on first progress report for filtered entity | `ConsoleProgressReporterTests.Report_ExportWithFilter_ShowsFilterDescription` | ✅ |
+| AC-52 | Empty `<filter>` element in schema produces warning via progress message | `ParallelExporterFilterFeedbackTests.SummarizeFilter_EmptyFilter_ReturnsNoConditionsMessage` | ✅ |
 
 ### Edge Cases
 
