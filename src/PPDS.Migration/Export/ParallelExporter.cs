@@ -257,6 +257,17 @@ namespace PPDS.Migration.Export
             long recordCount,
             CancellationToken cancellationToken)
         {
+            // Warn when schema has a <filter> element but it parsed to empty content
+            if (entitySchema.FetchXmlFilter != null && string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter))
+            {
+                progress.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Exporting,
+                    Entity = entitySchema.LogicalName,
+                    Message = $"Warning: {entitySchema.LogicalName} has a <filter> element in the schema but it is empty — all records will be exported (no filter applied). Check the schema for a malformed filter."
+                });
+            }
+
             var partitionCount = DeterminePartitionCount(recordCount, options);
 
             if (partitionCount > 1)
@@ -281,6 +292,9 @@ namespace PPDS.Migration.Export
             try
             {
                 _logger?.LogDebug("Exporting entity {Entity} (sequential)", entitySchema.LogicalName);
+
+                var hasFilter = !string.IsNullOrEmpty(entitySchema.FetchXmlFilter);
+                var filterDescription = hasFilter ? SummarizeFilter(entitySchema.FetchXmlFilter!) : null;
 
                 await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -312,7 +326,9 @@ namespace PPDS.Migration.Export
                             Entity = entitySchema.LogicalName,
                             Current = records.Count,
                             Total = records.Count, // We don't know total upfront
-                            RecordsPerSecond = rps
+                            RecordsPerSecond = rps,
+                            FilterApplied = hasFilter,
+                            FilterDescription = filterDescription
                         });
 
                         lastReportedCount = records.Count;
@@ -377,6 +393,9 @@ namespace PPDS.Migration.Export
                 _logger?.LogInformation("Exporting entity {Entity} with {Partitions} partitions (page-level parallelism)",
                     entitySchema.LogicalName, partitionCount);
 
+                var hasFilter = !string.IsNullOrEmpty(entitySchema.FetchXmlFilter);
+                var filterDescription = hasFilter ? SummarizeFilter(entitySchema.FetchXmlFilter!) : null;
+
                 var partitions = GuidPartitioner.CreatePartitions(partitionCount);
                 var fetchXml = BuildFetchXml(entitySchema, options.PageSize);
 
@@ -409,7 +428,9 @@ namespace PPDS.Migration.Export
                             Entity = entitySchema.LogicalName,
                             Current = (int)currentTotal,
                             Total = (int)(recordCount > 0 ? Math.Max(recordCount, currentTotal) : currentTotal),
-                            RecordsPerSecond = rps
+                            RecordsPerSecond = rps,
+                            FilterApplied = hasFilter,
+                            FilterDescription = filterDescription
                         });
                     }).ConfigureAwait(false);
 
@@ -870,6 +891,41 @@ namespace PPDS.Migration.Export
             }
 
             return fetch.ToString(SaveOptions.DisableFormatting);
+        }
+
+        /// <summary>
+        /// Summarizes a FetchXML filter into a human-readable description.
+        /// Extracts attribute/operator/value from condition elements.
+        /// </summary>
+        public static string SummarizeFilter(string fetchXmlFilter)
+        {
+            try
+            {
+                var doc = XDocument.Parse($"<root>{fetchXmlFilter}</root>");
+                var conditions = doc.Descendants("condition").ToList();
+
+                if (conditions.Count == 0)
+                    return "(filter — no conditions)";
+
+                var parts = conditions.Select(c =>
+                {
+                    var attr = c.Attribute("attribute")?.Value ?? "?";
+                    var op = c.Attribute("operator")?.Value ?? "?";
+                    var val = c.Attribute("value")?.Value;
+                    return val != null ? $"{attr} {op} '{val}'" : $"{attr} {op}";
+                }).ToList();
+
+                // Cap at 3 conditions to keep output concise
+                var summary = parts.Count <= 3
+                    ? string.Join(" AND ", parts)
+                    : string.Join(" AND ", parts.Take(3)) + $" (+{parts.Count - 3} more)";
+
+                return summary;
+            }
+            catch
+            {
+                return "(filter)";
+            }
         }
 
         private string AddPaging(string fetchXml, int pageNumber, string? pagingCookie)

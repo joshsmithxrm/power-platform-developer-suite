@@ -95,6 +95,16 @@ namespace PPDS.Migration.Progress
         public IReadOnlyList<MigrationError>? ErrorSamples { get; set; }
 
         /// <summary>
+        /// Gets or sets whether a FetchXML filter is applied for this entity export.
+        /// </summary>
+        public bool FilterApplied { get; set; }
+
+        /// <summary>
+        /// Gets or sets the filter description (summarized FetchXML filter conditions).
+        /// </summary>
+        public string? FilterDescription { get; set; }
+
+        /// <summary>
         /// Gets or sets a descriptive message.
         /// </summary>
         public string? Message { get; set; }

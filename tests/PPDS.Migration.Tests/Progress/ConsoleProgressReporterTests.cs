@@ -303,6 +303,101 @@ public class ConsoleProgressReporterTests : IDisposable
 
     #endregion
 
+    #region Report() — Export Filter Feedback (#501)
+
+    [Fact]
+    public void Report_ExportWithFilter_ShowsFilteredSuffix()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Export" };
+
+        reporter.Report(new ProgressEventArgs
+        {
+            Phase = MigrationPhase.Exporting,
+            Entity = "customeraddress",
+            Current = 100,
+            Total = 100,
+            FilterApplied = true,
+            FilterDescription = "country eq 'US'"
+        });
+
+        var output = GetOutput();
+        output.Should().Contain("[Export] customeraddress (filtered):");
+    }
+
+    [Fact]
+    public void Report_ExportWithFilter_ShowsFilterDescription()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Export" };
+
+        reporter.Report(new ProgressEventArgs
+        {
+            Phase = MigrationPhase.Exporting,
+            Entity = "customeraddress",
+            Current = 100,
+            Total = 100,
+            FilterApplied = true,
+            FilterDescription = "country eq 'US' AND statecode eq '0'"
+        });
+
+        var output = GetOutput();
+        output.Should().Contain("filter: country eq 'US' AND statecode eq '0'");
+    }
+
+    [Fact]
+    public void Report_ExportWithoutFilter_NoFilteredSuffix()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Export" };
+
+        reporter.Report(new ProgressEventArgs
+        {
+            Phase = MigrationPhase.Exporting,
+            Entity = "account",
+            Current = 50,
+            Total = 100,
+            FilterApplied = false
+        });
+
+        var output = GetOutput();
+        output.Should().Contain("[Export] account:");
+        output.Should().NotContain("(filtered)");
+        output.Should().NotContain("filter:");
+    }
+
+    [Fact]
+    public void Report_ExportFilterDescription_ShownOnlyOnFirstReport()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Export" };
+
+        // First report for entity — should show filter description
+        reporter.Report(new ProgressEventArgs
+        {
+            Phase = MigrationPhase.Exporting,
+            Entity = "customeraddress",
+            Current = 100,
+            Total = 200,
+            FilterApplied = true,
+            FilterDescription = "country eq 'US'"
+        });
+
+        // Second report for same entity — should NOT show filter description again
+        reporter.Report(new ProgressEventArgs
+        {
+            Phase = MigrationPhase.Exporting,
+            Entity = "customeraddress",
+            Current = 200,
+            Total = 200,
+            FilterApplied = true,
+            FilterDescription = "country eq 'US'"
+        });
+
+        var output = GetOutput();
+        // Filter description should appear exactly once
+        var filterLines = output.Split('\n').Count(l => l.Contains("filter: country eq 'US'"));
+        filterLines.Should().Be(1);
+    }
+
+    #endregion
+
     #region Complete() — Basic Output
 
     [Fact]

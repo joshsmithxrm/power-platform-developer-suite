@@ -80,13 +80,22 @@ namespace PPDS.Migration.Progress
                         var rps = args.RecordsPerSecond.HasValue ? $" @ {args.RecordsPerSecond:F1} rec/s" : "";
                         var pct = args.Total > 0 ? $" ({args.PercentComplete:F0}%)" : "";
                         var eta = args.EstimatedRemaining.HasValue ? $" | ETA: {FormatEta(args.EstimatedRemaining.Value)}" : "";
+                        var filterInfo = args.FilterApplied ? " (filtered)" : "";
 
                         // Show success/failure breakdown if there are failures
                         var failureInfo = args.FailureCount > 0
                             ? $" [{args.SuccessCount} ok, {args.FailureCount} failed]"
                             : "";
 
-                        Console.Error.WriteLine($"{prefix} [{phase}] {args.Entity}{relInfo}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
+                        Console.Error.WriteLine($"{prefix} [{phase}] {args.Entity}{relInfo}{tierInfo}{filterInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
+
+                        // Show filter description on first progress report for this entity
+                        if (isNewEntity && args.FilterApplied && !string.IsNullOrEmpty(args.FilterDescription))
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkGray;
+                            Console.Error.WriteLine($"        filter: {args.FilterDescription}");
+                            Console.ResetColor();
+                        }
 
                         // Show sample errors for real-time visibility
                         if (args.FailureCount > 0 && args.ErrorSamples?.Count > 0)

@@ -99,4 +99,26 @@ public class ProgressEventArgsTests
 
         args.PercentComplete.Should().Be(100);
     }
+
+    [Fact]
+    public void FilterApplied_DefaultsFalse()
+    {
+        var args = new ProgressEventArgs();
+
+        args.FilterApplied.Should().BeFalse();
+        args.FilterDescription.Should().BeNull();
+    }
+
+    [Fact]
+    public void FilterApplied_CanBeSetAndRetrieved()
+    {
+        var args = new ProgressEventArgs
+        {
+            FilterApplied = true,
+            FilterDescription = "statecode eq '0'"
+        };
+
+        args.FilterApplied.Should().BeTrue();
+        args.FilterDescription.Should().Be("statecode eq '0'");
+    }
 }
