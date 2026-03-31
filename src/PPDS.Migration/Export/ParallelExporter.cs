@@ -293,7 +293,7 @@ namespace PPDS.Migration.Export
             {
                 _logger?.LogDebug("Exporting entity {Entity} (sequential)", entitySchema.LogicalName);
 
-                var hasFilter = !string.IsNullOrEmpty(entitySchema.FetchXmlFilter);
+                var hasFilter = !string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter);
                 var filterDescription = hasFilter ? SummarizeFilter(entitySchema.FetchXmlFilter!) : null;
 
                 await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -393,7 +393,7 @@ namespace PPDS.Migration.Export
                 _logger?.LogInformation("Exporting entity {Entity} with {Partitions} partitions (page-level parallelism)",
                     entitySchema.LogicalName, partitionCount);
 
-                var hasFilter = !string.IsNullOrEmpty(entitySchema.FetchXmlFilter);
+                var hasFilter = !string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter);
                 var filterDescription = hasFilter ? SummarizeFilter(entitySchema.FetchXmlFilter!) : null;
 
                 var partitions = GuidPartitioner.CreatePartitions(partitionCount);
@@ -922,8 +922,9 @@ namespace PPDS.Migration.Export
 
                 return summary;
             }
-            catch
+            catch (Exception)
             {
+                // Best-effort summary — malformed XML should not break export
                 return "(filter)";
             }
         }
