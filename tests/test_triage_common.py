@@ -7,10 +7,16 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 
+import subprocess
+from unittest.mock import patch
+
 from triage_common import (
     build_triage_prompt,
+    detect_gemini_overload,
     format_reply_body,
     get_repo_slug,
+    get_unreplied_comments,
+    is_triage_complete,
     parse_triage_json,
     parse_triage_jsonl,
     parse_triage_stage_log,
@@ -194,3 +200,220 @@ class TestFormatReplyBody:
             "action": "fixed", "description": "patched",
         })
         assert body == "patched"
+
+
+# ---------------------------------------------------------------------------
+# get_unreplied_comments (AC-139)
+# ---------------------------------------------------------------------------
+
+
+class TestGetUnrepliedComments:
+    def test_returns_unreplied_bot_comments(self, tmp_path):
+        """AC-139: get_unreplied_comments returns Gemini + CodeQL comments with no reply."""
+        comments = [
+            {"id": 1, "user": {"login": "gemini-code-assist[bot]"}, "in_reply_to_id": None,
+             "path": "src/foo.py", "line": 10, "body": "Issue here"},
+            {"id": 2, "user": {"login": "github-advanced-security[bot]"}, "in_reply_to_id": None,
+             "path": "src/bar.py", "line": 5, "body": "Security issue"},
+            {"id": 3, "user": {"login": "human"}, "in_reply_to_id": 1,
+             "path": "src/foo.py", "line": 10, "body": "Fixed"},
+        ]
+        # Comment 1 has a reply (id 3), comment 2 does not
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+
+        assert len(result) == 1
+        assert result[0]["id"] == 2
+
+    def test_returns_empty_in_shakedown(self, tmp_path):
+        """AC-139: shakedown mode returns empty list without calling GitHub."""
+        result = get_unreplied_comments(str(tmp_path), 42, shakedown=True)
+        assert result == []
+
+    def test_returns_empty_on_no_bot_comments(self, tmp_path):
+        """AC-139: returns empty when no bot comments exist."""
+        comments = [
+            {"id": 1, "user": {"login": "human"}, "in_reply_to_id": None,
+             "path": "src/foo.py", "line": 10, "body": "Comment"},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+        assert result == []
+
+    def test_returns_empty_when_all_bot_comments_replied(self, tmp_path):
+        """AC-139: returns empty when every bot comment has a reply."""
+        comments = [
+            {"id": 1, "user": {"login": "gemini-code-assist[bot]"}, "in_reply_to_id": None,
+             "path": "src/a.py", "line": 1, "body": "Issue A"},
+            {"id": 2, "user": {"login": "human"}, "in_reply_to_id": 1,
+             "path": "src/a.py", "line": 1, "body": "Addressed"},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+        assert result == []
+
+    def test_is_triage_complete_delegates(self, tmp_path):
+        """AC-139: is_triage_complete returns True when no unreplied comments."""
+        with patch("triage_common.get_unreplied_comments", return_value=[]):
+            assert is_triage_complete(str(tmp_path), 42) is True
+
+        with patch("triage_common.get_unreplied_comments",
+                   return_value=[{"id": 1}]):
+            assert is_triage_complete(str(tmp_path), 42) is False
+
+
+# ---------------------------------------------------------------------------
+# reconciliation_loop (AC-140)
+# ---------------------------------------------------------------------------
+
+
+class TestReconciliationLoop:
+    def test_successive_calls_reflect_reply_state(self, tmp_path):
+        """AC-140: get_unreplied_comments returns different results as replies appear."""
+        # First call: one unreplied bot comment
+        comments_before = [
+            {"id": 10, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None, "path": "x.py", "line": 1, "body": "Fix"},
+        ]
+        # Second call: same bot comment now has a reply
+        comments_after = [
+            {"id": 10, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None, "path": "x.py", "line": 1, "body": "Fix"},
+            {"id": 11, "user": {"login": "ppds-bot"}, "in_reply_to_id": 10,
+             "path": "x.py", "line": 1, "body": "Fixed in abc"},
+        ]
+
+        mock_result_before = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments_before), stderr="")
+        mock_result_after = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments_after), stderr="")
+
+        with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+            with patch("triage_common.subprocess.run", return_value=mock_result_before):
+                first = get_unreplied_comments(str(tmp_path), 42)
+            with patch("triage_common.subprocess.run", return_value=mock_result_after):
+                second = get_unreplied_comments(str(tmp_path), 42)
+
+        assert len(first) == 1
+        assert first[0]["id"] == 10
+        assert len(second) == 0
+
+
+# ---------------------------------------------------------------------------
+# detect_gemini_overload (AC-141)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectGeminiOverload:
+    def test_detects_overload_message(self, tmp_path):
+        """AC-141: detect_gemini_overload returns True on overload message."""
+        comments = [
+            {"user": {"login": "gemini-code-assist[bot]"},
+             "body": "We're experiencing higher than usual traffic. Unable to create review."},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                assert detect_gemini_overload(str(tmp_path), 42) is True
+
+    def test_returns_false_on_normal_comments(self, tmp_path):
+        """AC-141: detect_gemini_overload returns False on normal review comments."""
+        comments = [
+            {"user": {"login": "gemini-code-assist[bot]"},
+             "body": "Here is a summary of the review."},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                assert detect_gemini_overload(str(tmp_path), 42) is False
+
+    def test_returns_false_in_shakedown(self, tmp_path):
+        """AC-141: shakedown mode returns False without calling GitHub."""
+        assert detect_gemini_overload(str(tmp_path), 42, shakedown=True) is False
+
+    def test_detects_unable_to_create_variant(self, tmp_path):
+        """AC-141: detect_gemini_overload matches 'unable to create' substring."""
+        comments = [
+            {"user": {"login": "gemini-code-assist[bot]"},
+             "body": "Sorry, I was unable to create a review at this time."},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                assert detect_gemini_overload(str(tmp_path), 42) is True
+
+    def test_ignores_non_gemini_bot_overload(self, tmp_path):
+        """AC-141: overload message from a non-Gemini user is ignored."""
+        comments = [
+            {"user": {"login": "some-other-bot"},
+             "body": "We're experiencing higher than usual traffic."},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                assert detect_gemini_overload(str(tmp_path), 42) is False
+
+
+# ---------------------------------------------------------------------------
+# unified triage pass (AC-145)
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedTriagePass:
+    def test_handles_both_gemini_and_codeql_comments(self, tmp_path):
+        """AC-145: get_unreplied_comments returns both Gemini and CodeQL unreplied."""
+        comments = [
+            {"id": 100, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None,
+             "path": "src/a.py", "line": 5, "body": "Style issue"},
+            {"id": 200, "user": {"login": "github-advanced-security[bot]"},
+             "in_reply_to_id": None,
+             "path": "src/b.py", "line": 20, "body": "Potential vulnerability"},
+            {"id": 300, "user": {"login": "human"}, "in_reply_to_id": None,
+             "path": "src/c.py", "line": 1, "body": "Human comment"},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+
+        assert len(result) == 2
+        ids = {c["id"] for c in result}
+        assert ids == {100, 200}
+
+    def test_unified_triage_filters_replied_from_both_bots(self, tmp_path):
+        """AC-145: replied comments from either bot are excluded."""
+        comments = [
+            {"id": 100, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None,
+             "path": "src/a.py", "line": 5, "body": "Style issue"},
+            {"id": 200, "user": {"login": "github-advanced-security[bot]"},
+             "in_reply_to_id": None,
+             "path": "src/b.py", "line": 20, "body": "Potential vuln"},
+            {"id": 300, "user": {"login": "dev"}, "in_reply_to_id": 100,
+             "path": "src/a.py", "line": 5, "body": "Fixed"},
+            {"id": 400, "user": {"login": "dev"}, "in_reply_to_id": 200,
+             "path": "src/b.py", "line": 20, "body": "Dismissed"},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(comments), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+
+        assert result == []

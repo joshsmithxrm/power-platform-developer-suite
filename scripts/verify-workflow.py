@@ -323,9 +323,12 @@ def test_pr_gate_allows(ctx: ScenarioContext) -> ScenarioResult:
         "branch": "feat/test",
         "phase": "implementing",
         "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
-        "verify": {"cli": "2026-03-28T00:00:00Z"},
-        "qa": {"cli": "2026-03-28T00:00:00Z"},
-        "review": {"passed": "2026-03-28T00:00:00Z"},
+        "verify": {
+            "cli": "2026-03-28T00:00:00Z", "cli_commit_ref": head_sha,
+            "workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha,
+        },
+        "qa": {"cli": "2026-03-28T00:00:00Z", "cli_commit_ref": head_sha},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
     })
     stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
     result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
@@ -411,6 +414,70 @@ def test_resume_detection(ctx: ScenarioContext) -> ScenarioResult:
         for step in ["/gates", "/verify", "/qa"]:
             if step in required_section:
                 return fail(ctx, f"{step} should not be in Required list (already complete)")
+    return pass_result(ctx)
+
+
+# ===========================================================================
+# Scenarios — Commit-Aware Validation (v8.0)
+# ===========================================================================
+
+@scenario("commit-ref-validation")
+def test_commit_ref_validation(ctx: ScenarioContext) -> ScenarioResult:
+    """PR gate blocks when gates.commit_ref doesn't match HEAD, passes when it does."""
+    project_root = get_project_root()
+    head_sha = get_head_sha(project_root)
+
+    # Test 1: Wrong commit_ref -> blocked
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "wrong_sha_1234567890"},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},  # workflow-only, no QA needed
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 2:
+        return fail(ctx, f"Expected exit 2 for wrong commit_ref, got {result.returncode}. stderr: {result.stderr[:300]}")
+
+    # Test 2: Correct commit_ref -> allowed
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},  # workflow-only, no QA needed
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 0:
+        return fail(ctx, f"Expected exit 0 for correct commit_ref, got {result.returncode}. stderr: {result.stderr[:300]}")
+
+    return pass_result(ctx)
+
+
+@scenario("workflow-only-no-qa")
+def test_workflow_only_no_qa(ctx: ScenarioContext) -> ScenarioResult:
+    """Workflow-only diff passes PR gate without QA entries."""
+    project_root = get_project_root()
+    head_sha = get_head_sha(project_root)
+
+    # State with gates, verify(workflow), review -- but NO qa entries
+    # This should pass because the diff is workflow-only
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 0:
+        return fail(ctx, f"Expected exit 0 for workflow-only diff (no QA needed), got {result.returncode}. stderr: {result.stderr[:300]}")
+
     return pass_result(ctx)
 
 
