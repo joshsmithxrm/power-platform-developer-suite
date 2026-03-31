@@ -38,6 +38,11 @@ def main():
     if isinstance(state.get("gates"), dict):
         state["gates"]["passed"] = None
 
+    # Clear review (codebase changed — AC-136)
+    if isinstance(state.get("review"), dict):
+        state["review"]["passed"] = None
+        state["review"]["commit_ref"] = None
+
     # Update last_commit to current HEAD
     try:
         head = subprocess.run(

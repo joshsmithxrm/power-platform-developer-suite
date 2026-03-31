@@ -34,7 +34,9 @@ from pathlib import Path
 
 from triage_common import (
     build_triage_prompt,
+    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
+    get_unreplied_comments,
     parse_triage_stage_log,
     post_replies as _post_replies_common,
 )
@@ -917,6 +919,33 @@ def post_replies(worktree_path, pr_number, triage_results, logger):
     _post_replies_common(worktree_path, pr_number, triage_results, _log_fn)
 
 
+def _poll_codeql_check(worktree_path, pr_number, logger):
+    """Wait for CodeQL check to complete (5 min timeout)."""
+    if os.environ.get("PPDS_SHAKEDOWN"):
+        return
+    start = time.time()
+    while time.time() - start < 300:
+        try:
+            result = subprocess.run(
+                ["gh", "pr", "checks", str(pr_number),
+                 "--json", "name,state,conclusion"],
+                cwd=worktree_path, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                checks = json.loads(result.stdout)
+                codeql = [c for c in checks
+                          if "codeql" in c.get("name", "").lower()]
+                if codeql and all(c.get("state") == "COMPLETED" for c in codeql):
+                    log(logger, "pr", "CODEQL_COMPLETE",
+                        elapsed=f"{int(time.time() - start)}s")
+                    return
+        except (subprocess.TimeoutExpired, FileNotFoundError,
+                json.JSONDecodeError, OSError):
+            pass
+        time.sleep(30)
+    log(logger, "pr", "CODEQL_TIMEOUT")
+
+
 def run_pr_stage(worktree_path, logger, dry_run=False):
     """Scripted PR stage: draft → poll Gemini → triage → ready → notify."""
     log(logger, "pr", "START")
@@ -1062,13 +1091,34 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         log(logger, "pr", "DONE", exit=-1, duration=f"{int(time.time() - start)}s")
         return -1, logger
 
-    # 5. Poll for Gemini comments
+    # 5. Poll for CodeQL completion (AC-144) — 5 min timeout
+    _poll_codeql_check(worktree_path, pr_number, logger)
+
+    # 6. Poll for Gemini comments
     comments = poll_gemini(worktree_path, pr_number, logger)
 
-    # 6. Handle triage or annotation
+    # 7. Handle triage or annotation
     annotation = None
     if not comments:
-        annotation = "\n\n**Gemini:** no review received within 5 minutes."
+        # Check for Gemini overload (AC-141, AC-142)
+        if detect_gemini_overload(worktree_path, pr_number):
+            log(logger, "pr", "GEMINI_OVERLOAD_DETECTED")
+            # Post /gemini review to retry
+            repo = get_repo_slug(worktree_path)
+            if repo:
+                try:
+                    subprocess.run(
+                        ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+                         "-f", "body=/gemini review"],
+                        cwd=worktree_path, capture_output=True, text=True, timeout=15,
+                    )
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    pass
+            # Re-poll for 5 more minutes
+            comments = poll_gemini(worktree_path, pr_number, logger,
+                                   min_wait=30, max_wait=300)
+        if not comments:
+            annotation = "\n\n**Gemini:** no review received within 5 minutes."
     else:
         triage_results = run_triage(worktree_path, pr_number, comments, logger,
                                     dry_run=dry_run)
@@ -1088,6 +1138,21 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
                 remote_head = remote_result.stdout.split()[0] if remote_result.stdout.strip() else ""
                 if local_head == remote_head:
                     post_replies(worktree_path, pr_number, triage_results, logger)
+                    # Reconciliation: re-check for unreplied and re-triage delta (AC-140)
+                    for recon_round in range(3):
+                        unreplied = get_unreplied_comments(
+                            worktree_path, pr_number,
+                            shakedown=bool(os.environ.get("PPDS_SHAKEDOWN")))
+                        if not unreplied:
+                            break
+                        log(logger, "pr", "RECONCILE",
+                            round=recon_round + 1, unreplied=len(unreplied))
+                        delta_results = run_triage(
+                            worktree_path, pr_number, unreplied, logger,
+                            dry_run=dry_run)
+                        if delta_results:
+                            post_replies(worktree_path, pr_number,
+                                         delta_results, logger)
                 else:
                     log(logger, "pr", "PUSH_MISMATCH",
                         local=local_head[:8], remote=remote_head[:8])
@@ -1113,18 +1178,12 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
             cwd=worktree_path, capture_output=True, text=True, timeout=30,
         )
 
-    # 7. Convert draft → ready
+    # 8. Convert draft → ready
     subprocess.run(
         ["gh", "pr", "ready", pr_number],
         cwd=worktree_path, capture_output=True, text=True, timeout=30,
     )
     log(logger, "pr", "PR_READY", url=pr_url)
-
-    # 8. Write final workflow state
-    subprocess.run(
-        ["python", "scripts/workflow-state.py", "set", "pr.gemini_triaged", "true"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=10,
-    )
 
     duration = int(time.time() - start)
     log(logger, "pr", "DONE", exit=0, duration=f"{duration}s")

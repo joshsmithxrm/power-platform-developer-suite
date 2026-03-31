@@ -142,6 +142,7 @@ After review completes (all findings evaluated and verdict rendered), run:
 
 ```bash
 python scripts/workflow-state.py set review.passed now
+python scripts/workflow-state.py set review.commit_ref "$(git rev-parse HEAD)"
 python scripts/workflow-state.py set review.findings {count}
 ```
 

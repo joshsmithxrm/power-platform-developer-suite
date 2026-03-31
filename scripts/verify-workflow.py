@@ -345,12 +345,17 @@ def test_state_invalidation(ctx: ScenarioContext) -> ScenarioResult:
         "branch": "feat/test",
         "phase": "implementing",
         "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "abc1234"},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "abc1234"},
         "last_commit": "abc1234",
     })
     result = ctx.run_hook("post-commit-state.py", stdin_json={})
     state = ctx.read_state()
     if state.get("gates", {}).get("passed") is not None:
         return fail(ctx, f"Expected gates.passed=null, got {state['gates'].get('passed')}")
+    if state.get("review", {}).get("passed") is not None:
+        return fail(ctx, f"Expected review.passed=null, got {state['review'].get('passed')}")
+    if state.get("review", {}).get("commit_ref") is not None:
+        return fail(ctx, f"Expected review.commit_ref=null, got {state['review'].get('commit_ref')}")
     return pass_result(ctx)
 
 

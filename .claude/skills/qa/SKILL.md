@@ -29,6 +29,7 @@ After QA passes for a surface (verdict is PASS — all checks green), run:
 
 ```bash
 python scripts/workflow-state.py set qa.{surface} now
+python scripts/workflow-state.py set qa.{surface}_commit_ref "$(git rev-parse HEAD)"
 ```
 
 Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.

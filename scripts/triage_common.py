@@ -25,6 +25,110 @@ def get_repo_slug(worktree, shakedown=False):
     return None
 
 
+def get_unreplied_comments(worktree, pr_number, shakedown=False):
+    """Return Gemini + CodeQL inline comments with no threaded reply.
+
+    Fetches all inline comments (pulls/comments endpoint) and identifies
+    bot comments from gemini-code-assist[bot] and github-advanced-security[bot]
+    that have no reply.  A reply is any comment whose in_reply_to_id matches
+    the bot comment's id.
+
+    Returns: list of unreplied comment dicts, empty list on error or no comments.
+    """
+    if shakedown:
+        return []
+
+    repo = get_repo_slug(worktree, shakedown=shakedown)
+    if not repo:
+        return []
+
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
+             "--paginate"],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return []
+        comments = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, FileNotFoundError,
+            json.JSONDecodeError, OSError):
+        return []
+
+    bot_usernames = {"gemini-code-assist[bot]", "github-advanced-security[bot]"}
+
+    bot_comments = [
+        c for c in comments
+        if c.get("user", {}).get("login") in bot_usernames
+        and c.get("in_reply_to_id") is None
+    ]
+
+    replied_to_ids = {
+        c.get("in_reply_to_id")
+        for c in comments
+        if c.get("in_reply_to_id") is not None
+    }
+
+    unreplied = [
+        {
+            "id": c.get("id"),
+            "user": c.get("user", {}).get("login"),
+            "path": c.get("path"),
+            "line": c.get("line"),
+            "body": c.get("body"),
+        }
+        for c in bot_comments
+        if c.get("id") not in replied_to_ids
+    ]
+
+    return unreplied
+
+
+def is_triage_complete(worktree, pr_number, shakedown=False):
+    """Return True when all bot comments have at least one reply."""
+    return len(get_unreplied_comments(
+        worktree, pr_number, shakedown=shakedown)) == 0
+
+
+def detect_gemini_overload(worktree, pr_number, shakedown=False):
+    """Detect if Gemini posted an overload message on the PR.
+
+    Checks issue-level comments (issues/{pr}/comments endpoint, NOT
+    pulls/comments) for a gemini-code-assist[bot] message containing
+    "higher than usual traffic" or "unable to create".
+
+    Returns: True if overload detected, False otherwise.
+    """
+    if shakedown:
+        return False
+
+    repo = get_repo_slug(worktree, shakedown=shakedown)
+    if not repo:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+             "--paginate"],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return False
+        comments = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, FileNotFoundError,
+            json.JSONDecodeError, OSError):
+        return False
+
+    for comment in comments:
+        if comment.get("user", {}).get("login") != "gemini-code-assist[bot]":
+            continue
+        body = (comment.get("body") or "").lower()
+        if "higher than usual traffic" in body or "unable to create" in body:
+            return True
+
+    return False
+
+
 def build_triage_prompt(worktree, pr_number, comments):
     """Build the triage prompt. Pure function -- no I/O except reading state.json."""
     state_path = os.path.join(worktree, ".workflow", "state.json")
