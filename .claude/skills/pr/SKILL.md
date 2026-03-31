@@ -98,127 +98,48 @@ python scripts/workflow-state.py set pr.url "{pr-url}"
 python scripts/workflow-state.py set pr.created now
 ```
 
-### 4. Wait for Gemini Review
+### 4. Launch Background Monitor (MANDATORY)
 
-Gemini posts review comments within 2-3 minutes of PR creation. Do NOT skip this step.
+The pr-monitor handles the entire post-creation lifecycle: CI polling, Gemini review wait (with overload detection + retry), CodeQL check wait, triage dispatch, threaded replies, reconciliation, draft→ready conversion, retro, and notification. It runs as a detached background process that survives session exit.
 
-**Polling strategy:**
-- Wait 90 seconds minimum after PR creation (Gemini takes 2-3 minutes)
-- Poll every 30 seconds
-- **Stabilization check:** stop polling when comment count is identical on two consecutive 30-second polls (Gemini is done posting)
-- **Max wait: 5 minutes**
-- On timeout: report that no review was received
+**This step is MANDATORY. Do not skip it. Do not attempt inline Gemini polling instead.**
 
-**How to check:**
-```bash
-# Check for reviews
-gh api repos/{owner}/{repo}/pulls/{number}/reviews --jq 'length'
-
-# Check for review comments
-gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'
-```
-
-Stop polling when reviews or comments appear (length > 0) AND comment count has stabilized (same count on two consecutive polls). CI status is NOT monitored — `/gates` already verified build/tests locally. The user checks CI on the PR page when ready to merge.
-
-### 5. Triage EVERY Review Comment
-
-This step is MANDATORY. Do not skip it. Do not defer it. Do not declare done without completing it.
-
-**Get all review comments:**
-```bash
-gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | {id, user: .user.login, path, line, body}'
-```
-
-**For each comment:**
-1. Evaluate against constitution and codebase patterns
-2. If valid (mechanical issue, real bug, correct suggestion) → fix it
-3. If invalid (conflicts with our patterns, misunderstands codebase) → dismiss with rationale
-
-**Reply directly to EACH comment** (threaded reply, not top-level):
-```bash
-# Reply to a specific review comment
-gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body="..."
-```
-
-Reply text:
-- Fixed: "Fixed in {commit SHA} — {brief description}"
-- Dismissed: "Not applicable — {rationale referencing constitution/pattern}"
-
-**Do NOT use `gh pr comment`** — that creates a top-level comment, not a threaded reply.
-
-**Common mistakes:**
-- WRONG: `gh pr comment 123 --body "Addressed all feedback"` → this is a single top-level comment, not per-comment replies
-- WRONG: Posting a summary issue comment that groups all findings → reviewers can't see which comment was addressed
-- RIGHT: Loop over each `comment_id` from the API response and POST a reply to each one individually
-- RIGHT: Each reply references the specific commit SHA or explains why the finding was dismissed
-
-**Push fixes as a new commit:**
-```bash
-git add <files>
-git commit -m "fix: address review feedback from {reviewer}"
-git push
-```
-
-### 5.5. Convert to Ready
-
-After triage is complete, convert the draft PR to ready for review:
+The monitor exists because Gemini review timing is unpredictable (2-10+ minutes). Inline polling with a fixed timeout creates a gap where late-arriving comments go untriaged. The monitor eliminates this gap.
 
 ```bash
-# Convert draft PR to ready for review
-gh pr ready {N}
+python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number}
 ```
 
-> **Note:** This is when GitHub sends the reviewer notification — after triage is complete, not at PR creation. By using draft→ready flow, reviewers are notified only when the PR is fully triaged and ready for human review, avoiding noisy intermediate notifications.
+Launch as a detached background process:
+- Windows: `subprocess.Popen(..., creationflags=subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NEW_PROCESS_GROUP)`
+- Unix: `subprocess.Popen(..., start_new_session=True)`
 
-### 6. Present Summary
-
-After comments are triaged and responded to:
-
-```
-PR ready for review: {url}
-
-Gemini review: {N} comments
-  Fixed: {count} ({brief list})
-  Dismissed: {count} ({brief list})
-
-CI: running — check PR page for status.
-
-Awaiting your review.
-```
-
-### 7. Write Triage State
-
-After Gemini comments are triaged (step 5 complete):
-
+After launching, verify the PID file was written:
 ```bash
-python scripts/workflow-state.py set pr.gemini_triaged true
+cat .workflow/pr-monitor.pid
 ```
 
-Note: `pr.url` and `pr.created` are already written in Step 3, immediately after PR creation. This ensures state is consistent even if the session terminates before reaching this step.
+If the monitor fails to launch (e.g., `claude` command not found), fall back to manual triage: wait inline, triage comments yourself, convert to ready. But this is the exception, not the norm.
 
-The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 5.
+### 5. Present Summary and Return
 
-### 8. Notify
-
-Fire a desktop toast so the user knows the PR is ready:
-
-```bash
-python .claude/hooks/notify.py --title "PR Ready" --msg "Gemini triaged — click to review" --url "{pr-url}"
-```
-
-This fires after `gh pr ready` converts the draft to ready for review. Notification timing is correct because the PR remains in draft state until triage completes — reviewers and the user are notified simultaneously when the PR is actually ready.
-
-## Timeout Behavior
-
-If Gemini doesn't post within 5 minutes:
+The monitor is now handling the lifecycle. Present status and return control to the user:
 
 ```
-PR created: {url}
-Gemini: no review received within 5 minutes.
-CI: running — check PR page for status.
+PR created (draft): {url}
+Monitor launched (PID {pid}) — handling:
+  • CI polling (15 min timeout)
+  • Gemini review wait (5 min, with overload retry)
+  • CodeQL check wait (5 min)
+  • Triage + threaded replies
+  • Draft → ready conversion (after triage)
+  • Retro + notification
 
-Awaiting your review.
+Check progress: /status
+Monitor log: .workflow/pr-monitor.log
 ```
+
+Do NOT wait for the monitor to finish. Do NOT do inline Gemini polling. The monitor handles everything asynchronously.
 
 ## Error Handling
 
@@ -227,34 +148,4 @@ Awaiting your review.
 | Rebase conflicts | Present conflicts to user, do NOT auto-resolve |
 | PR creation fails | Check `gh auth status`, suggest `gh auth login` if needed |
 | Push rejected | Check if branch is behind, suggest rebase |
-
-### 9. Launch Background Monitor (Interactive Mode)
-
-After creating the PR, in interactive mode (when `PPDS_PIPELINE` is NOT set), launch the pr-monitor as a background process:
-
-```bash
-python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number}
-```
-
-Platform-specific detachment is handled by the caller (the skill executor):
-- Windows: Use `subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NEW_PROCESS_GROUP` in Popen creationflags
-- Unix: Use `start_new_session=True` in Popen
-
-The monitor handles: CI polling, Gemini stabilization, triage dispatch, draft→ready conversion, retro, and notification — all as a background process that survives session exit.
-
-> **Note:** If Steps 4-8 already completed (triage done, PR converted to ready, notification sent), the monitor should skip triage and draft→ready conversion. It only needs to handle CI polling, retro, and notification for CI completion. Check `pr.gemini_triaged` in workflow state to determine if triage was already performed.
-
-### 10. Retro (Interactive Mode — only if pr-monitor was NOT launched)
-
-If Step 9 launched the pr-monitor, **skip this step** — the monitor already handles retro as part of its lifecycle. Running retro here AND in the monitor causes double retro.
-
-Only spawn a retro subagent if the pr-monitor was NOT launched (e.g., in pipeline mode or if monitor launch failed):
-
-```
-Agent tool:
-  subagent_type: general-purpose
-  prompt: "/retro"
-  run_in_background: true
-```
-
-This is a fallback retro for cases where the pr-monitor is not running.
+| Monitor fails to launch | Fall back to inline triage (wait for comments, triage, convert to ready) |
