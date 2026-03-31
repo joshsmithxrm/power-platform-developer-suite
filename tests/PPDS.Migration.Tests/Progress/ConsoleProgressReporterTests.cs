@@ -336,11 +336,11 @@ public class ConsoleProgressReporterTests : IDisposable
             Current = 100,
             Total = 100,
             FilterApplied = true,
-            FilterDescription = "country eq 'US' AND statecode eq '0'"
+            FilterDescription = "country eq 'US', statecode eq '0'"
         });
 
         var output = GetOutput();
-        output.Should().Contain("filter: country eq 'US' AND statecode eq '0'");
+        output.Should().Contain("filter: country eq 'US', statecode eq '0'");
     }
 
     [Fact]

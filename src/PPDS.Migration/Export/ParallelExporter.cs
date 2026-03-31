@@ -257,9 +257,23 @@ namespace PPDS.Migration.Export
             long recordCount,
             CancellationToken cancellationToken)
         {
-            // Warn when schema has a <filter> element but it parsed to empty content
-            if (entitySchema.FetchXmlFilter != null && string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter))
+            // Warn when schema has a <filter> element but it contains no conditions
+            if (!string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter))
             {
+                var summary = SummarizeFilter(entitySchema.FetchXmlFilter);
+                if (summary == NoConditionsSummary)
+                {
+                    progress.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = entitySchema.LogicalName,
+                        Message = $"Warning: {entitySchema.LogicalName} has a <filter> element in the schema but it contains no conditions — all records will be exported. Check the schema for a malformed filter."
+                    });
+                }
+            }
+            else if (entitySchema.FetchXmlFilter != null)
+            {
+                // FetchXmlFilter is empty/whitespace — <filter> element existed but was empty
                 progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Exporting,
@@ -893,9 +907,12 @@ namespace PPDS.Migration.Export
             return fetch.ToString(SaveOptions.DisableFormatting);
         }
 
+        internal const string NoConditionsSummary = "(filter — no conditions)";
+
         /// <summary>
         /// Summarizes a FetchXML filter into a human-readable description.
         /// Extracts attribute/operator/value from condition elements.
+        /// Uses neutral separator since filters may mix AND/OR logic.
         /// </summary>
         public static string SummarizeFilter(string fetchXmlFilter)
         {
@@ -905,20 +922,29 @@ namespace PPDS.Migration.Export
                 var conditions = doc.Descendants("condition").ToList();
 
                 if (conditions.Count == 0)
-                    return "(filter — no conditions)";
+                    return NoConditionsSummary;
 
                 var parts = conditions.Select(c =>
                 {
                     var attr = c.Attribute("attribute")?.Value ?? "?";
                     var op = c.Attribute("operator")?.Value ?? "?";
                     var val = c.Attribute("value")?.Value;
+
+                    // Check for child <value> elements (used by 'in', 'not-in' operators)
+                    if (val == null)
+                    {
+                        var childValues = c.Elements("value").Select(v => v.Value).ToList();
+                        if (childValues.Count == 1) val = childValues[0];
+                        else if (childValues.Count > 1) val = string.Join(",", childValues);
+                    }
+
                     return val != null ? $"{attr} {op} '{val}'" : $"{attr} {op}";
                 }).ToList();
 
                 // Cap at 3 conditions to keep output concise
                 var summary = parts.Count <= 3
-                    ? string.Join(" AND ", parts)
-                    : string.Join(" AND ", parts.Take(3)) + $" (+{parts.Count - 3} more)";
+                    ? string.Join(", ", parts)
+                    : string.Join(", ", parts.Take(3)) + $" (+{parts.Count - 3} more)";
 
                 return summary;
             }

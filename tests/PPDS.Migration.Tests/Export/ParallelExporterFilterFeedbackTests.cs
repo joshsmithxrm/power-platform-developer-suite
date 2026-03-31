@@ -26,7 +26,7 @@ public class ParallelExporterFilterFeedbackTests
 
         var result = ParallelExporter.SummarizeFilter(filter);
 
-        result.Should().Be("country eq 'US' AND statecode eq '0'");
+        result.Should().Be("country eq 'US', statecode eq '0'");
     }
 
     [Fact]
@@ -77,6 +77,16 @@ public class ParallelExporterFilterFeedbackTests
 
         result.Should().Contain("x eq '1'");
         result.Should().Contain("y eq '2'");
+    }
+
+    [Fact]
+    public void SummarizeFilter_InOperatorWithChildValues_ExtractsValues()
+    {
+        var filter = "<filter><condition attribute='statecode' operator='in'><value>0</value><value>1</value></condition></filter>";
+
+        var result = ParallelExporter.SummarizeFilter(filter);
+
+        result.Should().Be("statecode in '0,1'");
     }
 
     [Fact]
