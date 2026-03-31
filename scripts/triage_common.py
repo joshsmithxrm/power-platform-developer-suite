@@ -45,8 +45,8 @@ def get_unreplied_comments(worktree, pr_number, shakedown=False):
     try:
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
-             "--paginate"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
+             "--paginate", "--slurp"],
+            cwd=worktree, capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
             return []
@@ -109,8 +109,8 @@ def detect_gemini_overload(worktree, pr_number, shakedown=False):
     try:
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
-             "--paginate"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
+             "--paginate", "--slurp"],
+            cwd=worktree, capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
             return False

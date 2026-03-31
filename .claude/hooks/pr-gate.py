@@ -101,6 +101,12 @@ def _check_triage_completeness(project_dir, state):
     pr_info = state.get("pr", {})
     pr_number = pr_info.get("number")
     if not pr_number:
+        # Try to extract from URL (pipeline writes pr.url but not pr.number)
+        pr_url = pr_info.get("url", "")
+        candidate = pr_url.rstrip("/").split("/")[-1] if pr_url else ""
+        if candidate.isdigit():
+            pr_number = int(candidate)
+    if not pr_number:
         return []  # No existing PR -- skip triage check
 
     # Import triage_common from scripts/

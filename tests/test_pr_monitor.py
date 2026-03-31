@@ -672,10 +672,11 @@ class TestCodeqlCheckPolling:
             {"name": "build", "state": "COMPLETED", "conclusion": "SUCCESS"},
         ]
 
-        with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks)):
-            # Should return without timing out
+        with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks)) as mock_run:
             _real_poll_codeql(wt, 42, logger)
-        # If we reach here, it did not hang or raise
+
+        # Should have called subprocess.run exactly once (no polling needed)
+        assert mock_run.call_count == 1, "Should return immediately when CodeQL is complete"
 
     def test_poll_codeql_waits_for_in_progress(self, tmp_path):
         """AC-144: _poll_codeql polls while CodeQL is IN_PROGRESS, returns on COMPLETED."""
@@ -733,7 +734,14 @@ class TestCodeqlCheckPolling:
              patch("pr_monitor.time.time", side_effect=advancing_time), \
              patch("pr_monitor.time.sleep"):
             _real_poll_codeql(wt, 42, logger)
-        # Should return (timeout) without raising
+
+        # Should return (timeout) without raising, and log the timeout
+        log_path = str(tmp_path / "test.log")
+        with open(log_path) as f:
+            log_content = f.read()
+        assert "TIMEOUT" in log_content, (
+            f"Expected TIMEOUT in log after CodeQL timeout, got: {log_content}"
+        )
 
     def test_poll_codeql_skips_in_shakedown(self, tmp_path):
         """AC-144: _poll_codeql returns immediately in shakedown mode."""
@@ -746,3 +754,71 @@ class TestCodeqlCheckPolling:
 
         # Should not have called subprocess at all
         mock_run.assert_not_called()
+
+
+class TestReconciliationLoop:
+    """AC-140: _reconcile_replies re-triages unreplied comments up to 3 rounds."""
+
+    def test_reconciliation_retries_unreplied(self, tmp_path):
+        """_reconcile_replies calls get_unreplied_comments and re-triages."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result_dict = pr_monitor._empty_result()
+
+        initial_triage = [{"id": 1, "action": "fixed", "description": "done", "commit": "abc"}]
+
+        # get_unreplied_comments returns 1 unreplied on first check, then 0
+        unreplied_calls = [
+            [{"id": 2, "user": "gemini-code-assist[bot]", "path": "a.py", "line": 1, "body": "issue"}],
+            [],
+        ]
+
+        with patch("pr_monitor.post_replies"), \
+             patch("pr_monitor.get_unreplied_comments", side_effect=unreplied_calls), \
+             patch("pr_monitor.run_triage", return_value=[{"id": 2, "action": "dismissed", "description": "ok", "commit": None}]) as mock_triage, \
+             patch("pr_monitor.get_repo_slug", return_value="owner/repo"), \
+             patch("pr_monitor.subprocess.run"):
+            pr_monitor._reconcile_replies(wt, 42, initial_triage, logger, result_dict, 1)
+
+        # run_triage should have been called once for the delta
+        assert mock_triage.call_count == 1
+
+
+class TestUnifiedTriagePass:
+    """AC-145: Gemini + CodeQL comments triaged in single pass."""
+
+    def test_unified_triage_both_bot_types(self, tmp_path):
+        """Both Gemini and CodeQL comments go to a single run_triage call."""
+        wt = _make_worktree(tmp_path)
+
+        mixed_comments = [
+            {"id": 1, "user": "gemini-code-assist[bot]", "path": "a.py", "line": 1, "body": "fix"},
+            {"id": 2, "user": "github-advanced-security[bot]", "path": "b.py", "line": 5, "body": "vuln"},
+        ]
+
+        # First poll returns mixed comments; subsequent polls return empty
+        # (triage handled them all) so the triage loop stops after 1 iteration.
+        gemini_calls = [0]
+
+        def mock_gemini(worktree, pr_number, logger):
+            gemini_calls[0] += 1
+            if gemini_calls[0] == 1:
+                return mixed_comments
+            return []
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", side_effect=mock_gemini), \
+             patch("pr_monitor.run_triage", return_value=[
+                 {"id": 1, "action": "fixed", "description": "done", "commit": "abc"},
+             ]) as mock_triage, \
+             patch("pr_monitor._reconcile_replies"), \
+             patch("pr_monitor._poll_codeql"), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            pr_monitor.run_monitor(wt, 1, resume=False)
+
+        # run_triage called once with both comment types in a single pass
+        assert mock_triage.call_count == 1
+        comments_arg = mock_triage.call_args[0][2]  # 3rd positional arg
+        assert len(comments_arg) == 2

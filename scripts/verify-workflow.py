@@ -631,6 +631,17 @@ def main():
                     f"{state_result.stderr.strip()}",
                     file=sys.stderr,
                 )
+            # Also stamp commit_ref (v8.0 commit-aware validation)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if head.returncode == 0:
+                subprocess.run(
+                    [sys.executable, state_py, "set", "verify.workflow_commit_ref",
+                     head.stdout.strip()],
+                    capture_output=True, text=True, timeout=10,
+                )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print("WARNING: Could not write verify.workflow timestamp", file=sys.stderr)
 
