@@ -1101,10 +1101,11 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     annotation = None
     if not comments:
         # Check for Gemini overload (AC-141, AC-142)
-        if detect_gemini_overload(worktree_path, pr_number):
+        shakedown = bool(os.environ.get("PPDS_SHAKEDOWN"))
+        if detect_gemini_overload(worktree_path, pr_number, shakedown=shakedown):
             log(logger, "pr", "GEMINI_OVERLOAD_DETECTED")
             # Post /gemini review to retry
-            repo = get_repo_slug(worktree_path)
+            repo = get_repo_slug(worktree_path, shakedown=shakedown)
             if repo:
                 try:
                     subprocess.run(
@@ -1120,8 +1121,13 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         if not comments:
             annotation = "\n\n**Gemini:** no review received within 5 minutes."
     else:
-        triage_results = run_triage(worktree_path, pr_number, comments, logger,
-                                    dry_run=dry_run)
+        # Filter to unreplied bot comments for initial triage (AC-140 hardening)
+        shakedown_flag = bool(os.environ.get("PPDS_SHAKEDOWN"))
+        unreplied_initial = get_unreplied_comments(
+            worktree_path, pr_number, shakedown=shakedown_flag)
+        triage_comments = unreplied_initial if unreplied_initial else comments
+        triage_results = run_triage(worktree_path, pr_number, triage_comments,
+                                    logger, dry_run=dry_run)
         if triage_results is None:
             annotation = "\n\n**Gemini:** triage incomplete — manual review needed."
         else:
