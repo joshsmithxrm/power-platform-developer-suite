@@ -1,8 +1,8 @@
 # Workflow Enforcement
 
-**Status:** Draft (v7.0 — comprehensive workflow overhaul: phase-aware hooks, post-PR monitor, shakedown, retro trigger)
-**Version:** 7.0
-**Last Updated:** 2026-03-27
+**Status:** Draft (v8.0 — commit-aware exit validation, PR-as-source-of-truth triage, CodeQL automation, Gemini retry)
+**Version:** 8.0
+**Last Updated:** 2026-03-30
 **Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
 
@@ -20,7 +20,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 ### Non-Goals
 
-- **Full state machine orchestration**: We enforce outcomes at exit points, not step-by-step sequencing. The AI can work in any order as long as all required steps complete before committing or creating a PR.
+- **Entry-point sequencing**: We do not block skills from running out of order. Skills can run in any order. The PR gate enforces that all stages completed against the current code via commit-ref validation. Running a stage early is allowed but will not satisfy the gate unless the commit-ref is current (or ancestral, for verify/QA).
 - **CI/CD pipeline changes**: GitHub Actions and external CI are out of scope. This spec covers the local development workflow only.
 - **Superpowers plugin replacement**: We disable superpowers for this repo and build our own skills, but we do not modify or fork the superpowers plugin itself.
 
@@ -141,13 +141,17 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
   },
   "verify": {
     "ext": "2026-03-16T16:10:00Z",
-    "tui": "2026-03-16T16:15:00Z"
+    "ext_commit_ref": "abc1234",
+    "tui": "2026-03-16T16:15:00Z",
+    "tui_commit_ref": "abc1234"
   },
   "qa": {
-    "ext": "2026-03-16T16:30:00Z"
+    "ext": "2026-03-16T16:30:00Z",
+    "ext_commit_ref": "abc1234"
   },
   "review": {
     "passed": "2026-03-16T16:45:00Z",
+    "commit_ref": "abc1234",
     "findings": 0
   },
   "pr": {
@@ -161,7 +165,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 1. Created when any skill first writes to it (e.g., `/implement` sets `branch`, `spec`, `plan`).
 2. `gates.commit_ref` stores the commit SHA that gates were verified against. Hooks compare this to HEAD.
-3. **State invalidation on commit:** The Post-Commit Hook (see below) clears `gates.passed` (sets to `null`) after every successful commit because the codebase has changed since gates last ran. `verify`, `qa`, and `review` timestamps are NOT automatically cleared on commit — they track cumulative coverage across the session.
+3. **Commit-ref validation replaces explicit invalidation:** Every stage records a `commit_ref` alongside its timestamp. The PR gate compares each stage's `commit_ref` against HEAD — tiered: `gates` and `review` must be exact HEAD match; `verify` and `qa` must be ancestor-of-HEAD (survives converge fix commits without re-running). The Post-Commit Hook still clears `gates.passed` for backwards compatibility with the stop hook, but the PR gate's commit-ref check is the authoritative validation.
 4. Skills are responsible for writing their own entries. No central coordinator.
 5. File is gitignored — it is per-session state, not committed.
 6. **Phase lifecycle:** The `phase` field tracks what kind of work the session is doing. Every entry point MUST set it. Phase determines stop hook enforcement behavior.
@@ -237,9 +241,11 @@ WORKFLOW STATE for branch feat/import-jobs:
 
 **Behavior:**
 1. Read `.workflow/state.json` if it exists.
-2. Clear `gates.passed` (set to `null`) — the codebase has changed since gates last ran.
+2. Clear `gates.passed` and `review.passed` (set to `null`) — the codebase has changed since gates and review last ran.
 3. Update `last_commit` to current HEAD.
 4. Write updated state file.
+
+Note: `verify` and `qa` timestamps are NOT cleared on commit. With tiered commit-ref validation, the PR gate checks verify/qa commit_refs are ancestral to HEAD — converge fix commits do not invalidate prior verify/qa work. Gates and review require exact HEAD match, so they must be cleared and re-run.
 
 **Implementation:** `.claude/hooks/post-commit-state.py`, triggered via a new `PostToolUse` section in `.claude/settings.json` (see Implementation Notes below).
 
@@ -250,14 +256,23 @@ This is the component responsible for state invalidation on commit (Core Require
 **Trigger:** PreToolUse on `Bash(gh pr create:*)`.
 
 **Behavior:**
-1. Read `.workflow/state.json`.
-2. Verify ALL of the following:
-   - `gates.commit_ref` matches current HEAD (gates ran against the current code).
-   - `verify` has at least one surface with a timestamp (visual verification happened).
-   - `qa` has at least one surface with a timestamp (blind verification happened).
-   - `review.passed` has a timestamp (code review completed).
-3. If any check fails, exit code 2 with a specific message listing missing steps.
-4. **This is a hard gate.** PR creation is blocked until all checks pass.
+1. Read `.workflow/state.json` and current HEAD.
+2. Detect affected surfaces from diff: `git diff --name-only origin/main...HEAD`.
+   - `src/PPDS.Extension/` → requires `verify.ext`
+   - `src/PPDS.Cli/Commands/` (not Serve/) → requires `verify.cli`
+   - `src/PPDS.Mcp/` → requires `verify.mcp`
+   - `src/PPDS.Cli/Tui/` → requires `verify.tui`
+   - `.claude/`, `scripts/` → requires `verify.workflow` (no separate QA required)
+   - Cross-cutting (`src/PPDS.Cli/Services/`, `src/PPDS.Migration/`) → requires `verify.cli`
+3. **Commit-ref validation (tiered):**
+   - `gates.commit_ref == HEAD` (exact match — gates must validate current code).
+   - `review.commit_ref == HEAD` (exact match — review must see final code).
+   - For each required verify surface: `verify.{surface}_commit_ref` is ancestor-of-HEAD (`git merge-base --is-ancestor`).
+   - For each required QA surface (non-workflow): `qa.{surface}_commit_ref` is ancestor-of-HEAD.
+   - Workflow-only diffs: `verify.workflow` required, QA not required.
+4. **Triage completeness:** All Gemini + CodeQL inline comments on the PR have threaded replies (computed from PR, not from state file).
+5. If any check fails, exit code 2 with specific message listing failures.
+6. **This is a hard gate.** PR creation is blocked until all checks pass.
 
 **Implementation:** `.claude/hooks/pr-gate.py`, triggered via `.claude/settings.json` PreToolUse matcher on `Bash(gh pr create:*)`.
 
@@ -916,6 +931,69 @@ New fields: `git_changes` (count of modified/untracked files), `commits` (rev-li
 - Used for the "last 20 lines" capture in pipeline.log
 - Used by `/status` for human-readable stage output
 
+### PR Triage Completeness (v8.0)
+
+Triage is verified by the PR itself, not by a state file flag. The `gemini_triaged` field in state is deprecated — the PR gate computes triage completeness directly from the PR's comment/reply graph.
+
+#### Comment-Reply Delta
+
+```python
+# In triage_common.py
+def get_unreplied_comments(repo, pr_number):
+    """Fetch Gemini + CodeQL comments with no threaded reply."""
+    all_comments = gh_api(f"repos/{repo}/pulls/{pr_number}/comments")
+    bot_comments = [c for c in all_comments 
+                    if c["user"]["login"] in ("gemini-code-assist[bot]", "github-advanced-security[bot]")
+                    and c["in_reply_to_id"] is None]
+    replied_to_ids = {c["in_reply_to_id"] for c in all_comments if c["in_reply_to_id"]}
+    return [c for c in bot_comments if c["id"] not in replied_to_ids]
+```
+
+This function is called by:
+- PR gate hook (blocks if unreplied > 0)
+- Pipeline PR stage (after triage, verifies completeness)
+- pr_monitor.py (reconciliation loop)
+
+#### Reconciliation Loop
+
+After triage agent runs, the monitor computes the delta:
+1. Fetch unreplied comments
+2. If unreplied > 0: re-run triage with ONLY the unreplied comments
+3. Loop up to 3 rounds
+4. If still unreplied after 3 rounds: post "manual review needed" reply to remaining and proceed
+
+### Gemini Overload Handling (v8.0)
+
+Gemini may fail to post a review due to overload. It posts an issue comment (not a review) saying "experiencing higher than usual traffic."
+
+**Detection:** After the initial 5-minute polling window, check `issues/{pr}/comments` for gemini-code-assist overload message.
+
+**Retry flow:**
+1. If overload detected: post `/gemini review` as issue comment to re-trigger
+2. Poll for review for another 5 minutes
+3. If second attempt also fails or times out: proceed without Gemini review, notify user
+4. Notification text: "Gemini overloaded after 2 attempts — PR ready but unreviewed by Gemini."
+
+### CodeQL Automation (v8.0)
+
+CodeQL findings appear as inline comments from `github-advanced-security[bot]`, not from Gemini. They are posted after the CodeQL GitHub Actions check completes.
+
+**Integration into pr_monitor.py:**
+1. Poll `gh pr checks {pr}` for the CodeQL check status
+2. When CodeQL completes: fetch inline comments from `github-advanced-security[bot]`
+3. Feed to triage agent (same prompt structure as Gemini, different source)
+4. Agent fixes trivially-actionable findings (unused variables, missing dispose, ContainsKey→TryGetValue)
+5. Non-trivial findings: agent posts reply "manual review needed"
+6. Reconciliation loop ensures all CodeQL comments have replies
+
+**Ordering:** CodeQL check typically completes 3-5 minutes after PR creation. Gemini review arrives within 2-3 minutes. The monitor polls for BOTH completion signals before starting triage — triage processes all bot comments (Gemini + CodeQL) in one pass.
+
+### Workflow Surface QA Exemption (v8.0)
+
+For workflow-only diffs (changes limited to `.claude/`, `scripts/`, `specs/`, `docs/`), the PR gate requires `verify.workflow` but does NOT require a separate QA surface. The rationale: `/verify workflow` runs 9 structural checks + 6 behavioral scenarios — structural validation IS the QA for process code. There is no product UI surface to test.
+
+The `qa.workflow` auto-stamp in `/verify workflow` (SKILL.md line 218) is removed. The PR gate detects workflow-only diffs via path heuristics and skips the QA requirement.
+
 ### CLAUDE.md Workflow Section Rewrite
 
 Replace the current workflow bullet list with:
@@ -1110,6 +1188,25 @@ After all skills in this spec are implemented:
 | AC-126 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
 | AC-127 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
 | AC-128 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
+
+| AC-129 | PR gate requires `gates.commit_ref == HEAD` (exact match) | `test_pipeline.py::test_pr_gate_exact_head_gates` | 🔲 |
+| AC-130 | PR gate requires `review.commit_ref == HEAD` (exact match) | `test_pipeline.py::test_pr_gate_exact_head_review` | 🔲 |
+| AC-131 | PR gate requires `verify.{surface}_commit_ref` is ancestor-of-HEAD for each affected surface | `test_pipeline.py::test_pr_gate_ancestor_verify` | 🔲 |
+| AC-132 | PR gate requires `qa.{surface}_commit_ref` is ancestor-of-HEAD for each affected QA surface | `test_pipeline.py::test_pr_gate_ancestor_qa` | 🔲 |
+| AC-133 | PR gate detects affected surfaces from `git diff --name-only origin/main...HEAD` path heuristics | `test_pipeline.py::test_pr_gate_surface_detection` | 🔲 |
+| AC-134 | PR gate skips QA requirement for workflow-only diffs (`.claude/`, `scripts/`, `specs/`, `docs/`) | `test_pipeline.py::test_pr_gate_workflow_only_no_qa` | 🔲 |
+| AC-135 | Every skill that writes state stamps `commit_ref` alongside its timestamp (`/gates`, `/verify`, `/qa`, `/review`) | `test_pipeline.py::test_skills_write_commit_ref` | 🔲 |
+| AC-136 | Post-commit hook clears both `gates.passed` AND `review.passed` on new commit | `test_pipeline.py::test_post_commit_clears_review` | 🔲 |
+| AC-137 | `/verify workflow` does NOT auto-stamp `qa.workflow` — stamps `verify.workflow` + `verify.workflow_commit_ref` only | `test_pipeline.py::test_verify_workflow_no_qa_stamp` | 🔲 |
+| AC-138 | PR gate computes triage completeness from PR comment/reply graph, not from `gemini_triaged` state flag | `test_pipeline.py::test_pr_gate_triage_from_pr` | 🔲 |
+| AC-139 | `triage_common.get_unreplied_comments()` returns Gemini + CodeQL comments with no threaded reply | `test_triage_common.py::test_get_unreplied_comments` | 🔲 |
+| AC-140 | Triage reconciliation loop re-triages only unreplied comments, up to 3 rounds | `test_triage_common.py::test_reconciliation_loop` | 🔲 |
+| AC-141 | pr_monitor detects Gemini overload message on `issues/{pr}/comments` endpoint | `test_pr_monitor.py::test_gemini_overload_detection` | 🔲 |
+| AC-142 | pr_monitor retries Gemini by posting `/gemini review` comment, polls for 5 more minutes | `test_pr_monitor.py::test_gemini_retry_on_overload` | 🔲 |
+| AC-143 | pr_monitor proceeds with notification after second Gemini failure/timeout | `test_pr_monitor.py::test_gemini_double_failure_notify` | 🔲 |
+| AC-144 | pr_monitor polls CodeQL check status via `gh pr checks`, fetches `github-advanced-security` comments after completion | `test_pr_monitor.py::test_codeql_check_polling` | 🔲 |
+| AC-145 | pr_monitor triages CodeQL + Gemini comments in single triage pass | `test_pr_monitor.py::test_unified_triage_pass` | 🔲 |
+| AC-146 | Converge fix commits do not invalidate verify/qa (ancestor-of-HEAD check passes) | `test_pipeline.py::test_converge_preserves_verify_qa` | 🔲 |
 
 ### Edge Cases
 
@@ -1475,6 +1572,7 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-26 | v4.0 — headless pipeline mode: relative hook paths, PPDS_PIPELINE env, Popen + polling, stage timeouts, heartbeats, stage logs. /start from worktree. /status stage log support. Commands-to-skills migration. |
 | 2026-03-26 | v5.0 — pipeline observability and PR orchestration: (1) stream-json output for real-time stage logs, (2) multi-signal activity detection, (3) JSONL post-processing, (4) pipeline lock file, (5) /status live JSONL monitoring, (6) scripted PR stage with draft→ready flow, (7) gemini-triage agent profile (Sonnet), (8) pipeline-result.json + notify on completion/failure. |
 | 2026-03-27 | v6.0 — work-type routing: (1) `/start` classifies work type (user-confirmed, labels as hints), (2) `.plans/context.md` written to worktree with issue details + work type + next step, (3) work-type-aware guidance replaces hardcoded `/design`, (4) `work_type` field in workflow state, (5) `/design` reads `context.md` instead of `design-context.md`, (6) `/design` anti-patterns updated for bug-fix path, (7) `/implement` Step 0 fallback when no spec found. |
+| 2026-03-30 | v8.0 — commit-aware exit validation: (1) tiered commit-ref validation in PR gate (exact HEAD for gates+review, ancestor for verify+qa), (2) PR-as-source-of-truth triage completeness (replaces gemini_triaged flag), (3) triage reconciliation loop with delta re-triage, (4) CodeQL automation in pr_monitor (same triage loop as Gemini), (5) Gemini overload detection + 1 auto-retry, (6) workflow surface QA exemption (verify.workflow sufficient, no qa.workflow), (7) post-commit clears review alongside gates, (8) surface-aware PR gate detects required surfaces from diff. |
 | 2026-03-27 | v7.0 — comprehensive workflow overhaul: (1) phase-aware stop hook replaces git-diff heuristic, (2) `origin/main` in all hooks/heartbeat replaces stale local `main`, (3) enforcement logging in state for retro detection, (4) `PPDS_SHAKEDOWN=1` env var, (5) post-PR monitor (`pr_monitor.py`) — decoupled background process for CI/Gemini/triage/retro/notify, (6) `/shakedown-workflow` skill — behavioral integration test for workflow changes, (7) hook path doubling investigation + workaround, (8) phase lifecycle for all entry points. Addresses issues #731, #727, #732, #730, #734, #712, #733, #728, #729, #723, #724, #715, #662. |
 
 ---

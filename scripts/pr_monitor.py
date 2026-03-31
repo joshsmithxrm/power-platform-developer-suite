@@ -27,7 +27,9 @@ from pathlib import Path
 
 from triage_common import (
     build_triage_prompt,
+    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
+    get_unreplied_comments,
     parse_triage_jsonl,
     post_replies as _post_replies_common,
 )
@@ -404,6 +406,134 @@ def post_replies(worktree, pr_number, triage_results, logger):
     )
 
 
+def _post_gemini_retry(worktree, pr_number, logger):
+    """Post /gemini review comment to trigger a new review."""
+    repo = get_repo_slug(worktree)
+    if not repo:
+        return
+    try:
+        subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+             "-f", "body=/gemini review"],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        logger.log("gemini", "RETRY_POSTED")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        logger.log("gemini", "RETRY_FAILED")
+
+
+def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
+                       triage_iteration):
+    """Post replies then reconcile unreplied comments (up to 3 rounds).
+
+    1. Posts replies for the initial triage_results.
+    2. Checks for unreplied comments via get_unreplied_comments().
+    3. If any remain, re-triages with only the delta comments (up to 3 rounds).
+    4. After 3 rounds with still-unreplied, posts "manual review needed".
+    """
+    MAX_RECONCILIATION_ROUNDS = 3
+
+    # Initial reply posting
+    try:
+        post_replies(worktree, pr_number, triage_results, logger)
+        mark_step(result, f"replies_{triage_iteration}", "done")
+    except Exception as e:
+        logger.log("replies", "EXCEPTION", error=str(e))
+        mark_step(result, f"replies_{triage_iteration}", "error")
+    write_result(worktree, result)
+
+    # Reconciliation loop
+    for recon_round in range(1, MAX_RECONCILIATION_ROUNDS + 1):
+        unreplied = get_unreplied_comments(
+            worktree, pr_number, shakedown=bool(SHAKEDOWN),
+        )
+        if not unreplied:
+            logger.log("reconcile", "COMPLETE",
+                       round=recon_round, iteration=triage_iteration)
+            return
+
+        logger.log("reconcile", "DELTA_TRIAGE",
+                   round=recon_round, unreplied=len(unreplied),
+                   iteration=triage_iteration)
+
+        # Re-triage with only unreplied comments
+        delta_results = run_triage(worktree, pr_number, unreplied, logger)
+        recon_key = f"reconcile_{triage_iteration}_r{recon_round}"
+
+        if delta_results:
+            try:
+                post_replies(worktree, pr_number, delta_results, logger)
+                mark_step(result, recon_key, "done")
+            except Exception as e:
+                logger.log("reconcile", "REPLY_ERROR",
+                           round=recon_round, error=str(e))
+                mark_step(result, recon_key, "error")
+        else:
+            logger.log("reconcile", "TRIAGE_FAILED", round=recon_round)
+            mark_step(result, recon_key, "error")
+        write_result(worktree, result)
+
+    # After max rounds, check for any still-unreplied
+    still_unreplied = get_unreplied_comments(
+        worktree, pr_number, shakedown=bool(SHAKEDOWN),
+    )
+    if still_unreplied:
+        logger.log("reconcile", "MANUAL_REVIEW_NEEDED",
+                   remaining=len(still_unreplied),
+                   iteration=triage_iteration)
+        # Post a PR comment noting manual review is needed
+        repo = get_repo_slug(worktree)
+        if repo:
+            body = (
+                f"**Workflow note:** {len(still_unreplied)} inline review "
+                f"comment(s) could not be triaged after "
+                f"{MAX_RECONCILIATION_ROUNDS} reconciliation rounds. "
+                f"Manual review needed."
+            )
+            try:
+                subprocess.run(
+                    ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+                     "-f", f"body={body}"],
+                    cwd=worktree, capture_output=True, text=True, timeout=15,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                pass
+        mark_step(result, f"reconcile_{triage_iteration}", "manual_review")
+        write_result(worktree, result)
+
+
+def _poll_codeql(worktree, pr_number, logger):
+    """Wait for CodeQL check to complete (5 min timeout)."""
+    if SHAKEDOWN:
+        logger.log("codeql", "SHAKEDOWN_SKIPPED")
+        return
+    start = time.time()
+    while time.time() - start < 300:  # 5 minutes
+        try:
+            proc_result = subprocess.run(
+                ["gh", "pr", "checks", str(pr_number),
+                 "--json", "name,state,conclusion"],
+                cwd=worktree, capture_output=True, text=True, timeout=30,
+            )
+            if proc_result.returncode == 0:
+                checks = json.loads(proc_result.stdout)
+                codeql = [c for c in checks
+                          if "codeql" in c.get("name", "").lower()]
+                if codeql:
+                    all_done = all(
+                        c.get("state") == "COMPLETED" for c in codeql
+                    )
+                    if all_done:
+                        logger.log("codeql", "COMPLETE")
+                        return
+        except (subprocess.TimeoutExpired, FileNotFoundError,
+                json.JSONDecodeError, OSError):
+            pass
+        logger.log("codeql", "POLL", elapsed=f"{int(time.time() - start)}s")
+        time.sleep(30)
+    logger.log("codeql", "TIMEOUT")
+
+
 def run_retro(worktree, logger):
     """Run claude -p '/retro' for retrospective."""
     if SHAKEDOWN:
@@ -570,9 +700,27 @@ def run_monitor(worktree, pr_number, resume=False):
         comments = []
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
+
+            # Gemini overload detection + retry (AC-141, AC-142, AC-143)
+            if not comments:
+                if detect_gemini_overload(
+                    worktree, pr_number, shakedown=bool(SHAKEDOWN),
+                ):
+                    logger.log("gemini", "OVERLOAD_DETECTED")
+                    _post_gemini_retry(worktree, pr_number, logger)
+                    # Re-poll for 5 more minutes
+                    comments = _step_gemini(
+                        worktree, pr_number, logger, result,
+                        step_suffix="_retry",
+                    )
+                    if not comments:
+                        logger.log("gemini", "OVERLOAD_RETRY_FAILED")
         else:
             # Resumed — read last known comment count
             logger.log("gemini", "RESUMED")
+
+        # ---- Step 2b: Wait for CodeQL before triage (AC-144) ----
+        _poll_codeql(worktree, pr_number, logger)
 
         # ---- Step 3: Triage loop (if inline comments) ----
         inline_count = len(comments)
@@ -597,15 +745,12 @@ def run_monitor(worktree, pr_number, resume=False):
                 step_key, triage_iteration,
             )
 
-            # Post threaded replies to Gemini comments
+            # Post threaded replies + reconciliation loop (AC-140)
             if triage_results:
-                try:
-                    post_replies(worktree, pr_number, triage_results, logger)
-                    mark_step(result, f"replies_{triage_iteration}", "done")
-                except Exception as e:
-                    logger.log("replies", "EXCEPTION", error=str(e))
-                    mark_step(result, f"replies_{triage_iteration}", "error")
-                write_result(worktree, result)
+                _reconcile_replies(
+                    worktree, pr_number, triage_results, logger, result,
+                    triage_iteration,
+                )
 
             # Re-poll CI after triage commits
             ci_recheck_key = f"ci_recheck_{triage_iteration}"

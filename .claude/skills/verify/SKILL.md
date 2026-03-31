@@ -215,7 +215,7 @@ Runs behavioral scenarios against workflow hooks and state management. Parses JS
 On all checks passing:
 ```bash
 python scripts/workflow-state.py set verify.workflow now
-python scripts/workflow-state.py set qa.workflow now
+python scripts/workflow-state.py set verify.workflow_commit_ref "$(git rev-parse HEAD)"
 ```
 
 ### 8. Report
@@ -243,10 +243,11 @@ After verification passes for a surface (verdict is PASS), run:
 
 ```bash
 python scripts/workflow-state.py set verify.{surface} now
+python scripts/workflow-state.py set verify.{surface}_commit_ref "$(git rev-parse HEAD)"
 ```
 
 Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
-Surface key `workflow`: `/verify workflow` → writes `verify.workflow` + `qa.workflow` (structural validation IS the QA for process code).
+Surface key `workflow`: `/verify workflow` → writes `verify.workflow` (structural validation for process code).
 
 ## Rules
 

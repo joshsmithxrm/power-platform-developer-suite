@@ -323,9 +323,12 @@ def test_pr_gate_allows(ctx: ScenarioContext) -> ScenarioResult:
         "branch": "feat/test",
         "phase": "implementing",
         "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
-        "verify": {"cli": "2026-03-28T00:00:00Z"},
-        "qa": {"cli": "2026-03-28T00:00:00Z"},
-        "review": {"passed": "2026-03-28T00:00:00Z"},
+        "verify": {
+            "cli": "2026-03-28T00:00:00Z", "cli_commit_ref": head_sha,
+            "workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha,
+        },
+        "qa": {"cli": "2026-03-28T00:00:00Z", "cli_commit_ref": head_sha},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
     })
     stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
     result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
@@ -345,12 +348,17 @@ def test_state_invalidation(ctx: ScenarioContext) -> ScenarioResult:
         "branch": "feat/test",
         "phase": "implementing",
         "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "abc1234"},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "abc1234"},
         "last_commit": "abc1234",
     })
     result = ctx.run_hook("post-commit-state.py", stdin_json={})
     state = ctx.read_state()
     if state.get("gates", {}).get("passed") is not None:
         return fail(ctx, f"Expected gates.passed=null, got {state['gates'].get('passed')}")
+    if state.get("review", {}).get("passed") is not None:
+        return fail(ctx, f"Expected review.passed=null, got {state['review'].get('passed')}")
+    if state.get("review", {}).get("commit_ref") is not None:
+        return fail(ctx, f"Expected review.commit_ref=null, got {state['review'].get('commit_ref')}")
     return pass_result(ctx)
 
 
@@ -406,6 +414,70 @@ def test_resume_detection(ctx: ScenarioContext) -> ScenarioResult:
         for step in ["/gates", "/verify", "/qa"]:
             if step in required_section:
                 return fail(ctx, f"{step} should not be in Required list (already complete)")
+    return pass_result(ctx)
+
+
+# ===========================================================================
+# Scenarios — Commit-Aware Validation (v8.0)
+# ===========================================================================
+
+@scenario("commit-ref-validation")
+def test_commit_ref_validation(ctx: ScenarioContext) -> ScenarioResult:
+    """PR gate blocks when gates.commit_ref doesn't match HEAD, passes when it does."""
+    project_root = get_project_root()
+    head_sha = get_head_sha(project_root)
+
+    # Test 1: Wrong commit_ref -> blocked
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": "wrong_sha_1234567890"},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},  # workflow-only, no QA needed
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 2:
+        return fail(ctx, f"Expected exit 2 for wrong commit_ref, got {result.returncode}. stderr: {result.stderr[:300]}")
+
+    # Test 2: Correct commit_ref -> allowed
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},  # workflow-only, no QA needed
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 0:
+        return fail(ctx, f"Expected exit 0 for correct commit_ref, got {result.returncode}. stderr: {result.stderr[:300]}")
+
+    return pass_result(ctx)
+
+
+@scenario("workflow-only-no-qa")
+def test_workflow_only_no_qa(ctx: ScenarioContext) -> ScenarioResult:
+    """Workflow-only diff passes PR gate without QA entries."""
+    project_root = get_project_root()
+    head_sha = get_head_sha(project_root)
+
+    # State with gates, verify(workflow), review -- but NO qa entries
+    # This should pass because the diff is workflow-only
+    ctx.write_state({
+        "branch": "feat/test",
+        "phase": "implementing",
+        "gates": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+        "verify": {"workflow": "2026-03-28T00:00:00Z", "workflow_commit_ref": head_sha},
+        "qa": {},
+        "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
+    })
+    stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    if result.returncode != 0:
+        return fail(ctx, f"Expected exit 0 for workflow-only diff (no QA needed), got {result.returncode}. stderr: {result.stderr[:300]}")
+
     return pass_result(ctx)
 
 
@@ -558,6 +630,17 @@ def main():
                     f"WARNING: workflow-state.py exited {state_result.returncode}: "
                     f"{state_result.stderr.strip()}",
                     file=sys.stderr,
+                )
+            # Also stamp commit_ref (v8.0 commit-aware validation)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if head.returncode == 0:
+                subprocess.run(
+                    [sys.executable, state_py, "set", "verify.workflow_commit_ref",
+                     head.stdout.strip()],
+                    capture_output=True, text=True, timeout=10,
                 )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print("WARNING: Could not write verify.workflow timestamp", file=sys.stderr)

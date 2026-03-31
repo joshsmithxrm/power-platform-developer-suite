@@ -37,6 +37,12 @@ def main():
     # Clear gates (codebase changed)
     if isinstance(state.get("gates"), dict):
         state["gates"]["passed"] = None
+        state["gates"]["commit_ref"] = None
+
+    # Clear review (codebase changed — AC-136)
+    if isinstance(state.get("review"), dict):
+        state["review"]["passed"] = None
+        state["review"]["commit_ref"] = None
 
     # Update last_commit to current HEAD
     try:
