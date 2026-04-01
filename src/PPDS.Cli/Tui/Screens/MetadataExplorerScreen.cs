@@ -491,13 +491,13 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
     private string? PromptForSolution()
     {
-        var solutionField = new TextField("") { X = 1, Y = 1, Width = Dim.Fill(1) };
-        var dlg = new Dialog("Solution Required", 50, 7);
+        using var solutionField = new TextField("") { X = 1, Y = 1, Width = Dim.Fill(1) };
+        using var dlg = new Dialog("Solution Required", 50, 7);
         dlg.Add(new Label("Solution unique name:") { X = 1, Y = 0 }, solutionField);
-        var okBtn = new Button("OK", true);
+        using var okBtn = new Button("OK", true);
         string? result = null;
         okBtn.Clicked += () => { result = solutionField.Text?.ToString()?.Trim(); Application.RequestStop(); };
-        var cancelBtn = new Button("Cancel");
+        using var cancelBtn = new Button("Cancel");
         cancelBtn.Clicked += () => Application.RequestStop();
         dlg.AddButton(okBtn);
         dlg.AddButton(cancelBtn);
