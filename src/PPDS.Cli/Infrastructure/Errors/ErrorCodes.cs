@@ -324,6 +324,18 @@ public static class ErrorCodes
     }
 
     /// <summary>
+    /// Metadata authoring errors.
+    /// </summary>
+    public static class MetadataAuthoring
+    {
+        /// <summary>Metadata authoring validation failed (schema name, required fields, constraints).</summary>
+        public const string ValidationFailed = "MetadataAuthoring.ValidationFailed";
+
+        /// <summary>A general metadata authoring operation failed.</summary>
+        public const string OperationFailed = "MetadataAuthoring.OperationFailed";
+    }
+
+    /// <summary>
     /// Web resource operation errors.
     /// </summary>
     public static class WebResource

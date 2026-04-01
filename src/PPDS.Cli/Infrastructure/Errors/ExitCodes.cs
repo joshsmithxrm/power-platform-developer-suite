@@ -37,4 +37,7 @@ public static class ExitCodes
 
     /// <summary>Precondition failed - operation blocked by current state (e.g., has children).</summary>
     public const int PreconditionFailed = 10;
+
+    /// <summary>Confirmation required - interactive prompt needed but stdin is redirected. Use --force to bypass.</summary>
+    public const int ConfirmationRequired = 11;
 }
