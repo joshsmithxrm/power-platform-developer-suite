@@ -58,6 +58,8 @@ import type {
     EnvironmentVariablesSyncDeploymentSettingsResponse,
     WebResourceInfoDto,
     WebResourceDetailDto,
+    MetadataAuthoringResult,
+    MetadataDeleteResult,
 } from './types.js';
 
 // Re-export AuthWhoResponse for profileCommands.ts convenience
@@ -1183,6 +1185,112 @@ export class DaemonClient implements vscode.Disposable {
         this.log.debug(`Got entity "${logicalName}" with ${result.entity.attributes.length} attributes`);
 
         return result;
+    }
+
+    // ── Metadata Authoring ─────────────────────────────────────────────────
+
+    async metadataCreateTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createTable...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createTable', rpcParams);
+    }
+
+    async metadataUpdateTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/updateTable...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/updateTable', rpcParams);
+    }
+
+    async metadataDeleteTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/deleteTable...');
+        return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteTable', rpcParams);
+    }
+
+    async metadataCreateColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createColumn...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createColumn', rpcParams);
+    }
+
+    async metadataUpdateColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/updateColumn...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/updateColumn', rpcParams);
+    }
+
+    async metadataDeleteColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/deleteColumn...');
+        return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteColumn', rpcParams);
+    }
+
+    async metadataCreateOneToMany(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createOneToMany...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createOneToMany', rpcParams);
+    }
+
+    async metadataCreateManyToMany(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createManyToMany...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createManyToMany', rpcParams);
+    }
+
+    async metadataDeleteRelationship(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/deleteRelationship...');
+        return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteRelationship', rpcParams);
+    }
+
+    async metadataCreateGlobalChoice(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createGlobalChoice...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createGlobalChoice', rpcParams);
+    }
+
+    async metadataDeleteGlobalChoice(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/deleteGlobalChoice...');
+        return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteGlobalChoice', rpcParams);
+    }
+
+    async metadataCreateKey(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/createKey...');
+        return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createKey', rpcParams);
+    }
+
+    async metadataDeleteKey(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+        await this.ensureConnected();
+        const rpcParams: Record<string, unknown> = { ...params };
+        if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        this.log.info('Calling metadata/deleteKey...');
+        return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteKey', rpcParams);
     }
 
     // ── Plugins ─────────────────────────────────────────────────────────────

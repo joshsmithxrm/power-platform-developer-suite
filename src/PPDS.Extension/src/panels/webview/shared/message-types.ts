@@ -5,7 +5,7 @@
  */
 
 // Import daemon response types that appear in message payloads
-import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto, WebResourceInfoDto, MetadataGlobalChoiceSummaryDto, MetadataOptionSetDto } from '../../../types.js';
+import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto, WebResourceInfoDto, MetadataGlobalChoiceSummaryDto, MetadataOptionSetDto, MetadataAuthoringResult, MetadataDeleteResult } from '../../../types.js';
 
 // ── Query Panel ─────────────────────────────────────────────────────────────
 
@@ -263,6 +263,26 @@ export interface MetadataEntityViewDto {
     description: string | null;
 }
 
+/** Parameters for creating a table. */
+export interface CreateTableParams {
+    solutionUniqueName: string;
+    schemaName: string;
+    displayName: string;
+    pluralDisplayName: string;
+    description: string;
+    ownershipType: string;
+}
+
+/** Parameters for creating a column. */
+export interface CreateColumnParams {
+    solutionUniqueName: string;
+    entityLogicalName: string;
+    schemaName: string;
+    displayName: string;
+    description: string;
+    columnType: string;
+}
+
 /** Messages the Metadata Browser Panel webview sends to the extension host. */
 export type MetadataBrowserPanelWebviewToHost =
     | { command: 'ready' }
@@ -273,6 +293,10 @@ export type MetadataBrowserPanelWebviewToHost =
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker'; entityLogicalName?: string }
     | { command: 'copyToClipboard'; text: string }
+    | { command: 'createTable'; params: CreateTableParams }
+    | { command: 'deleteTable'; entityLogicalName: string; solutionUniqueName: string }
+    | { command: 'createColumn'; params: CreateColumnParams }
+    | { command: 'deleteColumn'; entityLogicalName: string; columnLogicalName: string; solutionUniqueName: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Metadata Browser Panel webview. */
@@ -284,6 +308,8 @@ export type MetadataBrowserPanelHostToWebview =
     | { command: 'entityDetailLoaded'; entity: MetadataEntityDetailDto }
     | { command: 'entityDetailLoading'; logicalName: string }
     | { command: 'globalChoiceDetailLoading'; name: string }
+    | { command: 'authoringResult'; result: MetadataAuthoringResult }
+    | { command: 'deleteResult'; result: MetadataDeleteResult }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };

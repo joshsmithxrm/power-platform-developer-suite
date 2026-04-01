@@ -412,6 +412,38 @@ export interface MetadataOptionValueDto {
     description: string | null;
 }
 
+// ── Metadata Authoring ──────────────────────────────────────────────────────
+
+export interface MetadataAuthoringResult {
+    success: boolean;
+    logicalName?: string;
+    metadataId?: string;
+    wasDryRun: boolean;
+    error?: string;
+    errorCode?: string;
+    validationMessages?: MetadataValidationMessageDto[];
+}
+
+export interface MetadataDeleteResult {
+    success: boolean;
+    dependencies?: MetadataDependencyDto[];
+    dependencyCount: number;
+    error?: string;
+    errorCode?: string;
+}
+
+export interface MetadataValidationMessageDto {
+    field: string;
+    rule: string;
+    message: string;
+}
+
+export interface MetadataDependencyDto {
+    dependentComponentType: string;
+    dependentComponentName: string;
+    dependentComponentSchemaName?: string;
+}
+
 // ── Import Jobs ──────────────────────────────────────────────────────────────
 
 export interface ImportJobsListResponse {
