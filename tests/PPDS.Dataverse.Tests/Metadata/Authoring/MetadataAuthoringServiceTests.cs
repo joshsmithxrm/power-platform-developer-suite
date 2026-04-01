@@ -23,7 +23,7 @@ namespace PPDS.Dataverse.Tests.Metadata.Authoring;
 public class MetadataAuthoringServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _pool = new();
-    private readonly Mock<IPooledClient> _client = new();
+    private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
     private readonly SchemaValidator _validator = new();
     private readonly DataverseMetadataAuthoringService _service;
 
@@ -31,6 +31,10 @@ public class MetadataAuthoringServiceTests
     {
         _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_client.Object);
+
+        // Default ExecuteAsync to return a valid response (prevents NRE from await null)
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OrganizationResponse());
 
         SetupPublisherPrefixQuery("new");
 

@@ -30,6 +30,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     private readonly IDataverseConnectionPool _connectionPool;
     private readonly SchemaValidator _validator;
     private readonly ILogger<DataverseMetadataAuthoringService>? _logger;
+    private readonly ICachedMetadataProvider? _cacheProvider;
     private readonly Dictionary<string, string> _publisherPrefixCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -38,11 +39,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     public DataverseMetadataAuthoringService(
         IDataverseConnectionPool connectionPool,
         SchemaValidator validator,
-        ILogger<DataverseMetadataAuthoringService>? logger = null)
+        ILogger<DataverseMetadataAuthoringService>? logger = null,
+        ICachedMetadataProvider? cacheProvider = null)
     {
         _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _logger = logger;
+        _cacheProvider = cacheProvider;
     }
 
     #region Tables
@@ -128,6 +131,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateEntityResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntityList();
+        _cacheProvider?.InvalidateEntity(request.SchemaName.ToLowerInvariant());
+
         reporter?.ReportInfo($"Table '{request.SchemaName}' created successfully.");
         _logger?.LogInformation("Created table {SchemaName} with MetadataId {MetadataId}", request.SchemaName, response.EntityId);
 
@@ -197,6 +203,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntityList();
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
         reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated successfully.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
     }
@@ -228,6 +237,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        _cacheProvider?.InvalidateEntityList();
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
         reporter?.ReportInfo($"Table '{request.EntityLogicalName}' deleted successfully.");
         _logger?.LogInformation("Deleted table {Entity}", request.EntityLogicalName);
@@ -276,6 +288,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
         reporter?.ReportInfo($"Column '{request.SchemaName}' created on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Created column {SchemaName} on {Entity} with MetadataId {MetadataId}",
@@ -349,6 +363,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
         reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
     }
@@ -383,6 +399,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
         reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' deleted from '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Deleted column {Column} from {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
@@ -446,6 +464,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateOneToManyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntity(request.ReferencedEntity);
+        _cacheProvider?.InvalidateEntity(request.ReferencingEntity);
+
         reporter?.ReportInfo($"1:N relationship '{request.SchemaName}' created.");
         _logger?.LogInformation("Created 1:N relationship {SchemaName} with MetadataId {MetadataId}",
             request.SchemaName, response.RelationshipId);
@@ -508,6 +529,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateManyToManyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntity(request.Entity1LogicalName);
+        _cacheProvider?.InvalidateEntity(request.Entity2LogicalName);
+
         reporter?.ReportInfo($"N:N relationship '{request.SchemaName}' created.");
         _logger?.LogInformation("Created N:N relationship {SchemaName} with MetadataId {MetadataId}",
             request.SchemaName, response.ManyToManyRelationshipId);
@@ -569,6 +593,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        // UpdateRelationshipRequest doesn't carry entity logical names, so we must
+        // invalidate all entity caches to ensure stale relationship data is cleared.
+        _cacheProvider?.InvalidateAll();
+
         reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated.");
         _logger?.LogInformation("Updated relationship {SchemaName}", request.SchemaName);
     }
@@ -600,6 +628,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        // DeleteRelationshipRequest doesn't carry entity logical names, so we must
+        // invalidate all entity caches to ensure stale relationship data is cleared.
+        _cacheProvider?.InvalidateAll();
 
         reporter?.ReportInfo($"Relationship '{request.SchemaName}' deleted.");
         _logger?.LogInformation("Deleted relationship {SchemaName}", request.SchemaName);
@@ -662,6 +694,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateOptionSetResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateGlobalOptionSets();
+
         reporter?.ReportInfo($"Global choice '{request.SchemaName}' created.");
         _logger?.LogInformation("Created global choice {SchemaName} with MetadataId {MetadataId}",
             request.SchemaName, response.OptionSetId);
@@ -717,6 +751,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateGlobalOptionSets();
+
         reporter?.ReportInfo($"Global choice '{request.Name}' updated.");
         _logger?.LogInformation("Updated global choice {Name}", request.Name);
     }
@@ -748,6 +784,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        _cacheProvider?.InvalidateGlobalOptionSets();
 
         reporter?.ReportInfo($"Global choice '{request.Name}' deleted.");
         _logger?.LogInformation("Deleted global choice {Name}", request.Name);
@@ -936,6 +974,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         var response = (CreateEntityKeyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
         reporter?.ReportInfo($"Alternate key '{request.SchemaName}' created on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Created alternate key {SchemaName} on {Entity} with MetadataId {MetadataId}",
             request.SchemaName, request.EntityLogicalName, response.EntityKeyId);
@@ -979,6 +1019,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
         reporter?.ReportInfo($"Alternate key '{request.KeyLogicalName}' deleted from '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Deleted alternate key {Key} from {Entity}", request.KeyLogicalName, request.EntityLogicalName);

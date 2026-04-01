@@ -192,6 +192,20 @@ public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposabl
     }
 
     /// <inheritdoc />
+    public void InvalidateEntityList()
+    {
+        _entities = null;
+    }
+
+    /// <inheritdoc />
+    public void InvalidateGlobalOptionSets()
+    {
+        // No global option set cache fields exist today.
+        // This method is a stable API hook so authoring callers don't need to
+        // change when global option set caching is added in the future.
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         _entityLock.Dispose();

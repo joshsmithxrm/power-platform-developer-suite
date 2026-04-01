@@ -27,6 +27,10 @@ public class CreateColumnTypeTests
         _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_client.Object);
 
+        // Default ExecuteAsync to return a valid response (prevents NRE from await null)
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OrganizationResponse());
+
         SetupPublisherPrefixQuery("new");
 
         _service = new DataverseMetadataAuthoringService(_pool.Object, _validator);

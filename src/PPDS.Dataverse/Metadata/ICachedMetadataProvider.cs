@@ -54,4 +54,17 @@ public interface ICachedMetadataProvider
     /// </summary>
     /// <param name="entityLogicalName">The entity logical name to invalidate.</param>
     void InvalidateEntity(string entityLogicalName);
+
+    /// <summary>
+    /// Invalidates the cached entity list. The next call to <see cref="GetEntitiesAsync"/>
+    /// will re-fetch from Dataverse. Use after table create/delete operations.
+    /// </summary>
+    void InvalidateEntityList();
+
+    /// <summary>
+    /// Invalidates any cached global option set data. Currently a no-op since global option
+    /// sets are not cached, but provides a stable API for cache invalidation after global
+    /// choice create/update/delete operations.
+    /// </summary>
+    void InvalidateGlobalOptionSets();
 }
