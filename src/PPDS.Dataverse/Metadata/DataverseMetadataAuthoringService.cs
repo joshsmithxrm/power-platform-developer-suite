@@ -674,7 +674,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             DisplayName = new Label(request.DisplayName, 1033),
             Description = string.IsNullOrEmpty(request.Description) ? null : new Label(request.Description, 1033),
             IsGlobal = true,
-            OptionSetType = request.IsMultiSelect ? OptionSetType.Picklist : OptionSetType.Picklist
+            OptionSetType = OptionSetType.Picklist // SDK uses Picklist for all choice types; multi-select is determined by the attribute type (MultiSelectPicklistAttributeMetadata), not the option set
         };
 
         if (request.Options != null)

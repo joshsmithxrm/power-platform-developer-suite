@@ -22,7 +22,8 @@ internal sealed class CreateColumnDialog : TuiDialog
 
     private bool _confirmed;
 
-    private static readonly string[] ColumnTypeNames = Enum.GetNames<SchemaColumnType>();
+    private static readonly SchemaColumnType[] ColumnTypeValues = Enum.GetValues<SchemaColumnType>();
+    private static readonly string[] ColumnTypeNames = ColumnTypeValues.Select(v => v.ToString()).ToArray();
 
     /// <summary>
     /// Gets the result request, or null if the dialog was cancelled.
@@ -102,7 +103,7 @@ internal sealed class CreateColumnDialog : TuiDialog
 
     private void UpdateTypeSpecificFields()
     {
-        var selectedType = (SchemaColumnType)_typeGroup.SelectedItem;
+        var selectedType = ColumnTypeValues[_typeGroup.SelectedItem];
         bool isText = selectedType is SchemaColumnType.String or SchemaColumnType.Memo;
         _maxLengthLabel.Visible = isText;
         _maxLengthField.Visible = isText;
@@ -110,7 +111,7 @@ internal sealed class CreateColumnDialog : TuiDialog
 
     private CreateColumnRequest BuildResult()
     {
-        var selectedType = (SchemaColumnType)_typeGroup.SelectedItem;
+        var selectedType = ColumnTypeValues[_typeGroup.SelectedItem];
         var request = new CreateColumnRequest
         {
             SolutionUniqueName = _solutionField.Text?.ToString()?.Trim() ?? "",

@@ -108,10 +108,12 @@ public static class ChoiceCommandGroup
 
         foreach (var pair in raw.Split(','))
         {
-            var parts = pair.Trim().Split('=');
-            if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out var value))
+            var trimmed = pair.Trim();
+            // Split on the LAST '=' so labels can contain '=' characters
+            var lastEquals = trimmed.LastIndexOf('=');
+            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
             {
-                result.Add(new OptionDefinition { Label = parts[0].Trim(), Value = value });
+                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
             }
         }
 

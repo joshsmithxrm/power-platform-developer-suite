@@ -489,6 +489,22 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
     #region Edit Operations
 
+    private string? PromptForSolution()
+    {
+        var solutionField = new TextField("") { X = 1, Y = 1, Width = Dim.Fill(1) };
+        var dlg = new Dialog("Solution Required", 50, 7);
+        dlg.Add(new Label("Solution unique name:") { X = 1, Y = 0 }, solutionField);
+        var okBtn = new Button("OK", true);
+        string? result = null;
+        okBtn.Clicked += () => { result = solutionField.Text?.ToString()?.Trim(); Application.RequestStop(); };
+        var cancelBtn = new Button("Cancel");
+        cancelBtn.Clicked += () => Application.RequestStop();
+        dlg.AddButton(okBtn);
+        dlg.AddButton(cancelBtn);
+        Application.Run(dlg);
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
     private void EditSelectedAttribute()
     {
         if (_selectedEntity == null || _detailTable.Table == null) return;
@@ -503,9 +519,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
         if (dialog.UpdatedValue is { } newValue && newValue != displayName)
         {
+            var solutionName = PromptForSolution();
+            if (string.IsNullOrWhiteSpace(solutionName)) return;
+
             var request = new UpdateColumnRequest
             {
-                SolutionUniqueName = "", // user must provide via a solution-aware flow in the future
+                SolutionUniqueName = solutionName,
                 EntityLogicalName = _selectedEntity.LogicalName,
                 ColumnLogicalName = logicalName,
                 DisplayName = newValue

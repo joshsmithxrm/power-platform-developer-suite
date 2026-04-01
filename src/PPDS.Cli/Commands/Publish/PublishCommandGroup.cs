@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Security;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Commands.WebResources;
@@ -380,7 +381,8 @@ public static class PublishCommandGroup
             Console.Error.WriteLine($"Publishing {entityNames.Count} entity metadata...");
         }
 
-        var entityXml = string.Join("", entityNames.Select(n => $"<entity>{n}</entity>"));
+        var entityXml = string.Join("", entityNames.Select(n =>
+            $"<entity>{SecurityElement.Escape(n)}</entity>"));
         var parameterXml = $"<importexportxml><entities>{entityXml}</entities></importexportxml>";
 
         var startTime = DateTime.UtcNow;

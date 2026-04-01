@@ -317,8 +317,9 @@ public class MetadataAuthoringServiceTests
 
         capturedRequest.Should().NotBeNull();
         var updatedRel = capturedRequest!.Relationship as OneToManyRelationshipMetadata;
-        updatedRel.Should().NotBeNull();
-        updatedRel!.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
+        updatedRel.Should().NotBeNull("because UpdateRelationship should send a OneToManyRelationshipMetadata");
+        updatedRel!.CascadeConfiguration.Should().NotBeNull();
+        updatedRel.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
         updatedRel.CascadeConfiguration.Assign.Should().Be(CascadeType.Cascade);
     }
 
