@@ -170,7 +170,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             });
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
-            var metadataService = provider.GetRequiredService<IMetadataService>();
+            var metadataService = provider.GetRequiredService<IMetadataQueryService>();
             var entities = await metadataService.GetEntitiesAsync(cancellationToken: ct);
 
             ct.ThrowIfCancellationRequested();
@@ -211,7 +211,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             });
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
-            var metadataService = provider.GetRequiredService<IMetadataService>();
+            var metadataService = provider.GetRequiredService<IMetadataQueryService>();
 
             var (entity, globalOptionSets) = await metadataService.GetEntityWithGlobalOptionSetsAsync(
                 logicalName, includeGlobalOptionSets: true, ct);

@@ -376,7 +376,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, IQueryExecutor)
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService, IQueryExecutor)
         services.RegisterDataverseServices();
 
         // TDS Endpoint executor — per-environment, uses same auth as connection pool

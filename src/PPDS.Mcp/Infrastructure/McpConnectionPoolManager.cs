@@ -337,7 +337,7 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, etc.).
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService, etc.).
         services.RegisterDataverseServices();
 
         // Connection pool with factory delegate.

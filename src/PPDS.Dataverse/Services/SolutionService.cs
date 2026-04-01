@@ -23,7 +23,7 @@ public class SolutionService : ISolutionService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<SolutionService> _logger;
-    private readonly IMetadataService _metadataService;
+    private readonly IMetadataQueryService _metadataService;
     private readonly IComponentNameResolver _nameResolver;
     private readonly ICachedMetadataProvider _cachedMetadata;
 
@@ -141,7 +141,7 @@ public class SolutionService : ISolutionService
     public SolutionService(
         IDataverseConnectionPool pool,
         ILogger<SolutionService> logger,
-        IMetadataService metadataService,
+        IMetadataQueryService metadataService,
         IComponentNameResolver nameResolver,
         ICachedMetadataProvider cachedMetadata)
     {

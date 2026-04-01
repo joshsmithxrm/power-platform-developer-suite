@@ -47,7 +47,7 @@ public class RegisterDataverseServicesTests
     }
 
     [Fact]
-    public void RegisterDataverseServices_RegistersIMetadataService()
+    public void RegisterDataverseServices_RegistersIMetadataQueryService()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -56,10 +56,10 @@ public class RegisterDataverseServicesTests
         services.RegisterDataverseServices();
 
         // Assert
-        var descriptor = services.FirstOrDefault(sd => sd.ServiceType == typeof(IMetadataService));
-        descriptor.Should().NotBeNull("IMetadataService should be registered");
+        var descriptor = services.FirstOrDefault(sd => sd.ServiceType == typeof(IMetadataQueryService));
+        descriptor.Should().NotBeNull("IMetadataQueryService should be registered");
         descriptor!.Lifetime.Should().Be(ServiceLifetime.Transient);
-        descriptor.ImplementationType.Should().Be(typeof(DataverseMetadataService));
+        descriptor.ImplementationType.Should().Be(typeof(DataverseMetadataQueryService));
     }
 
     [Fact]

@@ -247,7 +247,7 @@ namespace PPDS.Dataverse.DependencyInjection
 
             // Pool-consuming services (transient - stateless, get pool connection per operation)
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
-            services.AddTransient<IMetadataService, DataverseMetadataService>();
+            services.AddTransient<IMetadataQueryService, DataverseMetadataQueryService>();
             services.AddTransient<IQueryExecutor, QueryExecutor>();
 
             // Cached metadata provider (singleton - per-session cache for IntelliSense)

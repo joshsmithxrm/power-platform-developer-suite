@@ -21,7 +21,7 @@ namespace PPDS.Dataverse.Tests.Services;
 public class ComponentNameResolverTests
 {
     private readonly Mock<ICachedMetadataProvider> _metadataProvider = new();
-    private readonly Mock<IMetadataService> _metadataService = new();
+    private readonly Mock<IMetadataQueryService> _metadataService = new();
     private readonly Mock<IDataverseConnectionPool> _pool = new();
     private readonly ILogger<ComponentNameResolver> _logger = NullLogger<ComponentNameResolver>.Instance;
 

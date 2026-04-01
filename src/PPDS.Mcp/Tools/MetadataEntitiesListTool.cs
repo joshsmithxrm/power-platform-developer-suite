@@ -37,7 +37,7 @@ public sealed class MetadataEntitiesListTool : McpToolBase
             .ConfigureAwait(false);
 
         var metadataService = serviceProvider
-            .GetRequiredService<IMetadataService>();
+            .GetRequiredService<IMetadataQueryService>();
 
         var entities = await metadataService
             .GetEntitiesAsync(customOnly, filter, cancellationToken: cancellationToken)

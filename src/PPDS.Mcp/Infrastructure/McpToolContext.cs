@@ -162,7 +162,7 @@ public sealed class McpToolContext
     /// <remarks>
     /// The returned service provider should be disposed after use.
     /// For most operations, prefer <see cref="GetPoolAsync"/> which uses cached pools.
-    /// Use this method when you need access to services like IMetadataService or ISqlQueryService.
+    /// Use this method when you need access to services like IMetadataQueryService or ISqlQueryService.
     /// </remarks>
     public async Task<ServiceProvider> CreateServiceProviderAsync(CancellationToken cancellationToken = default)
     {
@@ -251,7 +251,7 @@ public sealed class McpToolContext
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, etc.).
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService, etc.).
         services.RegisterDataverseServices();
 
         // Connection pool with factory delegate.

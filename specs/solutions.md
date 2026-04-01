@@ -82,7 +82,7 @@ Solutions management across all PPDS surfaces — browsing, component inspection
 
 ### Dependencies
 
-- Depends on: [dataverse-services.md](./dataverse-services.md) for `ISolutionService`, `IImportJobService`, `IMetadataService`
+- Depends on: [dataverse-services.md](./dataverse-services.md) for `ISolutionService`, `IImportJobService`, `IMetadataQueryService`
 - Depends on: [connection-pooling.md](./connection-pooling.md) for `IDataverseConnectionPool`
 - Depends on: [tui.md](./tui.md) for `ITuiScreen`, `IHotkeyRegistry`, `ITuiErrorService`
 - Uses patterns from: [architecture.md](./architecture.md) for Application Service boundary
@@ -181,7 +181,7 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 public Guid MetadataId { get; init; }
 ```
 
-Populate in `DataverseMetadataService.MapToEntitySummary`:
+Populate in `DataverseMetadataQueryService.MapToEntitySummary`:
 ```csharp
 MetadataId = e.MetadataId ?? Guid.Empty,
 ```
@@ -226,7 +226,7 @@ The `componenttype` option set metadata query resolves type codes (including the
 
 #### Core Requirements
 
-1. `SolutionService` delegates to `IMetadataService.GetOptionSetAsync("componenttype")` to query the global option set metadata at runtime
+1. `SolutionService` delegates to `IMetadataQueryService.GetOptionSetAsync("componenttype")` to query the global option set metadata at runtime
 2. Returns `Dictionary<int, string>` mapping all type codes to display names, including the 10000+ range
 3. Results cached in-memory per environment URL in `SolutionService` (keyed by normalized, lowercased, trailing-slash-stripped URL)
 4. Cache lifetime: duration of the daemon process (component types don't change during a session)
@@ -238,7 +238,7 @@ The `componenttype` option set metadata query resolves type codes (including the
 #### Resolution Flow
 
 1. **First `solutions/components` call for an environment** triggers metadata query
-2. **`IMetadataService.GetOptionSetAsync("componenttype")`** returns option set metadata with all values
+2. **`IMetadataQueryService.GetOptionSetAsync("componenttype")`** returns option set metadata with all values
 3. **Parse** option values into `Dictionary<int, string>` and **cache** in a `ConcurrentDictionary<string, Dictionary<int, string>>` keyed by environment URL
 4. **Subsequent calls** for the same environment use cached mapping
 5. **Component type name resolution** in `GetComponentsAsync()` checks runtime cache first, then corrected hardcoded dictionary, then falls back to `Unknown ({type})`
@@ -426,7 +426,7 @@ public sealed record SolutionScreenState(
 | AC-05 | Component name resolution logs per-type timing | `ComponentNameResolverTests.ResolveAsync_LogsTiming` | |
 | AC-06 | Batch queries split at 100 IDs to avoid query length limits | `ComponentNameResolverTests.ResolveAsync_LargeBatch_Splits` | |
 | AC-07 | Name resolution failure for one type does not block other types | `ComponentNameResolverTests.ResolveAsync_PartialFailure_ContinuesOtherTypes` | |
-| AC-08 | EntitySummary includes MetadataId populated from RetrieveAllEntitiesRequest | `DataverseMetadataServiceTests.GetEntitiesAsync_IncludesMetadataId` | |
+| AC-08 | EntitySummary includes MetadataId populated from RetrieveAllEntitiesRequest | `DataverseMetadataQueryServiceTests.GetEntitiesAsync_IncludesMetadataId` | |
 | AC-09 | Component type metadata cached per environment URL | `SolutionServiceTests.cs` | |
 | AC-10 | Component type resolution falls back to hardcoded dictionary on metadata query failure | `SolutionServiceTests.cs` | |
 | AC-11 | Hardcoded `ComponentTypeNames` dictionary values corrected to match generated enum | `SolutionServiceTests.cs` | |
@@ -654,15 +654,15 @@ No new RPC methods. New fields are nullable and additive — no breaking changes
 - Positive: Consistent UX pattern, copiable text, keyboard accessible, simple implementation
 - Negative: Expands the list vertically (mitigated by single-expand behavior)
 
-### Why runtime metadata query via existing IMetadataService?
+### Why runtime metadata query via existing IMetadataQueryService?
 
 **Context:** Component types 10000+ show as "Unknown" because they're not in the hardcoded dictionary. The hardcoded dictionary also has incorrect values for several standard types.
 
-**Decision:** Query the `componenttype` global option set via `IMetadataService.GetOptionSetAsync()`, cache in `SolutionService`, and correct the hardcoded fallback dictionary.
+**Decision:** Query the `componenttype` global option set via `IMetadataQueryService.GetOptionSetAsync()`, cache in `SolutionService`, and correct the hardcoded fallback dictionary.
 
 **Alternatives considered:**
 - Expanding the hardcoded dictionary only: Rejected — 10000+ codes vary by environment version and installed solutions.
-- New standalone metadata method: Rejected — `IMetadataService` already implements `RetrieveOptionSetRequest`.
+- New standalone metadata method: Rejected — `IMetadataQueryService` already implements `RetrieveOptionSetRequest`.
 - Client-side (extension) metadata query: Rejected — daemon already has authenticated connection and caching.
 
 **Consequences:**
@@ -686,7 +686,7 @@ No new RPC methods. New fields are nullable and additive — no breaking changes
 
 ## Related Specs
 
-- [dataverse-services.md](./dataverse-services.md) — ISolutionService, IImportJobService, IMetadataService
+- [dataverse-services.md](./dataverse-services.md) — ISolutionService, IImportJobService, IMetadataQueryService
 - [connection-pooling.md](./connection-pooling.md) — Connection pool used for batch queries
 - [tui.md](./tui.md) — TUI framework: ITuiScreen, DataTableView, state capture
 - [plugins.md](./plugins.md) — Navigate from solution component to plugin registrations

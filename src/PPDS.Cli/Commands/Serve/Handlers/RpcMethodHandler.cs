@@ -1412,7 +1412,7 @@ public class RpcMethodHandler : IDisposable
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var metadataService = sp.GetRequiredService<IMetadataQueryService>();
 
             // Fetch entities with requested includeIntersect setting
             var entities = await metadataService.GetEntitiesAsync(includeIntersect: includeIntersect, cancellationToken: ct).ConfigureAwait(false);
@@ -1444,7 +1444,7 @@ public class RpcMethodHandler : IDisposable
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var optionSets = await metadataService.GetGlobalOptionSetsAsync(cancellationToken: ct).ConfigureAwait(false);
 
             return new MetadataGlobalOptionSetsResponse
@@ -1473,7 +1473,7 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var optionSet = await metadataService.GetOptionSetAsync(name, ct).ConfigureAwait(false);
 
             return new MetadataGlobalOptionSetDetailResponse
@@ -1504,7 +1504,7 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var (entity, globalOptionSets) = await metadataService.GetEntityWithGlobalOptionSetsAsync(
                 logicalName,
                 includeGlobalOptionSets,

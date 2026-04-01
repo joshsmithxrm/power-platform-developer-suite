@@ -7,14 +7,14 @@ using Xunit;
 namespace PPDS.Dataverse.Tests.Metadata;
 
 /// <summary>
-/// Tests for the filter regex behavior in DataverseMetadataService.
+/// Tests for the filter regex behavior in DataverseMetadataQueryService.
 /// </summary>
 public class FilterRegexTests
 {
     private static Regex? CreateFilterRegex(string? filter)
     {
         // Use reflection to call the private static method
-        var method = typeof(DataverseMetadataService)
+        var method = typeof(DataverseMetadataQueryService)
             .GetMethod("CreateFilterRegex", BindingFlags.NonPublic | BindingFlags.Static);
 
         return (Regex?)method?.Invoke(null, [filter]);

@@ -89,7 +89,7 @@ Create, modify, and delete Dataverse schema objects — tables, columns, relatio
 Phase 0 prerequisite. Mechanical rename across the entire codebase:
 
 - `IMetadataService` → `IMetadataQueryService`
-- `DataverseMetadataService` → `DataverseMetadataQueryService`
+- `DataverseMetadataQueryService` → `DataverseMetadataQueryService`
 - All DI registrations, RPC handlers, MCP tools, CLI commands, TUI screens, Extension panel references
 - Update `specs/metadata-browser.md` and `specs/publish.md` to reflect the rename and `--type entity` support
 - No behavioral changes — purely a rename

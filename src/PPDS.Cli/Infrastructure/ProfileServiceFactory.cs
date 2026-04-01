@@ -318,7 +318,7 @@ public static class ProfileServiceFactory
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService)
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService)
         // This method is shared with PPDS.Dataverse to prevent DI registration divergence
         services.RegisterDataverseServices();
 

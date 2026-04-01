@@ -9,19 +9,19 @@ using PPDS.Dataverse.Query;
 namespace PPDS.Dataverse.Metadata;
 
 /// <summary>
-/// Queries Dataverse metadata via <see cref="IMetadataService"/> and returns results
+/// Queries Dataverse metadata via <see cref="IMetadataQueryService"/> and returns results
 /// as virtual table rows (dictionaries of <see cref="QueryValue"/>).
 /// Bridges the rich DTO-based metadata API to the flat row format used by the query engine.
 /// </summary>
 public sealed class MetadataQueryExecutor : IMetadataQueryExecutor
 {
-    private readonly IMetadataService? _metadataService;
+    private readonly IMetadataQueryService? _metadataService;
 
     /// <summary>
     /// Creates executor with an optional metadata service.
     /// When null, all queries return empty results (useful for offline/testing scenarios).
     /// </summary>
-    public MetadataQueryExecutor(IMetadataService? metadataService = null)
+    public MetadataQueryExecutor(IMetadataQueryService? metadataService = null)
     {
         _metadataService = metadataService;
     }

@@ -33,7 +33,7 @@ public sealed class DataSchemaTool : McpToolBase
         CancellationToken cancellationToken = default)
     {
         await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
-        var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
+        var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
 
         var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
 

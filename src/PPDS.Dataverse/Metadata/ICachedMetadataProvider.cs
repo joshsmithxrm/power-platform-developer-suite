@@ -7,7 +7,7 @@ namespace PPDS.Dataverse.Metadata;
 
 /// <summary>
 /// Provides cached access to Dataverse metadata for IntelliSense and entity browsing.
-/// Wraps <see cref="IMetadataService"/> with per-session caching to avoid redundant
+/// Wraps <see cref="IMetadataQueryService"/> with per-session caching to avoid redundant
 /// round-trips to Dataverse for metadata that rarely changes.
 /// </summary>
 public interface ICachedMetadataProvider
