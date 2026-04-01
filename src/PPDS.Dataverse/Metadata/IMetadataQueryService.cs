@@ -8,7 +8,7 @@ namespace PPDS.Dataverse.Metadata;
 /// <summary>
 /// Provides access to Dataverse metadata for entity browsing and discovery.
 /// </summary>
-public interface IMetadataService
+public interface IMetadataQueryService
 {
     /// <summary>
     /// Gets a list of all entities with basic information.

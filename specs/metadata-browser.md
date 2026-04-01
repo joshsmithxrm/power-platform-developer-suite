@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last Updated:** 2026-03-18
-**Code:** [src/PPDS.Dataverse/Services/IMetadataService.cs](../src/PPDS.Dataverse/Services/IMetadataService.cs) | [src/PPDS.Extension/src/panels/MetadataBrowserPanel.ts](../src/PPDS.Extension/src/panels/MetadataBrowserPanel.ts) | [src/PPDS.Cli/Tui/Screens/MetadataExplorerScreen.cs](../src/PPDS.Cli/Tui/Screens/MetadataExplorerScreen.cs)
+**Code:** [src/PPDS.Dataverse/Metadata/IMetadataQueryService.cs](../src/PPDS.Dataverse/Metadata/IMetadataQueryService.cs) | [src/PPDS.Extension/src/panels/MetadataBrowserPanel.ts](../src/PPDS.Extension/src/panels/MetadataBrowserPanel.ts) | [src/PPDS.Cli/Tui/Screens/MetadataExplorerScreen.cs](../src/PPDS.Cli/Tui/Screens/MetadataExplorerScreen.cs)
 **Surfaces:** CLI, TUI, Extension, MCP
 
 ---
@@ -37,8 +37,8 @@ Browse entity definitions, attributes, relationships, keys, and privileges. The 
 │  └─────┬─────┘  └────┬────┘  └──┬───┘  └────┬────┘ │
 │   JSON-RPC        Direct     Direct       Direct     │
 │  ┌─────▼──────────────▼──────────▼────────────▼────┐ │
-│  │    IMetadataService / ICachedMetadataProvider     │ │
-│  │    DataverseMetadataService                      │ │
+│  │    IMetadataQueryService / ICachedMetadataProvider     │ │
+│  │    DataverseMetadataQueryService                      │ │
 │  └─────────────────────┬───────────────────────────┘ │
 │                        │                              │
 │  ┌─────────────────────▼───────────────────────────┐ │
@@ -54,7 +54,7 @@ Browse entity definitions, attributes, relationships, keys, and privileges. The 
 
 | Component | Responsibility |
 |-----------|----------------|
-| `IMetadataService` / `DataverseMetadataService` | Domain service — entity list, entity detail with all sub-collections |
+| `IMetadataQueryService` / `DataverseMetadataQueryService` | Domain service — entity list, entity detail with all sub-collections |
 | `ICachedMetadataProvider` | Caching layer — TTL-based entity list cache |
 | `MetadataBrowserPanel.ts` | VS Code webview panel — split pane with search and 5-tab detail |
 | `MetadataExplorerScreen.cs` | TUI screen — split pane, tab cycling, search dialog |

@@ -8,7 +8,7 @@ using PPDS.Dataverse.Metadata.Models;
 namespace PPDS.Dataverse.Metadata;
 
 /// <summary>
-/// Provides cached access to Dataverse metadata, wrapping <see cref="IMetadataService"/>
+/// Provides cached access to Dataverse metadata, wrapping <see cref="IMetadataQueryService"/>
 /// with per-session caching to minimize round-trips.
 /// </summary>
 /// <remarks>
@@ -30,7 +30,7 @@ namespace PPDS.Dataverse.Metadata;
 /// </remarks>
 public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposable
 {
-    private readonly IMetadataService _metadataService;
+    private readonly IMetadataQueryService _metadataService;
     private readonly TimeSpan _ttl;
     private readonly ITimeProvider _timeProvider;
 
@@ -50,7 +50,7 @@ public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposabl
     /// Creates a new <see cref="CachedMetadataProvider"/>.
     /// </summary>
     /// <param name="metadataService">The underlying metadata service.</param>
-    public CachedMetadataProvider(IMetadataService metadataService)
+    public CachedMetadataProvider(IMetadataQueryService metadataService)
         : this(metadataService, TimeSpan.FromMinutes(5), SystemTimeProvider.Instance)
     {
     }
@@ -62,7 +62,7 @@ public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposabl
     /// <param name="metadataService">The underlying metadata service.</param>
     /// <param name="ttl">Time-to-live for per-entity caches.</param>
     /// <param name="timeProvider">Time provider for cache expiry checks.</param>
-    public CachedMetadataProvider(IMetadataService metadataService, TimeSpan ttl, ITimeProvider timeProvider)
+    public CachedMetadataProvider(IMetadataQueryService metadataService, TimeSpan ttl, ITimeProvider timeProvider)
     {
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _ttl = ttl;
@@ -189,6 +189,20 @@ public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposabl
 
         _attributeCache.TryRemove(entityLogicalName, out _);
         _relationshipCache.TryRemove(entityLogicalName, out _);
+    }
+
+    /// <inheritdoc />
+    public void InvalidateEntityList()
+    {
+        _entities = null;
+    }
+
+    /// <inheritdoc />
+    public void InvalidateGlobalOptionSets()
+    {
+        // No global option set cache fields exist today.
+        // This method is a stable API hook so authoring callers don't need to
+        // change when global option set caching is added in the future.
     }
 
     /// <inheritdoc />

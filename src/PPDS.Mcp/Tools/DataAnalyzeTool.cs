@@ -34,7 +34,7 @@ public sealed class DataAnalyzeTool : McpToolBase
         CancellationToken cancellationToken = default)
     {
         await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
-        var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
+        var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Get entity metadata.

@@ -10,13 +10,13 @@ using Xunit;
 
 namespace PPDS.Dataverse.Tests.Metadata;
 
-public class DataverseMetadataServiceTests
+public class DataverseMetadataQueryServiceTests
 {
     [Fact]
     public void Constructor_ThrowsOnNullConnectionPool()
     {
         // Act
-        var act = () => new DataverseMetadataService(null!);
+        var act = () => new DataverseMetadataQueryService(null!);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -24,7 +24,7 @@ public class DataverseMetadataServiceTests
     }
 
     [Fact]
-    public void AddDataverseConnectionPool_RegistersIMetadataService()
+    public void AddDataverseConnectionPool_RegistersIMetadataQueryService()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -42,11 +42,11 @@ public class DataverseMetadataServiceTests
 
         // Act
         var provider = services.BuildServiceProvider();
-        var metadataService = provider.GetService<IMetadataService>();
+        var metadataService = provider.GetService<IMetadataQueryService>();
 
         // Assert
         metadataService.Should().NotBeNull();
-        metadataService.Should().BeOfType<DataverseMetadataService>();
+        metadataService.Should().BeOfType<DataverseMetadataQueryService>();
     }
 
     [Fact]
@@ -82,8 +82,8 @@ public class DataverseMetadataServiceTests
 
         // Act
         var provider = services.BuildServiceProvider();
-        var service1 = provider.GetService<IMetadataService>();
-        var service2 = provider.GetService<IMetadataService>();
+        var service1 = provider.GetService<IMetadataQueryService>();
+        var service2 = provider.GetService<IMetadataQueryService>();
 
         // Assert
         service1.Should().NotBeSameAs(service2);

@@ -20,7 +20,7 @@ public class SolutionServiceTests
     {
         // Arrange
         var logger = new NullLogger<SolutionService>();
-        var metadataService = new Mock<IMetadataService>().Object;
+        var metadataService = new Mock<IMetadataQueryService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
         var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
@@ -37,7 +37,7 @@ public class SolutionServiceTests
     {
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
-        var metadataService = new Mock<IMetadataService>().Object;
+        var metadataService = new Mock<IMetadataQueryService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
         var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
@@ -72,7 +72,7 @@ public class SolutionServiceTests
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
-        var metadataService = new Mock<IMetadataService>().Object;
+        var metadataService = new Mock<IMetadataQueryService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
 
         // Act
@@ -89,7 +89,7 @@ public class SolutionServiceTests
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
-        var metadataService = new Mock<IMetadataService>().Object;
+        var metadataService = new Mock<IMetadataQueryService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
         var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 

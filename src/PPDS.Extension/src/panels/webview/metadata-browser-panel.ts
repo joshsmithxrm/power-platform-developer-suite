@@ -92,6 +92,41 @@ makerBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'openInMaker', entityLogicalName: selectedEntityName ?? undefined });
 });
 
+const newTableBtn = document.getElementById('new-table-btn') as HTMLElement;
+const newColumnBtn = document.getElementById('new-column-btn') as HTMLElement;
+
+newTableBtn.addEventListener('click', () => {
+    // Placeholder: post a createTable command with empty params
+    // A real implementation would show an input form, but for now we send a message
+    // that the host will handle (e.g., using VS Code input boxes)
+    vscode.postMessage({
+        command: 'createTable',
+        params: {
+            solutionUniqueName: '',
+            schemaName: '',
+            displayName: '',
+            pluralDisplayName: '',
+            description: '',
+            ownershipType: 'UserOwned',
+        },
+    });
+});
+
+newColumnBtn.addEventListener('click', () => {
+    if (!selectedEntityName) return;
+    vscode.postMessage({
+        command: 'createColumn',
+        params: {
+            solutionUniqueName: '',
+            entityLogicalName: selectedEntityName,
+            schemaName: '',
+            displayName: '',
+            description: '',
+            columnType: 'String',
+        },
+    });
+});
+
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('reconnect-banner')!.style.display = 'none';
@@ -1499,6 +1534,30 @@ window.addEventListener('message', (event: MessageEvent<MetadataBrowserPanelHost
             updateBreadcrumb();
             renderTabBar();
             renderTabContent();
+            break;
+        case 'authoringResult':
+            {
+                const result = msg.result;
+                if (!result.success && result.error) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-state';
+                    errorDiv.textContent = result.error;
+                    tabContent.innerHTML = '';
+                    tabContent.appendChild(errorDiv);
+                }
+            }
+            break;
+        case 'deleteResult':
+            {
+                const result = msg.result;
+                if (!result.success && result.error) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-state';
+                    errorDiv.textContent = result.error;
+                    tabContent.innerHTML = '';
+                    tabContent.appendChild(errorDiv);
+                }
+            }
             break;
         case 'loading':
             entityListEl.innerHTML = '';

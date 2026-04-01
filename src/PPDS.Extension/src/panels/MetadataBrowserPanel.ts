@@ -98,6 +98,18 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             case 'openInMaker':
                 await this.openInMaker(message.entityLogicalName);
                 break;
+            case 'createTable':
+                await this.handleCreateTable(message.params);
+                break;
+            case 'deleteTable':
+                await this.handleDeleteTable(message.entityLogicalName, message.solutionUniqueName);
+                break;
+            case 'createColumn':
+                await this.handleCreateColumn(message.params);
+                break;
+            case 'deleteColumn':
+                await this.handleDeleteColumn(message.entityLogicalName, message.columnLogicalName, message.solutionUniqueName);
+                break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
                 break;
@@ -215,6 +227,86 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
+    private async handleCreateTable(params: { solutionUniqueName: string; schemaName: string; displayName: string; pluralDisplayName: string; description: string; ownershipType: string }): Promise<void> {
+        try {
+            const result = await this.daemon.metadataCreateTable(params, this.environmentUrl);
+            this.postMessage({ command: 'authoringResult', result });
+            if (result.success) {
+                vscode.window.showInformationMessage(`Table '${result.logicalName ?? params.schemaName}' created successfully.`);
+                await this.refreshAll();
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to create table: ${msg}` });
+        }
+    }
+
+    private async handleDeleteTable(entityLogicalName: string, solutionUniqueName: string): Promise<void> {
+        const confirmation = await vscode.window.showWarningMessage(
+            `Are you sure you want to delete table '${entityLogicalName}'? This action cannot be undone.`,
+            { modal: true },
+            'Delete',
+        );
+        if (confirmation !== 'Delete') return;
+
+        try {
+            const result = await this.daemon.metadataDeleteTable(
+                { solutionUniqueName, entityLogicalName },
+                this.environmentUrl,
+            );
+            this.postMessage({ command: 'deleteResult', result });
+            if (result.success) {
+                vscode.window.showInformationMessage(`Table '${entityLogicalName}' deleted successfully.`);
+                await this.refreshAll();
+            } else {
+                vscode.window.showErrorMessage(result.error ?? 'Delete failed');
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to delete table: ${msg}` });
+        }
+    }
+
+    private async handleCreateColumn(params: { solutionUniqueName: string; entityLogicalName: string; schemaName: string; displayName: string; description: string; columnType: string }): Promise<void> {
+        try {
+            const result = await this.daemon.metadataCreateColumn(params, this.environmentUrl);
+            this.postMessage({ command: 'authoringResult', result });
+            if (result.success) {
+                vscode.window.showInformationMessage(`Column '${result.logicalName ?? params.schemaName}' created successfully.`);
+                await this.loadEntityDetail(params.entityLogicalName);
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to create column: ${msg}` });
+        }
+    }
+
+    private async handleDeleteColumn(entityLogicalName: string, columnLogicalName: string, solutionUniqueName: string): Promise<void> {
+        const confirmation = await vscode.window.showWarningMessage(
+            `Are you sure you want to delete column '${columnLogicalName}' from '${entityLogicalName}'? This action cannot be undone.`,
+            { modal: true },
+            'Delete',
+        );
+        if (confirmation !== 'Delete') return;
+
+        try {
+            const result = await this.daemon.metadataDeleteColumn(
+                { solutionUniqueName, entityLogicalName, columnLogicalName },
+                this.environmentUrl,
+            );
+            this.postMessage({ command: 'deleteResult', result });
+            if (result.success) {
+                vscode.window.showInformationMessage(`Column '${columnLogicalName}' deleted successfully.`);
+                await this.loadEntityDetail(entityLogicalName);
+            } else {
+                vscode.window.showErrorMessage(result.error ?? 'Delete failed');
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to delete column: ${msg}` });
+        }
+    }
+
     private async openInMaker(entityLogicalName?: string): Promise<void> {
         if (this.environmentId) {
             const url = entityLogicalName
@@ -257,6 +349,8 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh entity list">Refresh</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
+    <vscode-button id="new-table-btn" appearance="secondary" title="Create a new table">New Table</vscode-button>
+    <vscode-button id="new-column-btn" appearance="secondary" title="Create a new column on the selected table">New Column</vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>

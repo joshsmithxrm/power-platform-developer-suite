@@ -40,6 +40,11 @@ public class MetadataCommandGroupTests
         Assert.Contains("keys", subcommandNames);
         Assert.Contains("optionsets", subcommandNames);
         Assert.Contains("optionset", subcommandNames);
+        Assert.Contains("table", subcommandNames);
+        Assert.Contains("column", subcommandNames);
+        Assert.Contains("relationship", subcommandNames);
+        Assert.Contains("choice", subcommandNames);
+        Assert.Contains("key", subcommandNames);
     }
 
     [Fact]

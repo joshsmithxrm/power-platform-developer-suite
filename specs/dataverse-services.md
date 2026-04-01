@@ -70,7 +70,7 @@ The Dataverse Services layer provides domain-specific operations for Dataverse e
 | IEnvironmentVariableService | Manage environment variable definitions and values |
 | IConnectionReferenceService | Connection references with orphan detection |
 | IDeploymentSettingsService | PAC-compatible deployment settings files |
-| IMetadataService | Entity/attribute/relationship metadata queries |
+| IMetadataQueryService | Entity/attribute/relationship metadata queries |
 
 ### Dependencies
 
@@ -314,7 +314,7 @@ Generates PAC-compatible deployment settings files.
 
 **DTOs:** `DeploymentSettingsFile`, `DeploymentSettingsSyncResult`, `DeploymentSettingsValidation`
 
-### IMetadataService
+### IMetadataQueryService
 
 Queries Dataverse schema metadata.
 

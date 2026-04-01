@@ -18,7 +18,7 @@ public class ComponentNameResolver : IComponentNameResolver
     private const int MaxBatchSize = 100;
 
     private readonly ICachedMetadataProvider _metadataProvider;
-    private readonly IMetadataService _metadataService;
+    private readonly IMetadataQueryService _metadataService;
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<ComponentNameResolver> _logger;
 
@@ -51,7 +51,7 @@ public class ComponentNameResolver : IComponentNameResolver
     /// </summary>
     public ComponentNameResolver(
         ICachedMetadataProvider metadataProvider,
-        IMetadataService metadataService,
+        IMetadataQueryService metadataService,
         IDataverseConnectionPool pool,
         ILogger<ComponentNameResolver> logger)
     {

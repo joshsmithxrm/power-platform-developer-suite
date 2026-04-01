@@ -37,7 +37,7 @@ builder.Services.AddSingleton<McpToolContext>();
 // Register auth services (ProfileStore, EnvironmentConfigStore, ISecureCredentialStore).
 builder.Services.AddAuthServices();
 
-// Register Dataverse services (IMetadataService, IPluginTraceService, IQueryExecutor, etc.).
+// Register Dataverse services (IMetadataQueryService, IPluginTraceService, IQueryExecutor, etc.).
 builder.Services.RegisterDataverseServices();
 
 var host = builder.Build();

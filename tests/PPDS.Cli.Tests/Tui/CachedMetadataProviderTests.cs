@@ -6,7 +6,7 @@ namespace PPDS.Cli.Tests.Tui;
 
 /// <summary>
 /// Unit tests for <see cref="CachedMetadataProvider"/>.
-/// Uses inline test doubles for <see cref="IMetadataService"/> and
+/// Uses inline test doubles for <see cref="IMetadataQueryService"/> and
 /// <see cref="CachedMetadataProvider.ITimeProvider"/> to test caching,
 /// TTL expiry, invalidation, and thread safety.
 /// </summary>
@@ -17,7 +17,7 @@ public class CachedMetadataProviderTests
     /// <summary>
     /// Stub metadata service that tracks call counts per method.
     /// </summary>
-    private sealed class StubMetadataService : IMetadataService
+    private sealed class StubMetadataService : IMetadataQueryService
     {
         private int _getEntitiesCount;
         private readonly Dictionary<string, int> _getAttributesCount = new(StringComparer.OrdinalIgnoreCase);

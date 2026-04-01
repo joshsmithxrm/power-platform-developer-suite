@@ -16,19 +16,19 @@ namespace PPDS.Dataverse.Metadata;
 /// <summary>
 /// Provides access to Dataverse metadata using the SDK.
 /// </summary>
-public class DataverseMetadataService : IMetadataService
+public class DataverseMetadataQueryService : IMetadataQueryService
 {
     private readonly IDataverseConnectionPool _connectionPool;
-    private readonly ILogger<DataverseMetadataService>? _logger;
+    private readonly ILogger<DataverseMetadataQueryService>? _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DataverseMetadataService"/> class.
+    /// Initializes a new instance of the <see cref="DataverseMetadataQueryService"/> class.
     /// </summary>
     /// <param name="connectionPool">The connection pool.</param>
     /// <param name="logger">Optional logger.</param>
-    public DataverseMetadataService(
+    public DataverseMetadataQueryService(
         IDataverseConnectionPool connectionPool,
-        ILogger<DataverseMetadataService>? logger = null)
+        ILogger<DataverseMetadataQueryService>? logger = null)
     {
         _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
         _logger = logger;

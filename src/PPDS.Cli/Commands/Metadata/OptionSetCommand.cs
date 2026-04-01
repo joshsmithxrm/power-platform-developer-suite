@@ -63,7 +63,7 @@ public static class OptionSetCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken: cancellationToken);
 
-            var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
+            var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
 
             if (!globalOptions.IsJsonMode)
             {

@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Paging support with cookies
   - Total record count via `returntotalrecordcount` preference header
   - Result mapping to typed `QueryResult` with column metadata
-- **Metadata service for entity browsing** - New `IMetadataService` interface and `DataverseMetadataService` implementation providing:
+- **Metadata service for entity browsing** - New `IMetadataQueryService` interface and `DataverseMetadataQueryService` implementation providing:
   - `GetEntitiesAsync()` - List all entities with optional filtering
   - `GetEntityAsync()` - Get full entity metadata including attributes, relationships, keys, and privileges
   - `GetAttributesAsync()` - List entity attributes with type filtering

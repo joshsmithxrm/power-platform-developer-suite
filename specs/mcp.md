@@ -61,7 +61,7 @@ The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabil
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                    PPDS.Dataverse + PPDS.Auth                             │
-│  IDataverseConnectionPool, IQueryExecutor, IMetadataService, etc.        │
+│  IDataverseConnectionPool, IQueryExecutor, IMetadataQueryService, etc.        │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
