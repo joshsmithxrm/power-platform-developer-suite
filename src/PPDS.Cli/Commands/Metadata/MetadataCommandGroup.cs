@@ -37,6 +37,7 @@ public static class MetadataCommandGroup
         command.Subcommands.Add(KeysCommand.Create());
         command.Subcommands.Add(OptionSetsCommand.Create());
         command.Subcommands.Add(OptionSetCommand.Create());
+        command.Subcommands.Add(PublishAliasCommand.Create());
 
         return command;
     }

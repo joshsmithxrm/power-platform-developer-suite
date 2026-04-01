@@ -5,6 +5,7 @@ using PPDS.Cli.Commands.WebResources;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Services;
 
 namespace PPDS.Cli.Commands.Publish;
@@ -22,7 +23,7 @@ public static class PublishCommandGroup
 
     private static readonly Option<string?> TypeOption = new("--type", "-t")
     {
-        Description = "Component type to publish. Required when specifying resources or --solution. Supported: webresource"
+        Description = "Component type to publish. Required when specifying resources or --solution. Supported: webresource, entity"
     };
 
     private static readonly Option<string?> SolutionOption = new("--solution", "-s")
@@ -86,7 +87,7 @@ public static class PublishCommandGroup
             }
             else if (solution != null && type == null)
             {
-                result.AddError("--type is required with --solution. Supported types: webresource");
+                result.AddError("--type is required with --solution. Supported types: webresource, entity");
             }
             else if (names.Length == 0 && solution == null)
             {
@@ -132,17 +133,18 @@ public static class PublishCommandGroup
             Console.Error.WriteLine();
             Console.Error.WriteLine("Options:");
             Console.Error.WriteLine("  --all                Publish all customizations (PublishAllXml)");
-            Console.Error.WriteLine("  --type <type>        Component type (supported: webresource)");
+            Console.Error.WriteLine("  --type <type>        Component type (supported: webresource, entity)");
             Console.Error.WriteLine("  --solution <name>    Scope to components in a solution (requires --type)");
             return ExitCodes.InvalidArguments;
         }
 
         // Validate type if provided
-        if (type != null && !type.Equals("webresource", StringComparison.OrdinalIgnoreCase))
+        var supportedTypes = new[] { "webresource", "entity" };
+        if (type != null && !supportedTypes.Any(t => t.Equals(type, StringComparison.OrdinalIgnoreCase)))
         {
             var error = new StructuredError(
                 ErrorCodes.Validation.InvalidValue,
-                $"Unsupported type '{type}'. Supported types: webresource",
+                $"Unsupported type '{type}'. Supported types: webresource, entity",
                 null,
                 type);
             writer.WriteError(error);
@@ -170,6 +172,11 @@ public static class PublishCommandGroup
             if (all)
             {
                 return await PublishAllAsync(serviceProvider, writer, globalOptions, cancellationToken);
+            }
+            else if (type != null && type.Equals("entity", StringComparison.OrdinalIgnoreCase))
+            {
+                return await PublishEntitiesAsync(
+                    serviceProvider, names, solution, writer, globalOptions, cancellationToken);
             }
             else
             {
@@ -338,6 +345,66 @@ public static class PublishCommandGroup
         return ExitCodes.Success;
     }
 
+    private static async Task<int> PublishEntitiesAsync(
+        ServiceProvider serviceProvider,
+        string[] names,
+        string? solution,
+        IOutputWriter writer,
+        GlobalOptionValues globalOptions,
+        CancellationToken cancellationToken)
+    {
+        if (names.Length == 0 && solution == null)
+        {
+            Console.Error.WriteLine("Specify entity logical names to publish. Example: ppds publish --type entity account contact");
+            return ExitCodes.InvalidArguments;
+        }
+
+        var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+        await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        List<string> entityNames;
+        if (names.Length > 0)
+        {
+            entityNames = names.ToList();
+        }
+        else
+        {
+            // --solution without names: resolve all custom entities in the solution
+            // For MVP, require explicit names
+            Console.Error.WriteLine("Specify entity logical names to publish. Example: ppds publish --type entity account contact");
+            return ExitCodes.InvalidArguments;
+        }
+
+        if (!globalOptions.IsJsonMode)
+        {
+            Console.Error.WriteLine($"Publishing {entityNames.Count} entity metadata...");
+        }
+
+        var entityXml = string.Join("", entityNames.Select(n => $"<entity>{n}</entity>"));
+        var parameterXml = $"<importexportxml><entities>{entityXml}</entities></importexportxml>";
+
+        var startTime = DateTime.UtcNow;
+        var environmentKey = client.ConnectedOrgUniqueName ?? "default";
+        await client.PublishXmlAsync(parameterXml, environmentKey, cancellationToken);
+        var duration = DateTime.UtcNow - startTime;
+
+        if (globalOptions.IsJsonMode)
+        {
+            writer.WriteSuccess(new PublishEntitiesOutput
+            {
+                PublishedCount = entityNames.Count,
+                EntityNames = entityNames,
+                DurationSeconds = duration.TotalSeconds
+            });
+        }
+        else
+        {
+            Console.Error.WriteLine($"Published {entityNames.Count} entity metadata in {duration.TotalSeconds:F1} seconds.");
+        }
+
+        return ExitCodes.Success;
+    }
+
     #region Output Models
 
     private sealed class PublishAllOutput
@@ -353,6 +420,18 @@ public static class PublishCommandGroup
     {
         [JsonPropertyName("publishedCount")]
         public int PublishedCount { get; set; }
+
+        [JsonPropertyName("durationSeconds")]
+        public double DurationSeconds { get; set; }
+    }
+
+    private sealed class PublishEntitiesOutput
+    {
+        [JsonPropertyName("publishedCount")]
+        public int PublishedCount { get; set; }
+
+        [JsonPropertyName("entityNames")]
+        public List<string> EntityNames { get; set; } = [];
 
         [JsonPropertyName("durationSeconds")]
         public double DurationSeconds { get; set; }
