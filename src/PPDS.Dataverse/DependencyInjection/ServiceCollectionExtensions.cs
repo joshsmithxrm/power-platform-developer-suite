@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Resilience;
@@ -248,6 +249,8 @@ namespace PPDS.Dataverse.DependencyInjection
             // Pool-consuming services (transient - stateless, get pool connection per operation)
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
             services.AddTransient<IMetadataQueryService, DataverseMetadataQueryService>();
+            services.AddTransient<SchemaValidator>();
+            services.AddTransient<IMetadataAuthoringService, DataverseMetadataAuthoringService>();
             services.AddTransient<IQueryExecutor, QueryExecutor>();
 
             // Cached metadata provider (singleton - per-session cache for IntelliSense)
