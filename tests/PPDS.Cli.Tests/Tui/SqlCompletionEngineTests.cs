@@ -388,6 +388,10 @@ public class SqlCompletionEngineTests
         public void InvalidateAll() { }
 
         public void InvalidateEntity(string entityLogicalName) { }
+
+        public void InvalidateEntityList() { }
+
+        public void InvalidateGlobalOptionSets() { }
     }
 
     #endregion

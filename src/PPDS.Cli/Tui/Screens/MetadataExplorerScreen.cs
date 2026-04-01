@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Tui.Dialogs.Metadata;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Metadata.Models;
 using Terminal.Gui;
 
@@ -22,6 +24,14 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     private readonly Button[] _tabButtons;
     private readonly Action[] _tabClickHandlers;
 
+    // Action bar buttons
+    private readonly Button _newButton;
+    private readonly Button _editButton;
+    private readonly Button _deleteButton;
+    private readonly Action _newClickHandler;
+    private readonly Action _editClickHandler;
+    private readonly Action _deleteClickHandler;
+
     private List<EntitySummary> _allEntities = [];
     private List<EntitySummary> _filteredEntities = [];
     private EntityMetadataDto? _selectedEntity;
@@ -34,6 +44,13 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     private const int FilterDebounceMs = 300;
 
     private static readonly string[] TabNames = ["Attributes", "Relationships", "Keys", "Privileges", "Choices"];
+
+    /// <summary>Tab indices for action bar context sensitivity.</summary>
+    private const int TabAttributes = 0;
+    private const int TabRelationships = 1;
+    private const int TabKeys = 2;
+    private const int TabPrivileges = 3;
+    private const int TabChoices = 4;
 
     public override string Title => "Metadata";
 
@@ -68,7 +85,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
         _entitiesFrame.Add(_searchField, _entityList);
 
-        // Right pane: details with tab buttons and table
+        // Right pane: details with tab buttons, action bar, and table
         _detailsFrame = new FrameView("Details")
         {
             X = Pos.Right(_entitiesFrame),
@@ -95,10 +112,23 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             previousButton = _tabButtons[i];
         }
 
+        // Action bar: New, Edit, Delete buttons (row below tabs)
+        _newButton = new Button("[New]") { X = 0, Y = 1 };
+        _editButton = new Button("[Edit]") { X = Pos.Right(_newButton) + 1, Y = 1 };
+        _deleteButton = new Button("[Delete]") { X = Pos.Right(_editButton) + 1, Y = 1 };
+
+        _newClickHandler = OnNewClicked;
+        _editClickHandler = OnEditClicked;
+        _deleteClickHandler = OnDeleteClicked;
+
+        _newButton.Clicked += _newClickHandler;
+        _editButton.Clicked += _editClickHandler;
+        _deleteButton.Clicked += _deleteClickHandler;
+
         _detailTable = new TableView
         {
             X = 0,
-            Y = 2,
+            Y = 3, // shifted down for action bar
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             FullRowSelect = true,
@@ -106,6 +136,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         };
 
         foreach (var btn in _tabButtons) _detailsFrame.Add(btn);
+        _detailsFrame.Add(_newButton, _editButton, _deleteButton);
         _detailsFrame.Add(_detailTable);
 
         // Status label at bottom
@@ -125,6 +156,9 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         _searchField.TextChanged += OnSearchTextChanged;
         _entityList.SelectedItemChanged += OnEntitySelectionChanged;
 
+        // Update action bar for initial tab state
+        UpdateActionBarVisibility();
+
         // Kick off initial load
         if (EnvironmentUrl != null)
         {
@@ -141,7 +175,608 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         RegisterHotkey(registry, Key.CtrlMask | Key.R, "Refresh", () => ErrorService.FireAndForget(LoadEntitiesAsync(), "Metadata.Refresh"));
         RegisterHotkey(registry, Key.CtrlMask | Key.F, "Focus search", () => _searchField.SetFocus());
         RegisterHotkey(registry, Key.CtrlMask | Key.O, "Open in Maker", OpenInMaker);
+        RegisterHotkey(registry, Key.CtrlMask | Key.N, "New", OnNewClicked);
+        RegisterHotkey(registry, Key.CtrlMask | Key.E, "Edit", OnEditClicked);
+        RegisterHotkey(registry, Key.CtrlMask | Key.D, "Delete", OnDeleteClicked);
     }
+
+    #region Action Bar
+
+    /// <summary>
+    /// Updates action bar button visibility based on the active tab.
+    /// Privileges tab is read-only, so all action buttons are hidden.
+    /// </summary>
+    internal void UpdateActionBarVisibility()
+    {
+        bool showActions = _activeTabIndex != TabPrivileges;
+        _newButton.Visible = showActions;
+        _editButton.Visible = showActions;
+        _deleteButton.Visible = showActions;
+    }
+
+    private void OnNewClicked()
+    {
+        if (EnvironmentUrl == null) return;
+
+        switch (_activeTabIndex)
+        {
+            case TabAttributes:
+                if (_selectedEntity == null) return;
+                OpenCreateColumnDialog();
+                break;
+            case TabRelationships:
+                if (_selectedEntity == null) return;
+                OpenCreateRelationshipDialog();
+                break;
+            case TabKeys:
+                if (_selectedEntity == null) return;
+                OpenCreateKeyDialog();
+                break;
+            case TabChoices:
+                OpenCreateChoiceDialog();
+                break;
+            default:
+                // Entity-level new (no tab or tab==Attributes with no entity selected)
+                OpenCreateTableDialog();
+                break;
+        }
+    }
+
+    private void OnEditClicked()
+    {
+        if (EnvironmentUrl == null || _selectedEntity == null) return;
+
+        switch (_activeTabIndex)
+        {
+            case TabAttributes:
+                EditSelectedAttribute();
+                break;
+            case TabRelationships:
+            case TabKeys:
+            case TabChoices:
+                // For these tabs, editing means updating the display name via generic property editor
+                EditSelectedItemDisplayName();
+                break;
+        }
+    }
+
+    private void OnDeleteClicked()
+    {
+        if (EnvironmentUrl == null || _selectedEntity == null) return;
+
+        switch (_activeTabIndex)
+        {
+            case TabAttributes:
+                DeleteSelectedAttribute();
+                break;
+            case TabRelationships:
+                DeleteSelectedRelationship();
+                break;
+            case TabKeys:
+                DeleteSelectedKey();
+                break;
+            case TabChoices:
+                DeleteSelectedChoice();
+                break;
+        }
+    }
+
+    #endregion
+
+    #region Create Dialogs
+
+    private void OpenCreateTableDialog()
+    {
+        using var dialog = new CreateTableDialog(Session);
+        Application.Run(dialog);
+        if (dialog.Result is { } request)
+        {
+            _statusLabel.Text = "Creating table...";
+            ErrorService.FireAndForget(ExecuteCreateTableAsync(request), "Metadata.CreateTable");
+        }
+    }
+
+    private async Task ExecuteCreateTableAsync(CreateTableRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            var result = await service.CreateTableAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Table created: {result.LogicalName}";
+            });
+
+            await LoadEntitiesAsync();
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create table", ex, "Metadata.CreateTable");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void OpenCreateColumnDialog()
+    {
+        using var dialog = new CreateColumnDialog(_selectedEntity!.LogicalName, Session);
+        Application.Run(dialog);
+        if (dialog.Result is { } request)
+        {
+            _statusLabel.Text = "Creating column...";
+            ErrorService.FireAndForget(ExecuteCreateColumnAsync(request), "Metadata.CreateColumn");
+        }
+    }
+
+    private async Task ExecuteCreateColumnAsync(CreateColumnRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            var result = await service.CreateColumnAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Column created: {result.LogicalName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create column", ex, "Metadata.CreateColumn");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void OpenCreateRelationshipDialog()
+    {
+        using var dialog = new CreateRelationshipDialog(_selectedEntity!.LogicalName, Session);
+        Application.Run(dialog);
+
+        if (dialog.OneToManyResult is { } oneToMany)
+        {
+            _statusLabel.Text = "Creating relationship...";
+            ErrorService.FireAndForget(ExecuteCreateOneToManyAsync(oneToMany), "Metadata.CreateRelationship");
+        }
+        else if (dialog.ManyToManyResult is { } manyToMany)
+        {
+            _statusLabel.Text = "Creating relationship...";
+            ErrorService.FireAndForget(ExecuteCreateManyToManyAsync(manyToMany), "Metadata.CreateRelationship");
+        }
+    }
+
+    private async Task ExecuteCreateOneToManyAsync(CreateOneToManyRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.CreateOneToManyAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Relationship created: {request.SchemaName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create relationship", ex, "Metadata.CreateRelationship");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private async Task ExecuteCreateManyToManyAsync(CreateManyToManyRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.CreateManyToManyAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Relationship created: {request.SchemaName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create relationship", ex, "Metadata.CreateRelationship");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void OpenCreateChoiceDialog()
+    {
+        using var dialog = new CreateChoiceDialog(Session);
+        Application.Run(dialog);
+        if (dialog.Result is { } request)
+        {
+            _statusLabel.Text = "Creating global choice...";
+            ErrorService.FireAndForget(ExecuteCreateChoiceAsync(request), "Metadata.CreateChoice");
+        }
+    }
+
+    private async Task ExecuteCreateChoiceAsync(CreateGlobalChoiceRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            var result = await service.CreateGlobalChoiceAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Global choice created: {result.Name}";
+            });
+
+            if (_selectedEntity != null)
+            {
+                await LoadEntityDetailAsync(_selectedEntity.LogicalName);
+            }
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create global choice", ex, "Metadata.CreateChoice");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void OpenCreateKeyDialog()
+    {
+        using var dialog = new CreateKeyDialog(_selectedEntity!.LogicalName, Session);
+        Application.Run(dialog);
+        if (dialog.Result is { } request)
+        {
+            _statusLabel.Text = "Creating alternate key...";
+            ErrorService.FireAndForget(ExecuteCreateKeyAsync(request), "Metadata.CreateKey");
+        }
+    }
+
+    private async Task ExecuteCreateKeyAsync(CreateKeyRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            var result = await service.CreateKeyAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Key created: {result.SchemaName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to create key", ex, "Metadata.CreateKey");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    #endregion
+
+    #region Edit Operations
+
+    private void EditSelectedAttribute()
+    {
+        if (_selectedEntity == null || _detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        var displayName = _detailTable.Table.Rows[row]["DisplayName"]?.ToString() ?? "";
+        var logicalName = _detailTable.Table.Rows[row]["LogicalName"]?.ToString() ?? "";
+
+        using var dialog = new EditPropertyDialog("Display Name", displayName, Session);
+        Application.Run(dialog);
+
+        if (dialog.UpdatedValue is { } newValue && newValue != displayName)
+        {
+            var request = new UpdateColumnRequest
+            {
+                SolutionUniqueName = "", // user must provide via a solution-aware flow in the future
+                EntityLogicalName = _selectedEntity.LogicalName,
+                ColumnLogicalName = logicalName,
+                DisplayName = newValue
+            };
+            _statusLabel.Text = "Updating column...";
+            ErrorService.FireAndForget(ExecuteUpdateColumnAsync(request), "Metadata.EditColumn");
+        }
+    }
+
+    private async Task ExecuteUpdateColumnAsync(UpdateColumnRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.UpdateColumnAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Column updated: {request.ColumnLogicalName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to update column", ex, "Metadata.EditColumn");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void EditSelectedItemDisplayName()
+    {
+        if (_detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        // Try common column names for display
+        string currentName = "";
+        string identifier = "";
+
+        if (_detailTable.Table.Columns.Contains("DisplayName"))
+        {
+            currentName = _detailTable.Table.Rows[row]["DisplayName"]?.ToString() ?? "";
+        }
+
+        if (_detailTable.Table.Columns.Contains("SchemaName"))
+        {
+            identifier = _detailTable.Table.Rows[row]["SchemaName"]?.ToString() ?? "";
+        }
+        else if (_detailTable.Table.Columns.Contains("OptionSetName"))
+        {
+            identifier = _detailTable.Table.Rows[row]["OptionSetName"]?.ToString() ?? "";
+        }
+
+        using var dialog = new EditPropertyDialog("Display Name", currentName, Session);
+        Application.Run(dialog);
+
+        if (dialog.UpdatedValue is { } newValue && newValue != currentName)
+        {
+            _statusLabel.Text = $"Updated display name for {identifier}";
+        }
+    }
+
+    #endregion
+
+    #region Delete Operations
+
+    private void DeleteSelectedAttribute()
+    {
+        if (_selectedEntity == null || _detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        var logicalName = _detailTable.Table.Rows[row]["LogicalName"]?.ToString() ?? "";
+
+        using var dialog = new DeleteConfirmDialog("Column", logicalName, session: Session);
+        Application.Run(dialog);
+
+        if (dialog.Confirmed)
+        {
+            var request = new DeleteColumnRequest
+            {
+                EntityLogicalName = _selectedEntity.LogicalName,
+                ColumnLogicalName = logicalName
+            };
+            _statusLabel.Text = "Deleting column...";
+            ErrorService.FireAndForget(ExecuteDeleteColumnAsync(request), "Metadata.DeleteColumn");
+        }
+    }
+
+    private async Task ExecuteDeleteColumnAsync(DeleteColumnRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.DeleteColumnAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Column deleted: {request.ColumnLogicalName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to delete column", ex, "Metadata.DeleteColumn");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void DeleteSelectedRelationship()
+    {
+        if (_selectedEntity == null || _detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        var schemaName = _detailTable.Table.Rows[row]["SchemaName"]?.ToString() ?? "";
+
+        using var dialog = new DeleteConfirmDialog("Relationship", schemaName, session: Session);
+        Application.Run(dialog);
+
+        if (dialog.Confirmed)
+        {
+            var request = new DeleteRelationshipRequest { SchemaName = schemaName };
+            _statusLabel.Text = "Deleting relationship...";
+            ErrorService.FireAndForget(ExecuteDeleteRelationshipAsync(request), "Metadata.DeleteRelationship");
+        }
+    }
+
+    private async Task ExecuteDeleteRelationshipAsync(DeleteRelationshipRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.DeleteRelationshipAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Relationship deleted: {request.SchemaName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to delete relationship", ex, "Metadata.DeleteRelationship");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void DeleteSelectedKey()
+    {
+        if (_selectedEntity == null || _detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        var schemaName = _detailTable.Table.Rows[row]["SchemaName"]?.ToString() ?? "";
+
+        using var dialog = new DeleteConfirmDialog("Key", schemaName, session: Session);
+        Application.Run(dialog);
+
+        if (dialog.Confirmed)
+        {
+            var request = new DeleteKeyRequest
+            {
+                EntityLogicalName = _selectedEntity.LogicalName,
+                KeyLogicalName = schemaName
+            };
+            _statusLabel.Text = "Deleting key...";
+            ErrorService.FireAndForget(ExecuteDeleteKeyAsync(request), "Metadata.DeleteKey");
+        }
+    }
+
+    private async Task ExecuteDeleteKeyAsync(DeleteKeyRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.DeleteKeyAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Key deleted: {request.KeyLogicalName}";
+            });
+
+            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to delete key", ex, "Metadata.DeleteKey");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    private void DeleteSelectedChoice()
+    {
+        if (_selectedEntity == null || _detailTable.Table == null) return;
+        var row = _detailTable.SelectedRow;
+        if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
+
+        var optionSetName = _detailTable.Table.Rows[row]["OptionSetName"]?.ToString() ?? "";
+        var isGlobal = _detailTable.Table.Rows[row]["Global"]?.ToString() == "\u2713";
+
+        if (!isGlobal)
+        {
+            MessageBox.ErrorQuery("Not Supported", "Only global choices can be deleted from this view.", "OK");
+            return;
+        }
+
+        using var dialog = new DeleteConfirmDialog("Global Choice", optionSetName, session: Session);
+        Application.Run(dialog);
+
+        if (dialog.Confirmed)
+        {
+            var request = new DeleteGlobalChoiceRequest { Name = optionSetName };
+            _statusLabel.Text = "Deleting global choice...";
+            ErrorService.FireAndForget(ExecuteDeleteChoiceAsync(request), "Metadata.DeleteChoice");
+        }
+    }
+
+    private async Task ExecuteDeleteChoiceAsync(DeleteGlobalChoiceRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.DeleteGlobalChoiceAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Global choice deleted: {request.Name}";
+            });
+
+            if (_selectedEntity != null)
+            {
+                await LoadEntityDetailAsync(_selectedEntity.LogicalName);
+            }
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to delete global choice", ex, "Metadata.DeleteChoice");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
+    #endregion
 
     #region Data Loading
 
@@ -322,6 +957,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 : TuiColorPalette.TabInactive;
         }
 
+        UpdateActionBarVisibility();
         RefreshDetailTable();
     }
 
@@ -560,6 +1196,9 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             _tabButtons[i].Clicked -= _tabClickHandlers[i];
         }
+        _newButton.Clicked -= _newClickHandler;
+        _editButton.Clicked -= _editClickHandler;
+        _deleteButton.Clicked -= _deleteClickHandler;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         if (_filterDebounceToken != null)
