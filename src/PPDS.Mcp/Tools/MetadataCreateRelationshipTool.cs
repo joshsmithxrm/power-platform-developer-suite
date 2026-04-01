@@ -40,12 +40,15 @@ public sealed class MetadataCreateRelationshipTool : McpToolBase
         [Description("Logical name of the referenced (parent / 'one' side) entity.")] string referencedEntity,
         [Description("Logical name of the referencing (child / 'many' side) entity.")] string referencingEntity,
         [Description("Schema name for the relationship.")] string schemaName,
-        [Description("Schema name of the lookup column on the referencing entity (required for oneToMany).")] string lookupSchemaName,
-        [Description("Display name of the lookup column (required for oneToMany).")] string lookupDisplayName,
         [Description("Relationship type: 'oneToMany' or 'manyToMany'.")] string relationshipType,
+        [Description("Schema name of the lookup column on the referencing entity (required for oneToMany, ignored for manyToMany).")] string? lookupSchemaName = null,
+        [Description("Display name of the lookup column (required for oneToMany, ignored for manyToMany).")] string? lookupDisplayName = null,
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
+        if (Context.IsReadOnly)
+            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
         await using var serviceProvider = await CreateScopeAsync(cancellationToken,
             (nameof(solution), solution),
             (nameof(referencedEntity), referencedEntity),
@@ -70,6 +73,11 @@ public sealed class MetadataCreateRelationshipTool : McpToolBase
         }
         else if (string.Equals(relationshipType, "oneToMany", StringComparison.OrdinalIgnoreCase))
         {
+            if (string.IsNullOrWhiteSpace(lookupSchemaName))
+                throw new ArgumentException("lookupSchemaName is required for oneToMany relationships.", nameof(lookupSchemaName));
+            if (string.IsNullOrWhiteSpace(lookupDisplayName))
+                throw new ArgumentException("lookupDisplayName is required for oneToMany relationships.", nameof(lookupDisplayName));
+
             result = await service.CreateOneToManyAsync(new CreateOneToManyRequest
             {
                 SolutionUniqueName = solution,

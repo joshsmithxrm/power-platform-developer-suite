@@ -354,27 +354,16 @@ public static class PublishCommandGroup
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
-        if (names.Length == 0 && solution == null)
+        if (names.Length == 0)
         {
             Console.Error.WriteLine("Specify entity logical names to publish. Example: ppds publish --type entity account contact");
             return ExitCodes.InvalidArguments;
         }
+
+        var entityNames = names.ToList();
 
         var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
         await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        List<string> entityNames;
-        if (names.Length > 0)
-        {
-            entityNames = names.ToList();
-        }
-        else
-        {
-            // --solution without names: resolve all custom entities in the solution
-            // For MVP, require explicit names
-            Console.Error.WriteLine("Specify entity logical names to publish. Example: ppds publish --type entity account contact");
-            return ExitCodes.InvalidArguments;
-        }
 
         if (!globalOptions.IsJsonMode)
         {

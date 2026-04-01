@@ -43,6 +43,9 @@ public sealed class MetadataCreateChoiceTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
+        if (Context.IsReadOnly)
+            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
         await using var serviceProvider = await CreateScopeAsync(cancellationToken,
             (nameof(solution), solution),
             (nameof(schemaName), schemaName),

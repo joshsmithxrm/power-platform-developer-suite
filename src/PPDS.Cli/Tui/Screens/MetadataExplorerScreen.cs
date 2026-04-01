@@ -589,7 +589,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
         if (dialog.UpdatedValue is { } newValue && newValue != currentName)
         {
-            _statusLabel.Text = $"Updated display name for {identifier}";
+            _statusLabel.Text = $"Edit not yet supported for this tab. Use CLI: ppds metadata relationship|choice update";
         }
     }
 

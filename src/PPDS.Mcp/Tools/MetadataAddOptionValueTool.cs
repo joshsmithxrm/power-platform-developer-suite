@@ -42,6 +42,9 @@ public sealed class MetadataAddOptionValueTool : McpToolBase
         [Description("Color associated with the option as hex string, e.g., '#FF0000' (optional).")] string? color = null,
         CancellationToken cancellationToken = default)
     {
+        if (Context.IsReadOnly)
+            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
         await using var serviceProvider = await CreateScopeAsync(cancellationToken,
             (nameof(solution), solution),
             (nameof(optionSetName), optionSetName),

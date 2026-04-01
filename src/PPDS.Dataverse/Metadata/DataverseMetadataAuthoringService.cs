@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -31,7 +32,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     private readonly SchemaValidator _validator;
     private readonly ILogger<DataverseMetadataAuthoringService>? _logger;
     private readonly ICachedMetadataProvider? _cacheProvider;
-    private readonly Dictionary<string, string> _publisherPrefixCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _publisherPrefixCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DataverseMetadataAuthoringService"/> class.
@@ -578,9 +579,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         var existingRel = retrieveResponse.RelationshipMetadata;
 
-        if (existingRel is OneToManyRelationshipMetadata o2m && request.CascadeConfiguration != null)
+        if (existingRel is OneToManyRelationshipMetadata o2m)
         {
-            o2m.CascadeConfiguration = MapCascadeConfiguration(request.CascadeConfiguration);
+            if (request.CascadeConfiguration != null)
+                o2m.CascadeConfiguration = MapCascadeConfiguration(request.CascadeConfiguration);
             if (request.IsHierarchical.HasValue)
                 o2m.IsHierarchical = request.IsHierarchical.Value;
         }
