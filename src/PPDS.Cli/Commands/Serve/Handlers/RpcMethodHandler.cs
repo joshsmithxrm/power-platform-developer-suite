@@ -5472,7 +5472,7 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
-    /// No-op stub: entitydatasource has no mutable attributes.
+    /// Rejects updates — entitydatasource has no mutable attributes.
     /// The logical name is assigned at creation time and cannot be changed.
     /// </summary>
     [JsonRpcMethod("dataSources/update")]
@@ -5520,8 +5520,6 @@ public class RpcMethodHandler : IDisposable
 }
 
 #region Response DTOs
-
-// TODO: Extract DTOs to a separate RpcMethodDtos.cs file for better maintainability
 
 /// <summary>
 /// Response for auth/list method.

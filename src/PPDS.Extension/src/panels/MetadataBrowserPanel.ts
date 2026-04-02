@@ -99,16 +99,16 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 await this.openInMaker(message.entityLogicalName);
                 break;
             case 'createTable':
-                await this.handleCreateTable(message.params);
+                await this.handleCreateTable();
                 break;
             case 'deleteTable':
-                await this.handleDeleteTable(message.entityLogicalName, message.solutionUniqueName);
+                await this.handleDeleteTable(message.entityLogicalName);
                 break;
             case 'createColumn':
-                await this.handleCreateColumn(message.params);
+                await this.handleCreateColumn(message.entityLogicalName);
                 break;
             case 'deleteColumn':
-                await this.handleDeleteColumn(message.entityLogicalName, message.columnLogicalName, message.solutionUniqueName);
+                await this.handleDeleteColumn(message.entityLogicalName, message.columnLogicalName);
                 break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
@@ -227,12 +227,25 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
-    private async handleCreateTable(params: { solutionUniqueName: string; schemaName: string; displayName: string; pluralDisplayName: string; description: string; ownershipType: string }): Promise<void> {
+    private async handleCreateTable(): Promise<void> {
+        const solutionUniqueName = await vscode.window.showInputBox({ title: 'Create Table — Solution', prompt: 'Solution unique name', placeHolder: 'e.g. contoso_core' });
+        if (!solutionUniqueName) return;
+        const schemaName = await vscode.window.showInputBox({ title: 'Create Table — Schema Name', prompt: 'Table schema name (with publisher prefix)', placeHolder: 'e.g. contoso_widget' });
+        if (!schemaName) return;
+        const displayName = await vscode.window.showInputBox({ title: 'Create Table — Display Name', prompt: 'Display name', placeHolder: 'e.g. Widget' });
+        if (!displayName) return;
+        const pluralDisplayName = await vscode.window.showInputBox({ title: 'Create Table — Plural Name', prompt: 'Plural display name', placeHolder: 'e.g. Widgets' });
+        if (!pluralDisplayName) return;
+        const description = await vscode.window.showInputBox({ title: 'Create Table — Description', prompt: 'Description (optional)', placeHolder: '' }) ?? '';
+        const ownershipType = await vscode.window.showQuickPick(['UserOwned', 'OrganizationOwned'], { title: 'Create Table — Ownership', placeHolder: 'Select ownership type' });
+        if (!ownershipType) return;
+
         try {
+            const params = { solutionUniqueName, schemaName, displayName, pluralDisplayName, description, ownershipType };
             const result = await this.daemon.metadataCreateTable(params, this.environmentUrl);
             this.postMessage({ command: 'authoringResult', result });
             if (result.success) {
-                vscode.window.showInformationMessage(`Table '${result.logicalName ?? params.schemaName}' created successfully.`);
+                vscode.window.showInformationMessage(`Table '${result.logicalName ?? schemaName}' created successfully.`);
                 await this.refreshAll();
             }
         } catch (error) {
@@ -241,7 +254,10 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
-    private async handleDeleteTable(entityLogicalName: string, solutionUniqueName: string): Promise<void> {
+    private async handleDeleteTable(entityLogicalName: string): Promise<void> {
+        const solutionUniqueName = await vscode.window.showInputBox({ title: 'Delete Table — Solution', prompt: 'Solution unique name', placeHolder: 'e.g. contoso_core' });
+        if (!solutionUniqueName) return;
+
         const confirmation = await vscode.window.showWarningMessage(
             `Are you sure you want to delete table '${entityLogicalName}'? This action cannot be undone.`,
             { modal: true },
@@ -267,13 +283,27 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
-    private async handleCreateColumn(params: { solutionUniqueName: string; entityLogicalName: string; schemaName: string; displayName: string; description: string; columnType: string }): Promise<void> {
+    private async handleCreateColumn(entityLogicalName: string): Promise<void> {
+        const solutionUniqueName = await vscode.window.showInputBox({ title: 'Create Column — Solution', prompt: 'Solution unique name', placeHolder: 'e.g. contoso_core' });
+        if (!solutionUniqueName) return;
+        const columnType = await vscode.window.showQuickPick(
+            ['String', 'Memo', 'Integer', 'BigInt', 'Decimal', 'Double', 'Money', 'Boolean', 'DateTime', 'Choice', 'Choices', 'Image', 'File'],
+            { title: 'Create Column — Type', placeHolder: 'Select column type' },
+        );
+        if (!columnType) return;
+        const schemaName = await vscode.window.showInputBox({ title: 'Create Column — Schema Name', prompt: 'Column schema name (with publisher prefix)', placeHolder: 'e.g. contoso_widgetcount' });
+        if (!schemaName) return;
+        const displayName = await vscode.window.showInputBox({ title: 'Create Column — Display Name', prompt: 'Display name', placeHolder: 'e.g. Widget Count' });
+        if (!displayName) return;
+        const description = await vscode.window.showInputBox({ title: 'Create Column — Description', prompt: 'Description (optional)', placeHolder: '' }) ?? '';
+
         try {
+            const params = { solutionUniqueName, entityLogicalName, schemaName, displayName, description, columnType };
             const result = await this.daemon.metadataCreateColumn(params, this.environmentUrl);
             this.postMessage({ command: 'authoringResult', result });
             if (result.success) {
-                vscode.window.showInformationMessage(`Column '${result.logicalName ?? params.schemaName}' created successfully.`);
-                await this.loadEntityDetail(params.entityLogicalName);
+                vscode.window.showInformationMessage(`Column '${result.logicalName ?? schemaName}' created successfully.`);
+                await this.loadEntityDetail(entityLogicalName);
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -281,7 +311,10 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
-    private async handleDeleteColumn(entityLogicalName: string, columnLogicalName: string, solutionUniqueName: string): Promise<void> {
+    private async handleDeleteColumn(entityLogicalName: string, columnLogicalName: string): Promise<void> {
+        const solutionUniqueName = await vscode.window.showInputBox({ title: 'Delete Column — Solution', prompt: 'Solution unique name', placeHolder: 'e.g. contoso_core' });
+        if (!solutionUniqueName) return;
+
         const confirmation = await vscode.window.showWarningMessage(
             `Are you sure you want to delete column '${columnLogicalName}' from '${entityLogicalName}'? This action cannot be undone.`,
             { modal: true },

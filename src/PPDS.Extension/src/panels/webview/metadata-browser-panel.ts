@@ -96,35 +96,12 @@ const newTableBtn = document.getElementById('new-table-btn') as HTMLElement;
 const newColumnBtn = document.getElementById('new-column-btn') as HTMLElement;
 
 newTableBtn.addEventListener('click', () => {
-    // Placeholder: post a createTable command with empty params
-    // A real implementation would show an input form, but for now we send a message
-    // that the host will handle (e.g., using VS Code input boxes)
-    vscode.postMessage({
-        command: 'createTable',
-        params: {
-            solutionUniqueName: '',
-            schemaName: '',
-            displayName: '',
-            pluralDisplayName: '',
-            description: '',
-            ownershipType: 'UserOwned',
-        },
-    });
+    vscode.postMessage({ command: 'createTable' });
 });
 
 newColumnBtn.addEventListener('click', () => {
     if (!selectedEntityName) return;
-    vscode.postMessage({
-        command: 'createColumn',
-        params: {
-            solutionUniqueName: '',
-            entityLogicalName: selectedEntityName,
-            schemaName: '',
-            displayName: '',
-            description: '',
-            columnType: 'String',
-        },
-    });
+    vscode.postMessage({ command: 'createColumn', entityLogicalName: selectedEntityName });
 });
 
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
