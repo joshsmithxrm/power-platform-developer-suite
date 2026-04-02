@@ -232,9 +232,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 EditSelectedAttribute();
                 break;
             case TabRelationships:
+                _statusLabel.Text = "Relationship editing requires cascade configuration. Use CLI: ppds metadata relationship update";
+                break;
             case TabKeys:
+                _statusLabel.Text = "Keys cannot be updated — use delete and recreate";
+                break;
             case TabChoices:
-                // For these tabs, editing means updating the display name via generic property editor
                 EditSelectedItemDisplayName();
                 break;
         }
@@ -560,36 +563,79 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
     }
 
+    private async Task ExecuteUpdateGlobalChoiceAsync(UpdateGlobalChoiceRequest request)
+    {
+        try
+        {
+            var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IMetadataAuthoringService>();
+            await service.UpdateGlobalChoiceAsync(request, reporter, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Choice updated: {request.Name}";
+            });
+
+            if (_selectedEntity != null)
+            {
+                await LoadEntityDetailAsync(_selectedEntity.LogicalName);
+            }
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to update choice", ex, "Metadata.EditChoice");
+                _statusLabel.Text = $"Error: {ex.Message}";
+            });
+        }
+    }
+
     private void EditSelectedItemDisplayName()
     {
         if (_detailTable.Table == null) return;
         var row = _detailTable.SelectedRow;
         if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
 
-        // Try common column names for display
-        string currentName = "";
-        string identifier = "";
-
-        if (_detailTable.Table.Columns.Contains("DisplayName"))
+        var isGlobal = _detailTable.Table.Columns.Contains("Global")
+            && _detailTable.Table.Rows[row]["Global"]?.ToString() == "\u2713";
+        if (!isGlobal)
         {
-            currentName = _detailTable.Table.Rows[row]["DisplayName"]?.ToString() ?? "";
+            _statusLabel.Text = "Only global choices can be edited from this view.";
+            return;
         }
 
-        if (_detailTable.Table.Columns.Contains("SchemaName"))
+        var optionSetName = _detailTable.Table.Columns.Contains("OptionSetName")
+            ? _detailTable.Table.Rows[row]["OptionSetName"]?.ToString() ?? ""
+            : "";
+
+        if (string.IsNullOrWhiteSpace(optionSetName) || optionSetName == "\u2014")
         {
-            identifier = _detailTable.Table.Rows[row]["SchemaName"]?.ToString() ?? "";
+            _statusLabel.Text = "Cannot edit choice without a valid option set name.";
+            return;
         }
-        else if (_detailTable.Table.Columns.Contains("OptionSetName"))
-        {
-            identifier = _detailTable.Table.Rows[row]["OptionSetName"]?.ToString() ?? "";
-        }
+
+        var globalOs = _globalOptionSets?.FirstOrDefault(
+            os => os.Name.Equals(optionSetName, StringComparison.OrdinalIgnoreCase));
+        var currentName = globalOs?.DisplayName ?? "";
 
         using var dialog = new EditPropertyDialog("Display Name", currentName, Session);
         Application.Run(dialog);
 
         if (dialog.UpdatedValue is { } newValue && newValue != currentName)
         {
-            _statusLabel.Text = $"Edit not yet supported for this tab. Use CLI: ppds metadata relationship|choice update";
+            var solutionName = PromptForSolution();
+            if (string.IsNullOrWhiteSpace(solutionName)) return;
+
+            var request = new UpdateGlobalChoiceRequest
+            {
+                SolutionUniqueName = solutionName,
+                Name = optionSetName,
+                DisplayName = newValue
+            };
+            _statusLabel.Text = "Updating choice...";
+            ErrorService.FireAndForget(ExecuteUpdateGlobalChoiceAsync(request), "Metadata.EditChoice");
         }
     }
 

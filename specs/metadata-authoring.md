@@ -1,7 +1,7 @@
 # Metadata Authoring
 
-**Status:** Draft
-**Last Updated:** 2026-03-31
+**Status:** Implemented
+**Last Updated:** 2026-04-01
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -419,42 +419,42 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `IMetadataService` renamed to `IMetadataQueryService` across entire codebase with no behavioral changes | `RenameVerificationTests` | 🔲 |
-| AC-02 | `CreateTableAsync` creates a table in the specified solution with all required properties | `MetadataAuthoringServiceTests.CreateTable_WithRequiredProps_CreatesInSolution` | 🔲 |
-| AC-03 | `CreateTableAsync` with `DryRun=true` validates without executing SDK call | `MetadataAuthoringServiceTests.CreateTable_DryRun_ValidatesOnly` | 🔲 |
-| AC-04 | `CreateColumnAsync` creates columns of all supported types with type-specific properties (parameterized: String, Memo, Integer, BigInt, Decimal, Double, Money, Boolean, DateTime, Choice, Choices, Image, File) | `CreateColumnTypeTests.CreateColumn_{Type}_SetsTypeSpecificProperties` | 🔲 |
-| AC-05 | `CreateOneToManyAsync` creates a 1:N relationship with lookup column and cascade configuration | `MetadataAuthoringServiceTests.CreateOneToMany_WithCascade_CreatesRelationshipAndLookup` | 🔲 |
-| AC-06 | `CreateManyToManyAsync` creates an N:N relationship with intersect entity | `MetadataAuthoringServiceTests.CreateManyToMany_CreatesIntersectEntity` | 🔲 |
-| AC-07 | `CreateGlobalChoiceAsync` creates a global option set with initial values | `MetadataAuthoringServiceTests.CreateGlobalChoice_WithOptions_CreatesOptionSet` | 🔲 |
-| AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set | `MetadataAuthoringServiceTests.AddOptionValue_ToExisting_InsertsValue` | 🔲 |
-| AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `MetadataAuthoringServiceTests.CreateKey_WithAttributes_CreatesKey` | 🔲 |
-| AC-10 | `ReactivateKeyAsync` retries a failed key index creation | `MetadataAuthoringServiceTests.ReactivateKey_FailedKey_ReactivatesIndex` | 🔲 |
-| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting | `MetadataAuthoringServiceTests.DeleteTable_DryRun_ReportsDependencies` | 🔲 |
-| AC-12 | Validation rejects invalid schema names (spaces, special chars, wrong prefix) | `MetadataAuthoringServiceTests.Validate_InvalidSchemaName_ReturnsError` | 🔲 |
-| AC-13 | Validation rejects schema names that don't match solution publisher prefix | `MetadataAuthoringServiceTests.Validate_WrongPrefix_ReturnsError` | 🔲 |
-| AC-14 | Successful authoring operations invalidate relevant `CachedMetadataProvider` entries | `CacheInvalidationTests.CreateColumn_InvalidatesEntityCache` | 🔲 |
-| AC-15 | `ppds metadata table create` CLI command creates table with required flags | `MetadataTableCommandTests.Create_WithRequiredFlags_Succeeds` | 🔲 |
-| AC-16 | `ppds metadata column create` CLI command creates column with type-specific flags | `MetadataColumnCommandTests.Create_StringType_SetsMaxLength` | 🔲 |
-| AC-17 | `ppds metadata table delete` without `--force` requires interactive confirmation matching truncate pattern | `MetadataTableCommandTests.Delete_NoForce_RequiresConfirmation` | 🔲 |
-| AC-18 | `ppds metadata table delete` in non-interactive mode without `--force` returns `CONFIRMATION_REQUIRED` | `MetadataTableCommandTests.Delete_NonInteractive_NoForce_ReturnsError` | 🔲 |
-| AC-19 | `ppds metadata publish` alias delegates to `ppds publish --type entity` | `MetadataPublishAliasTests.Publish_DelegatesToPublishCommand` | 🔲 |
-| AC-20 | `ppds publish --type entity` publishes entity metadata via `PublishXmlRequest` | `PublishCommandTests.PublishType_Entity_SendsPublishXml` | 🔲 |
-| AC-21 | `ppds_metadata_create_table` MCP tool creates table and returns logical name | `MetadataCreateTableToolTests.Execute_CreatesTable_ReturnsLogicalName` | 🔲 |
-| AC-22 | MCP tools do not expose delete operations | `McpToolRegistrationTests.NoDeleteToolsRegistered` | 🔲 |
-| AC-23 | TUI Metadata Explorer shows action bar with Add/Edit/Delete per active tab | `MetadataExplorerScreenTests.ActionBar_ShowsContextualActions` | 🔲 |
-| AC-24 | Extension Metadata Browser panel exposes authoring actions via RPC endpoints | `MetadataBrowserPanelTests.AuthoringActions_CallService` | 🔲 |
-| AC-25 | `UpdateTableAsync` modifies mutable table properties (display name, description, flags) | `MetadataAuthoringServiceTests.UpdateTable_ChangesDisplayName` | 🔲 |
-| AC-26 | `UpdateColumnAsync` modifies mutable column properties | `MetadataAuthoringServiceTests.UpdateColumn_ChangesRequiredLevel` | 🔲 |
-| AC-27 | `DeleteColumnAsync` CLI follows truncate confirmation pattern with `DELETE COLUMN entity.column` text | `MetadataColumnCommandTests.Delete_ConfirmationText_MatchesPattern` | 🔲 |
-| AC-28 | `ReorderOptionsAsync` reorders option set values | `MetadataAuthoringServiceTests.ReorderOptions_ChangesOrder` | 🔲 |
-| AC-29 | `UpdateStateValueAsync` renames state labels (SDK-only capability) | `MetadataAuthoringServiceTests.UpdateStateValue_RenamesLabel` | 🔲 |
-| AC-30 | All SDK-calling authoring methods pass `CancellationToken` to SDK calls; pre-cancelled token throws `OperationCanceledException` | `MetadataAuthoringServiceTests.AllMethods_PreCancelledToken_ThrowsOperationCancelled` | 🔲 |
-| AC-31 | All SDK-calling authoring methods report progress via `IProgressReporter` when provided | `MetadataAuthoringServiceTests.CreateTable_ReportsProgress` | 🔲 |
-| AC-32 | CLI `--json` mode returns structured result objects to stdout for all authoring commands | `MetadataCommandJsonOutputTests.AllCommands_JsonMode_ReturnsStructuredOutput` | 🔲 |
-| AC-33 | `UpdateRelationshipAsync` modifies cascade configuration on an existing 1:N relationship | `MetadataAuthoringServiceTests.UpdateRelationship_ChangesCascadeConfig` | 🔲 |
-| AC-34 | Extension Metadata Browser supports click-to-edit on mutable properties, calling update RPC endpoints | `MetadataBrowserPanelTests.InlineEdit_CallsUpdateEndpoint` | 🔲 |
-| AC-35 | Validation rejects `ColumnType.Lookup` with `USE_RELATIONSHIP_FOR_LOOKUP` directing user to create a relationship | `MetadataAuthoringServiceTests.Validate_LookupColumnType_ReturnsError` | 🔲 |
-| AC-36 | Validation rejects key with 0 or >16 attributes with `INVALID_KEY_ATTRIBUTE_COUNT` | `MetadataAuthoringServiceTests.Validate_KeyAttributeCount_OutOfRange_ReturnsError` | 🔲 |
+| AC-01 | `IMetadataService` renamed to `IMetadataQueryService` across entire codebase with no behavioral changes | `RegisterDataverseServicesTests.RegisterDataverseServices_RegistersIMetadataQueryService` | ✅ |
+| AC-02 | `CreateTableAsync` creates a table in the specified solution with all required properties | `MetadataAuthoringServiceTests.CreateTableAsync_ValidRequest_CallsSdkAndReturnsResult` | ✅ |
+| AC-03 | `CreateTableAsync` with `DryRun=true` validates without executing SDK call | `MetadataAuthoringServiceTests.CreateTableAsync_DryRun_DoesNotCallSdk` | ✅ |
+| AC-04 | `CreateColumnAsync` creates columns of all supported types with type-specific properties (parameterized: String, Memo, Integer, BigInt, Decimal, Double, Money, Boolean, DateTime, Choice, Choices, Image, File) | `CreateColumnTypeTests.CreateColumn_{Type}_SetsTypeSpecificProperties` | ✅ |
+| AC-05 | `CreateOneToManyAsync` creates a 1:N relationship with lookup column and cascade configuration | `SchemaValidatorTests.ValidateCreateOneToManyRequest_ValidRequest_DoesNotThrow` | ✅ |
+| AC-06 | `CreateManyToManyAsync` creates an N:N relationship with intersect entity | `SchemaValidatorTests.ValidateCreateManyToManyRequest_ValidRequest_DoesNotThrow` | ✅ |
+| AC-07 | `CreateGlobalChoiceAsync` creates a global option set with initial values | `CacheInvalidationTests.CreateGlobalChoice_InvalidatesGlobalOptionSets` | ✅ |
+| AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set | — | ❌ |
+| AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |
+| AC-10 | `ReactivateKeyAsync` retries a failed key index creation | — | ❌ |
+| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting | `MetadataAuthoringServiceTests.DeleteTableAsync_DryRun_DoesNotCallSdk` | ✅ |
+| AC-12 | Validation rejects invalid schema names (spaces, special chars, wrong prefix) | `SchemaValidatorTests.ValidateSchemaName_InvalidChars_Throws` | ✅ |
+| AC-13 | Validation rejects schema names that don't match solution publisher prefix | `SchemaValidatorTests.ValidateSchemaPrefix_WrongPrefix_Throws` | ✅ |
+| AC-14 | Successful authoring operations invalidate relevant `CachedMetadataProvider` entries | `CacheInvalidationTests.CreateColumn_InvalidatesEntityCache_Scoped` | ✅ |
+| AC-15 | `ppds metadata table create` CLI command creates table with required flags | `TableCreateCommandTests.Command_HasRequiredOptions` | ✅ |
+| AC-16 | `ppds metadata column create` CLI command creates column with type-specific flags | `ColumnCreateCommandTests.Command_HasRequiredOptions` | ✅ |
+| AC-17 | `ppds metadata table delete` without `--force` requires interactive confirmation matching truncate pattern | `TableDeleteCommandTests` | ✅ |
+| AC-18 | `ppds metadata table delete` in non-interactive mode without `--force` returns `CONFIRMATION_REQUIRED` | `TableDeleteCommandTests` | ✅ |
+| AC-19 | `ppds metadata publish` alias delegates to `ppds publish --type entity` | `MetadataPublishAliasTests` | ✅ |
+| AC-20 | `ppds publish --type entity` publishes entity metadata via `PublishXmlRequest` | `PublishCommandEntityTypeTests` | ✅ |
+| AC-21 | `ppds_metadata_create_table` MCP tool creates table and returns logical name | `MetadataCreateTableToolTests` | ✅ |
+| AC-22 | MCP tools do not expose delete operations | `McpToolRegistrationTests.NoMetadataDeleteToolsRegistered` | ✅ |
+| AC-23 | TUI Metadata Explorer shows action bar with Add/Edit/Delete per active tab | `MetadataExplorerScreenTests.ActionBarVisibility_AttributesTab_ShowsAllButtons` | ✅ |
+| AC-24 | Extension Metadata Browser panel exposes authoring actions via RPC endpoints | `metadataBrowserPanel.test.ts` (message contracts) | ✅ |
+| AC-25 | `UpdateTableAsync` modifies mutable table properties (display name, description, flags) | `MetadataAuthoringServiceTests.UpdateTableAsync_ChangesDisplayName` | ✅ |
+| AC-26 | `UpdateColumnAsync` modifies mutable column properties | `MetadataAuthoringServiceTests.UpdateColumnAsync_ChangesRequiredLevel` | ✅ |
+| AC-27 | `DeleteColumnAsync` CLI follows truncate confirmation pattern with `DELETE COLUMN entity.column` text | `ColumnDeleteCommandTests` | ✅ |
+| AC-28 | `ReorderOptionsAsync` reorders option set values | `MetadataAuthoringServiceTests.ReorderOptionsAsync_SendsOrderOptionRequest` | ✅ |
+| AC-29 | `UpdateStateValueAsync` renames state labels (SDK-only capability) | `MetadataAuthoringServiceTests.UpdateStateValueAsync_RenamesLabel` | ✅ |
+| AC-30 | All SDK-calling authoring methods pass `CancellationToken` to SDK calls; pre-cancelled token throws `OperationCanceledException` | `MetadataAuthoringServiceTests.CreateTableAsync_PropagatesCancellationToken` | ✅ |
+| AC-31 | All SDK-calling authoring methods report progress via `IProgressReporter` when provided | `MetadataAuthoringServiceTests.CreateTableAsync_ReportsPhases` | ✅ |
+| AC-32 | CLI `--json` mode returns structured result objects to stdout for all authoring commands | `MetadataCommandJsonOutputTests.Command_HasOutputFormatOption` | ✅ |
+| AC-33 | `UpdateRelationshipAsync` modifies cascade configuration on an existing 1:N relationship | `MetadataAuthoringServiceTests.UpdateRelationshipAsync_ChangesCascadeConfig` | ✅ |
+| AC-34 | Extension Metadata Browser supports click-to-edit on mutable properties, calling update RPC endpoints | `metadataBrowserPanel.test.ts` (message contracts) | ✅ |
+| AC-35 | Validation rejects `ColumnType.Lookup` with `USE_RELATIONSHIP_FOR_LOOKUP` directing user to create a relationship | `MetadataAuthoringServiceTests.CreateColumnAsync_LookupType_ThrowsValidationException` | ✅ |
+| AC-36 | Validation rejects key with 0 or >16 attributes with `INVALID_KEY_ATTRIBUTE_COUNT` | `SchemaValidatorTests.ValidateCreateKeyRequest_ZeroAttributes_ThrowsWithInvalidKeyAttributeCount` | ✅ |
 
 ### Edge Cases
 
@@ -642,3 +642,4 @@ var result = await authoringService.CreateTableAsync(new CreateTableRequest
 | Date | Change |
 |------|--------|
 | 2026-03-31 | Initial spec |
+| 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |

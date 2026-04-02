@@ -263,26 +263,6 @@ export interface MetadataEntityViewDto {
     description: string | null;
 }
 
-/** Parameters for creating a table. */
-export interface CreateTableParams {
-    solutionUniqueName: string;
-    schemaName: string;
-    displayName: string;
-    pluralDisplayName: string;
-    description: string;
-    ownershipType: string;
-}
-
-/** Parameters for creating a column. */
-export interface CreateColumnParams {
-    solutionUniqueName: string;
-    entityLogicalName: string;
-    schemaName: string;
-    displayName: string;
-    description: string;
-    columnType: string;
-}
-
 /** Messages the Metadata Browser Panel webview sends to the extension host. */
 export type MetadataBrowserPanelWebviewToHost =
     | { command: 'ready' }
@@ -293,10 +273,10 @@ export type MetadataBrowserPanelWebviewToHost =
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker'; entityLogicalName?: string }
     | { command: 'copyToClipboard'; text: string }
-    | { command: 'createTable'; params: CreateTableParams }
-    | { command: 'deleteTable'; entityLogicalName: string; solutionUniqueName: string }
-    | { command: 'createColumn'; params: CreateColumnParams }
-    | { command: 'deleteColumn'; entityLogicalName: string; columnLogicalName: string; solutionUniqueName: string }
+    | { command: 'createTable' }
+    | { command: 'deleteTable'; entityLogicalName: string }
+    | { command: 'createColumn'; entityLogicalName: string }
+    | { command: 'deleteColumn'; entityLogicalName: string; columnLogicalName: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Metadata Browser Panel webview. */
