@@ -598,13 +598,27 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         var row = _detailTable.SelectedRow;
         if (row < 0 || row >= _detailTable.Table.Rows.Count) return;
 
-        var currentName = _detailTable.Table.Columns.Contains("DisplayName")
-            ? _detailTable.Table.Rows[row]["DisplayName"]?.ToString() ?? ""
-            : "";
+        var isGlobal = _detailTable.Table.Columns.Contains("Global")
+            && _detailTable.Table.Rows[row]["Global"]?.ToString() == "\u2713";
+        if (!isGlobal)
+        {
+            _statusLabel.Text = "Only global choices can be edited from this view.";
+            return;
+        }
 
         var optionSetName = _detailTable.Table.Columns.Contains("OptionSetName")
             ? _detailTable.Table.Rows[row]["OptionSetName"]?.ToString() ?? ""
             : "";
+
+        if (string.IsNullOrWhiteSpace(optionSetName) || optionSetName == "\u2014")
+        {
+            _statusLabel.Text = "Cannot edit choice without a valid option set name.";
+            return;
+        }
+
+        var globalOs = _globalOptionSets?.FirstOrDefault(
+            os => os.Name.Equals(optionSetName, StringComparison.OrdinalIgnoreCase));
+        var currentName = globalOs?.DisplayName ?? "";
 
         using var dialog = new EditPropertyDialog("Display Name", currentName, Session);
         Application.Run(dialog);
