@@ -67,7 +67,8 @@ def main() -> None:
         # blocking all edits with an unhelpful traceback.
         sys.exit(0)
 
-    file_path = tool_input.get("file_path", "")
+    # Claude Code wraps tool params under tool_input; older format had file_path at top level.
+    file_path = tool_input.get("tool_input", {}).get("file_path") or tool_input.get("file_path", "")
 
     if is_allowed_path(file_path):
         sys.exit(0)
