@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-04-17
+
+### Added
+
+- **`IMetadataAuthoringService`** — Schema CRUD for tables, columns, relationships, choices, and alternate keys with validation and dry-run support. ([#764](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/764), [#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766))
+- **`IWebResourceService`** — Web resource querying, content access, and publishing operations. ([#618](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/618))
+- **`ListResult<T>`** — Structured return type for all service `List*` methods exposing `Items`, `TotalCount`, `WasTruncated`, and `FiltersApplied` per Constitution I4 (no silent truncation). ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651))
+- **Query hints in execution pipeline** — `ppds:` hint set (`USE_TDS`, `MAX_ROWS`, `MAXDOP`, `NOLOCK`, `HASH_GROUP`, `BYPASS_PLUGINS`, `BYPASS_FLOWS`) integrated into routing and execution.
+- **TDS endpoint routing foundation** — Types and routing logic for SQL endpoint queries.
+- **`CallerId` impersonation in migration paths** — Bulk operation pipeline accepts `DataverseClientOptions` end-to-end so callers can execute as mapped owners.
+- **`ComponentNameResolver`** — Resolves solution component types via `IMetadataQueryService` with per-environment caching; fills in component names for Roles, Forms, SiteMaps, ConnectionRoles, and entity-typed components.
+- **`WebResource` early-bound entity** — Generated entity for platform-agnostic web resource operations.
+
+### Changed
+
+- **`IMetadataService` renamed to `IMetadataQueryService`** — Read-only semantics made explicit ahead of `IMetadataAuthoringService`. Pre-v1 API change; consumers must update references. ([#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766))
+- **Service `List*` return type** — All service `List*` methods now return `ListResult<T>` instead of `IReadOnlyList<T>` to expose total counts and truncation state. ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651))
+
 ## [1.0.0-beta.6] - 2026-03-02
 
 ### Added

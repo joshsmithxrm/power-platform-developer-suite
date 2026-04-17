@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.8] - 2026-04-17
+
+### Added
+
+- **Page-level parallelism for single-entity export** — Large entities (default >5000 records) export in parallel using GUID range partitioning. Auto-scales partition count (2–16) by entity size; threshold configurable via `--page-parallel-threshold`. ([#503](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/503))
+- **File column export and import** — Exports file columns (e.g., `notes.documentbody`) into a `files/` directory inside the ZIP with metadata (filename, MIME type). Import uploads via chunked 4 MB transfers with source→target ID mapping. Controlled by the `IncludeFileData` export option (default off). ([#32](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/32))
+- **CMT parity — handler framework and state transitions** — Entity handler pipeline (10 built-in handlers covering SystemUser, Activity, BusinessUnit, Opportunity, Incident, Quote, SalesOrder, Lead, DuplicateRule, Product). Adds state/status transitions (`SetStateRequest`, `WinOpportunityRequest`, etc.), cascading external lookup resolution, and date shifting (absolute, relative, relativeDaily). ([#708](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/708))
+- **Owner impersonation via `CallerId`** — When `--impersonate-owners` is enabled, imports execute as the mapped target owner. Unmapped owners fall back to the service principal. ([#37](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/37))
+- **Filter feedback in export progress** — Export progress lists applied filter conditions and the `(filtered)` suffix per entity; warns when a schema contains an empty `<filter>` element. ([#501](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/501))
+- **`IProgressReporter.Silent`** — Static no-op reporter eliminates null-conditional checks for optional progress parameters.
+- **`EntityNames` and `AttributeNames` constants** — Replaces magic strings in handler and import logic with centralized constants.
+
+### Changed
+
+- **Per-entity import-mode override** — `EntitySchema` now supports an `importMode` attribute to override the global import mode per entity. ([#37](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/37))
+- **`SchemaMismatchException.TotalMissingCount` is now computed** — Reflects the current missing-fields dictionary state on every read.
+
+### Fixed
+
+- **Owner mapping index misalignment under filtered import** — Owner mapping is built alongside filtered records so indexes do not drift when record filters are applied.
+- **`IBulkOperationExecutor` plumbs `DataverseClientOptions`** — Threaded through the full call chain to enable per-request `CallerId` impersonation and customization. ([#37](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/37))
+
 ## [1.0.0-beta.7] - 2026-03-02
 
 ### Changed

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-04-17
+
+### Added
+
+- **FetchXML IntelliSense** — `FetchXmlCompletionEngine` provides cursor-aware completions (element names, attribute names, operators, filter types, boolean flags) for FetchXML documents. Wired through the CLI daemon, TUI, and VS Code extension.
+- **Query hint execution** — Eight `ppds:` hints integrated into the execution and routing pipeline: `USE_TDS`, `NOLOCK`, `HASH_GROUP`, `MAX_ROWS`, `MAXDOP`, `BATCH_SIZE`, `BYPASS_PLUGINS`, `BYPASS_FLOWS`.
+
+### Fixed
+
+- **Paged TDS queries** — Maintain consistent results across pages.
+- **`FetchXmlCompletionEngine` tag detection** — Correct XML context identification for nested elements.
+- **Notebook interactive prompts** — Appear once before execution rather than per-cell during Run All.
+
 ## [1.0.0-beta.1] - 2026-03-02
 
 ### Added

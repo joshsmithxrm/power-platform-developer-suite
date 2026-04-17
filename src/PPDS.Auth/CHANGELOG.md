@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.8] - 2026-04-17
+
+### Added
+
+- **`EnvironmentVariableAuth` static class** — Stateless CI/CD authentication via environment variables (`PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`, optional `PPDS_CLOUD`). All four required variables are read together; throws when partially configured. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
+- **Profile-linked environment tracking** — `EnvironmentConfig.Profiles` list tracks which profile(s) have accessed each environment, enabling per-profile filtering across UI and TUI. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+- **`CredentialProviderFactory.CreateAsync()` `clientSecretOverride` parameter** — Explicit override takes precedence over environment variable and credential store lookups for flexible credential injection. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
+- **`TuiStateFile` in `ProfilePaths`** — Enables TUI screen-state and filter persistence across sessions. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+
+### Changed
+
+- **Environment-variable auth precedence** — `ConnectionResolver` attempts environment-variable authentication before profile store lookup, supporting stateless CI/CD without profile configuration. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
+- **`EnvironmentConfigStore.SaveConfigAsync()` accepts optional `profileName`** — Tracks profile access when saving environment configurations. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+
+### Fixed
+
+- **Windows Credential Manager URI validation** — Service identifier changed from `ppds.credentials` to `https://ppds.credentials` to satisfy GCM's `CreateTargetName()` URI-format requirement, fixing `UriFormatException` on credential operations. ([#763](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/763))
+- **`PowerPlatformTokenProvider` error handling** — Throws `AuthenticationException` (was `ArgumentException`) for credential validation failures, improving diagnostics. ([#676](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/676))
+- **Deprecated Azure.Identity APIs** — `ManagedIdentityCredentialProvider` updated to use `ManagedIdentityId.SystemAssigned` and `ManagedIdentityId.FromUserAssignedClientId()` (Azure.Identity 1.19.0+).
+
 ## [1.0.0-beta.7] - 2026-03-02
 
 ### Added

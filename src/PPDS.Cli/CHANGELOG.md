@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.14] - 2026-04-17
+
+### Added
+
+- **Metadata authoring commands** — Schema CRUD across CLI, TUI, RPC, and MCP with validation, dry-run, and solution awareness:
+  - `ppds metadata table create|update|delete`
+  - `ppds metadata column create|update|delete`
+  - `ppds metadata relationship create|update|delete`
+  - `ppds metadata choice create|update|delete` (with option subcommands)
+  - `ppds metadata key create|delete|reactivate`
+  - Entity-type publishing via `ppds publish entity <name>...` ([#764](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/764), [#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766))
+- **Custom APIs command group** — Full lifecycle under `ppds custom-apis`: `list`, `get`, `register`, `update`, `unregister`, `add-parameter`, `update-parameter`, `remove-parameter`, `set-plugin`. ([#699](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/699))
+- **Data Providers command group** — Virtual entity providers under `ppds data-providers`: `list`, `get`, `register`, `update`, `unregister`. ([#657](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/657))
+- **Service Endpoints integration** — `--event-handler-type` option on `ppds plugins register step` supports plugin-type and service-endpoint event handlers. ([#699](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/699))
+- **Web Resources commands** — `ppds webresources list`, `get`, `url`; top-level `ppds publish --all`, `ppds publish web-resources`, `ppds publish <name>...`. ([#655](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/655))
+- **TUI: new screens and panels** — Solutions, Metadata Browser, Plugin Traces, Web Resources, Connection References, Environment Variables, Migration. ([#615](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/615), [#616](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/616), [#617](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/617), [#618](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/618), [#708](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/708))
+- **TUI: environment selector polish** — `Open in Maker` and `Open in Dynamics` links, resolved environment label display, environment preview panel with org metadata. ([#597](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/597))
+- **TUI: session persistence** — Filter selections (Web Resources solution filter, Environment Variables solution filter, etc.) persisted per environment per screen as JSON. ([#288](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/288), [#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+- **Update check system** — `ppds version --check` queries NuGet for updates; background check (24-hour cache); startup notification when an update is available (suppressed via `--quiet`); `ppds update` for self-update. ([#566](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/566))
+- **Environment-variable authentication** — Stateless CI/CD via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL` (all required together; partial config is a hard error). ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
+- **Page-level export parallelism** — GUID range partitioning above a configurable threshold (default 5000 records). New `--page-level-parallelism` and `--page-level-parallelism-threshold` options on data export. ([#503](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/503))
+- **Migration CMT parity** — State transitions (`SetStateRequest` plus Win/Close/Fulfill SDK messages for seven entity types), owner impersonation via `--impersonate-owners`, cascading external lookup resolution (`--resolve-lookups`, `--skip-unresolved-lookups`), per-entity import-mode overrides, date shifting (4 modes), and file column chunked transfer (4 MB blocks). ([#708](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/708))
+- **Filter feedback during data export** — Export progress reports applied filter conditions and `(filtered)` per entity. ([#501](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/501))
+- **Query hints execution** — `dataSources` and `appliedHints` returned in query result DTOs; cross-environment banner in TUI when a query spans multiple environments.
+- **TDS endpoint support** — `--use-tds` flag on `ppds query sql`; TUI toggle with `Ctrl+T`; status indicator in query results; DML respects TDS mode.
+
+### Changed
+
+- **Plugin registration v1 surfaces** — Removed `IsManaged` gatekeeping (Dataverse remains the authority); added `--secure-config` to `ppds plugins register step` and `--event-handler-type` for service-endpoint targeting. ([#699](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/699))
+- **TUI / presenter refactoring** — Extracted `AuthMethodFormModel`, `SqlQueryPresenter`, `DataverseUrlBuilder` (consolidated nine static URL builders); centralized `IDisposable` patterns; resolved keyboard conflicts (`Ctrl+S`, `Ctrl+R`, `Escape`). ([#434](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/434), [#703](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/703))
+- **`ListResult<T>` transparency** — All service responses return `ListResult<T>` exposing `Items`, `TotalCount`, `WasTruncated`, `FiltersApplied`. Removed silent `$top` defaults; added progressive paging cookie support; `--include-internal` for metadata (66 junction tables) and `--include-intersect` for solutions. Paging metadata propagates through RPC handlers and MCP tools. ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651))
+- **Extension UX audit** — 28 fixes across 8 panels: cross-platform VSIX extraction (PowerShell on Windows, tar elsewhere), unified panel navigation/filtering, thread-safe Terminal.Gui marshaling via `Application.MainLoop.Invoke()`, 300 ms filter debouncing, CTS-based race-condition prevention. ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633))
+- **`IMetadataService` renamed to `IMetadataQueryService`** — Pre-v1 API cleanup ahead of `IMetadataAuthoringService` write operations. ([#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766))
+- **Daemon logging** — Information-level log output enabled in `ppds serve` for troubleshooting.
+
+### Fixed
+
+- **Metadata authoring** — Validation/cleanup pass: global choice editing in TUI with display-name validation; block editing of local choices (must be global); prevent invalid option set name modifications; CodeQL dead-code and unused-variable cleanups. ([#770](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/770))
+- **TUI environment handling** — Graceful handling of duplicate and reserved environment labels; last-write-wins config conflict resolution; prevented splash-screen crash with no profile selected; friendly-name display for unnamed SPN profiles; scrollable keyboard-shortcuts dialog; removed redundant `FireAndForget` on init task. ([#595](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/595), [#596](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/596), [#602](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/602), [#603](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/603))
+- **Query execution** — DML confirmation dialog in SQL Query screen; correct `queryMode` reporting; preserve user-supplied `TOP`; guard against `TOP` in `EXPLAIN`; daemon `ProfileResolutionService` handles duplicate environment labels.
+- **Daemon JSON-RPC** — `SystemTextJsonFormatter` for camelCase responses; `query/complete` validation and history-save shutdown handling; `FetchXmlGenerator` exception handling; correct error codes for export safety checks; export-safety cap enforcement.
+- **`PpdsException` compliance** — Error-handling hardening across the codebase. ([#676](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/676))
+
 ## [1.0.0-beta.13] - 2026-03-02
 
 ### Added

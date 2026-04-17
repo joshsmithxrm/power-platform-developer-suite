@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0-beta.1] - 2026-04-17
+
+### Added
+
+- **`CustomApiAttribute`** — Code-first registration for Dataverse Custom APIs (name, binding, allowed customization, processing step type, plugin type).
+- **`CustomApiParameterAttribute`** — Defines Custom API request/response parameters (multiple may be applied per class).
+- **`PluginDeployment` enum** — `ServerOnly`, `Offline`, `Both` for `PluginStepAttribute.Deployment`.
+- **`PluginInvocationSource` enum** — `Parent`, `Child` for distinguishing root vs cascaded invocation contexts.
+- **`ApiBindingType` enum** — `Global`, `Entity`, `EntityCollection` for Custom API binding scope.
+- **`ApiParameterType` enum** — Twelve types (`Boolean`, `DateTime`, `Decimal`, `Entity`, `EntityCollection`, `EntityReference`, `Float`, `Integer`, `Money`, `Picklist`, `String`, `StringArray`, `Guid`).
+- **`ParameterDirection` enum** — `Input`, `Output`.
+- **`ApiProcessingStepType` enum** — `None`, `AsyncOnly`, `SyncAndAsync`.
+- **New `PluginStepAttribute` properties** — `Deployment` (default `ServerOnly`), `RunAsUser` (impersonation user), `CanBeBypassed` (default `true`), `CanUseReadOnlyConnection` (default `false`), `InvocationSource` (default `Parent`).
+- **New `PluginImageAttribute` properties** — `Description` for documenting image purpose; `MessagePropertyName` to override the auto-inferred message property.
+
+### Notes
+
+- All additions are backward compatible. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
+- Released as `2.1.0-beta.1` to validate the new annotation surface before promoting to a stable `2.1.0`.
+
 ## [2.0.0] - 2025-12-31
 
 ### Added
