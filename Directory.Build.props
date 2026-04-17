@@ -3,5 +3,10 @@
     <!-- Shared settings for all projects -->
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <!-- Audit only direct package references for vulnerabilities. Transitive
+         advisories (e.g., NU1903 against System.Security.Cryptography.Xml from
+         the auth/identity stack) are tracked separately via Dependabot — we
+         can't ship a fix until the upstream package publishes one. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
   </PropertyGroup>
 </Project>
