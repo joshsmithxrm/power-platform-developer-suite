@@ -100,7 +100,7 @@ I'll create:
 Good?
 ```
 
-Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead. The confirmed launch command is used in Steps 5, 5b, 6, and 7 — do not re-derive it from work type.
+Wait for user confirmation. If the user suggests a different name, work type, or launch command, use that instead. The confirmed launch command is used in Steps 5, 6, and 7 — do not re-derive it from work type.
 
 ### Step 4: Check for Existing Worktree
 
@@ -143,117 +143,146 @@ python scripts/workflow-state.py set launch_command "<confirmed-claude-command>"
 
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
 
-### Step 5b: Write Context File
+### Step 6: Launch New Session with Inline Prompt
 
-Write `.plans/context.md` to the new worktree with issue details and routing guidance:
+Construct a complete launch prompt from the current conversation and deliver it inline to the new session via `pwsh Start-Process` + here-string. **No context file is written.** The prompt is the entire handoff payload.
 
-1. Create `.plans/` directory in the new worktree:
-   ```bash
-   mkdir -p .worktrees/<name>/.plans
-   ```
+Why inline: file-based handoffs (`.plans/context.md`) were observed being ignored or deprioritized by the receiving session. Content in the initial user prompt receives higher attention weight and is followed reliably.
 
-2. For each extracted issue, fetch details:
-   ```bash
-   gh issue view <N> --json title,body
-   ```
+#### 6a: Gather conversation context
 
-3. Write `.plans/context.md` with the following structure:
-   ```markdown
-   # Context: <name>
+From the current conversation, collect:
 
-   ## Issues
-   ### #N: <title>
-   <body>
+- **Issue details** — for each extracted issue, run `gh issue view <N> --json title,body` and capture title + body. If `gh` is unauthenticated or fails, fall back to issue numbers only and warn the user.
+- **Investigation context** — if the conversation contains output from a prior `/investigate` session (findings, options, decisions), capture the relevant portions verbatim.
+- **User intent** — any specific instructions, constraints, or scope the user stated in the original `/start` input or follow-up messages.
 
-   ## Work Type
-   <confirmed work type>
+Skip 6a if no issues and no investigation context — the prompt will contain only the task name and routing.
 
-   ## Recommended Next Step
-   <routing guidance based on work type>
-   ```
+#### 6b: Build the launch prompt
 
-   Routing guidance values (derived from the confirmed launch command, not re-derived from work type):
-   - `claude` (bug fix) → "Code the fix + regression test, then run `/gates` → `/verify` → `/pr`"
-   - `claude '/implement'` → "Run `/implement`"
-   - `claude '/design'` → "Run `/design`"
-   - `claude` (docs) → "Edit docs and commit. No design or implement needed. When done: `/pr`"
+Target 1–5K chars. Hard cap 30K (PowerShell/CreateProcess limit is ~32K). Structure:
 
-4. If the conversation contains investigation context from a prior `/investigate` session, include it in the same `.plans/context.md` file under a `## Investigation Context` section.
+```
+Task: <one-sentence description of the work>
 
-5. If `gh` is not authenticated or issue fetch fails, write context with issue numbers and titles from args only. Warn the user.
+Branch: feat/<name>
+Worktree: .worktrees/<name>
+Work type: <confirmed work type>
+Issues: #N, #M
 
-If no issues and no investigation context in conversation — skip this step, no file written.
+Issue details:
 
-### Step 6: Open Terminal with Claude
+### #N: <title>
+<body>
 
-Detect platform:
+### #M: <title>
+<body>
+
+Investigation context (from prior /investigate):
+<verbatim relevant excerpts, if any>
+
+User intent:
+<anything the user stated that the new session needs to know>
+
+First action: <routing instruction based on confirmed launch command — see table below>
+
+Project context:
+- Constitution: specs/CONSTITUTION.md
+- Spec template: specs/SPEC-TEMPLATE.md
+- Tech stack and conventions: CLAUDE.md
+```
+
+Routing instruction by launch command:
+- `claude` (bug fix) → "Reproduce the bug, write a regression test that fails, fix the code to make it pass, then run `/gates` → `/verify` → `/pr`."
+- `claude '/implement'` → "Read the spec and plan referenced above, then invoke `/implement` to execute end-to-end."
+- `claude '/design'` → "Invoke `/design` to size the work and route to `/spec` → `/plan` → `/implement`."
+- `claude` (docs) → "Edit the relevant docs and commit. No design or implement needed. When done: `/pr`."
+
+**Prompt rules:**
+- No single quotes in prompt content (here-string terminator sensitivity). Rephrase or use double quotes.
+- All paths relative to worktree root unless the reference is outside it.
+- Critical overrides go directly in the prompt — do not bury them in referenced files.
+
+#### 6c: Write launch script and spawn new window
+
+Platform detection:
 
 ```bash
 uname -s
 ```
 
-Use the launch command confirmed in Step 3.
+**Windows (MINGW/MSYS) — primary path:**
 
-**Windows (MINGW/MSYS):**
-```bash
-start pwsh -NoExit -Command "Set-Location '<absolute-path-to-worktree>'; <claude-command>"
+1. Create launch-script directory: `mkdir -p "$LOCALAPPDATA/ppds"`
+2. Resolve the worktree absolute Windows path: `cygpath -w "<worktree-absolute-path>"`
+3. Resolve the claude binary's full Windows path: `cygpath -w "$(which claude)"` — node version managers (fnm, nvm, volta) use session-scoped shims that may not persist in the spawned shell, so embed the absolute path.
+4. Write `$LOCALAPPDATA/ppds/launch-<name>.ps1` with a PowerShell single-quoted here-string (`@' ... '@`) wrapping the prompt content verbatim:
+
+   ```powershell
+   Set-Location -Path "<worktree-windows-path>"
+
+   $prompt = @'
+   <full prompt content from 6b, verbatim>
+   '@
+
+   & "<claude-absolute-windows-path>" $prompt
+   ```
+
+   Use the Write tool to produce this file — do not shell-escape the prompt content manually.
+
+5. Spawn a new console window by invoking `Start-Process` from the current shell:
+
+   ```bash
+   pwsh -Command "Start-Process pwsh -ArgumentList '-NoExit','-File','<launch-script-windows-path>'"
+   ```
+
+   `Start-Process` opens a new console; on Windows 11 with Windows Terminal as default, the OS delegates to WT automatically.
+
+**Windows fallbacks, in order:**
+
+- If `pwsh` is not on PATH or execution policy is `Restricted`/`AllSigned` (check with `pwsh -Command "Get-ExecutionPolicy"`), skip to manual fallback.
+- If running under WSL2 (`uname -r` contains `microsoft`), do not use WSL-local pwsh — fall through to manual fallback.
+
+**Linux/Mac:** No reliable cross-distro terminal launch. Print the manual fallback (see 6d).
+
+#### 6d: Manual fallback
+
+If the launcher fails or the platform has no reliable terminal-spawn path, print:
+
+```
+Could not open a new terminal automatically. Open PowerShell and run:
+
+  cd <worktree-absolute-path>
+  $prompt = @'
+  <full prompt content>
+  '@
+  claude $prompt
 ```
 
-**Linux/Mac:** No reliable cross-distro terminal launch. Print instructions:
-```
-Worktree created. Open a terminal there:
-  cd <path-to-worktree>
-  <claude-command>
-```
+On Linux/Mac, substitute shell-appropriate syntax (bash here-doc).
 
-### Step 7: Print Guidance
+### Step 7: Return Control to User
 
-After terminal launch (or if launch fails, after printing cd instructions):
+After the new session is launched (or the manual fallback printed), summarize what happened and return control. The new session is self-contained — the inline prompt carries issues, investigation context, work-type routing, and the first-action instruction. Do NOT continue the work in this session.
 
-**Bug fix:**
 ```
 Worktree ready at .worktrees/<name> (branch feat/<name>)
 Issues linked: #N, #M
-Work type: Bug fix
+Work type: <work type>
+Prompt: <chars> chars delivered inline to new session
 
-Claude opened in worktree. Code the fix + regression test.
-When done: `/gates` → `/verify` → `/pr`
-```
-
-**Enhancement/refactor:**
-```
-Worktree ready at .worktrees/<name> (branch feat/<name>)
-Issues linked: #N, #M
-Work type: Enhancement/refactor
-
-Claude launched with /implement in worktree.
+New session spawned. It will <first-action from routing table>.
+This session's job is done — continue in the new window.
 ```
 
-**New feature:**
-```
-Worktree ready at .worktrees/<name> (branch feat/<name>)
-Issues linked: #N, #M
-Work type: New feature
+If the launcher fell through to the manual fallback, replace the "New session spawned" line with:
 
-Claude launched with /design in worktree.
+```
+Could not spawn a new window automatically. Manual launch command printed above — paste it into a PowerShell terminal to start the session.
 ```
 
-**Docs:**
-```
-Worktree ready at .worktrees/<name> (branch feat/<name>)
-Issues linked: #N, #M
-Work type: Docs
-
-Claude opened in worktree. Edit docs and commit.
-When done: `/pr`
-```
-
-If terminal launch failed, replace the launch confirmation with:
-```
-Could not open terminal automatically. Run:
-  cd .worktrees/<name>
-  <claude-command>
-```
+Do not re-derive or restate the first-action instructions — the prompt already contains them. The user only needs to know the session is ready and where to find it.
 
 ## Rules
 
@@ -264,4 +293,5 @@ Could not open terminal automatically. Run:
 5. **Workflow state** — always initialize state in the new worktree.
 6. **Freeform input** — never require structured flags. Parse what the user gives you.
 7. **Labels are hints** — work-type pre-selection from labels is a convenience; user confirms.
-8. **Context file** — write `.plans/context.md` with issue details and routing guidance.
+8. **Inline prompt handoff — no context files.** The new session receives its task, issues, investigation context, and routing via an inline CLI-argument prompt. Do not write `.plans/context.md` or any other handoff file — file-based handoffs are deprioritized by the receiving session.
+9. **Return control after launch** — this session does not continue the work once the new session is spawned.
