@@ -8,7 +8,12 @@ namespace PPDS.Auth.Profiles;
 /// <summary>
 /// Provides platform-specific encryption for sensitive profile data.
 /// </summary>
-public static class ProfileEncryption
+/// <remarks>
+/// Kept <c>internal</c> — profile encryption is an implementation detail of
+/// <see cref="ProfileStore"/>. Exposed to <c>PPDS.Auth.Tests</c> via
+/// <c>InternalsVisibleTo</c>.
+/// </remarks>
+internal static class ProfileEncryption
 {
     private const string EncryptedPrefix = "ENCRYPTED:";
 

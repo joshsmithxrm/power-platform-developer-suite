@@ -9,6 +9,16 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
+    <!-- Phase 0 docs-generation pilot: PPDS014 and PublicApiAnalyzers are errors
+         in this project. Other PPDS libraries (Dataverse, Migration, Plugins)
+         still default these to warnings until they are onboarded. -->
+    <WarningsAsErrors>$(WarningsAsErrors);PPDS014;RS0016;RS0017</WarningsAsErrors>
+
+    <!-- RS0026/RS0027: "multiple overloads with optional parameters" backcompat
+         advice. Pre-existing design in ProfileStore and PowerPlatformTokenProvider.
+         Suppressing as non-blocking guidance during Phase 0 baseline. -->
+    <NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+
     <!-- MinVer Configuration -->
     <MinVerTagPrefix>Auth-v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
@@ -36,6 +46,19 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
     <InternalsVisibleTo Include="PPDS.Auth.Tests" />
+  </ItemGroup>
+
+  <!-- Public API surface tracking for Phase 0 docs pilot -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <ItemGroup>

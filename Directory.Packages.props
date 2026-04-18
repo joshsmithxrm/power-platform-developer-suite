@@ -37,6 +37,7 @@
     <PackageVersion Include="CsvHelper" Version="33.1.0" />
     <PackageVersion Include="RadLine" Version="0.9.0" />
     <PackageVersion Include="Terminal.Gui" Version="1.19.0" />
+    <PackageVersion Include="Spectre.Console.Cli" Version="0.52.0" />
     <PackageVersion Include="System.CommandLine" Version="2.0.5" />
     <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="9.0.1" />
   </ItemGroup>
@@ -55,6 +56,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.11.0-beta1.24454.1" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.201" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
