@@ -654,7 +654,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.0",
     "@types/vscode": "^1.110.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
