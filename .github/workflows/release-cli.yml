@@ -153,7 +153,7 @@ jobs:
       # Fallback flow: create new release if no draft exists (manual tag push)
       - name: Create new release with assets
         if: steps.check_release.outputs.is_draft == 'false'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: PPDS CLI v${{ steps.version.outputs.version }}
           tag_name: ${{ steps.version.outputs.tag }}
