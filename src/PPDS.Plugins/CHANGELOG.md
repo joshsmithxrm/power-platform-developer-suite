@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.0-beta.1] - 2026-04-17
+## [2.1.0] - 2026-04-18
+
+Promotes the `2.1.0-beta.1` annotation surface to stable, aligned with the broader PPDS v1.0.0 launch. All additions are backward compatible. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
 
 ### Added
 
@@ -21,11 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ApiProcessingStepType` enum** — `None`, `AsyncOnly`, `SyncAndAsync`.
 - **New `PluginStepAttribute` properties** — `Deployment` (default `ServerOnly`), `RunAsUser` (impersonation user), `CanBeBypassed` (default `true`), `CanUseReadOnlyConnection` (default `false`), `InvocationSource` (default `Parent`).
 - **New `PluginImageAttribute` properties** — `Description` for documenting image purpose; `MessagePropertyName` to override the auto-inferred message property.
-
-### Notes
-
-- All additions are backward compatible. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
-- Released as `2.1.0-beta.1` to validate the new annotation surface before promoting to a stable `2.1.0`.
 
 ## [2.0.0] - 2025-12-31
 
@@ -79,7 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full XML documentation
 - Comprehensive unit test suite
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.1.0...HEAD
+[2.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.0.0...Plugins-v2.1.0
 [2.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.1...Plugins-v2.0.0
 [1.1.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.0...Plugins-v1.1.1
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.0.0...Plugins-v1.1.0

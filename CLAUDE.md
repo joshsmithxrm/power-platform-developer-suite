@@ -4,8 +4,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 ## NEVER
 
-- Regenerate `PPDS.Plugins.snk` - breaks strong naming for all assemblies
-- Create new `ServiceClient` per request - 42,000x slower than pool; use `IDataverseConnectionPool`
+- Commit a `.snk` private keypair — these are decoded from CI secrets at publish time, never tracked. Public keys (`*.PublicKey`) are safe to commit.
+- Create new `ServiceClient` per request - use `IDataverseConnectionPool`
 - Hold single pooled client for multiple queries - defeats pool parallelism
 - Write CLI status messages to stdout - use `Console.Error.WriteLine`; stdout is for data
 - Throw raw exceptions from Application Services - wrap in `PpdsException` with ErrorCode
@@ -13,7 +13,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 ## ALWAYS
 
 - Use connection pool for multi-request scenarios
-- Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) - 5x faster than `ExecuteMultiple`
+- Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) over `ExecuteMultiple`
 - Use Application Services for all persistent state - single code path for CLI/TUI/RPC
 - Accept `IProgressReporter` for operations >1 second - all UIs need feedback
 - Include ErrorCode in `PpdsException` - enables programmatic handling
@@ -24,6 +24,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 |------------|---------|---------|
 | .NET | 4.6.2, 8.0, 9.0, 10.0 | Plugins: 4.6.2; libraries/CLI: 8.0+ |
 | Terminal.Gui | 1.19+ | TUI framework |
+| Node.js / TypeScript | 20+ / 5+ | VS Code extension, MCP server |
+| Python | 3.11+ | Workflow scripts (`scripts/`) |
 
 ## Key Files
 
@@ -67,11 +69,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 ## Extension Versioning
 
-Odd/even minor convention: odd minor = pre-release, even minor = stable. See `.plans/2026-03-03-vscode-extension-prerelease-design.md`.
-
-## Architecture
-
-TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
+Odd/even minor convention: odd minor = pre-release, even minor = stable. VS Code marketplace publishes both channels from the same codebase; version gating happens at package time.
 
 ## Git Hooks
 
@@ -85,7 +83,3 @@ Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hoo
 - Rules and label taxonomy: `docs/BACKLOG.md`
 - Use `/backlog` skill for issue triage and management
 
-## Gotchas
-
-- VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
-- Agent research summaries may be wrong — read code yourself before stating facts

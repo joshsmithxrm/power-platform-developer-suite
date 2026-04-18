@@ -95,3 +95,16 @@ After creating a profile and selecting an environment, the MCP server automatica
 ## License
 
 MIT License
+
+## Troubleshooting & Support
+
+### Report a Bug
+
+Found an issue? Please report it on GitHub:
+[Report an Issue](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
+
+Include:
+- PPDS MCP server version: `ppds-mcp-server --version`
+- Error message or unexpected behavior
+- Steps to reproduce
+- Your OS and .NET runtime version (`dotnet --info`)

@@ -18,6 +18,7 @@ using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Diagnostics;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using Authoring = PPDS.Dataverse.Metadata.Authoring;
@@ -55,6 +56,8 @@ public class RpcMethodHandler : IDisposable
     private readonly IServiceProvider _authServices;
     private readonly ILogger<RpcMethodHandler> _logger;
     private readonly CancellationTokenSource _daemonCts = new();
+    private readonly DateTimeOffset _daemonStartedAt = DateTimeOffset.UtcNow;
+    private long _heartbeatCount;
     private JsonRpc? _rpc;
 
     // Discovery cache for env/list — uses Volatile.Read/Write for lock-free thread safety.
@@ -101,6 +104,94 @@ public class RpcMethodHandler : IDisposable
             throw new InvalidOperationException("RPC context has already been set.");
         }
     }
+
+    #region Daemon Health
+
+    /// <summary>
+    /// Lightweight liveness probe used by the VS Code extension (and any other client)
+    /// to detect a dead daemon. Clients are expected to call this every ~30s; a missed
+    /// response means the daemon has hung or exited and the client should restart it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Method name:</b> <c>_heartbeat</c> — the underscore prefix flags this as an
+    /// internal/infrastructure RPC, not a surface-level command, so it is greppable
+    /// in logs as <c>method=_heartbeat</c>.
+    /// </para>
+    /// <para>
+    /// <b>How to call from the extension:</b>
+    /// <code>
+    /// const result = await connection.sendRequest&lt;HeartbeatResponse&gt;('_heartbeat');
+    /// // result.ok === true, result.uptimeSeconds, result.correlationId
+    /// </code>
+    /// Follow-up: the Extension should wire this into <c>DaemonStatusBar</c> as a
+    /// 30s timer; missing two consecutive responses → show "daemon unreachable".
+    /// </para>
+    /// <para>
+    /// The response correlation id is deliberately unique per call so support can
+    /// join a client-side "lost heartbeat" incident with the daemon stderr log.
+    /// </para>
+    /// </remarks>
+    [JsonRpcMethod("_heartbeat")]
+    public Task<HeartbeatResponse> HeartbeatAsync()
+    {
+        return SafeExecuteAsync("_heartbeat", () =>
+        {
+            var count = Interlocked.Increment(ref _heartbeatCount);
+            var uptime = DateTimeOffset.UtcNow - _daemonStartedAt;
+
+            // Emit at Debug so ppds logs filtered at Debug can trace heartbeats, but
+            // Information-level defaults stay uncluttered during healthy operation.
+            _logger.LogDebug(
+                "_heartbeat ok count={Count} uptimeSec={Uptime:F0}",
+                count,
+                uptime.TotalSeconds);
+
+            return Task.FromResult(new HeartbeatResponse
+            {
+                Ok = true,
+                UptimeSeconds = (long)uptime.TotalSeconds,
+                StartedAt = _daemonStartedAt,
+                CorrelationId = CorrelationIdScope.Current ?? string.Empty,
+                HeartbeatCount = count,
+                DaemonVersion = typeof(RpcMethodHandler).Assembly.GetName().Version?.ToString() ?? "unknown"
+            });
+        });
+    }
+
+    /// <summary>
+    /// Response payload for the <c>_heartbeat</c> method. Clients should treat
+    /// <see cref="Ok"/>=true as "daemon responsive". Uptime and start time are
+    /// useful for debugging long-running sessions.
+    /// </summary>
+    public sealed class HeartbeatResponse
+    {
+        /// <summary>Always <see langword="true"/> when the daemon responds.</summary>
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        /// <summary>Daemon uptime in seconds since the serve command started.</summary>
+        [JsonPropertyName("uptimeSeconds")]
+        public long UptimeSeconds { get; set; }
+
+        /// <summary>UTC timestamp when the daemon started.</summary>
+        [JsonPropertyName("startedAt")]
+        public DateTimeOffset StartedAt { get; set; }
+
+        /// <summary>Correlation id associated with this heartbeat call.</summary>
+        [JsonPropertyName("correlationId")]
+        public string CorrelationId { get; set; } = string.Empty;
+
+        /// <summary>Total heartbeats served since daemon startup. Useful for detecting client reconnects.</summary>
+        [JsonPropertyName("heartbeatCount")]
+        public long HeartbeatCount { get; set; }
+
+        /// <summary>Daemon (PPDS.Cli) assembly version.</summary>
+        [JsonPropertyName("daemonVersion")]
+        public string DaemonVersion { get; set; } = string.Empty;
+    }
+
+    #endregion
 
     #region Auth Methods
 
@@ -3164,44 +3255,54 @@ public class RpcMethodHandler : IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result of the action.</returns>
     /// <exception cref="RpcException">Thrown when no active profile or environment is configured.</exception>
-    private async Task<T> WithActiveProfileAsync<T>(
+    private Task<T> WithActiveProfileAsync<T>(
         Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        return SafeExecuteAsync(callerName, async () =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
-        var store = _authServices.GetRequiredService<ProfileStore>();
-        var collection = await store.LoadAsync(cancellationToken);
+            var store = _authServices.GetRequiredService<ProfileStore>();
+            var collection = await store.LoadAsync(cancellationToken);
 
-        var profile = collection.ActiveProfile
-            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+            var profile = collection.ActiveProfile
+                ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
 
-        var environment = profile.Environment
-            ?? throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
+            var environment = profile.Environment
+                ?? throw new RpcException(
+                    ErrorCodes.Connection.EnvironmentNotFound,
+                    "No environment selected. Use env/select first.");
 
-        // Use the pool manager to get a cached service provider. This reuses the existing
-        // connection pool instead of creating a new ServiceClient on every RPC call.
-        var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
-            new[] { profile.Name ?? profile.DisplayIdentifier },
-            environment.Url,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            cancellationToken: cancellationToken);
+            // Use the pool manager to get a cached service provider. This reuses the existing
+            // connection pool instead of creating a new ServiceClient on every RPC call.
+            var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
+                new[] { profile.Name ?? profile.DisplayIdentifier },
+                environment.Url,
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                cancellationToken: cancellationToken);
 
-        return await action(serviceProvider, profile, environment, cancellationToken);
+            return await action(serviceProvider, profile, environment, cancellationToken);
+        });
     }
 
     /// <summary>
     /// Convenience overload for actions that only need the service provider and cancellation token.
     /// Wraps the full overload, discarding the profile and environment parameters.
     /// </summary>
+    /// <remarks>
+    /// <c>callerName</c> is forwarded so <see cref="SafeExecuteAsync{T}"/>'s correlation log line
+    /// identifies the real RPC method, not this shim.
+    /// </remarks>
     private Task<T> WithActiveProfileAsync<T>(
         Func<IServiceProvider, CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
         => WithActiveProfileAsync<T>(
             (sp, _, _, ct) => action(sp, ct),
-            cancellationToken);
+            cancellationToken,
+            callerName);
 
     /// <summary>
     /// Resolves the display name for an environment URL, preferring the user's configured label
@@ -3223,59 +3324,69 @@ public class RpcMethodHandler : IDisposable
     /// Executes an action with the active profile's credentials against a specific environment.
     /// If environmentUrl is provided, uses it; otherwise falls back to the active profile's saved environment.
     /// </summary>
-    private async Task<T> WithProfileAndEnvironmentAsync<T>(
+    private Task<T> WithProfileAndEnvironmentAsync<T>(
         string? environmentUrl,
         Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var store = _authServices.GetRequiredService<ProfileStore>();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile
-            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-
-        // Resolve environment: explicit URL wins, else profile's saved environment
-        string resolvedUrl;
-        if (!string.IsNullOrWhiteSpace(environmentUrl))
+        return SafeExecuteAsync(callerName, async () =>
         {
-            resolvedUrl = environmentUrl;
-        }
-        else
-        {
-            var env = profile.Environment
-                ?? throw new RpcException(
-                    ErrorCodes.Connection.EnvironmentNotFound,
-                    "No environment selected. Use env/select first.");
-            resolvedUrl = env.Url;
-        }
+            cancellationToken.ThrowIfCancellationRequested();
 
-        // Build an EnvironmentInfo for the resolved URL
-        var resolvedEnvironment = profile.Environment?.Url?.Equals(resolvedUrl, StringComparison.OrdinalIgnoreCase) == true
-            ? profile.Environment
-            : new PPDS.Auth.Profiles.EnvironmentInfo { Url = resolvedUrl, DisplayName = resolvedUrl };
+            var store = _authServices.GetRequiredService<ProfileStore>();
+            var collection = await store.LoadAsync(cancellationToken);
 
-        var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
-            new[] { profile.Name ?? profile.DisplayIdentifier },
-            resolvedUrl,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            cancellationToken: cancellationToken);
+            var profile = collection.ActiveProfile
+                ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
 
-        return await action(serviceProvider, profile, resolvedEnvironment, cancellationToken);
+            // Resolve environment: explicit URL wins, else profile's saved environment
+            string resolvedUrl;
+            if (!string.IsNullOrWhiteSpace(environmentUrl))
+            {
+                resolvedUrl = environmentUrl;
+            }
+            else
+            {
+                var env = profile.Environment
+                    ?? throw new RpcException(
+                        ErrorCodes.Connection.EnvironmentNotFound,
+                        "No environment selected. Use env/select first.");
+                resolvedUrl = env.Url;
+            }
+
+            // Build an EnvironmentInfo for the resolved URL
+            var resolvedEnvironment = profile.Environment?.Url?.Equals(resolvedUrl, StringComparison.OrdinalIgnoreCase) == true
+                ? profile.Environment
+                : new PPDS.Auth.Profiles.EnvironmentInfo { Url = resolvedUrl, DisplayName = resolvedUrl };
+
+            var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
+                new[] { profile.Name ?? profile.DisplayIdentifier },
+                resolvedUrl,
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                cancellationToken: cancellationToken);
+
+            return await action(serviceProvider, profile, resolvedEnvironment, cancellationToken);
+        });
     }
 
     /// <summary>
     /// Convenience overload for actions that only need the service provider and cancellation token.
     /// </summary>
+    /// <remarks>
+    /// <c>callerName</c> is forwarded to the full overload so <see cref="SafeExecuteAsync{T}"/>'s
+    /// correlation log line identifies the real RPC method, not this shim.
+    /// </remarks>
     private Task<T> WithProfileAndEnvironmentAsync<T>(
         string? environmentUrl,
         Func<IServiceProvider, CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
         => WithProfileAndEnvironmentAsync<T>(
             environmentUrl,
             (sp, _, _, ct) => action(sp, ct),
-            cancellationToken);
+            cancellationToken,
+            callerName);
 
     #endregion
 
@@ -4275,6 +4386,140 @@ public class RpcMethodHandler : IDisposable
         }, cancellationToken);
     }
 
+    // The workspace root used to constrain RPC-exposed filesystem paths. Captured once at daemon
+    // startup because the extension launches ppds serve with the workspace folder as the working
+    // directory. Using a snapshot avoids TOCTOU issues if code elsewhere mutates CurrentDirectory.
+    private static readonly string WorkspaceRoot = System.IO.Path.GetFullPath(Environment.CurrentDirectory);
+
+    /// <summary>
+    /// Defensive wrapper that converts unhandled exceptions into structured <see cref="RpcException"/>s.
+    /// Without this wrapper, raw exceptions from a handler propagate to StreamJsonRpc which returns a
+    /// generic JSON-RPC error without the hierarchical <c>ErrorCode</c> contract the extension relies on.
+    /// Logs at Error with a correlation id so support scenarios can cross-reference daemon stderr.
+    /// Never crashes the daemon — always translates to a response the client can render.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RpcException"/>s (expected validation/auth/not-found failures) pass through unchanged.
+    /// Only "surprise" exceptions (NRE, InvalidCast, IO, etc.) get the <see cref="ErrorCodes.Operation.Internal"/>
+    /// treatment.
+    /// </remarks>
+    internal async Task<T> SafeExecuteAsync<T>(string methodName, Func<Task<T>> action)
+    {
+        // Install a correlation id for this RPC invocation so every log line emitted
+        // by handler code, pool services, and Dataverse services inherits it via
+        // CorrelationIdScope.Current. Reuses the caller-supplied id when one is already
+        // in flight (e.g., nested WithActiveProfileAsync → action), otherwise mints a new one.
+        var correlationId = CorrelationIdScope.Current ?? CorrelationIdScope.NewId();
+        using var scope = CorrelationIdScope.Push(correlationId);
+
+        var startTicks = Environment.TickCount64;
+        // Emit a greppable start marker so ppds logs / daemon stderr can pair start/end events.
+        _logger.LogDebug(
+            "rpc.start method={Method} correlationId={CorrelationId}",
+            methodName,
+            correlationId);
+
+        try
+        {
+            var result = await action();
+            _logger.LogDebug(
+                "rpc.end method={Method} correlationId={CorrelationId} durationMs={DurationMs} outcome=success",
+                methodName,
+                correlationId,
+                Environment.TickCount64 - startTicks);
+            return result;
+        }
+        catch (RpcException rpcEx)
+        {
+            // Already structured; pass through. Log at Debug so ppds logs shows the failure origin.
+            _logger.LogDebug(
+                "rpc.end method={Method} correlationId={CorrelationId} durationMs={DurationMs} outcome=rpc-error code={Code}",
+                methodName,
+                correlationId,
+                Environment.TickCount64 - startTicks,
+                rpcEx.StructuredErrorCode);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is cooperative — surface as-is so StreamJsonRpc maps to the standard
+            // cancellation response. Not a bug and not a daemon fault.
+            _logger.LogDebug(
+                "rpc.end method={Method} correlationId={CorrelationId} durationMs={DurationMs} outcome=cancelled",
+                methodName,
+                correlationId,
+                Environment.TickCount64 - startTicks);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "rpc.error method={Method} correlationId={CorrelationId}",
+                methodName,
+                correlationId);
+
+            // Redact the exception message to avoid leaking filesystem paths, connection strings,
+            // or other operator-only details to the remote client. The correlationId is the join
+            // key between the thin client message and the detailed server log.
+            throw new RpcException(
+                ErrorCodes.Operation.Internal,
+                $"Internal error in {methodName}. CorrelationId: {correlationId}.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves a user-supplied path and requires the canonical result to live under the workspace root.
+    /// RPC is a hostile boundary: without this check, a malicious webview message could target arbitrary
+    /// filesystem locations (e.g., "..\\..\\Users\\x\\.ssh\\id_rsa").
+    /// </summary>
+    /// <param name="userInput">The path supplied by the RPC caller. May be relative or absolute.</param>
+    /// <param name="parameterName">Name of the RPC parameter (for the error message).</param>
+    /// <returns>The canonical absolute path, guaranteed to be within <see cref="WorkspaceRoot"/>.</returns>
+    /// <exception cref="RpcException">If the resolved path escapes the workspace root.</exception>
+    internal static string ResolveWorkspacePath(string userInput, string parameterName)
+    {
+        return ResolveWorkspacePath(userInput, parameterName, WorkspaceRoot);
+    }
+
+    /// <summary>
+    /// Test-friendly overload that accepts an explicit root. Production code routes through the
+    /// zero-arg overload which uses <see cref="WorkspaceRoot"/> captured at startup.
+    /// </summary>
+    internal static string ResolveWorkspacePath(string userInput, string parameterName, string root)
+    {
+        if (string.IsNullOrWhiteSpace(userInput))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                $"The '{parameterName}' parameter is required");
+        }
+
+        // Path.GetFullPath normalizes "..", symlinks-in-name, and relative roots to an absolute path.
+        // Relative paths resolve against the provided root (the workspace folder at daemon startup).
+        var resolved = System.IO.Path.GetFullPath(userInput, root);
+
+        // Use a trailing separator to prevent prefix-match false positives like
+        // "C:\\Workspace" matching "C:\\Workspace-evil\\secret".
+        var rootWithSep = root.EndsWith(System.IO.Path.DirectorySeparatorChar)
+            ? root
+            : root + System.IO.Path.DirectorySeparatorChar;
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (!resolved.Equals(root, comparison) &&
+            !resolved.StartsWith(rootWithSep, comparison))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.PathOutsideWorkspace,
+                $"The '{parameterName}' parameter resolves to a path outside the workspace root.");
+        }
+
+        return resolved;
+    }
+
     private static readonly System.Text.Json.JsonSerializerOptions DeploymentSettingsReadOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -4310,13 +4555,16 @@ public class RpcMethodHandler : IDisposable
                 "The 'filePath' parameter is required");
         }
 
+        // Constrain the caller-supplied path to the workspace root. RPC is untrusted; a malicious
+        // webview message must not be able to read or overwrite files outside the workspace.
+        var fullPath = ResolveWorkspacePath(filePath, nameof(filePath));
+
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var settingsService = sp.GetRequiredService<IDeploymentSettingsService>();
 
             // Load existing settings if file already exists
             DeploymentSettingsFile? existingSettings = null;
-            var fullPath = System.IO.Path.GetFullPath(filePath);
 
             if (System.IO.File.Exists(fullPath))
             {

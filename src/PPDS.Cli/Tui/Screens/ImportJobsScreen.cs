@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
@@ -132,6 +133,7 @@ internal sealed class ImportJobsScreen : TuiScreenBase
             var service = provider.GetRequiredService<IImportJobService>();
 
             var data = await service.GetDataAsync(job.Id, ScreenCancellation);
+            var displayText = FormatImportJobData(data);
 
             Application.MainLoop.Invoke(() =>
             {
@@ -144,7 +146,7 @@ internal sealed class ImportJobsScreen : TuiScreenBase
                     Width = Dim.Fill(),
                     Height = Dim.Fill(),
                     ReadOnly = true,
-                    Text = data ?? "(No import log data available)"
+                    Text = displayText
                 };
 
                 _detailDialog = new Dialog(
@@ -167,6 +169,49 @@ internal sealed class ImportJobsScreen : TuiScreenBase
             {
                 ErrorService.ReportError("Failed to load import log", ex, "ImportJobs.Detail");
             });
+        }
+    }
+
+    /// <summary>
+    /// Pretty-prints import job XML data for display in the detail dialog.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The Dataverse <c>importjob.data</c> attribute returns XML on a single line,
+    /// which is unreadable in the TUI text view (#763). This method attempts to
+    /// parse the value as XML and re-serialize it with standard whitespace
+    /// formatting via <see cref="XDocument.Parse(string, LoadOptions)"/>.
+    /// </para>
+    /// <para>
+    /// <see cref="LoadOptions.PreserveWhitespace"/> is intentionally <em>not</em>
+    /// used — we want whitespace reflow. CDATA and XML comments are preserved by
+    /// <see cref="XDocument"/>'s object model and round-trip through <c>ToString()</c>.
+    /// </para>
+    /// <para>
+    /// If the value is not well-formed XML (or is empty/null), the raw string is
+    /// returned unmodified so the user at least sees something. A null input is
+    /// surfaced as a human-readable placeholder.
+    /// </para>
+    /// </remarks>
+    /// <param name="rawXml">The raw <c>importjob.data</c> value (may be null/empty).</param>
+    /// <returns>Formatted text suitable for a <see cref="TextView"/>.</returns>
+    internal static string FormatImportJobData(string? rawXml)
+    {
+        if (string.IsNullOrWhiteSpace(rawXml))
+        {
+            return "(No import log data available)";
+        }
+
+        try
+        {
+            // LoadOptions.None → default whitespace handling (reflow on ToString()).
+            var doc = XDocument.Parse(rawXml, LoadOptions.None);
+            return doc.ToString(SaveOptions.None);
+        }
+        catch (System.Xml.XmlException)
+        {
+            // Malformed XML — fall back to raw so the user can still inspect it.
+            return rawXml;
         }
     }
 

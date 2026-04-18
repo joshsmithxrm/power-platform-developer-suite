@@ -184,7 +184,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
             if (account != null)
             {
-                AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
+                AuthDebugLog.WriteLine($"  Found account for silent auth: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
                 try
                 {
                     var silentResult = await _msalClient!
@@ -274,7 +274,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
             if (_deviceCodeCallback == null)
             {
-                AuthenticationOutput.WriteLine($"Authenticated as: {result.Account.Username}");
+                AuthenticationOutput.WriteLine($"Authenticated as: upn={LogIdentityHelper.HashIdentifier(result.Account.Username)}");
                 AuthenticationOutput.WriteLine();
             }
 

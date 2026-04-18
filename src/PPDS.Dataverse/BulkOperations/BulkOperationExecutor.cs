@@ -708,14 +708,23 @@ namespace PPDS.Dataverse.BulkOperations
             Func<IPooledClient, List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
             CancellationToken cancellationToken)
         {
-            var attempt = 0;
+            // Per-category retry counters. Prior implementation used a single shared counter,
+            // which caused throttle retries to consume the budget that auth/connection/deadlock
+            // retries should have had. On long imports, the first transient auth or deadlock
+            // blip after repeated throttles would fail immediately and collapse the entire run.
+            // Each category now has its own independent budget and exponential-backoff basis.
+            var throttleAttempts = 0;
+            var authAttempts = 0;
+            var connectionAttempts = 0;
+            var infraRaceAttempts = 0;
+            var deadlockAttempts = 0;
+            var poolExhaustionAttempts = 0;
             var maxRetries = _options.Pool.MaxConnectionRetries;
 
             // Loop indefinitely for service protection errors - only CancellationToken stops us.
             // Other transient errors (auth, connection, TVP, deadlock) have finite retry limits.
             while (true)
             {
-                attempt++;
                 IPooledClient? client = null;
                 string connectionName = "unknown";
 
@@ -768,6 +777,7 @@ namespace PPDS.Dataverse.BulkOperations
                     // Service protection is transient - always retry, never fail.
                     // PooledClient already recorded the throttle via callback.
                     // GetClientAsync will wait for a non-throttled connection.
+                    throttleAttempts++;
                     LogThrottle(connectionName, retryAfter, errorCode);
 
                     // Adaptively reduce parallelism when throttled
@@ -777,6 +787,8 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsAuthFailure(ex))
                 {
+                    authAttempts++;
+
                     // Extract connection name from exception if client is null
                     var failedConnection = client?.ConnectionName
                         ?? GetConnectionNameFromException(ex, connectionName);
@@ -784,7 +796,7 @@ namespace PPDS.Dataverse.BulkOperations
                     _logger.LogWarning(
                         "Authentication failure on connection {Connection}. " +
                         "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
-                        failedConnection, attempt, maxRetries, ex.Message);
+                        failedConnection, authAttempts, maxRetries, ex.Message);
 
                     // Mark connection as invalid - it won't be returned to pool
                     client?.MarkInvalid($"Auth failure: {ex.Message}");
@@ -799,11 +811,11 @@ namespace PPDS.Dataverse.BulkOperations
                         _connectionPool.InvalidateSeed(failedConnection);
                     }
 
-                    if (attempt >= maxRetries)
+                    if (authAttempts >= maxRetries)
                     {
                         throw new DataverseConnectionException(
                             failedConnection,
-                            $"Authentication failure after {attempt} attempts",
+                            $"Authentication failure after {authAttempts} attempts",
                             ex);
                     }
 
@@ -811,6 +823,8 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsConnectionFailure(ex))
                 {
+                    connectionAttempts++;
+
                     // Extract connection name from exception if client is null (connection creation failed)
                     var failedConnection = client?.ConnectionName
                         ?? GetConnectionNameFromException(ex, connectionName);
@@ -818,7 +832,7 @@ namespace PPDS.Dataverse.BulkOperations
                     _logger.LogWarning(
                         "Connection failure on {Connection}. " +
                         "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
-                        failedConnection, attempt, maxRetries, ex.Message);
+                        failedConnection, connectionAttempts, maxRetries, ex.Message);
 
                     // Mark connection as invalid (only if we have a client instance)
                     client?.MarkInvalid($"Connection failure: {ex.Message}");
@@ -826,11 +840,11 @@ namespace PPDS.Dataverse.BulkOperations
                     // Record the failure for statistics
                     _connectionPool.RecordConnectionFailure();
 
-                    if (attempt >= maxRetries)
+                    if (connectionAttempts >= maxRetries)
                     {
                         throw new DataverseConnectionException(
                             failedConnection,
-                            $"Connection failure after {attempt} attempts",
+                            $"Connection failure after {connectionAttempts} attempts",
                             ex);
                     }
 
@@ -838,15 +852,17 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsBulkInfrastructureRaceConditionError(ex))
                 {
-                    // Exponential backoff: 500ms, 1s, 2s
-                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+                    infraRaceAttempts++;
+
+                    // Exponential backoff: 500ms, 1s, 2s - against this category's own counter
+                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, infraRaceAttempts - 1));
 
                     _logger.LogWarning(
                         "Bulk operation infrastructure race condition detected for {Entity}. " +
                         "This is transient on new tables. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxRetries}",
-                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxBulkInfrastructureRetries);
+                        entityLogicalName, delay.TotalMilliseconds, infraRaceAttempts, MaxBulkInfrastructureRetries);
 
-                    if (attempt >= MaxBulkInfrastructureRetries)
+                    if (infraRaceAttempts >= MaxBulkInfrastructureRetries)
                     {
                         _logger.LogError(
                             "Bulk operation infrastructure error persisted after {MaxRetries} retries for {Entity}. " +
@@ -861,15 +877,17 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsDeadlockError(ex))
                 {
-                    // Exponential backoff: 500ms, 1s, 2s
-                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+                    deadlockAttempts++;
+
+                    // Exponential backoff: 500ms, 1s, 2s - against this category's own counter
+                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, deadlockAttempts - 1));
 
                     _logger.LogWarning(
                         "SQL deadlock detected for {Entity}. " +
                         "This is transient under high concurrency. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxDeadlockRetries}",
-                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxDeadlockRetries);
+                        entityLogicalName, delay.TotalMilliseconds, deadlockAttempts, MaxDeadlockRetries);
 
-                    if (attempt >= MaxDeadlockRetries)
+                    if (deadlockAttempts >= MaxDeadlockRetries)
                     {
                         _logger.LogError(
                             "SQL deadlock persisted after {MaxRetries} retries for {Entity}. " +
@@ -884,15 +902,17 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (PoolExhaustedException ex)
                 {
+                    poolExhaustionAttempts++;
+
                     // Pool exhaustion is ALWAYS transient - connections will free up as batches complete.
                     // Retry indefinitely with exponential backoff (same pattern as throttling).
                     // Only cancellation token can stop this - pool exhaustion should never cause data loss.
-                    var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, attempt - 1), 32)); // Cap at 32s
+                    var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, poolExhaustionAttempts - 1), 32)); // Cap at 32s
 
                     _logger.LogWarning(
                         "Pool exhausted for {Entity} (attempt {Attempt}). " +
                         "Waiting {Delay}s for connections to free. Active: {Active}/{MaxPool}",
-                        entityLogicalName, attempt, delay.TotalSeconds,
+                        entityLogicalName, poolExhaustionAttempts, delay.TotalSeconds,
                         ex.ActiveConnections, ex.MaxPoolSize);
 
                     await Task.Delay(delay, cancellationToken);

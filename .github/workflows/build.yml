@@ -115,6 +115,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/PPDS.Extension/package-lock.json
 
+      - name: Setup Python (for RPC DTO drift check)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # Guards the C# ↔ TypeScript RPC DTO contract. Fails if a Response DTO
+      # exists on one side and not the other. See scripts/check-rpc-dto-drift.py
+      # and release plan workstream G3.
+      - name: Check RPC DTO drift
+        run: python scripts/check-rpc-dto-drift.py
+
       - name: Install dependencies
         working-directory: src/PPDS.Extension
         run: npm ci
@@ -126,6 +137,13 @@ jobs:
       - name: Lint
         working-directory: src/PPDS.Extension
         run: npm run lint
+
+      # Dead-code detection (knip) — non-blocking advisory for now (Workstream L5).
+      # Flip `continue-on-error` to false once the backlog of unused exports is cleared.
+      - name: Dead-code check (advisory)
+        working-directory: src/PPDS.Extension
+        run: npm run dead-code
+        continue-on-error: true
 
       - name: Build
         working-directory: src/PPDS.Extension

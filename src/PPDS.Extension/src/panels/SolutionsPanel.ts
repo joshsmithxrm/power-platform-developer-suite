@@ -10,6 +10,7 @@ import { getNonce } from './webviewUtils.js';
 import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, ComponentGroupDto } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
+import { groupComponentsByType } from './webview/shared/group-components.js';
 
 export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview> {
     private static instances: SolutionsPanel[] = [];
@@ -179,22 +180,10 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             this.postMessage({ command: 'componentsLoading', uniqueName });
             const result = await this.daemon.solutionsComponents(uniqueName, undefined, this.environmentUrl);
 
-            // Group components by type name (same logic as solutionsTreeView.ts)
-            const groupMap = new Map<string, SolutionComponentInfoDto[]>();
-            for (const component of result.components) {
-                const typeName = component.componentTypeName;
-                const group = groupMap.get(typeName);
-                if (group) {
-                    group.push(component);
-                } else {
-                    groupMap.set(typeName, [component]);
-                }
-            }
-
-            // Sort groups by name
-            const groups: ComponentGroupDto[] = Array.from(groupMap.entries())
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([typeName, components]) => ({
+            // Group components by type name using the shared utility
+            // (mirrors `PPDS.Cli.Services.SolutionComponentGrouper`).
+            const groups: ComponentGroupDto[] = groupComponentsByType<SolutionComponentInfoDto>(result.components)
+                .map(({ typeName, components }) => ({
                     typeName,
                     components: components.map(c => ({
                         objectId: c.objectId,

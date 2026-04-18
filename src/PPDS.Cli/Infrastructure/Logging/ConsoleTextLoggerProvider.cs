@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using PPDS.Dataverse.Diagnostics;
 
 namespace PPDS.Cli.Infrastructure.Logging;
 
@@ -77,6 +78,15 @@ internal sealed class ConsoleTextLogger : ILogger
         var levelAbbr = GetLevelAbbreviation(logLevel);
         var levelColor = GetLevelColor(logLevel);
 
+        // Prefer the ambient scope so correlation ids propagate across await points and
+        // into Dataverse services that don't know about the CLI LogContext.
+        var correlationId = CorrelationIdScope.Current ?? _context.CorrelationId;
+        // Show a short suffix (first 8 chars) so text output stays scannable while
+        // still allowing log-aggregation tools to grep on a prefix match.
+        var correlationSuffix = !string.IsNullOrEmpty(correlationId) && correlationId.Length >= 8
+            ? correlationId.Substring(0, 8)
+            : correlationId ?? string.Empty;
+
         lock (ConsoleLock)
         {
             var useColor = _options.EnableColors && !Console.IsErrorRedirected &&
@@ -96,8 +106,15 @@ internal sealed class ConsoleTextLogger : ILogger
                 Console.ResetColor();
             }
 
-            // Write category and message
-            Console.Error.WriteLine($" [{_shortCategoryName}] {message}");
+            // Write category, correlation id (short), and message
+            if (!string.IsNullOrEmpty(correlationSuffix))
+            {
+                Console.Error.WriteLine($" [{_shortCategoryName}] [cid={correlationSuffix}] {message}");
+            }
+            else
+            {
+                Console.Error.WriteLine($" [{_shortCategoryName}] {message}");
+            }
 
             // Write exception if present
             if (exception != null)

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 /**
  * Available environment types. These map to the EnvironmentType enum
@@ -188,7 +189,7 @@ export function registerEnvironmentConfigCommand(
                 );
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to configure environment: ${message}`);
+                void showErrorWithReport(`Failed to configure environment: ${message}`);
             }
         }),
     );

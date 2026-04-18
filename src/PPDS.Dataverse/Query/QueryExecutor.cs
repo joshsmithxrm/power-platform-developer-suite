@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Security;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -19,6 +21,15 @@ namespace PPDS.Dataverse.Query;
 /// </summary>
 public class QueryExecutor : IQueryExecutor
 {
+    /// <summary>
+    /// Backstop validator for Dataverse entity logical names: lowercase letter start,
+    /// followed by lowercase letters/digits/underscores. Applied before any FetchXML
+    /// string interpolation as defense-in-depth (primary defense is SecurityElement.Escape).
+    /// </summary>
+    private static readonly Regex EntityLogicalNameRegex = new(
+        "^[a-z][a-z0-9_]*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly IDataverseConnectionPool _connectionPool;
     private readonly ILogger<QueryExecutor>? _logger;
 
@@ -290,6 +301,14 @@ public class QueryExecutor : IQueryExecutor
 
             allRecords.AddRange(result.Records);
 
+            // Stop paging if we've reached the cap. Dataverse pages return up to 5000 rows,
+            // so a caller asking for e.g. 100 would otherwise receive the full first page.
+            // The final Take(maxRecords) below trims any overshoot.
+            if (allRecords.Count >= maxRecords)
+            {
+                break;
+            }
+
             if (!result.MoreRecords)
             {
                 break;
@@ -297,6 +316,12 @@ public class QueryExecutor : IQueryExecutor
 
             pagingCookie = result.PagingCookie;
             pageNumber++;
+        }
+
+        // Trim to maxRecords in case the last page overshot the cap.
+        if (allRecords.Count > maxRecords)
+        {
+            allRecords = allRecords.Take(maxRecords).ToList();
         }
 
         stopwatch.Stop();
@@ -351,16 +376,31 @@ public class QueryExecutor : IQueryExecutor
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
 
+        // Backstop validation: reject anything that does not match a valid Dataverse
+        // logical name. SecurityElement.Escape below is the primary defense against
+        // FetchXML injection; this regex catches obviously malformed input first.
+        if (!EntityLogicalNameRegex.IsMatch(entityLogicalName))
+        {
+            throw new ArgumentException(
+                $"'{entityLogicalName}' is not a valid Dataverse entity logical name. " +
+                "Expected lowercase letter start followed by lowercase letters, digits, or underscores.",
+                nameof(entityLogicalName));
+        }
+
+        // Defense-in-depth: escape any XML-sensitive characters before interpolating into
+        // a FetchXML string literal, even though the regex above already rejects them.
+        var safeEntityName = SecurityElement.Escape(entityLogicalName);
+
         // Use sorted top-1 queries instead of aggregate MIN/MAX to avoid the
         // Dataverse 50K AggregateQueryRecordLimit. Two simple queries with
         // ascending/descending sort on the indexed createdon column are fast
         // and never hit the aggregate limit.
-        var minFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+        var minFetchXml = $"<fetch top='1'><entity name='{safeEntityName}'>" +
             "<attribute name='createdon' />" +
             "<order attribute='createdon' descending='false' />" +
             "</entity></fetch>";
 
-        var maxFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+        var maxFetchXml = $"<fetch top='1'><entity name='{safeEntityName}'>" +
             "<attribute name='createdon' />" +
             "<order attribute='createdon' descending='true' />" +
             "</entity></fetch>";

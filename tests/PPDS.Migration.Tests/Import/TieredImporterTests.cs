@@ -684,6 +684,72 @@ public class TieredImporterTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ImportAsync_PluginReenableFails_SurfacesPerStepWarnings()
+    {
+        // D5: when EnablePluginStepsAsync throws a PluginStepReenableException with
+        // per-step failure detail, TieredImporter must emit an ImportWarning for each
+        // failed step (plus a roll-up warning) rather than logging silently.
+        var records = new List<Entity>
+        {
+            new Entity("account") { Id = Guid.NewGuid(), ["name"] = "Contoso" }
+        };
+
+        var entitySchema = new EntitySchema
+        {
+            LogicalName = "account",
+            PrimaryIdField = "accountid",
+            DisplayName = "Account",
+            DisablePlugins = true,
+            ObjectTypeCode = 1
+        };
+
+        var data = CreateMigrationData("account", records, entitySchema);
+        var plan = CreateSingleTierPlan("account");
+
+        SetupSchemaValidatorNoMismatches();
+        SetupBulkUpsertSuccess("account", 1);
+
+        var stepId1 = Guid.NewGuid();
+        var stepId2 = Guid.NewGuid();
+        var pluginStepIds = new List<Guid> { stepId1, stepId2 };
+
+        _pluginStepManager
+            .Setup(p => p.GetActivePluginStepsAsync(
+                It.IsAny<IEnumerable<int>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pluginStepIds);
+
+        _pluginStepManager
+            .Setup(p => p.DisablePluginStepsAsync(
+                It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Simulate token expiry after disable: one step fails, one succeeds.
+        _pluginStepManager
+            .Setup(p => p.EnablePluginStepsAsync(
+                It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PluginStepReenableException(new[]
+            {
+                (stepId1, (Exception)new InvalidOperationException("token expired"))
+            }));
+
+        var options = new ImportOptions { RespectDisablePluginsSetting = true };
+
+        // Act
+        var result = await _sut.ImportAsync(data, plan, options);
+
+        // Assert — per-step warning + roll-up warning are both present.
+        result.Warnings.Should().Contain(w =>
+            w.Code == ImportWarningCodes.PluginReenableFailed
+            && w.Message.Contains(stepId1.ToString()));
+        result.Warnings.Count(w => w.Code == ImportWarningCodes.PluginReenableFailed)
+            .Should().BeGreaterThanOrEqualTo(2,
+                "D5: one per-step warning plus a roll-up warning must be emitted");
+    }
+
     #endregion
 
     #region PrepareRecordForImport_RemapsEntityReferences

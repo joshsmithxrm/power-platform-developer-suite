@@ -5,6 +5,7 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
 
 import { getNonce } from './webviewUtils.js';
@@ -374,7 +375,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`FetchXML preview failed: ${msg}`);
+            void showErrorWithReport(`FetchXML preview failed: ${msg}`);
         }
     }
 
@@ -392,7 +393,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`EXPLAIN failed: ${msg}`);
+            void showErrorWithReport(`EXPLAIN failed: ${msg}`);
         }
     }
 
@@ -451,7 +452,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 vscode.window.showInformationMessage(`Copied ${result.rowCount} rows to clipboard`);
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Export failed: ${msg}`);
+                void showErrorWithReport(`Export failed: ${msg}`);
             }
             return;
         }
@@ -513,7 +514,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Export failed: ${msg}`);
+            void showErrorWithReport(`Export failed: ${msg}`);
         }
     }
 

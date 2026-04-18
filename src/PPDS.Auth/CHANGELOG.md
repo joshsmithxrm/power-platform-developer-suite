@@ -7,161 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-beta.8] - 2026-04-17
+## [1.0.0] - 2026-04-18
+
+First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.8` series. Targets `net8.0`, `net9.0`, `net10.0`.
 
 ### Added
 
-- **`EnvironmentVariableAuth` static class** — Stateless CI/CD authentication via environment variables (`PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`, optional `PPDS_CLOUD`). All four required variables are read together; throws when partially configured. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
-- **Profile-linked environment tracking** — `EnvironmentConfig.Profiles` list tracks which profile(s) have accessed each environment, enabling per-profile filtering across UI and TUI. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
-- **`CredentialProviderFactory.CreateAsync()` `clientSecretOverride` parameter** — Explicit override takes precedence over environment variable and credential store lookups for flexible credential injection. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
-- **`TuiStateFile` in `ProfilePaths`** — Enables TUI screen-state and filter persistence across sessions. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+- **Credential providers** — `InteractiveBrowserCredentialProvider`, `DeviceCodeCredentialProvider`, `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, `CertificateStoreCredentialProvider`, `ManagedIdentityCredentialProvider` (system and user-assigned), `GitHubFederatedCredentialProvider`, `AzureDevOpsFederatedCredentialProvider`, `UsernamePasswordCredentialProvider`.
+- **`ICredentialProvider` abstraction** — Custom authentication methods via plug-in implementation.
+- **Profile management** — Create, list, select, delete, update, rename, clear profiles. `AuthProfile.Authority` stores full authority URL; `AuthProfile.HomeAccountId` tracks MSAL account identity across sessions ([#59](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/59)).
+- **Profile storage v2** — Array-based storage with name-based active profile (migration from v1 auto-deletes on first load) ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107)).
+- **Secure credential storage** — `SecureCredentialStore` (MSAL.Extensions: Windows DPAPI, macOS Keychain, Linux libsecret) keyed by ApplicationId. Replaced in beta.6 by `NativeCredentialStore` using platform-native APIs directly (Windows Credential Manager, macOS Keychain, Linux Secret Service) ([#485](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/485)). `TokenCacheManager.ClearAllCachesAsync()` wipes all caches.
+- **Environment-variable authentication** — `EnvironmentVariableAuth` static class for stateless CI/CD via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL` (plus optional `PPDS_CLOUD`). All four required variables read together; partial configuration throws. `ConnectionResolver` attempts env-var auth before profile-store lookup ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706)).
+- **Global Discovery Service integration** — Environment enumeration; resolution by ID, URL, unique name, or partial friendly name. Multi-cloud support: Public, GCC, GCC High, DoD, China, USNat, USSec.
+- **`EnvironmentResolutionService`** — Multi-layer environment resolution that tries direct Dataverse connection first (works for service principals) before falling back to Global Discovery. Returns full org metadata ([#88](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/88), [#89](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/89)).
+- **`IPowerPlatformTokenProvider` / `PowerPlatformTokenProvider`** — Token acquisition for Power Apps and Power Automate management APIs using interactive browser, device code, or client credentials. Shares MSAL token cache with existing credential providers ([#150](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/150)).
+- **`CloudEndpoints.GetPowerAppsApiUrl()` / `GetPowerAutomateApiUrl()`** — Cloud-specific Power Platform API URLs.
+- **`EnvironmentConfig` and `EnvironmentConfigStore`** — Per-environment configuration (label, type, color). `EnvironmentType` enum (`Development`, `Test`, `Production`, `Sandbox`, `Default`). `QuerySafetySettings` and `ProtectionLevel` for DML thresholds and production protection, with cross-environment DML policy enforcement.
+- **Profile-linked environment tracking** — `EnvironmentConfig.Profiles` list tracks which profile(s) have accessed each environment, enabling per-profile filtering in UI/TUI. `EnvironmentConfigStore.SaveConfigAsync()` accepts optional `profileName` ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656)).
+- **`TuiStateFile` in `ProfilePaths`** — Enables TUI screen-state and filter persistence across sessions ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656)).
+- **DI registration** — `AddAuthServices()` extension method registers `ProfileStore`, `EnvironmentConfigStore`, and `NativeCredentialStore`.
+- **`CredentialProviderFactory.CreateAsync()`** — Async factory that retrieves secrets from the secure store; supports `PPDS_SPN_SECRET` environment variable; accepts `clientSecretOverride` parameter with precedence over env-var/store lookups ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107), [#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706)).
+- **`AuthenticationOutput`** — Configurable authentication-message output (consumers can redirect or suppress).
+- **`Clone()` methods** — Deep copying on `AuthProfile`, `EnvironmentInfo`, and `ProfileCollection`.
+- **`MsalClientBuilder`** — Shared MSAL client setup extracted from credential providers to reduce duplication.
+- **Platform-native token caching via MSAL**, JWT claims parsing, and integration tests for service-principal credential providers ([#55](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55)).
 
 ### Changed
 
-- **Environment-variable auth precedence** — `ConnectionResolver` attempts environment-variable authentication before profile store lookup, supporting stateless CI/CD without profile configuration. ([#706](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/706))
-- **`EnvironmentConfigStore.SaveConfigAsync()` accepts optional `profileName`** — Tracks profile access when saving environment configurations. ([#656](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/656))
+- **BREAKING — Profile storage schema v2** — Array storage, name-based active profile, secure storage for secrets. v1 profiles auto-deleted ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107)).
+- **BREAKING — `AuthProfile` secret removal** — `ClientSecret`, `CertificatePassword`, and `Password` moved to secure credential store; `UserCountry` and `TenantCountry` removed (optional JWT claims unavailable without app-manifest configuration).
+- **BREAKING — Removed `EnvironmentInfo.Id`** — Redundant; use `OrganizationId` or `EnvironmentId` ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107)).
+- **`EnvironmentConfig.Type` uses `EnvironmentType` enum** — Changed from `string` for compile-time safety.
+- **Native OS credential storage** — Replaced custom `SecureCredentialStore` with OS-native APIs (Windows Credential Manager, macOS Keychain, Linux Secret Service) for better security and reliability ([#485](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/485)).
+- **Deprecated Azure.Identity APIs replaced** — `ManagedIdentityCredentialProvider` updated to `ManagedIdentityId.SystemAssigned` / `ManagedIdentityId.FromUserAssignedClientId()` (Azure.Identity 1.19.0+).
 
 ### Fixed
 
-- **Windows Credential Manager URI validation** — Service identifier changed from `ppds.credentials` to `https://ppds.credentials` to satisfy GCM's `CreateTargetName()` URI-format requirement, fixing `UriFormatException` on credential operations. ([#763](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/763))
-- **`PowerPlatformTokenProvider` error handling** — Throws `AuthenticationException` (was `ArgumentException`) for credential validation failures, improving diagnostics. ([#676](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/676))
-- **Deprecated Azure.Identity APIs** — `ManagedIdentityCredentialProvider` updated to use `ManagedIdentityId.SystemAssigned` and `ManagedIdentityId.FromUserAssignedClientId()` (Azure.Identity 1.19.0+).
+- **Cross-tenant token cache issue** — `ppds env list` returned environments from wrong tenant when a user had multi-tenant profiles; fixed by using `HomeAccountId` for precise MSAL account lookup with tenant-filtering fallback ([#59](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/59)).
+- **Race condition in `ProfileConnectionSource`** — Added `SemaphoreSlim` for proper async synchronization ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81)).
+- **Memory leaks in credential providers** — Cache unregistration in `Dispose()` for `DeviceCodeCredentialProvider`, `InteractiveBrowserCredentialProvider`, `UsernamePasswordCredentialProvider`, `GlobalDiscoveryService` ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81)).
+- **Sync-over-async deadlock risk** — Wrapped blocking calls in `Task.Run()` to prevent deadlocks in UI/ASP.NET contexts ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81)).
+- **`CertificateStoreCredentialProvider` copy-paste bug** — Fixed `StoreName=` → `StoreLocation=` parameter ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81)).
+- **Token cache scope mismatch in browser auth** — Fixed scope mismatch during interactive browser profile creation.
+- **Disposal guards and typed catches** — Added across credential providers.
+- **Unnamed profile selection silently failed** — Active profile tracking now uses index-based lookup with backwards compatibility.
+- **Linux cleartext storage uses isolated MSAL config path** — Prevents conflicts with system keyring detection when libsecret is unavailable.
+- **ServiceClient org metadata populated** — Credential providers force eager discovery via `ConnectedOrgFriendlyName` access immediately after `ServiceClient` creation so metadata survives pool cloning ([#86](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/86)).
+- **Service principal identity display** — Returns full Application ID (GUID) instead of truncated `app:xxxxxxxx...` format across all SPN providers ([#100](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/100)).
+- **Missing `EnvironmentId` for direct connections** — `EnvironmentResolutionService.TryDirectConnectionAsync` now populates `EnvironmentId` from `ServiceClient.EnvironmentId` ([#101](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/101)).
+- **Windows Credential Manager URI validation** — Service identifier changed to `https://ppds.credentials` to satisfy GCM's `CreateTargetName()` URI-format requirement ([#763](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/763)).
+- **`PowerPlatformTokenProvider` error handling** — Throws `AuthenticationException` (was `ArgumentException`) for credential validation failures ([#676](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/676)).
+- **MSAL token-state query** — Token validity checked against MSAL's actual cache rather than stale profile metadata ([#491](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/491)).
+- **Credential store bypass for test scenarios** — `PPDS_TEST_CLIENT_SECRET` env var supported for test/CI scenarios ([#488](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/488)).
+- **Input validation in `CredentialProviderFactory`** — Added for required fields.
 
-## [1.0.0-beta.7] - 2026-03-02
-
-### Added
-
-- **`AddAuthServices()` DI registration** — Extension method for registering `ProfileStore`, `EnvironmentConfigStore`, and `NativeCredentialStore` into the DI container
-- **`EnvironmentConfig` models and `EnvironmentConfigStore`** — Per-environment configuration for label, type, and color settings
-- **`EnvironmentType` enum** — Typed environment classification (`Development`, `Test`, `Production`, `Sandbox`, `Default`), moved from CLI to Auth for shared use
-- **`QuerySafetySettings`** — Per-environment DML safety thresholds in `EnvironmentConfig`
-- **`ProtectionLevel`** — Environment protection level enforcement for production safety
-- **Cross-environment DML policy enforcement** — Safety policies for cross-environment data modification operations
-
-### Changed
-
-- **`EnvironmentConfig.Type` uses `EnvironmentType` enum** — Changed from `string` to typed enum for compile-time safety
-
-### Fixed
-
-- **Token cache scope mismatch in browser auth** — Fixed scope mismatch during interactive browser profile creation
-- **Disposal guards and typed catches** — Added disposal guards, empty-string-clears, and specific exception catches in credential providers
-
-## [1.0.0-beta.6] - 2026-01-14
-
-### Changed
-
-- **Authentication uses native OS credential storage** - Replaced custom `SecureCredentialStore` with native OS credential storage APIs for better security and reliability. Uses Windows Credential Manager, macOS Keychain, or Linux Secret Service directly. ([#485](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/485))
-
-### Fixed
-
-- **Query MSAL for token state instead of stale profile metadata** - Token validity is now checked against MSAL's actual token cache state rather than profile metadata that may be stale. ([#491](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/491))
-- **Credential store bypass for test scenarios** - Check `PPDS_TEST_CLIENT_SECRET` environment variable for credential store bypass in test/CI scenarios. ([#488](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/488))
-
-## [1.0.0-beta.5] - 2026-01-06
-
-### Added
-
-- **`IPowerPlatformTokenProvider`** - New interface for acquiring tokens for Power Platform REST APIs (Power Apps, Power Automate). Enables CLI commands that interact with Power Platform management APIs. ([#150](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/150))
-- **`PowerPlatformTokenProvider`** - Implementation supporting interactive browser, device code, and client credentials (SPN) flows. Shares MSAL token cache with existing credential providers.
-- **`CloudEndpoints.GetPowerAppsApiUrl()`** - Returns Power Apps API URL for each cloud environment (Public, UsGov, UsGovHigh, UsGovDod, China).
-- **`CloudEndpoints.GetPowerAutomateApiUrl()`** - Returns Power Automate API URL for each cloud environment.
-
-### Fixed
-
-- **Unnamed profile selection silently failed** - Selecting a profile without a name (`ppds auth select --index N`) appeared to succeed but would revert to the first profile on next command. Active profile tracking now uses index-based lookup instead of name-based, with backwards compatibility for existing profiles.json files.
-
-## [1.0.0-beta.4] - 2026-01-03
-
-### Changed
-
-- **BREAKING: Profile storage schema v2** - Modernized profile storage format. Profiles now stored as array with name-based active profile instead of dictionary with numeric index. v1 profiles are automatically deleted on first load (pre-release breaking change). ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **BREAKING: Secure credential storage** - Secrets (client secrets, certificate passwords, user passwords) are now stored in platform-native secure storage using MSAL.Extensions (Windows DPAPI, macOS Keychain, Linux libsecret) instead of in profile JSON. New `SecureCredentialStore` class manages encrypted credential storage. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **BREAKING: Removed `EnvironmentInfo.Id`** - Redundant field removed; use `OrganizationId` or `EnvironmentId` instead. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-
-### Added
-
-- **`SecureCredentialStore`** - Cross-platform encrypted credential storage using MSAL.Extensions.Msal. Credentials keyed by ApplicationId. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **`CredentialProviderFactory.CreateAsync()`** - Async factory method that retrieves secrets from secure store. Supports `PPDS_SPN_SECRET` environment variable for CI/CD scenarios. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **`AuthProfile.Authority`** - Stores full authority URL for authentication. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **`EnvironmentResolutionService`** - Multi-layer environment resolution that tries direct Dataverse connection first (works for service principals), then falls back to Global Discovery for user authentication. Returns full org metadata. ([#89](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/89), [#88](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/88))
-- **`TokenCacheManager.ClearAllCachesAsync()`** - Public method to clear all MSAL token caches including file-based cache and platform-specific secure storage (macOS Keychain, Linux keyring). ([#90](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/90))
-- **Integration tests for credential providers** - Live tests for `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, and `GitHubFederatedCredentialProvider` ([#55](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55))
-- Manual test procedures documentation for interactive browser and device code authentication
-
-### Removed
-
-- **`AuthProfile.ClientSecret`** - Moved to secure credential store
-- **`AuthProfile.CertificatePassword`** - Moved to secure credential store
-- **`AuthProfile.Password`** - Moved to secure credential store
-- **`AuthProfile.UserCountry`** - Removed (optional JWT claims not available without app manifest configuration)
-- **`AuthProfile.TenantCountry`** - Removed (optional JWT claims not available without app manifest configuration)
-
-### Fixed
-
-- **Linux cleartext storage uses exclusive MSAL config** - On Linux without libsecret, the SecureCredentialStore now uses an isolated MSAL configuration path to prevent conflicts with system keyring detection. ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107))
-- **ServiceClient org metadata not populated** - Credential providers now force eager org metadata discovery by accessing `ConnectedOrgFriendlyName` immediately after creating the ServiceClient. Discovery is lazy by default, and the connection pool clones clients before properties are accessed, resulting in empty metadata. This fix ensures `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` are populated. ([#86](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/86))
-- **Service principal identity display truncated** - Credential providers now return full Application ID (GUID) instead of truncated `app:xxxxxxxx...` format. Affects `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, `CertificateStoreCredentialProvider`, `GitHubFederatedCredentialProvider`, `AzureDevOpsFederatedCredentialProvider`, and `ManagedIdentityCredentialProvider`. ([#100](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/100))
-- **Missing Environment ID for direct connections** - `EnvironmentResolutionService.TryDirectConnectionAsync` now populates `EnvironmentId` from `ServiceClient.EnvironmentId` property. Previously only Global Discovery paths returned this value. ([#101](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/101))
-
-## [1.0.0-beta.3] - 2026-01-02
-
-### Fixed
-
-- **Race condition in ProfileConnectionSource** - Added `SemaphoreSlim` for proper async synchronization instead of mixed lock/async patterns ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-- **Memory leaks in credential providers** - Added cache unregistration in `Dispose()` for `DeviceCodeCredentialProvider`, `InteractiveBrowserCredentialProvider`, `UsernamePasswordCredentialProvider`, and `GlobalDiscoveryService` ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-- **Sync-over-async deadlock risk** - Wrapped blocking calls in `Task.Run()` to prevent deadlocks in UI/ASP.NET contexts ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-- **Copy-paste bug in CertificateStoreCredentialProvider** - Fixed `StoreName=` → `StoreLocation=` parameter ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-
-### Added
-
-- `AuthenticationOutput` static class for configurable authentication message output - library consumers can redirect or suppress console messages ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-- `Clone()` methods on `AuthProfile`, `EnvironmentInfo`, and `ProfileCollection` for proper deep copying ([#82](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/82))
-- Input validation for required fields in `CredentialProviderFactory` ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81))
-
-### Changed
-
-- Extracted common MSAL client setup into `MsalClientBuilder` - reduces code duplication across credential providers ([#82](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/82))
-
-## [1.0.0-beta.2] - 2026-01-01
-
-### Fixed
-
-- **Cross-tenant token cache issue** - Fixed bug where `ppds env list` would return environments from wrong tenant when user had profiles for multiple tenants. Root cause was MSAL account lookup using `FirstOrDefault()` instead of filtering by tenant. Now uses `HomeAccountId` for precise account lookup with tenant filtering fallback. ([#59](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/59))
-
-### Added
-
-- `HomeAccountId` property on `AuthProfile` and `ICredentialProvider` to track MSAL account identity across sessions
-
-## [1.0.0-beta.1] - 2025-12-29
-
-### Added
-
-- Authentication profile storage with encrypted secrets (DPAPI on Windows)
-- Profile management: create, list, select, delete, update, rename, clear
-- Multiple credential providers:
-  - `InteractiveBrowserCredentialProvider`: Opens browser for OAuth login
-  - `DeviceCodeCredentialProvider`: Device code flow for headless environments
-  - `ClientSecretCredentialProvider`: Service principal with client secret
-  - `CertificateFileCredentialProvider`: Service principal with certificate file
-  - `CertificateStoreCredentialProvider`: Service principal with Windows certificate store
-  - `ManagedIdentityCredentialProvider`: Azure Managed Identity (system or user-assigned)
-  - `GitHubFederatedCredentialProvider`: GitHub Actions OIDC federation
-  - `AzureDevOpsFederatedCredentialProvider`: Azure Pipelines OIDC federation
-  - `UsernamePasswordCredentialProvider`: Username/password authentication
-- Global Discovery Service integration for environment enumeration
-- Environment resolution by ID, URL, unique name, or partial friendly name
-- Multi-cloud support: Public, GCC, GCC High, DoD, China, USNat, USSec
-- `ICredentialProvider` abstraction for custom authentication methods
-- Platform-native token caching via MSAL
-- JWT claims parsing for identity information
-- Targets: `net8.0`, `net9.0`, `net10.0`
-
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.7...HEAD
-[1.0.0-beta.7]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.6...Auth-v1.0.0-beta.7
-[1.0.0-beta.6]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.5...Auth-v1.0.0-beta.6
-[1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.4...Auth-v1.0.0-beta.5
-[1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.3...Auth-v1.0.0-beta.4
-[1.0.0-beta.3]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.2...Auth-v1.0.0-beta.3
-[1.0.0-beta.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.1...Auth-v1.0.0-beta.2
-[1.0.0-beta.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Auth-v1.0.0-beta.1
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0...HEAD
+[1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Auth-v1.0.0

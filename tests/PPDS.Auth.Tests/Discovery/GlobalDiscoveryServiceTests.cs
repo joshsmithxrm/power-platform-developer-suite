@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Discovery;
@@ -145,6 +147,52 @@ public class GlobalDiscoveryServiceTests
 
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*my-test-profile*");
+    }
+
+    #endregion
+
+    #region UPN redaction regression guards (A5-follow-up)
+
+    /// <summary>
+    /// Regression guard: neither `AuthDebugLog` nor `AuthenticationOutput` call site in
+    /// GlobalDiscoveryService.cs may print `account.Username` or `result.Account.Username`
+    /// without routing through LogIdentityHelper.HashIdentifier. This prevents raw UPNs
+    /// from leaking into debug logs or user-visible auth output streams that may be
+    /// redirected to CI/bug-report logs.
+    /// </summary>
+    [Fact]
+    public void GlobalDiscoveryService_DoesNotEmitRawUpnToLogsOrAuthOutput()
+    {
+        var sourcePath = FindSourceFile();
+        var source = File.ReadAllText(sourcePath);
+
+        // Match any occurrence of `{...Username}` inside an AuthDebugLog.WriteLine or
+        // AuthenticationOutput.WriteLine call that is NOT wrapped by HashIdentifier.
+        // The approved form looks like `upn={LogIdentityHelper.HashIdentifier(x.Username)}`.
+        var rawUpnPattern = new Regex(
+            @"(AuthDebugLog|AuthenticationOutput)\.WriteLine\([^)]*\{[^{}]*\.Username\}[^)]*\)",
+            RegexOptions.Singleline);
+
+        foreach (Match match in rawUpnPattern.Matches(source))
+        {
+            match.Value.Should().Contain("HashIdentifier",
+                $"every log/auth-output emission of .Username in GlobalDiscoveryService must be hashed. " +
+                $"Offending call: {match.Value}");
+        }
+    }
+
+    private static string FindSourceFile()
+    {
+        // Walk up from the test assembly to find src/PPDS.Auth/Discovery/GlobalDiscoveryService.cs.
+        // Matches the pattern used elsewhere in the test suite for source-level regression guards.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var candidate = Path.Combine(dir.FullName, "src", "PPDS.Auth", "Discovery", "GlobalDiscoveryService.cs");
+            if (File.Exists(candidate)) return candidate;
+            dir = dir.Parent;
+        }
+        throw new FileNotFoundException("Could not locate GlobalDiscoveryService.cs from test base directory.");
     }
 
     #endregion

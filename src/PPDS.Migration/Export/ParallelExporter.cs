@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Security;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -120,11 +122,34 @@ namespace PPDS.Migration.Export
                 Message = $"Exporting {schema.Entities.Count} entities..."
             });
 
+            var warnings = new WarningCollector();
+
             try
             {
-                // Pre-fetch approximate record counts for partition routing
+                // Pre-fetch approximate record counts for partition routing.
+                // Entities whose count query fails are surfaced via WarningCollector (F1);
+                // they will fall back to sequential export because recordCount=0 drops them below threshold.
+                var countFailures = new ConcurrentBag<string>();
                 var recordCounts = await GetEntityRecordCountsAsync(
-                    schema.Entities, cancellationToken).ConfigureAwait(false);
+                    schema.Entities, countFailures, cancellationToken).ConfigureAwait(false);
+
+                foreach (var failedEntity in countFailures)
+                {
+                    warnings.AddWarning(new ImportWarning
+                    {
+                        Code = ExportWarningCodes.CountFailedSequentialFallback,
+                        Entity = failedEntity,
+                        Message = $"Record count query failed for entity '{failedEntity}' — falling back to sequential export (partitioning disabled).",
+                        Impact = "Reduced export throughput for this entity."
+                    });
+
+                    progress.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = failedEntity,
+                        Message = $"Warning: count query failed for {failedEntity} — exporting sequentially (no partitioning)."
+                    });
+                }
 
                 // Export all entities in parallel
                 await Parallel.ForEachAsync(
@@ -212,7 +237,8 @@ namespace PPDS.Migration.Export
                     Duration = stopwatch.Elapsed,
                     EntityResults = entityResults.ToArray(),
                     OutputPath = outputPath,
-                    Errors = errors.ToArray()
+                    Errors = errors.ToArray(),
+                    Warnings = warnings.GetWarnings()
                 };
 
                 progress.Complete(new MigrationResult
@@ -246,7 +272,8 @@ namespace PPDS.Migration.Export
                             Phase = MigrationPhase.Exporting,
                             Message = safeMessage
                         }
-                    }
+                    },
+                    Warnings = warnings.GetWarnings()
                 };
             }
         }
@@ -310,8 +337,6 @@ namespace PPDS.Migration.Export
                 var hasFilter = !string.IsNullOrWhiteSpace(entitySchema.FetchXmlFilter);
                 var filterDescription = hasFilter ? SummarizeFilter(entitySchema.FetchXmlFilter!) : null;
 
-                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-
                 // Build FetchXML
                 var fetchXml = BuildFetchXml(entitySchema, options.PageSize);
                 var pageNumber = 1;
@@ -323,7 +348,14 @@ namespace PPDS.Migration.Export
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
-                    var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+
+                    // E1: Acquire client per page, release before next iteration's await.
+                    // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
+                    EntityCollection response;
+                    await using (var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false))
+                    {
+                        response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+                    }
 
                     records.AddRange(response.Entities);
 
@@ -492,8 +524,6 @@ namespace PPDS.Migration.Export
         {
             var records = new List<Entity>();
 
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-
             var fetchXml = AddPartitionFilter(baseFetchXml, entitySchema.PrimaryIdField, partition);
             var pageNumber = 1;
             string? pagingCookie = null;
@@ -503,7 +533,14 @@ namespace PPDS.Migration.Export
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
-                var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+
+                // E2: Acquire client per page, release before next iteration's await.
+                // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
+                EntityCollection response;
+                await using (var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false))
+                {
+                    response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+                }
 
                 records.AddRange(response.Entities);
 
@@ -596,18 +633,25 @@ namespace PPDS.Migration.Export
             IProgressReporter progress,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
-
             // Query intersect entity to get all associations
             var intersectEntity = rel.IntersectEntity ?? rel.Name;
             var sourceIdField = $"{entitySchema.LogicalName}id";
             var targetIdField = rel.TargetEntityPrimaryKey ?? $"{rel.Entity2}id";
 
+            // C4: validate and escape all values interpolated into FetchXML to prevent injection.
+            ValidateLogicalName(intersectEntity, nameof(intersectEntity));
+            ValidateLogicalName(sourceIdField, nameof(sourceIdField));
+            ValidateLogicalName(targetIdField, nameof(targetIdField));
+
+            var escapedIntersect = SecurityElement.Escape(intersectEntity);
+            var escapedSourceIdField = SecurityElement.Escape(sourceIdField);
+            var escapedTargetIdField = SecurityElement.Escape(targetIdField);
+
             // Build FetchXML to query intersect entity
             var fetchXml = $@"<fetch>
-                <entity name='{intersectEntity}'>
-                    <attribute name='{sourceIdField}' />
-                    <attribute name='{targetIdField}' />
+                <entity name='{escapedIntersect}'>
+                    <attribute name='{escapedSourceIdField}' />
+                    <attribute name='{escapedTargetIdField}' />
                 </entity>
             </fetch>";
 
@@ -621,7 +665,14 @@ namespace PPDS.Migration.Export
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
-                var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+
+                // E3: Acquire client per page, release before next iteration's await.
+                // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
+                EntityCollection response;
+                await using (var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false))
+                {
+                    response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+                }
 
                 // Only include associations where both fields exist and source was exported
                 var validAssociations = response.Entities
@@ -780,6 +831,7 @@ namespace PPDS.Migration.Export
 
         private async Task<Dictionary<string, long>> GetEntityRecordCountsAsync(
             IReadOnlyList<EntitySchema> entities,
+            ConcurrentBag<string> countFailures,
             CancellationToken cancellationToken)
         {
             var counts = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -795,10 +847,16 @@ namespace PPDS.Migration.Export
                 {
                     try
                     {
-                        // Acquire and release per query to comply with D2 (don't hold across operations)
+                        // C4: validate and escape values before interpolating into FetchXML.
+                        ValidateLogicalName(entity.LogicalName, nameof(entity.LogicalName));
+                        ValidateLogicalName(entity.PrimaryIdField, nameof(entity.PrimaryIdField));
+                        var escapedEntity = SecurityElement.Escape(entity.LogicalName);
+                        var escapedPk = SecurityElement.Escape(entity.PrimaryIdField);
+
+                        // Acquire and release per query to comply with pool discipline.
                         await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: ct).ConfigureAwait(false);
 
-                        var fetchXml = $@"<fetch aggregate=""true""><entity name=""{entity.LogicalName}""><attribute name=""{entity.PrimaryIdField}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
+                        var fetchXml = $@"<fetch aggregate=""true""><entity name=""{escapedEntity}""><attribute name=""{escapedPk}"" alias=""cnt"" aggregate=""count""/></entity></fetch>";
 
                         var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml)).ConfigureAwait(false);
                         var aliased = response.Entities.FirstOrDefault()?.GetAttributeValue<AliasedValue>("cnt");
@@ -810,12 +868,33 @@ namespace PPDS.Migration.Export
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        // If count fails for an entity, default to 0 (sequential export)
-                        _logger?.LogDebug(ex, "Failed to get record count for {Entity}, defaulting to sequential", entity.LogicalName);
+                        // F1: surface at Warning level (not Debug) and record the failure so the
+                        // caller can emit a WarningCollector entry. Entity will fall back to
+                        // sequential export because recordCount=0 drops it below the partition threshold.
+                        _logger?.LogWarning(ex,
+                            "Failed to get record count for {Entity} — falling back to sequential export",
+                            entity.LogicalName);
+                        countFailures.Add(entity.LogicalName);
                     }
                 }).ConfigureAwait(false);
 
             return new Dictionary<string, long>(counts, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Validates that a Dataverse logical name matches the expected shape.
+        /// Backstop guard against malicious or malformed names being interpolated into FetchXML.
+        /// </summary>
+        private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.Compiled);
+
+        private static void ValidateLogicalName(string value, string argumentName)
+        {
+            if (string.IsNullOrEmpty(value) || !LogicalNamePattern.IsMatch(value))
+            {
+                throw new ArgumentException(
+                    $"Invalid Dataverse logical name '{value}'. Must match ^[a-z][a-z0-9_]*$.",
+                    argumentName);
+            }
         }
 
         /// <summary>
@@ -974,5 +1053,14 @@ namespace PPDS.Migration.Export
         {
             public IReadOnlyList<Entity>? Records { get; set; }
         }
+    }
+
+    /// <summary>
+    /// Standard warning codes for export operations.
+    /// </summary>
+    public static class ExportWarningCodes
+    {
+        /// <summary>Record count query failed, entity fell back to sequential export.</summary>
+        public const string CountFailedSequentialFallback = "COUNT_FAILED_SEQUENTIAL_FALLBACK";
     }
 }

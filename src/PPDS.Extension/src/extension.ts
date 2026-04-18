@@ -31,28 +31,66 @@ import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
 import { ProfileStatusBar } from './profileStatusBar.js';
+import { showErrorWithReport } from './utils/errorNotify.js';
+import { logCommand, newClientCorrelationId } from './utils/structuredLog.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
 
 /**
- * Wraps a command handler with error logging. All unhandled exceptions
- * from command callbacks are logged to the PPDS output channel so they
- * appear in user-submitted log files, not just the dev console.
+ * Wraps a command handler with structured start/end/error logging.
+ * All unhandled exceptions from command callbacks are logged to the PPDS
+ * output channel so they appear in user-submitted log files, not just the
+ * dev console.
+ *
+ * Emits three kinds of lines via {@link logCommand} so `ppds logs dump` can
+ * reconstruct the command lifecycle:
+ *   - `command.start` when the handler is invoked.
+ *   - `command.end`   when it returns normally.
+ *   - `command.error` when it throws.
+ *
+ * @param commandName Stable identifier written into every log line. When
+ *     omitted, the handler name (if any) or the literal `anonymous` is used.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
-function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void> {
+function cmd(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
+    handler: (...args: any[]) => any,
+    commandName?: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
+): (...args: any[]) => Promise<void> {
+    const resolvedName = commandName ?? handler.name ?? 'anonymous';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
     return async (...args: any[]) => {
+        const correlationId = newClientCorrelationId();
+        const start = Date.now();
+        logCommand(logChannel, {
+            event: 'command.start',
+            command: resolvedName,
+            correlationId,
+        });
         try {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- forwarding opaque command args
             await handler(...args);
+            logCommand(logChannel, {
+                event: 'command.end',
+                command: resolvedName,
+                correlationId,
+                durationMs: Date.now() - start,
+                outcome: 'success',
+            });
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             const stack = err instanceof Error ? err.stack : undefined;
-            logChannel?.error(`Command error: ${msg}`);
+            logCommand(logChannel, {
+                event: 'command.error',
+                command: resolvedName,
+                correlationId,
+                durationMs: Date.now() - start,
+                outcome: 'failure',
+                errorMessage: msg,
+            });
             if (stack) logChannel?.debug(stack);
-            vscode.window.showErrorMessage(`PPDS: ${msg}`);
+            void showErrorWithReport(`PPDS: ${msg}`);
         }
     };
 }
@@ -180,22 +218,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // ── Restart Daemon Command ───────────────────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.restartDaemon', async () => {
-            try {
-                await client.restart();
-                vscode.window.showInformationMessage('PPDS daemon restarted.');
-            } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to restart daemon: ${msg}`);
-            }
-        })
+        vscode.commands.registerCommand('ppds.restartDaemon', cmd(async () => {
+            await client.restart();
+            vscode.window.showInformationMessage('PPDS daemon restarted.');
+        }, 'ppds.restartDaemon'))
     );
 
     // Auto-start daemon if configured (default: true)
     if (config.get<boolean>('autoStartDaemon', true)) {
         void client.start().catch(err => {
             const msg = err instanceof Error ? err.message : String(err);
-            vscode.window.showErrorMessage(`PPDS daemon failed to start: ${msg}`);
+            void showErrorWithReport(`PPDS daemon failed to start: ${msg}`);
         });
     }
 
@@ -287,7 +320,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.window.showInformationMessage(`Default environment set to ${item.envDisplayName}`);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to set environment: ${msg}`);
+                void showErrorWithReport(`Failed to set environment: ${msg}`);
             }
         }),
 
@@ -370,7 +403,7 @@ export function activate(context: vscode.ExtensionContext): void {
                         );
                     } catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
-                        vscode.window.showErrorMessage(`Connection failed: ${msg}`);
+                        void showErrorWithReport(`Connection failed: ${msg}`);
                     }
                 },
             );
@@ -390,7 +423,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 profileTreeProvider.refresh();
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to remove environment: ${msg}`);
+                void showErrorWithReport(`Failed to remove environment: ${msg}`);
             }
         }),
 
@@ -419,7 +452,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.window.showInformationMessage(`Environment set to ${trimmedUrl}`);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to set environment: ${msg}`);
+                void showErrorWithReport(`Failed to set environment: ${msg}`);
             }
         }),
     );

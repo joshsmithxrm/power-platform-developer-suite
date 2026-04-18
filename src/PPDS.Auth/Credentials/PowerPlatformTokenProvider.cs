@@ -214,7 +214,8 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
         }
         catch (AuthenticationFailedException ex)
         {
-            throw new AuthenticationException($"Failed to acquire token for {resource}: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Failed to acquire token for {resource}: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
     }
 
@@ -231,7 +232,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
 
         if (account != null)
         {
-            AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
+            AuthDebugLog.WriteLine($"  Found account for silent auth: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
             try
             {
                 result = await _msalClient!

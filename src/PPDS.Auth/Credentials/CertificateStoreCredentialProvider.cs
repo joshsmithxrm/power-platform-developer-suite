@@ -154,12 +154,13 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
         }
         catch (Exception ex)
         {
-            throw new AuthenticationException($"Failed to create ServiceClient: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Failed to create ServiceClient: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
 
         if (!client.IsReady)
         {
-            var error = client.LastError ?? "Unknown error";
+            var error = SensitiveValueRedactor.Redact(client.LastError) ?? "Unknown error";
             client.Dispose();
             throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
         }
@@ -205,7 +206,8 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
         }
         catch (Exception ex) when (ex is not AuthenticationException)
         {
-            throw new AuthenticationException($"Failed to access certificate store: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Failed to access certificate store: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
     }
 

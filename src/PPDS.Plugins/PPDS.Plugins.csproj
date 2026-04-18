@@ -9,9 +9,13 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <!-- Strong naming for Dataverse compatibility -->
+    <!-- Strong naming. PublicSign=true lets local and CI builds work with only
+         the public key. The publish-nuget.yml workflow swaps in the real
+         private key (from the PLUGINS_SNK_BASE64 secret) at release time and
+         overrides PublicSign=false. NEVER commit a real .snk private key. -->
     <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>PPDS.Plugins.snk</AssemblyOriginatorKeyFile>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>PPDS.Plugins.PublicKey</AssemblyOriginatorKeyFile>
 
     <!-- MinVer Configuration -->
     <MinVerTagPrefix>Plugins-v</MinVerTagPrefix>

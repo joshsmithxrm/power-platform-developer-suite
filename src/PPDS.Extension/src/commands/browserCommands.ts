@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 const MAKER_BASE_URL = 'https://make.powerapps.com';
 
@@ -84,7 +85,7 @@ export function registerBrowserCommands(
                 await vscode.env.openExternal(vscode.Uri.parse(url));
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to open Maker Portal: ${message}`);
+                void showErrorWithReport(`Failed to open Maker Portal: ${message}`);
             }
         }),
     );
@@ -110,7 +111,7 @@ export function registerBrowserCommands(
                 await vscode.env.openExternal(vscode.Uri.parse(url));
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to open Dynamics 365: ${message}`);
+                void showErrorWithReport(`Failed to open Dynamics 365: ${message}`);
             }
         }),
     );

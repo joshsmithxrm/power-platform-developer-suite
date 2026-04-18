@@ -66,19 +66,23 @@ import type {
 export type { AuthWhoResponse } from './types.js';
 
 // ── Plugins panel response types ─────────────────────────────────────────────
+// NOTE: Only types consumed outside this file are exported. The rest are internal
+// DTOs used only as return types for DaemonClient methods. Per knip audit (v1.0),
+// keeping them non-exported prevents drift between the RPC handler (C#) and
+// never-imported copies in downstream code. See G3 DTO drift check.
 
-export interface PluginsListResponse {
+interface PluginsListResponse {
     assemblies: PluginAssemblyInfoDto[];
     packages: PluginPackageInfoDto[];
     serviceEndpoints: ServiceEndpointDto[];
     customApis: CustomApiDto[];
     dataSources: DataSourceDto[];
 }
-export interface PluginPackageInfoDto { id?: string; name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
+interface PluginPackageInfoDto { id?: string; name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
 export interface PluginAssemblyInfoDto { id?: string; name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
-export interface PluginTypeInfoDto { id?: string; typeName: string; steps: PluginStepInfoDto[] }
-export interface PluginStepInfoDto { id?: string; name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
-export interface PluginsGetResponse {
+interface PluginTypeInfoDto { id?: string; typeName: string; steps: PluginStepInfoDto[] }
+interface PluginStepInfoDto { id?: string; name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
+interface PluginsGetResponse {
     type: string;
     assembly?: Record<string, unknown>;
     package?: Record<string, unknown>;
@@ -86,19 +90,19 @@ export interface PluginsGetResponse {
     step?: Record<string, unknown>;
     image?: Record<string, unknown>;
 }
-export interface PluginsMessagesResponse { messages: string[] }
-export interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
-export interface AttributeInfoDto { logicalName: string; displayName: string; attributeType: string }
-export interface PluginsToggleStepResponse { success: boolean }
-export interface PluginsRegisterResponse { id: string }
-export interface PluginsUpdateResponse { success: boolean }
-export interface PluginsUnregisterResponse { deletedCount: number }
-export interface PluginsDownloadResponse { content: string; fileName: string }
+interface PluginsMessagesResponse { messages: string[] }
+interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
+interface AttributeInfoDto { logicalName: string; displayName: string; attributeType: string }
+interface PluginsToggleStepResponse { success: boolean }
+interface PluginsRegisterResponse { id: string }
+interface PluginsUpdateResponse { success: boolean }
+interface PluginsUnregisterResponse { deletedCount: number }
+interface PluginsDownloadResponse { content: string; fileName: string }
 
 // ── Service endpoints response types ─────────────────────────────────────────
 
-export interface ServiceEndpointsListResponse { endpoints: ServiceEndpointDto[] }
-export interface ServiceEndpointDto {
+interface ServiceEndpointsListResponse { endpoints: ServiceEndpointDto[] }
+interface ServiceEndpointDto {
     id: string;
     name: string;
     description?: string;
@@ -112,13 +116,13 @@ export interface ServiceEndpointDto {
     userClaim?: string;
     isManaged: boolean;
 }
-export interface ServiceEndpointsGetResponse { endpoint: ServiceEndpointDto }
-export interface ServiceEndpointsRegisterResponse { id: string }
+interface ServiceEndpointsGetResponse { endpoint: ServiceEndpointDto }
+interface ServiceEndpointsRegisterResponse { id: string }
 
 // ── Custom API response types ─────────────────────────────────────────────────
 
-export interface CustomApisListResponse { apis: CustomApiDto[] }
-export interface CustomApiDto {
+interface CustomApisListResponse { apis: CustomApiDto[] }
+interface CustomApiDto {
     id: string;
     uniqueName: string;
     displayName: string;
@@ -136,7 +140,7 @@ export interface CustomApiDto {
     requestParameters: CustomApiParameterDto[];
     responseProperties: CustomApiParameterDto[];
 }
-export interface CustomApiParameterDto {
+interface CustomApiParameterDto {
     id: string;
     uniqueName: string;
     displayName: string;
@@ -147,13 +151,13 @@ export interface CustomApiParameterDto {
     isOptional: boolean;
     isManaged: boolean;
 }
-export interface CustomApisGetResponse { api: CustomApiDto }
-export interface CustomApisRegisterResponse { id: string }
+interface CustomApisGetResponse { api: CustomApiDto }
+interface CustomApisRegisterResponse { id: string }
 
 // ── Data provider response types ──────────────────────────────────────────────
 
-export interface DataProvidersListResponse { providers: DataProviderDto[] }
-export interface DataProviderDto {
+interface DataProvidersListResponse { providers: DataProviderDto[] }
+interface DataProviderDto {
     id: string;
     name: string;
     dataSourceId?: string;
@@ -165,8 +169,8 @@ export interface DataProviderDto {
     deletePlugin?: string;
     isManaged: boolean;
 }
-export interface DataSourcesListResponse { dataSources: DataSourceDto[] }
-export interface DataSourceDto {
+interface DataSourcesListResponse { dataSources: DataSourceDto[] }
+interface DataSourceDto {
     id: string;
     name: string;
 }

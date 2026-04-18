@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Extraction;
@@ -21,8 +22,12 @@ public static class NupkgExtractor
         {
             Directory.CreateDirectory(tempDir);
 
-            // Extract the nupkg (it's a zip file)
-            ZipFile.ExtractToDirectory(nupkgPath, tempDir);
+            // Extract the nupkg (it's a zip file). Use the 3-arg overload with
+            // overwriteFiles: false — .NET 8 applies a zip-slip mitigation by default, but we
+            // also re-assert every entry's canonical path stays under tempDir to guard against
+            // any future regression or custom .nupkg entries with traversal segments.
+            ZipFile.ExtractToDirectory(nupkgPath, tempDir, overwriteFiles: false);
+            AssertExtractedEntriesContained(nupkgPath, tempDir);
 
             // Find plugin DLLs in the lib folder
             // Plugin packages target net462 typically
@@ -108,6 +113,38 @@ public static class NupkgExtractor
             catch
             {
                 // Ignore cleanup errors
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that every entry in <paramref name="archivePath"/> extracts to a location under
+    /// <paramref name="destinationDir"/>. Guards against zip-slip entries that escape the temp
+    /// directory via ".." or absolute path segments, even if the platform's default mitigation
+    /// regresses.
+    /// </summary>
+    private static void AssertExtractedEntriesContained(string archivePath, string destinationDir)
+    {
+        var canonicalDest = Path.GetFullPath(destinationDir);
+        if (!canonicalDest.EndsWith(Path.DirectorySeparatorChar))
+        {
+            canonicalDest += Path.DirectorySeparatorChar;
+        }
+
+        using var archive = ZipFile.OpenRead(archivePath);
+        foreach (var entry in archive.Entries)
+        {
+            // Directory entries have an empty Name and end with a separator. Still validate them
+            // so a traversal path like "../evil/" cannot slip past.
+            var combined = Path.Combine(destinationDir, entry.FullName);
+            var canonicalEntry = Path.GetFullPath(combined);
+
+            if (!canonicalEntry.StartsWith(canonicalDest, StringComparison.Ordinal)
+                && !string.Equals(canonicalEntry + Path.DirectorySeparatorChar, canonicalDest, StringComparison.Ordinal))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"NuGet package '{archivePath}' contains an entry that escapes the extraction directory: '{entry.FullName}'.");
             }
         }
     }
