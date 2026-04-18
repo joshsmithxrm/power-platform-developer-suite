@@ -76,6 +76,8 @@ The pre-commit hook automatically runs unit tests (~10s).
 4. **Address review feedback** - Respond to comments and make requested changes
 5. **Squash and merge** - Once approved
 
+For merge mechanics — when auto-merge is appropriate, when it isn't, and squash/branch-protection rules — see [`docs/MERGE-POLICY.md`](docs/MERGE-POLICY.md).
+
 ### PR Guidelines
 
 - Keep PRs focused - one feature/fix per PR
