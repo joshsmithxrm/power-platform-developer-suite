@@ -254,7 +254,7 @@ Tags trigger different workflows:
 **Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
 
 ```bash
-gh release create Cli-v<version> --draft --title "PPDS CLI v<version>" --notes-file <(sed -n '/## \[<version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
+gh release create Cli-v<cli-version> --draft --title "PPDS CLI v<cli-version>" --notes-file <(sed -n '/## \[<cli-version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
 ```
 
 This avoids the "already has an immutable release for this tag" failure mode (Gotcha 1) in most cases. If you skip this, the workflow creates the draft itself — fine unless something else has created a draft already.
@@ -284,7 +284,7 @@ Or visit `https://www.nuget.org/packages/PPDS.<Package>/`.
 
 #### GitHub Release
 ```bash
-gh release view Cli-v<version>
+gh release view Cli-v<cli-version>
 ```
 - Confirm 5 binaries attached (win-x64.exe, win-arm64.exe, osx-x64, osx-arm64, linux-x64)
 - Confirm release notes pulled from CHANGELOG
@@ -298,7 +298,7 @@ Visit `https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-pl
 #### Smoke test installs
 ```bash
 # Fresh CLI tool install
-dotnet tool install -g PPDS.Cli --version <version>
+dotnet tool install -g PPDS.Cli --version <cli-version>
 ppds --version
 dotnet tool uninstall -g PPDS.Cli
 
