@@ -20,6 +20,12 @@ Do NOT use this skill for:
 - Documentation-only updates — those don't need a release
 - Pre-public-release key rotation — that's a separate operation
 
+## Usage
+
+- `/release` — default to prerelease flow
+- `/release prerelease` — explicit prerelease
+- `/release stable v1.0.0` — stable release, version specified
+
 ## Prerequisites
 
 Before starting:
@@ -40,6 +46,8 @@ Before starting:
 python scripts/workflow-state.py set phase release
 ```
 
+> **Note:** `release` is a custom phase for this skill. Existing workflow hooks (`verify-workflow.py`, `session-stop-workflow.py`) do not recognize it and fall through as non-enforcing. The phase registration is purely for audit-trail and retro mining. If you need PR-gate enforcement during the release PR, use `set phase pr` at Step 7 instead.
+
 Create a dated release worktree (following the PPDS `release/*` branch convention):
 
 ```bash
@@ -54,14 +62,24 @@ Name convention:
 
 ### 2. Enumerate Changes Per Package
 
-For each package, list commits since the last release to that package's source tree:
+Each package has its own lineage — find the last release tag for each and diff from there:
 
 ```bash
-# Example: PPDS.Auth since commit ade79f584
-git log ade79f584..HEAD --oneline -- src/PPDS.Auth/
+# For each package, get the latest release tag
+for prefix in Auth Cli Dataverse Extension Mcp Migration Plugins Query; do
+  last_tag=$(git describe --tags --match "${prefix}-v*" --abbrev=0 2>/dev/null)
+  echo "$prefix: $last_tag"
+done
 ```
 
-Repeat for all 8 packages:
+Then enumerate commits per package since its own last tag:
+
+```bash
+# Example: commits in PPDS.Auth since Auth-v1.0.0-beta.7
+git log Auth-v1.0.0-beta.7..HEAD --oneline -- src/PPDS.Auth/
+```
+
+Repeat for all 8 packages (7 NuGet + 1 Extension):
 - `src/PPDS.Auth/`
 - `src/PPDS.Cli/`
 - `src/PPDS.Dataverse/`
@@ -73,6 +91,8 @@ Repeat for all 8 packages:
 
 ### 3. Draft CHANGELOGs (Parallel Agents)
 
+All 8 packages have a `CHANGELOG.md` — you update each one. The version-bump mechanics in Step 4 differ (7 via git tags, 1 via `package.json`), but CHANGELOG work is uniform across 8 packages.
+
 The previous release session dispatched **8 parallel research agents** (one per package) to draft CHANGELOG entries from `git log`. Follow the same pattern:
 
 Dispatch one agent per package with this prompt template:
@@ -83,7 +103,7 @@ After agents return, curate their drafts and insert into each CHANGELOG:
 
 - **Prerelease:** new entry under `[Unreleased]` as `[<version>-beta.N] - YYYY-MM-DD`
 - **Stable:** consolidate accumulated `[*-beta.*]` entries into a single `[<version>] - YYYY-MM-DD`
-- Leave an empty `[Unreleased]` header above (per Keep-a-Changelog)
+- **Always leave `[Unreleased]` header empty at top** after the release entry (Keep-a-Changelog convention — the next prerelease/release writes into that empty header)
 - Update the bottom link references (`[<version>]: https://github.com/.../compare/<prev>..<new>`)
 
 ### 4. Version Bumps
@@ -125,8 +145,11 @@ Bump `package.json` version AND run `npm install` in the Extension directory to 
 Run the gates before opening the PR:
 
 ```bash
-# Build
-dotnet build PPDS.sln --source https://api.nuget.org/v3/index.json -v q
+# Restore (--source is a restore/pack flag, not build)
+dotnet restore PPDS.sln --source https://api.nuget.org/v3/index.json
+
+# Build against restored packages
+dotnet build PPDS.sln --no-restore -v q
 
 # Full unit suite across TFMs
 dotnet test PPDS.sln --no-build --filter "Category!=Integration" -v minimal
@@ -147,7 +170,7 @@ dotnet list package --vulnerable
 Spot-check:
 - Per-package CHANGELOGs: scan for fabricated PR numbers (`gh pr view NNN` should work for each cited PR)
 - Extension `package.json` and `package-lock.json` version match
-- `docs/whats-new-v1.md` (for stable releases) reflects the final feature list
+- For stable releases: confirm any "What's new" doc (e.g., `docs/whats-new-v<major>.md` if present) reflects the final feature list
 
 ### 7. Open Release PR
 
@@ -189,7 +212,25 @@ git tag Plugins-v<version>
 # but push the tag anyway for source-of-truth)
 git tag Extension-v<version>
 
+# Verify tag prefixes BEFORE push — catches MinVer-prefix bugs early
+git tag -l 'Auth-v*' | tail -3
+git tag -l 'Cli-v*' | tail -3
+# ...etc for each prefix
+
 # Batch push
+git push origin --tags
+```
+
+**Worked example** — verbatim from PR #785 (2026-04-17 prerelease):
+```bash
+git tag Auth-v1.0.0-beta.8
+git tag Cli-v1.0.0-beta.14
+git tag Dataverse-v1.0.0-beta.7
+git tag Mcp-v1.0.0-beta.2
+git tag Migration-v1.0.0-beta.8
+git tag Query-v1.0.0-beta.2
+git tag Plugins-v2.1.0-beta.1
+git tag Extension-v0.7.0
 git push origin --tags
 ```
 
@@ -203,7 +244,15 @@ Tags trigger different workflows:
 |---|---|---|
 | `Auth-v*`, `Dataverse-v*`, `Migration-v*`, `Query-v*`, `Mcp-v*`, `Plugins-v*` | `publish-nuget.yml` | NuGet.org packages |
 | `Cli-v*` | `publish-nuget.yml` + `release-cli.yml` | NuGet tool package + multi-platform binaries (win-x64/arm64, osx-x64/arm64, linux-x64) + draft GitHub release published |
-| `Extension-v*` | `extension-publish.yml` (triggered by `release: published` event) | VS Code Marketplace |
+| `Extension-v*` | `extension-publish.yml` (triggered by `release: published` event) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). One target failing does not fail the rest. |
+
+**Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
+
+```bash
+gh release create Cli-v<version> --draft --title "PPDS CLI v<version>" --notes-file <(sed -n '/## \[<version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
+```
+
+This avoids the "already has an immutable release for this tag" failure mode (Gotcha 1) in most cases. If you skip this, the workflow creates the draft itself — fine unless something else has created a draft already.
 
 Watch the runs:
 
@@ -241,10 +290,16 @@ Visit `https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-pl
 
 #### Smoke test installs
 ```bash
-# Fresh tool install
+# Fresh CLI tool install
 dotnet tool install -g PPDS.Cli --version <version>
 ppds --version
 dotnet tool uninstall -g PPDS.Cli
+
+# Fresh Extension install
+code --install-extension JoshSmithXRM.power-platform-developer-suite --pre-release  # prerelease channel
+# or:
+code --install-extension JoshSmithXRM.power-platform-developer-suite  # stable
+# Then open VS Code and verify the sidebar loads, the version matches, basic commands work
 ```
 
 ## Known Gotchas
@@ -306,7 +361,13 @@ Previous releases have needed inline fixes:
 ## Rollback / Recovery
 
 ### A tag published a broken package
-- **NuGet:** Unlist the version via `https://www.nuget.org/packages/PPDS.<Package>/<version>/Delete` (or `dotnet nuget delete` with API key). NuGet allows unlisting; hard-deletion requires support.
+- **NuGet:** Unlist the version via the NuGet.org web UI (`https://www.nuget.org/packages/PPDS.<Package>/<version>/Delete`) OR via CLI:
+  ```bash
+  dotnet nuget delete PPDS.<Package> <version> \
+    --api-key "$NUGET_API_KEY" \
+    --source https://api.nuget.org/v3/index.json
+  ```
+  Requires the same `NUGET_API_KEY` secret CI uses. NuGet allows unlisting; hard-deletion requires support.
 - **GitHub release:** `gh release delete <tag>` and `git tag -d <tag> && git push origin :<tag>`.
 - **Extension:** VS Marketplace supports unlisting via the management portal. You cannot hard-delete.
 
@@ -322,13 +383,20 @@ Bump the patch version (e.g., `1.0.0` → `1.0.1`), prepare a new CHANGELOG entr
 After all publishes verify:
 
 1. **Announce** — release notes on GitHub, optionally social/blog.
-2. **Clean up the release worktree:**
+2. **Record the release in workflow state** for audit/retro mining:
+   ```bash
+   python scripts/workflow-state.py set release.pr "https://github.com/.../pull/NNN"
+   python scripts/workflow-state.py set release.tags "Auth-v...,Cli-v...,Dataverse-v...,Mcp-v...,Migration-v...,Query-v...,Plugins-v...,Extension-v..."
+   python scripts/workflow-state.py set release.completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   ```
+3. **Clean up the release worktree:**
    ```bash
    git worktree remove .worktrees/release-YYYY-MM-DD
    git branch -d release/prerelease-YYYY-MM-DD
    ```
-3. **File any follow-up issues** surfaced during verification (e.g., "marketplace listing missing icon"). Label `v<next>` milestone.
-4. **Update `.plans/v*-release-plan.md`** (if present) with actual vs planned dates and any learnings.
+4. **File any follow-up issues** surfaced during verification (e.g., "marketplace listing missing icon"). Label `v<next>` milestone.
+5. **Update `.plans/v*-release-plan.md`** (if present) with actual vs planned dates and any learnings.
+6. **Patch this skill** if any step was wrong, missing, or ambiguous. The skill is the canonical release runbook — keeping it accurate across releases is how it stays useful.
 
 ## Rules
 
