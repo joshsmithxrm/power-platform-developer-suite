@@ -131,6 +131,16 @@ public static class NupkgExtractor
             canonicalDest += Path.DirectorySeparatorChar;
         }
 
+        // Use case-insensitive comparison on Windows and macOS where filesystems are
+        // case-insensitive by default (NTFS, APFS-default); case-sensitive on Linux (ext4).
+        // Path.GetFullPath does not normalize case, so a case mismatch between the entry
+        // path and the base directory would otherwise cause spurious extraction failures
+        // on Windows/macOS. The comparison only ever rejects, never accepts, so loosening
+        // the comparison cannot create a zip-slip bypass — it only avoids false negatives.
+        var pathComparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
         using var archive = ZipFile.OpenRead(archivePath);
         foreach (var entry in archive.Entries)
         {
@@ -139,8 +149,8 @@ public static class NupkgExtractor
             var combined = Path.Combine(destinationDir, entry.FullName);
             var canonicalEntry = Path.GetFullPath(combined);
 
-            if (!canonicalEntry.StartsWith(canonicalDest, StringComparison.Ordinal)
-                && !string.Equals(canonicalEntry + Path.DirectorySeparatorChar, canonicalDest, StringComparison.Ordinal))
+            if (!canonicalEntry.StartsWith(canonicalDest, pathComparison)
+                && !string.Equals(canonicalEntry + Path.DirectorySeparatorChar, canonicalDest, pathComparison))
             {
                 throw new PpdsException(
                     ErrorCodes.Validation.InvalidValue,

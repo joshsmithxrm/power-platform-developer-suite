@@ -1844,7 +1844,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// </summary>
         private static readonly Regex MissingIdPattern = new(
             @"(?:With )?Ids? = ([0-9a-fA-F-]{36})",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         /// <summary>
         /// Analyzes a batch failure to identify which record(s) caused the failure.

@@ -4405,11 +4405,13 @@ public class RpcMethodHandler : IDisposable
     /// </remarks>
     internal async Task<T> SafeExecuteAsync<T>(string methodName, Func<Task<T>> action)
     {
-        // Install a correlation id for this RPC invocation so every log line emitted
-        // by handler code, pool services, and Dataverse services inherits it via
-        // CorrelationIdScope.Current. Reuses the caller-supplied id when one is already
-        // in flight (e.g., nested WithActiveProfileAsync → action), otherwise mints a new one.
-        var correlationId = CorrelationIdScope.Current ?? CorrelationIdScope.NewId();
+        // Install a fresh correlation id at the RPC boundary so each call gets its own
+        // identifier in logs. Program.cs:Main pushes a process-lifetime bootstrap scope
+        // which would otherwise leak into every RPC in daemon mode if we honored Current
+        // here — the bug we previously had where every ppds serve request shared one id.
+        // Nested calls (e.g., WithActiveProfileAsync → action) push their own scopes
+        // beneath this one and inherit the fresh id naturally.
+        var correlationId = CorrelationIdScope.NewId();
         using var scope = CorrelationIdScope.Push(correlationId);
 
         var startTicks = Environment.TickCount64;

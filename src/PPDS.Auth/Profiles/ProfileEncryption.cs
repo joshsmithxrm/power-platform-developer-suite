@@ -152,12 +152,18 @@ public static class ProfileEncryption
             }
         }
 
-        // On non-Windows we do not attempt to decrypt legacy XOR-obfuscated
-        // values: the previous scheme was not a confidentiality boundary,
-        // and rehydrating it here would keep pretending it was. Callers
-        // that find a bare ENCRYPTED: value on a non-Windows host must
-        // re-authenticate; the cleartext path uses CLEARTEXT: instead.
-        return string.Empty;
+        // On non-Windows we do not attempt to decrypt legacy XOR-obfuscated values:
+        // the previous scheme was not a confidentiality boundary, and rehydrating it
+        // here would keep pretending it was. Surface a typed exception so callers can
+        // trigger reauth UX instead of silently treating the credential as empty —
+        // the latter cascades into "wrong credentials" downstream, which is the worst
+        // kind of bug to debug. Symmetric with Encrypt's behavior on the same platform.
+        throw new AuthenticationException(
+            "Cannot decrypt a legacy ENCRYPTED: profile value on this platform. " +
+            "Re-authenticate the profile, or migrate to the CLEARTEXT: format with " +
+            "PPDS_ALLOW_CLEARTEXT=1. Production credential storage should use " +
+            "NativeCredentialStore (Keychain/libsecret) instead of ProfileEncryption.",
+            "Auth.LegacyEncryptedProfileUnsupported");
     }
 
     /// <summary>

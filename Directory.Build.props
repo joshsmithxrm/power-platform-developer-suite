@@ -6,7 +6,10 @@
     <!-- Audit only direct package references for vulnerabilities. Transitive
          advisories (e.g., NU1903 against System.Security.Cryptography.Xml from
          the auth/identity stack) are tracked separately via Dependabot — we
-         can't ship a fix until the upstream package publishes one. -->
+         can't ship a fix until the upstream package publishes one.
+         The Dependabot config that backs this trade-off lives at
+         .github/dependabot.yml (NuGet ecosystem, weekly). If you're considering
+         removing or weakening that file, flip this back to 'all' first. -->
     <NuGetAuditMode>direct</NuGetAuditMode>
   </PropertyGroup>
 </Project>

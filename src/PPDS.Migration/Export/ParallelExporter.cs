@@ -885,7 +885,7 @@ namespace PPDS.Migration.Export
         /// Validates that a Dataverse logical name matches the expected shape.
         /// Backstop guard against malicious or malformed names being interpolated into FetchXML.
         /// </summary>
-        private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.Compiled);
+        private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         private static void ValidateLogicalName(string value, string argumentName)
         {

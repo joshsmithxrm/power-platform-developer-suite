@@ -226,6 +226,28 @@ public class ProfileEncryptionTests : IDisposable
     }
 
     [Fact]
+    public void Decrypt_OnNonWindows_BareEncryptedPrefix_Throws()
+    {
+        if (IsWindows)
+        {
+            // On Windows the DPAPI branch handles ENCRYPTED: values; this guard fires
+            // only on macOS/Linux where there is no in-process secure store.
+            return;
+        }
+
+        // Construct a bare ENCRYPTED:<valid_base64> payload — the legacy format produced
+        // by older PPDS Windows installs whose profile.json gets copied to a non-Windows
+        // host. We must not silently treat this as an empty credential, because that
+        // cascades into a "wrong credentials" UX downstream when the user re-runs auth.
+        var legacyPayload = "ENCRYPTED:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("payload"));
+
+        var act = () => ProfileEncryption.Decrypt(legacyPayload);
+
+        act.Should().Throw<AuthenticationException>()
+            .Where(e => e.ErrorCode == "Auth.LegacyEncryptedProfileUnsupported");
+    }
+
+    [Fact]
     public void ProfileEncryption_DoesNotExposeXorHelpers()
     {
         // Regression guard for A2: ObfuscateBytes/DeobfuscateBytes must not exist.

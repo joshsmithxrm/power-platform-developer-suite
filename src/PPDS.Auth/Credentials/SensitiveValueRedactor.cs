@@ -25,7 +25,7 @@ internal static class SensitiveValueRedactor
     // Keep in sync with ConnectionStringRedactor.SensitiveKeys.
     private static readonly Regex Pattern = new(
         @"(?<key>ClientSecret|Password|Secret|Key|Pwd|Token|ApiKey|AccessToken|RefreshToken|SharedAccessKey|AccountKey|Credential)(?<separator>\s*=\s*)(?:""[^""]*""|[^;]*)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Redacts sensitive key=value pairs from a string.

@@ -26,6 +26,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PPDS.Auth\PPDS.Auth.csproj" />
+    <!-- Reference Dataverse only so SensitiveValueRedactorParityTests can compare
+         the PPDS.Auth duplicate against the authoritative ConnectionStringRedactor.
+         No production code in PPDS.Auth depends on PPDS.Dataverse. -->
+    <ProjectReference Include="..\..\src\PPDS.Dataverse\PPDS.Dataverse.csproj" />
   </ItemGroup>
 
 </Project>

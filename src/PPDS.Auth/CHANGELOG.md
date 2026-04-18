@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`ProfileEncryption.Decrypt`** — On non-Windows platforms, now throws `AuthenticationException` with error code `Auth.LegacyEncryptedProfileUnsupported` when handed a bare `ENCRYPTED:`-prefixed value. Previously returned `string.Empty`, which silently cascaded into "wrong credentials" UX when a Windows-encrypted profile was copied to macOS/Linux. SDK consumers should catch this exception and trigger reauth, or migrate to `NativeCredentialStore` (Keychain/libsecret) which is the recommended production credential store on all platforms.
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.8` series. Targets `net8.0`, `net9.0`, `net10.0`.

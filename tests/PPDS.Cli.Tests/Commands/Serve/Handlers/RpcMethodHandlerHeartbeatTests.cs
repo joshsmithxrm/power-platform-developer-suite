@@ -24,18 +24,21 @@ public class RpcMethodHandlerHeartbeatTests
     }
 
     [Fact]
-    public async Task HeartbeatAsync_ReturnsOkWithUptimeAndCorrelationId()
+    public async Task HeartbeatAsync_ReturnsOkWithUptimeAndFreshCorrelationId()
     {
         var handler = CreateHandler();
 
-        // Install an ambient correlation id so the response echoes it back.
-        using var scope = CorrelationIdScope.Push("hb-correlation");
+        // Even with an outer correlation scope in flight (e.g., CLI bootstrap or another
+        // call's lingering scope), HeartbeatAsync runs through SafeExecuteAsync which
+        // mints a FRESH id at the RPC boundary. The response must not leak the outer id.
+        using var scope = CorrelationIdScope.Push("hb-outer-leak-guard");
 
         var response = await handler.HeartbeatAsync();
 
         Assert.True(response.Ok);
         Assert.True(response.UptimeSeconds >= 0);
-        Assert.Equal("hb-correlation", response.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(response.CorrelationId));
+        Assert.NotEqual("hb-outer-leak-guard", response.CorrelationId);
         Assert.Equal(1, response.HeartbeatCount);
         Assert.False(string.IsNullOrWhiteSpace(response.DaemonVersion));
     }

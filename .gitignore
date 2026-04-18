@@ -2,8 +2,11 @@
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
-[Ll]og/
-[Ll]ogs/
+# Match log files anywhere — was previously [Ll]og/ + [Ll]ogs/, but those
+# directory-name rules silently shadowed real source dirs (e.g. CLI Logs
+# command group). File-pattern is strictly better and still covers runtime
+# log output at ~/.ppds/*.log and any local debug log captures.
+*.log
 
 # Visual Studio
 .vs/
