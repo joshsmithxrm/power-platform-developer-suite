@@ -175,7 +175,7 @@ def poll_ci(worktree, pr_number, logger):
         try:
             result = subprocess.run(
                 ["gh", "pr", "checks", str(pr_number),
-                 "--json", "name,state,conclusion"],
+                 "--json", "name,state,bucket"],
                 cwd=worktree, capture_output=True, text=True, timeout=30,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
@@ -201,10 +201,14 @@ def poll_ci(worktree, pr_number, logger):
             time.sleep(CI_POLL_INTERVAL)
             continue
 
+        # `gh pr checks` returns `bucket` as the conclusion category:
+        #   pass | fail | pending | skipping | cancel
+        # `state` indicates COMPLETED vs IN_PROGRESS vs QUEUED.
         total = len(checks)
-        completed = [c for c in checks if c.get("state") == "COMPLETED"]
-        failed = [c for c in completed
-                  if c.get("conclusion") not in ("SUCCESS", "NEUTRAL", "SKIPPED")]
+        completed = [c for c in checks
+                     if c.get("state") in ("COMPLETED", "SUCCESS", "FAILURE")
+                     or c.get("bucket") in ("pass", "fail", "skipping", "cancel")]
+        failed = [c for c in completed if c.get("bucket") == "fail"]
         pending = total - len(completed)
 
         logger.log("ci", "POLL",
@@ -512,7 +516,7 @@ def _poll_codeql(worktree, pr_number, logger):
         try:
             proc_result = subprocess.run(
                 ["gh", "pr", "checks", str(pr_number),
-                 "--json", "name,state,conclusion"],
+                 "--json", "name,state,bucket"],
                 cwd=worktree, capture_output=True, text=True, timeout=30,
             )
             if proc_result.returncode == 0:
@@ -521,7 +525,9 @@ def _poll_codeql(worktree, pr_number, logger):
                           if "codeql" in c.get("name", "").lower()]
                 if codeql:
                     all_done = all(
-                        c.get("state") == "COMPLETED" for c in codeql
+                        c.get("state") in ("COMPLETED", "SUCCESS", "FAILURE")
+                        or c.get("bucket") in ("pass", "fail", "skipping", "cancel")
+                        for c in codeql
                     )
                     if all_done:
                         logger.log("codeql", "COMPLETE")
