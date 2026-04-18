@@ -138,6 +138,14 @@ jobs:
         working-directory: src/PPDS.Extension
         run: npm run lint
 
+      # Production-only vulnerability gate. Blocks CI on `high` or `critical`
+      # advisories in shipped (non-dev) dependencies. Moderate-and-below are
+      # intentionally not blocking (too noisy on transitive churn).
+      # Dev-dep advisories are handled by dependabot PRs, not CI.
+      - name: npm audit (production)
+        working-directory: src/PPDS.Extension
+        run: npm audit --omit=dev --audit-level=high
+
       # Dead-code detection (knip) — non-blocking advisory for now (Workstream L5).
       # Flip `continue-on-error` to false once the backlog of unused exports is cleared.
       - name: Dead-code check (advisory)
