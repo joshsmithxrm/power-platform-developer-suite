@@ -125,7 +125,11 @@ Use the **odd/even minor convention**:
 - **Odd minor** (0.5, 0.7, 1.1, 1.3) = pre-release channel on VS Marketplace
 - **Even minor** (0.4, 0.6, 1.0, 1.2) = stable channel
 
-Bump `package.json` version AND run `npm install` in the Extension directory to sync the lock file.
+Bump `package.json` version AND sync the lock file:
+
+```bash
+( cd src/PPDS.Extension && npm install )
+```
 
 ### 5. Package Lineage Reference
 
@@ -199,18 +203,19 @@ After the PR merges, pull main and push tags in a **single batch**:
 git fetch origin
 git checkout main && git pull
 
-# One tag per NuGet package (7)
-git tag Auth-v<version>
-git tag Cli-v<version>
-git tag Dataverse-v<version>
-git tag Mcp-v<version>
-git tag Migration-v<version>
-git tag Query-v<version>
-git tag Plugins-v<version>
+# One tag per NuGet package (7) — versions are per-package; do NOT assume a single shared version.
+# PPDS.Plugins in particular is on a 2.x lineage (see Step 5).
+git tag Auth-v<auth-version>
+git tag Cli-v<cli-version>
+git tag Dataverse-v<dataverse-version>
+git tag Mcp-v<mcp-version>
+git tag Migration-v<migration-version>
+git tag Query-v<query-version>
+git tag Plugins-v<plugins-version>
 
 # Extension (published via release-published event, not directly on tag push —
 # but push the tag anyway for source-of-truth)
-git tag Extension-v<version>
+git tag Extension-v<extension-version>
 
 # Verify tag prefixes BEFORE push — catches MinVer-prefix bugs early
 git tag -l 'Auth-v*' | tail -3
@@ -270,8 +275,10 @@ Expected sequence (typical timing):
 #### NuGet.org
 For each package:
 ```bash
-# Check listing exists at expected version
-curl -s https://api.nuget.org/v3-flatcontainer/ppds.<package>/index.json | jq '.versions' | tail -5
+# Check listing exists at expected version.
+# IMPORTANT: the v3-flatcontainer path segment MUST be lowercase (e.g. ppds.auth, ppds.cli),
+# even though the canonical PackageId is PPDS.<Name>. Mixed case returns 404.
+curl -s https://api.nuget.org/v3-flatcontainer/<package-id-lowercase>/index.json | jq '.versions' | tail -5
 ```
 Or visit `https://www.nuget.org/packages/PPDS.<Package>/`.
 
