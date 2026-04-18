@@ -125,7 +125,11 @@ Use the **odd/even minor convention**:
 - **Odd minor** (0.5, 0.7, 1.1, 1.3) = pre-release channel on VS Marketplace
 - **Even minor** (0.4, 0.6, 1.0, 1.2) = stable channel
 
-Bump `package.json` version AND run `npm install` in the Extension directory to sync the lock file.
+Bump `package.json` version AND sync the lock file:
+
+```bash
+( cd src/PPDS.Extension && npm install )
+```
 
 ### 5. Package Lineage Reference
 
@@ -199,18 +203,19 @@ After the PR merges, pull main and push tags in a **single batch**:
 git fetch origin
 git checkout main && git pull
 
-# One tag per NuGet package (7)
-git tag Auth-v<version>
-git tag Cli-v<version>
-git tag Dataverse-v<version>
-git tag Mcp-v<version>
-git tag Migration-v<version>
-git tag Query-v<version>
-git tag Plugins-v<version>
+# One tag per NuGet package (7) — versions are per-package; do NOT assume a single shared version.
+# PPDS.Plugins in particular is on a 2.x lineage (see Step 5).
+git tag Auth-v<auth-version>
+git tag Cli-v<cli-version>
+git tag Dataverse-v<dataverse-version>
+git tag Mcp-v<mcp-version>
+git tag Migration-v<migration-version>
+git tag Query-v<query-version>
+git tag Plugins-v<plugins-version>
 
 # Extension (published via release-published event, not directly on tag push —
 # but push the tag anyway for source-of-truth)
-git tag Extension-v<version>
+git tag Extension-v<extension-version>
 
 # Verify tag prefixes BEFORE push — catches MinVer-prefix bugs early
 git tag -l 'Auth-v*' | tail -3
@@ -249,7 +254,7 @@ Tags trigger different workflows:
 **Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
 
 ```bash
-gh release create Cli-v<version> --draft --title "PPDS CLI v<version>" --notes-file <(sed -n '/## \[<version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
+gh release create Cli-v<cli-version> --draft --title "PPDS CLI v<cli-version>" --notes-file <(sed -n '/## \[<cli-version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
 ```
 
 This avoids the "already has an immutable release for this tag" failure mode (Gotcha 1) in most cases. If you skip this, the workflow creates the draft itself — fine unless something else has created a draft already.
@@ -270,14 +275,16 @@ Expected sequence (typical timing):
 #### NuGet.org
 For each package:
 ```bash
-# Check listing exists at expected version
-curl -s https://api.nuget.org/v3-flatcontainer/ppds.<package>/index.json | jq '.versions' | tail -5
+# Check listing exists at expected version.
+# IMPORTANT: the v3-flatcontainer path segment MUST be lowercase (e.g. ppds.auth, ppds.cli),
+# even though the canonical PackageId is PPDS.<Name>. Mixed case returns 404.
+curl -s https://api.nuget.org/v3-flatcontainer/<package-id-lowercase>/index.json | jq '.versions' | tail -5
 ```
 Or visit `https://www.nuget.org/packages/PPDS.<Package>/`.
 
 #### GitHub Release
 ```bash
-gh release view Cli-v<version>
+gh release view Cli-v<cli-version>
 ```
 - Confirm 5 binaries attached (win-x64.exe, win-arm64.exe, osx-x64, osx-arm64, linux-x64)
 - Confirm release notes pulled from CHANGELOG
@@ -291,7 +298,7 @@ Visit `https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-pl
 #### Smoke test installs
 ```bash
 # Fresh CLI tool install
-dotnet tool install -g PPDS.Cli --version <version>
+dotnet tool install -g PPDS.Cli --version <cli-version>
 ppds --version
 dotnet tool uninstall -g PPDS.Cli
 
