@@ -22,6 +22,11 @@ public static class DiagnosticIds
     public const string PropagateCancellation = "PPDS011";
     public const string NoSyncOverAsync = "PPDS012";
     public const string NoFireAndForgetInCtor = "PPDS013";
+
+    // Documentation rules (from specs/docs-generation.md)
+    public const string XmlDocOnPublicApi = "PPDS014";
+    public const string CliCommandNeedsDescription = "PPDS015";
+    public const string McpToolNeedsMetadata = "PPDS016";
 }
 
 /// <summary>
@@ -33,4 +38,5 @@ public static class DiagnosticCategories
     public const string Performance = "PPDS.Performance";
     public const string Correctness = "PPDS.Correctness";
     public const string Style = "PPDS.Style";
+    public const string Documentation = "PPDS.Documentation";
 }
