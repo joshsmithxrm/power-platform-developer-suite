@@ -47,6 +47,7 @@ def _git(repo: Path, *args: str, env_extra: dict | None = None) -> subprocess.Co
         capture_output=True,
         text=True,
         env=env,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -71,6 +72,7 @@ def _run_gate(repo: Path, msg: str) -> subprocess.CompletedProcess:
         cwd=repo,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     gitdir = (repo / gitdir_proc.stdout.strip()).resolve()
     (gitdir / "COMMIT_EDITMSG").write_text(msg, encoding="utf-8")
@@ -80,6 +82,7 @@ def _run_gate(repo: Path, msg: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=10,
+        stdin=subprocess.DEVNULL,
     )
 
 
