@@ -175,9 +175,10 @@ public static class ServiceRegistration
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
 
         // Browser launcher — swappable so tests can replace with a no-op (issue #809).
-        // Resolves to whatever BrowserHelper.Launcher currently points at, so
-        // the test module initializer still wins for code paths resolved from DI.
-        services.AddSingleton<IBrowserLauncher>(_ => BrowserHelper.Launcher);
+        // Transient so each resolution re-reads BrowserHelper.Launcher; a singleton
+        // factory would capture whatever was installed at first resolution and miss
+        // per-test swaps.
+        services.AddTransient<IBrowserLauncher>(_ => BrowserHelper.Launcher);
 
         return services;
     }
