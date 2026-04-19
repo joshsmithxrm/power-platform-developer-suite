@@ -555,10 +555,10 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-10 | Env var auth takes precedence over `PPDS_PROFILE` and active profile | `EnvironmentVariableAuthTests.EnvVarAuth_TakesPrecedence` | 🔲 |
 | AC-11 | Synthetic profile produces working `ServiceClient` via `CredentialProviderFactory` | `EnvironmentVariableAuthTests.SyntheticProfile_CreatesProvider` | 🔲 |
 | AC-12 | No disk I/O: no profile written, no MSAL cache, no credential store access | `EnvironmentVariableAuthTests.NoSideEffects` | 🔲 |
-| AC-13 | `PPDS.Auth` assembly references no `Devlooped.*` assembly at runtime | `DependencyAuditTests.PpdsAuthAssembly_DoesNotReferenceDevlooped` | 🔲 |
-| AC-14a | Vendored credential store round-trips a secret via Windows Credential Manager (DPAPI) | `NativeCredentialStoreInteropTests.Windows_RoundTripsSecret` (CI: `windows-latest`) | 🔲 |
-| AC-14b | Vendored credential store round-trips a secret via macOS Keychain | `NativeCredentialStoreInteropTests.MacOS_RoundTripsSecret` (CI: `macos-latest`) | 🔲 |
-| AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 |
+| AC-13 | `PPDS.Auth` assembly references no `Devlooped.*` assembly at runtime | `DependencyAuditTests.PpdsAuthAssembly_DoesNotReferenceDevlooped` | ✅ |
+| AC-14a | Vendored credential store round-trips a secret via Windows Credential Manager (DPAPI) | `NativeCredentialStoreInteropTests.Windows_RoundTripsSecret` (CI: `windows-latest`) | 🔲 (flips ✅ on green CI matrix) |
+| AC-14b | Vendored credential store round-trips a secret via macOS Keychain | `NativeCredentialStoreInteropTests.MacOS_RoundTripsSecret` (CI: `macos-latest`) | 🔲 (flips ✅ on green CI matrix) |
+| AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 (flips ✅ on green CI matrix) |
 
 ### Edge Cases
 
