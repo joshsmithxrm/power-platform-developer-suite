@@ -215,6 +215,10 @@ internal sealed class XmlDocIndex
                             var name = cref;
                             var colon = name.IndexOf(':');
                             if (colon >= 0) name = name.Substring(colon + 1);
+                            // XML-doc IDs spell closed generics with curly braces
+                            // (e.g. "List{T}"); convert to C# source form so
+                            // readers see familiar `List<T>`.
+                            name = name.Replace('{', '<').Replace('}', '>');
                             sb.Append('`').Append(name).Append('`');
                         }
                     }

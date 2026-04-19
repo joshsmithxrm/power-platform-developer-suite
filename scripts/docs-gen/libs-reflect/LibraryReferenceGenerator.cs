@@ -154,31 +154,98 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
                 ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                     ".nuget", "packages");
+
             if (Directory.Exists(nugetHome))
             {
-                try
+                var resolvedFromNuget = TryResolveFromNugetCache(nugetHome, name);
+                if (resolvedFromNuget is not null)
                 {
-                    var matches = Directory.EnumerateFiles(
-                        nugetHome, name + ".dll", SearchOption.AllDirectories)
-                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    string? best = matches.FirstOrDefault(p => p.Contains("net8.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault(p => p.Contains("net9.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault(p => p.Contains("netstandard2.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault();
-                    if (best is not null)
-                    {
-                        _byName[name] = best;
-                        return context.LoadFromAssemblyPath(best);
-                    }
-                }
-                catch
-                {
-                    // Swallow; returning null lets the caller surface the unresolvable assembly.
+                    _byName[name] = resolvedFromNuget;
+                    return context.LoadFromAssemblyPath(resolvedFromNuget);
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Targeted NuGet-cache lookup: first probe the conventional
+        /// <c>{nugetHome}/{assemblyName}/</c> subtree (fast — bounded to one
+        /// package), only falling back to a full recursive scan when the
+        /// assembly simple name does not match its package id. Within the
+        /// matched set, prefer the newest package version and then the
+        /// newest TFM (net10.0 → net9.0 → net8.0 → netstandard2.0 → any).
+        /// </summary>
+        private static string? TryResolveFromNugetCache(string nugetHome, string simpleName)
+        {
+            try
+            {
+                var targetedRoot = Path.Combine(nugetHome, simpleName.ToLowerInvariant());
+                List<string> matches;
+
+                if (Directory.Exists(targetedRoot))
+                {
+                    matches = Directory.EnumerateFiles(
+                        targetedRoot, simpleName + ".dll", SearchOption.AllDirectories).ToList();
+                }
+                else
+                {
+                    // Assembly simple name != package id — rare but legal.
+                    // Fall back to a full scan; this is the slow path and
+                    // only happens for unconventional packages.
+                    matches = Directory.EnumerateFiles(
+                        nugetHome, simpleName + ".dll", SearchOption.AllDirectories).ToList();
+                }
+
+                if (matches.Count == 0) return null;
+
+                // Score each match: (tfm-rank, version-rank). Higher is better.
+                // Pick the newest version within the highest-priority TFM.
+                return matches
+                    .Select(p => new { Path = p, Tfm = TfmRank(p), Version = VersionFromPath(p) })
+                    .OrderByDescending(m => m.Tfm)
+                    .ThenByDescending(m => m.Version)
+                    .ThenBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
+                    .First().Path;
+            }
+            catch
+            {
+                // Swallow; returning null lets the caller surface the
+                // unresolvable assembly with its original error.
+                return null;
+            }
+        }
+
+        private static int TfmRank(string path)
+        {
+            // Higher rank = more preferred. Matched against the path segment
+            // so "net10.0" does not spuriously match inside "net1.0" etc.
+            if (path.Contains(Path.DirectorySeparatorChar + "net10.0" + Path.DirectorySeparatorChar)
+                || path.Contains(Path.AltDirectorySeparatorChar + "net10.0" + Path.AltDirectorySeparatorChar)) return 40;
+            if (path.Contains(Path.DirectorySeparatorChar + "net9.0" + Path.DirectorySeparatorChar)
+                || path.Contains(Path.AltDirectorySeparatorChar + "net9.0" + Path.AltDirectorySeparatorChar)) return 30;
+            if (path.Contains(Path.DirectorySeparatorChar + "net8.0" + Path.DirectorySeparatorChar)
+                || path.Contains(Path.AltDirectorySeparatorChar + "net8.0" + Path.AltDirectorySeparatorChar)) return 20;
+            if (path.Contains(Path.DirectorySeparatorChar + "netstandard2.0" + Path.DirectorySeparatorChar)
+                || path.Contains(Path.AltDirectorySeparatorChar + "netstandard2.0" + Path.AltDirectorySeparatorChar)) return 10;
+            return 0;
+        }
+
+        private static Version VersionFromPath(string path)
+        {
+            // NuGet cache layout: {nugetHome}/{pkg}/{version}/lib/{tfm}/{dll}.
+            // Walk segments from the DLL up and pick the first segment that
+            // parses as a Version. Fallback to 0.0.0 so unparseable versions
+            // sort last but do not crash.
+            var parts = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            foreach (var seg in parts)
+            {
+                if (Version.TryParse(seg.Split('-')[0], out var v))
+                {
+                    return v;
+                }
+            }
+            return new Version(0, 0, 0);
         }
     }
 

@@ -69,11 +69,13 @@ if [ -z "$ROOT" ]; then
   ROOT="$(cd "$script_dir/../.." && pwd)"
 fi
 
-cd "$ROOT"
+# Use `git -C "$ROOT"` rather than `cd "$ROOT"` — preserves the caller's CWD
+# so temp-file placement, relative paths from argv, and any shell state the
+# caller expects to survive this script are not clobbered.
 
 if [ -z "$SINCE_TAG" ]; then
   # Pick the most recent annotated tag matching v*; fall back to HEAD~1.
-  SINCE_TAG="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+  SINCE_TAG="$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
   if [ -z "$SINCE_TAG" ]; then
     SINCE_TAG="HEAD~1"
   fi
@@ -138,7 +140,7 @@ for pkg in "${PACKAGES[@]}"; do
 
   # Grab the previous version from git (empty if it did not exist).
   prev="$(mktemp)"
-  if git show "${SINCE_TAG}:${shipped_rel}" > "$prev" 2>/dev/null; then
+  if git -C "$ROOT" show "${SINCE_TAG}:${shipped_rel}" > "$prev" 2>/dev/null; then
     :
   else
     : > "$prev"

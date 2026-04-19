@@ -132,51 +132,70 @@ public static class Program
     }
 
     /// <summary>
-    /// Calls <c>GET /app/installations</c> and returns the installation id
-    /// whose <c>account.login</c> matches <paramref name="login"/>.
+    /// Calls <c>GET /app/installations</c> (paginated) and returns the
+    /// installation id whose <c>account.login</c> matches <paramref name="login"/>.
     /// </summary>
+    /// <remarks>
+    /// GitHub paginates this endpoint (30-item default, 100-item max). If the
+    /// App is installed on many accounts the target may not be on the first
+    /// page, so we iterate <c>page=1..N</c> at <c>per_page=100</c> until we
+    /// either find a match or a page returns fewer than <c>per_page</c>
+    /// entries (indicating the last page).
+    /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when no matching installation is found.
     /// </exception>
     private static async Task<long> FindInstallationIdAsync(HttpClient http, string login)
     {
-        using var response = await http.GetAsync("https://api.github.com/app/installations");
-        var body = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
+        const int perPage = 100;
+        const int maxPages = 100; // hard cap — 10,000 installations is already absurd
+
+        for (var page = 1; page <= maxPages; page++)
         {
-            throw new InvalidOperationException(
-                $"GET /app/installations failed: HTTP {(int)response.StatusCode} — {body}");
-        }
-
-        using var doc = JsonDocument.Parse(body);
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException(
-                "GET /app/installations did not return a JSON array");
-        }
-
-        foreach (var inst in doc.RootElement.EnumerateArray())
-        {
-            if (!inst.TryGetProperty("account", out var account))
+            var url = $"https://api.github.com/app/installations?per_page={perPage}&page={page}";
+            using var response = await http.GetAsync(url);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
             {
-                continue;
+                throw new InvalidOperationException(
+                    $"GET {url} failed: HTTP {(int)response.StatusCode} — {body}");
             }
 
-            if (!account.TryGetProperty("login", out var loginProp)
-                || loginProp.ValueKind != JsonValueKind.String)
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
-                continue;
+                throw new InvalidOperationException(
+                    $"GET {url} did not return a JSON array");
             }
 
-            if (!string.Equals(loginProp.GetString(), login, StringComparison.OrdinalIgnoreCase))
+            var count = 0;
+            foreach (var inst in doc.RootElement.EnumerateArray())
             {
-                continue;
+                count++;
+
+                if (!inst.TryGetProperty("account", out var account))
+                {
+                    continue;
+                }
+
+                if (!account.TryGetProperty("login", out var loginProp)
+                    || loginProp.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(loginProp.GetString(), login, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (inst.TryGetProperty("id", out var idProp) && idProp.TryGetInt64(out var id))
+                {
+                    return id;
+                }
             }
 
-            if (inst.TryGetProperty("id", out var idProp) && idProp.TryGetInt64(out var id))
-            {
-                return id;
-            }
+            if (count < perPage) break; // last page — stop iterating
         }
 
         throw new InvalidOperationException(
