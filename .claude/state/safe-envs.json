@@ -1,4 +1,4 @@
 {
-  "safe_envs": [],
+  "safe_envs": ["PPDS Demo - Dev"],
   "_comment": "Add env names that are safe to use for shakedown/verify operations (e.g. dev/test envs only). Names are matched case-insensitively against the active profile Environment.DisplayName, Environment.UniqueName, or the host portion of Environment.Url. Used by .claude/hooks/dev-env-check.py."
 }
