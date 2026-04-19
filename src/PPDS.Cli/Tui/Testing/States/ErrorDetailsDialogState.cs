@@ -22,10 +22,16 @@ public sealed record ErrorListItem(
 /// <param name="SelectedErrorDetails">Full details of selected error (null if none).</param>
 /// <param name="ErrorCount">Total number of errors.</param>
 /// <param name="HasClearButton">Whether the clear button is available.</param>
+/// <param name="HasReportIssueButton">Whether the report-issue button is available.</param>
+/// <param name="ReportIssueUrl">The URL the report-issue button opens.</param>
+/// <param name="FooterText">Non-interactive footer showing the issues URL.</param>
 public sealed record ErrorDetailsDialogState(
     string Title,
     IReadOnlyList<ErrorListItem> Errors,
     int SelectedIndex,
     string? SelectedErrorDetails,
     int ErrorCount,
-    bool HasClearButton);
+    bool HasClearButton,
+    bool HasReportIssueButton = false,
+    string? ReportIssueUrl = null,
+    string? FooterText = null);

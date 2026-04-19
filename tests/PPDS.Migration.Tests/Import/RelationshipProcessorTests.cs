@@ -144,6 +144,53 @@ public class RelationshipProcessorTests
         _client.Verify(c => c.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryBase>()), Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task ProcessAsync_EmitsWarning_WhenRoleMappingIsSkipped()
+    {
+        // F4: when a role target cannot be mapped (source/target role IDs differ and
+        // no same-ID role exists in target), emit a WarningCollector entry so the
+        // caller can detect the silent drop.
+        var sourceOldId = Guid.NewGuid();
+        var sourceNewId = Guid.NewGuid();
+        var unmappedRoleId = Guid.NewGuid();
+
+        var idMappings = new IdMappingCollection();
+        idMappings.AddMapping("systemuser", sourceOldId, sourceNewId);
+        // Intentionally do NOT map the role.
+
+        var m2mData = new ManyToManyRelationshipData
+        {
+            RelationshipName = "systemuserroles_association",
+            SourceEntityName = "systemuser",
+            SourceId = sourceOldId,
+            TargetEntityName = "role",
+            TargetIds = new List<Guid> { unmappedRoleId }
+        };
+
+        var warnings = new WarningCollector();
+        var context = CreateContext(
+            relationshipData: new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>
+            {
+                ["systemuser"] = new List<ManyToManyRelationshipData> { m2mData }
+            },
+            idMappings: idMappings);
+        context.Warnings = warnings;
+
+        // LookupRoleByIdAsync runs a FetchExpression against the role table. Return
+        // an empty collection for role lookups (role not in target) but fall through
+        // for the metadata RetrieveAllEntitiesRequest set up by SetupEmptyMetadataResponse.
+        _client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryBase>()))
+            .ReturnsAsync(new EntityCollection());
+
+        // Act
+        await _sut.ProcessAsync(context, CancellationToken.None);
+
+        // Assert — WarningCollector has a RoleMappingSkipped entry keyed to the source entity.
+        warnings.GetWarnings().Should().Contain(w =>
+            w.Code == ImportWarningCodes.RoleMappingSkipped
+            && w.Entity == "systemuser");
+    }
+
     #endregion
 
     #region ProcessAsync — relationship name resolution

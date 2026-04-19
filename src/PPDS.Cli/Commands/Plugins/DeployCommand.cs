@@ -294,13 +294,56 @@ public static class DeployCommand
 
             // Get existing types and steps
             var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId);
-            var existingTypeMap = existingTypes.ToDictionary(t => t.TypeName, t => t);
+
+            // Build a duplicate-aware type lookup. TypeName is typically the fully qualified
+            // name, but collisions can happen (e.g., the same class name under different
+            // namespaces or zombie types left from historical registrations). We surface the
+            // conflict to the user instead of aborting with ArgumentException deep in LINQ.
+            var existingTypeMap = new Dictionary<string, PluginTypeInfo>(StringComparer.Ordinal);
+            var typeCollisions = new Dictionary<string, List<PluginTypeInfo>>(StringComparer.Ordinal);
+            foreach (var typeInfo in existingTypes)
+            {
+                if (existingTypeMap.TryGetValue(typeInfo.TypeName, out var firstSeen))
+                {
+                    if (!typeCollisions.TryGetValue(typeInfo.TypeName, out var group))
+                    {
+                        group = [firstSeen];
+                        typeCollisions[typeInfo.TypeName] = group;
+                    }
+                    group.Add(typeInfo);
+                }
+                else
+                {
+                    existingTypeMap[typeInfo.TypeName] = typeInfo;
+                }
+            }
+
+            if (typeCollisions.Count > 0)
+            {
+                var details = string.Join("; ", typeCollisions.Select(c =>
+                    $"'{c.Key}' appears {c.Value.Count} times (ids: {string.Join(", ", c.Value.Select(t => t.Id))})"));
+                throw new PpdsException(
+                    ErrorCodes.Operation.Duplicate,
+                    $"Assembly '{assemblyConfig.Name}' has duplicate plugin type names in the environment. " +
+                    $"Please disambiguate manually before re-deploying. Conflicts: {details}");
+            }
 
             foreach (var existingType in existingTypes)
             {
                 var steps = await service.ListStepsForTypeAsync(existingType.Id);
                 foreach (var step in steps)
                 {
+                    // Collision check: two existing steps in the environment sharing the same
+                    // name would silently collapse in this dictionary, causing cleanup to drop
+                    // one of them and deploy diffs to misreport existence. Surface the conflict.
+                    if (existingStepsMap.TryGetValue(step.Name, out var existingSameName))
+                    {
+                        throw new PpdsException(
+                            ErrorCodes.Operation.Duplicate,
+                            $"Environment contains duplicate plugin step name '{step.Name}' " +
+                            $"(ids: {existingSameName.Id}, {step.Id}) under assembly '{assemblyConfig.Name}'. " +
+                            "Rename or delete one of the conflicting steps in the environment before re-deploying.");
+                    }
                     existingStepsMap[step.Name] = step;
                 }
             }

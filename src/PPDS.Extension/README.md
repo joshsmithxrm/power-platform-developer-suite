@@ -2,7 +2,7 @@
 
 A comprehensive VS Code extension for Power Platform development and administration — your complete toolkit for Dynamics 365, Dataverse, and Power Platform solutions.
 
-> **Pre-Release:** This is a pre-release version of the rebuilt extension. The stable version (0.3.x) remains available for users who prefer a production-ready experience. Switch between channels in the VS Code Extensions view.
+> **v1.0.0 — Stable.** This is the stable release of the rebuilt extension. Profile, environment, solutions, notebook, and viewer surfaces (plugin traces, connection references, environment variables, metadata browser, web resources, import jobs) are all included.
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ Quick ad-hoc query panel for one-off Dataverse queries without creating a notebo
 
 ## Quick Start
 
-1. Install the extension (pre-release channel)
+1. Install the extension from the VS Code Marketplace
 2. Open the PPDS sidebar (activity bar icon)
 3. Create or select an authentication profile
 4. Select an environment
@@ -53,19 +53,6 @@ Quick ad-hoc query panel for one-off Dataverse queries without creating a notebo
 | `ppds.queryDefaultTop` | 100 | Default TOP value for SQL queries (1-5000) |
 | `ppds.autoStartDaemon` | true | Auto-start the ppds daemon on activation |
 | `ppds.showEnvironmentInStatusBar` | true | Show active environment in status bar |
-
-## Known Limitations (Pre-Release)
-
-The following features from the stable version are not yet available in this rebuild:
-
-- Plugin Trace viewer
-- Connection References viewer
-- Environment Variables viewer
-- Metadata Browser
-- Web Resources viewer
-- Import Job viewer
-
-These will be added in future pre-release updates before the next stable release.
 
 ## Feedback
 

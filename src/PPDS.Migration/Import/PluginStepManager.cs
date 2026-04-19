@@ -108,6 +108,13 @@ namespace PPDS.Migration.Import
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// D5: per-step failures are collected and surfaced via an aggregated
+        /// <see cref="PluginStepReenableException"/>. Previously per-step failures were logged
+        /// at Warning only; if the token expired mid-re-enable, plugins stayed quietly disabled
+        /// post-"successful" import. Callers in <c>TieredImporter.EnablePluginsAfterImportAsync</c>
+        /// catch this and push structured warnings into <see cref="Progress.IWarningCollector"/>.
+        /// </remarks>
         public async Task EnablePluginStepsAsync(
             IEnumerable<Guid> stepIds,
             CancellationToken cancellationToken = default)
@@ -122,6 +129,8 @@ namespace PPDS.Migration.Import
 
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+
+            var failures = new List<(Guid StepId, Exception Error)>();
 
             foreach (var stepId in stepList)
             {
@@ -141,7 +150,13 @@ namespace PPDS.Migration.Import
                 catch (Exception ex)
                 {
                     _logger?.LogWarning(ex, "Failed to re-enable plugin step {StepId}", stepId);
+                    failures.Add((stepId, ex));
                 }
+            }
+
+            if (failures.Count > 0)
+            {
+                throw new PluginStepReenableException(failures);
             }
         }
 
@@ -194,8 +209,42 @@ namespace PPDS.Migration.Import
         /// <summary>
         /// Re-enables the specified plugin steps.
         /// </summary>
+        /// <remarks>
+        /// Throws <see cref="PluginStepReenableException"/> if one or more steps fail to re-enable,
+        /// so callers can surface the failures rather than silently leaving plugins disabled.
+        /// </remarks>
         Task EnablePluginStepsAsync(
             IEnumerable<Guid> stepIds,
             CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
+    /// Aggregated exception thrown when one or more plugin steps fail to re-enable.
+    /// Preserves per-step failure details so callers can report exactly which steps remain disabled.
+    /// </summary>
+    public class PluginStepReenableException : Exception
+    {
+        /// <summary>
+        /// Gets the per-step failures. Each tuple contains the step ID and the underlying exception.
+        /// </summary>
+        public IReadOnlyList<(Guid StepId, Exception Error)> Failures { get; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PluginStepReenableException"/> class.
+        /// </summary>
+        /// <param name="failures">The per-step failures.</param>
+        public PluginStepReenableException(IReadOnlyList<(Guid StepId, Exception Error)> failures)
+            : base(BuildMessage(failures), failures?.Count > 0 ? failures[0].Error : null)
+        {
+            Failures = failures ?? Array.Empty<(Guid, Exception)>();
+        }
+
+        private static string BuildMessage(IReadOnlyList<(Guid StepId, Exception Error)>? failures)
+        {
+            var count = failures?.Count ?? 0;
+            return count == 1
+                ? $"Failed to re-enable 1 plugin step (stepId={failures![0].StepId}): {failures[0].Error.Message}"
+                : $"Failed to re-enable {count} plugin step(s) after import. They remain disabled.";
+        }
     }
 }

@@ -31,6 +31,9 @@
   <ItemGroup Label="Serialization and Security">
     <PackageVersion Include="System.Text.Json" Version="10.0.5" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.5" />
+    <!-- Pinned explicitly to patched 8.0.3 to avoid transitive 8.0.2 pulled by Microsoft.IdentityModel.*
+         which carries GHSA-37gx-xxp4-5rgx and GHSA-w3x6-4m5h-cxqf (both High). -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="8.0.3" />
   </ItemGroup>
 
   <ItemGroup Label="CLI and TUI">

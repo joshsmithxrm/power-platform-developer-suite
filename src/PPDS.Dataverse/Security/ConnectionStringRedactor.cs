@@ -113,7 +113,7 @@ namespace PPDS.Dataverse.Security
             // Captures: key (the sensitive key name), separator (=), and value
             var pattern = $@"(?<key>{keyPattern})(?<separator>\s*=\s*)(?:""[^""]*""|[^;]*)";
 
-            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
         }
     }
 }

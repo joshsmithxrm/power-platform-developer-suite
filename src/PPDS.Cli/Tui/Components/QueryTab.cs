@@ -14,7 +14,7 @@ internal sealed class QueryTab
     private static int _nextTabNumber = 1;
     private static readonly Regex FromEntityRegex = new(
         @"\bFROM\s+(\w+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private string _queryText;
     private string _savedQueryText;

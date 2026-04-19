@@ -2787,6 +2787,86 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
+    public async Task ListAssembliesAsync_LoopsUntilMoreRecordsFalse()
+    {
+        // F3: Prove List methods thread PageInfo through and drain all pages. Two pages —
+        // first with MoreRecords=true and a paging cookie, second with MoreRecords=false.
+        var page1 = new EntityCollection
+        {
+            MoreRecords = true,
+            PagingCookie = "<cookie page=\"1\" />"
+        };
+        var asm1 = new PluginAssembly { Id = Guid.NewGuid(), Name = "A1" };
+        page1.Entities.Add(asm1);
+
+        var page2 = new EntityCollection { MoreRecords = false };
+        var asm2 = new PluginAssembly { Id = Guid.NewGuid(), Name = "A2" };
+        page2.Entities.Add(asm2);
+
+        var calls = 0;
+        var capturedCookies = new List<string?>();
+        var capturedPageNumbers = new List<int?>();
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase q, CancellationToken _) =>
+            {
+                calls++;
+                var qe = (QueryExpression)q;
+                capturedCookies.Add(qe.PageInfo?.PagingCookie);
+                capturedPageNumbers.Add(qe.PageInfo?.PageNumber);
+                return calls == 1 ? page1 : page2;
+            });
+
+        var results = await _sut.ListAssembliesAsync();
+
+        // Both pages should have been returned, and paging info must have been threaded.
+        Assert.Equal(2, calls);
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, r => r.Name == "A1");
+        Assert.Contains(results, r => r.Name == "A2");
+        Assert.Equal(1, capturedPageNumbers[0]);
+        Assert.Equal(2, capturedPageNumbers[1]);
+        Assert.Null(capturedCookies[0]);
+        Assert.Equal("<cookie page=\"1\" />", capturedCookies[1]);
+    }
+
+    [Fact]
+    public async Task ListStepsForTypeAsync_LoopsUntilMoreRecordsFalse()
+    {
+        // Same paging contract as ListAssembliesAsync — covers another List method to prove
+        // RetrieveAllPagesAsync is used consistently.
+        var page1 = new EntityCollection
+        {
+            MoreRecords = true,
+            PagingCookie = "<cookie page=\"1\" />"
+        };
+        var step1 = new SdkMessageProcessingStep { Id = Guid.NewGuid() };
+        step1[SdkMessageProcessingStep.Fields.Name] = "Step1";
+        step1[SdkMessageProcessingStep.Fields.Stage] = new OptionSetValue(40);
+        step1[SdkMessageProcessingStep.Fields.Mode] = new OptionSetValue(0);
+        page1.Entities.Add(step1);
+
+        var page2 = new EntityCollection { MoreRecords = false };
+        var step2 = new SdkMessageProcessingStep { Id = Guid.NewGuid() };
+        step2[SdkMessageProcessingStep.Fields.Name] = "Step2";
+        step2[SdkMessageProcessingStep.Fields.Stage] = new OptionSetValue(40);
+        step2[SdkMessageProcessingStep.Fields.Mode] = new OptionSetValue(0);
+        page2.Entities.Add(step2);
+
+        var calls = 0;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase _, CancellationToken _) => ++calls == 1 ? page1 : page2);
+
+        var results = await _sut.ListStepsForTypeAsync(Guid.NewGuid());
+
+        Assert.Equal(2, calls);
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, r => r.Name == "Step1");
+        Assert.Contains(results, r => r.Name == "Step2");
+    }
+
+    [Fact]
     public async Task ListMessagesAsync_ReturnsMessages()
     {
         // Arrange

@@ -10,7 +10,9 @@ We release security updates for the following versions:
 | PPDS.Dataverse | 1.x | ✅ |
 | PPDS.Migration | 1.x | ✅ |
 | PPDS.Auth | 1.x | ✅ |
+| PPDS.Query | 1.x | ✅ |
 | PPDS.Cli | 1.x | ✅ |
+| PPDS.Mcp | 1.x | ✅ |
 
 **Recommendation:** Always use the latest version for best security and features.
 

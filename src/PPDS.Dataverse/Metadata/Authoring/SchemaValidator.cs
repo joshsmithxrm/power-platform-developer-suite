@@ -11,7 +11,7 @@ namespace PPDS.Dataverse.Metadata.Authoring;
 /// </summary>
 public sealed class SchemaValidator
 {
-    private static readonly Regex SchemaNameRegex = new(@"^[a-zA-Z][a-zA-Z0-9_]*$", RegexOptions.Compiled);
+    private static readonly Regex SchemaNameRegex = new(@"^[a-zA-Z][a-zA-Z0-9_]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Validates that a schema name follows Dataverse naming rules.

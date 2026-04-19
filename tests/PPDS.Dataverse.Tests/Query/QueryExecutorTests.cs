@@ -549,3 +549,214 @@ public class QueryExecutorBypassHintTests
             Times.Never);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  C2: ExecuteFetchXmlAllPagesAsync respects maxRecords cap
+// ═══════════════════════════════════════════════════════════════
+
+[Trait("Category", "PlanUnit")]
+public class QueryExecutorAllPagesTests
+{
+    /// <summary>
+    /// Builds an EntityCollection containing <paramref name="count"/> synthetic records
+    /// with the given MoreRecords/PagingCookie state.
+    /// </summary>
+    private static EntityCollection BuildPage(string entity, int count, bool moreRecords, string? pagingCookie)
+    {
+        var entities = new List<Entity>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var e = new Entity(entity, Guid.NewGuid());
+            e["name"] = $"row-{i}";
+            entities.Add(e);
+        }
+        var coll = new EntityCollection(entities)
+        {
+            EntityName = entity,
+            MoreRecords = moreRecords,
+            PagingCookie = pagingCookie ?? string.Empty
+        };
+        return coll;
+    }
+
+    /// <summary>
+    /// Sets up a mock pool whose client returns the supplied sequence of
+    /// EntityCollections on successive RetrieveMultipleAsync calls.
+    /// </summary>
+    private static (Mock<IDataverseConnectionPool> pool, Mock<IPooledClient> client, Action<int> getCallCount)
+        CreateMockPoolWithPages(params EntityCollection[] pages)
+    {
+        var callCount = 0;
+        var mockClient = new Mock<IPooledClient>();
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryBase, CancellationToken>((_, _) =>
+            {
+                var page = pages[Math.Min(callCount, pages.Length - 1)];
+                callCount++;
+                return Task.FromResult(page);
+            });
+
+        var mockPool = new Mock<IDataverseConnectionPool>();
+        mockPool
+            .Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+
+        Action<int> verifier = expected => Assert.Equal(expected, callCount);
+        return (mockPool, mockClient, verifier);
+    }
+
+    private const string ValidFetchXml =
+        "<fetch><entity name=\"account\"><attribute name=\"name\" /></entity></fetch>";
+
+    [Fact]
+    public async Task ExecuteFetchXmlAllPagesAsync_TrimsResults_WhenFirstPageExceedsMaxRecords()
+    {
+        // Arrange: server returns 5000 rows in one page, but caller asked for 100.
+        // Prior bug: whole 5000-row page was returned to caller; new behavior trims to 100.
+        var page1 = BuildPage("account", count: 5000, moreRecords: true, pagingCookie: "cookie-1");
+        var (mockPool, _, verifyCalls) = CreateMockPoolWithPages(page1);
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act
+        var result = await executor.ExecuteFetchXmlAllPagesAsync(ValidFetchXml, maxRecords: 100);
+
+        // Assert
+        Assert.Equal(100, result.Records.Count);
+        Assert.Equal(100, result.Count);
+        verifyCalls(1); // No second page fetched — we already had enough
+    }
+
+    [Fact]
+    public async Task ExecuteFetchXmlAllPagesAsync_DoesNotFetchNextPage_WhenCapReached()
+    {
+        // Arrange: first page has 5000, MoreRecords=true — but maxRecords=5000 reached, so stop.
+        var page1 = BuildPage("account", count: 5000, moreRecords: true, pagingCookie: "cookie-1");
+        var page2 = BuildPage("account", count: 5000, moreRecords: false, pagingCookie: null);
+        var (mockPool, _, verifyCalls) = CreateMockPoolWithPages(page1, page2);
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act
+        var result = await executor.ExecuteFetchXmlAllPagesAsync(ValidFetchXml, maxRecords: 5000);
+
+        // Assert
+        Assert.Equal(5000, result.Records.Count);
+        verifyCalls(1); // Second page must NOT have been fetched
+    }
+
+    [Fact]
+    public async Task ExecuteFetchXmlAllPagesAsync_ContinuesPaging_WhenUnderCap()
+    {
+        // Arrange: first page returns 5000 with MoreRecords=true, second page returns 500 terminal.
+        // Caller asks for 5500 rows → both pages fetched, final count == 5500 (not trimmed).
+        var page1 = BuildPage("account", count: 5000, moreRecords: true, pagingCookie: "cookie-1");
+        var page2 = BuildPage("account", count: 500, moreRecords: false, pagingCookie: null);
+        var (mockPool, _, verifyCalls) = CreateMockPoolWithPages(page1, page2);
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act
+        var result = await executor.ExecuteFetchXmlAllPagesAsync(ValidFetchXml, maxRecords: 5500);
+
+        // Assert
+        Assert.Equal(5500, result.Records.Count);
+        verifyCalls(2);
+    }
+
+    [Fact]
+    public async Task ExecuteFetchXmlAllPagesAsync_TrimsResults_WhenSecondPageOvershoots()
+    {
+        // Arrange: caller asks for 5500, first page returns 5000, second returns 5000.
+        // Combined total 10000 is trimmed to 5500.
+        var page1 = BuildPage("account", count: 5000, moreRecords: true, pagingCookie: "cookie-1");
+        var page2 = BuildPage("account", count: 5000, moreRecords: true, pagingCookie: "cookie-2");
+        var (mockPool, _, verifyCalls) = CreateMockPoolWithPages(page1, page2);
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act
+        var result = await executor.ExecuteFetchXmlAllPagesAsync(ValidFetchXml, maxRecords: 5500);
+
+        // Assert
+        Assert.Equal(5500, result.Records.Count);
+        // Two pages fetched (first did not satisfy cap on its own), but no third page fetched
+        verifyCalls(2);
+    }
+
+    [Fact]
+    public async Task ExecuteFetchXmlAllPagesAsync_TerminatesOnMoreRecordsFalse_WhenUnderCap()
+    {
+        // Arrange: single terminal page with only 50 rows; maxRecords far above.
+        var page1 = BuildPage("account", count: 50, moreRecords: false, pagingCookie: null);
+        var (mockPool, _, verifyCalls) = CreateMockPoolWithPages(page1);
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act
+        var result = await executor.ExecuteFetchXmlAllPagesAsync(ValidFetchXml, maxRecords: 10_000);
+
+        // Assert
+        Assert.Equal(50, result.Records.Count);
+        verifyCalls(1);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  C4: GetMinMaxCreatedOnAsync validates entity logical name
+// ═══════════════════════════════════════════════════════════════
+
+[Trait("Category", "PlanUnit")]
+public class QueryExecutorEntityNameValidationTests
+{
+    private static (Mock<IDataverseConnectionPool> pool, Mock<IPooledClient> client) CreateSafeMockPool()
+    {
+        var empty = new EntityCollection { EntityName = "account" };
+        var mockClient = new Mock<IPooledClient>();
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(empty);
+        var mockPool = new Mock<IDataverseConnectionPool>();
+        mockPool
+            .Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+        return (mockPool, mockClient);
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("contact")]
+    [InlineData("new_myentity")]
+    [InlineData("prefix_entity_01")]
+    public async Task GetMinMaxCreatedOnAsync_AcceptsValidLogicalNames(string entityLogicalName)
+    {
+        // Arrange
+        var (mockPool, _) = CreateSafeMockPool();
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act & Assert: does not throw for well-formed lowercase logical names
+        var (min, max) = await executor.GetMinMaxCreatedOnAsync(entityLogicalName);
+        Assert.Null(min);
+        Assert.Null(max);
+    }
+
+    [Theory]
+    [InlineData("Account")]               // uppercase letter
+    [InlineData("1account")]              // starts with digit
+    [InlineData("account'; drop table")] // injection attempt with quote + spaces
+    [InlineData("acc<evil/>")]            // angle brackets / XML-ish injection
+    [InlineData("acc&amp;")]              // ampersand
+    [InlineData("acc\"quoted\"")]         // embedded quotes
+    [InlineData("acc-dash")]              // dash not allowed
+    [InlineData("acc.dot")]               // dot not allowed
+    public async Task GetMinMaxCreatedOnAsync_RejectsInvalidOrUnsafeLogicalNames(string entityLogicalName)
+    {
+        // Arrange
+        var (mockPool, mockClient) = CreateSafeMockPool();
+        var executor = new QueryExecutor(mockPool.Object);
+
+        // Act & Assert: regex backstop throws before any query is issued
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => executor.GetMinMaxCreatedOnAsync(entityLogicalName));
+
+        mockClient.Verify(
+            c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+}

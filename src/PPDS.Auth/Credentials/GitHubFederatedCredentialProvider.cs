@@ -117,7 +117,7 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
         catch (AuthenticationFailedException ex)
         {
             throw new AuthenticationException(
-                $"GitHub federated authentication failed. Ensure ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set: {ex.Message}", ex);
+                $"GitHub federated authentication failed. Ensure ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
 
         return _cachedToken.Value.Token;

@@ -27,6 +27,8 @@ using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.UpdateCheck;
+using PPDS.Cli.Commands.Logs;
+using PPDS.Dataverse.Diagnostics;
 
 namespace PPDS.Cli;
 
@@ -45,6 +47,12 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        // Seed the ambient correlation-id scope before any command runs. Every log line emitted
+        // by the CLI, RPC handlers invoked in-process, and Dataverse services will pick this up
+        // via CorrelationIdScope.Current. The scope lives for the process lifetime; RPC calls
+        // can push nested scopes per method invocation.
+        using var correlationScope = CorrelationIdScope.Push(CorrelationIdScope.NewId());
+
         // No arguments = launch TUI directly (first-class experience)
         if (args.Length == 0)
         {
@@ -105,6 +113,7 @@ public static class Program
         rootCommand.Subcommands.Add(ServeCommand.Create());
         rootCommand.Subcommands.Add(DocsCommand.Create());
         rootCommand.Subcommands.Add(VersionCommand.Create());
+        rootCommand.Subcommands.Add(LogsCommandGroup.Create());
         rootCommand.Subcommands.Add(InteractiveCommand.Create());
 
         // Internal/debug commands - only visible when PPDS_INTERNAL=1

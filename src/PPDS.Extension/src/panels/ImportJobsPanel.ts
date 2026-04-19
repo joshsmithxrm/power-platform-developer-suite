@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 import { buildMakerUrl } from '../commands/browserCommands.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -171,7 +172,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            void vscode.window.showErrorMessage(`Failed to open import log: ${msg}`);
+            void showErrorWithReport(`Failed to open import log: ${msg}`);
         }
     }
 

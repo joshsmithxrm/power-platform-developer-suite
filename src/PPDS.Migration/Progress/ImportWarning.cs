@@ -56,5 +56,11 @@ namespace PPDS.Migration.Progress
 
         /// <summary>Failed to re-enable plugin steps after import.</summary>
         public const string PluginReenableFailed = "PLUGIN_REENABLE_FAILED";
+
+        /// <summary>
+        /// M2M role mapping was skipped because no matching role could be found in the target environment.
+        /// Emitted by RelationshipProcessor when cross-environment role lookup by ID fails.
+        /// </summary>
+        public const string RoleMappingSkipped = "ROLE_MAPPING_SKIPPED";
     }
 }

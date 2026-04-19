@@ -13,7 +13,7 @@ The connection pooling system manages Dataverse client lifecycle with intelligen
 
 ### Goals
 
-- **Performance**: Reuse authenticated connections instead of creating new ones (42,000x faster)
+- **Performance**: Reuse authenticated connections instead of creating new ones (avoids per-request auth round-trips, which cost hundreds of milliseconds to seconds each)
 - **Resilience**: Automatic throttle detection, tracking, and intelligent routing
 - **Scalability**: Support multiple Application Users for parallel operations beyond single-user limits
 
@@ -297,16 +297,17 @@ var response = await pool.ExecuteAsync(new CreateRequest { Target = entity });
 
 ### Why Connection Pooling?
 
-**Context:** Creating a new `ServiceClient` instance requires authentication, which involves network round-trips to Azure AD and Dataverse. Each creation takes 500ms-4s.
+**Context:** Creating a new `ServiceClient` instance requires authentication, which involves network round-trips to Azure AD and Dataverse. Each creation typically takes 500ms–4s depending on network latency and auth mode.
 
 **Decision:** Pool authenticated connections and reuse across requests via `Clone()`.
 
-**Test results:**
-| Scenario | Result |
-|----------|--------|
-| New client per request | 4.2s per operation |
-| Pooled (cloned) client | 0.1ms per checkout |
-| Performance gain | 42,000x faster |
+**Expected order-of-magnitude difference (from SDK behavior; not a measured benchmark in this repo):**
+| Scenario | Cost per checkout |
+|----------|-------------------|
+| New client per request | Hundreds of ms to several seconds (auth round-trip) |
+| Pooled (cloned) client | Sub-millisecond (no auth, reuses seed instance) |
+
+> No benchmark harness currently lives in this repo; the gap is derived from `ServiceClient`'s documented authentication path vs. the no-op `Clone()` of an already-authenticated seed. Treat this as directional guidance, not a measured ratio.
 
 **Alternatives considered:**
 - Singleton client: Rejected - not thread-safe, single-user limit (52 concurrent)

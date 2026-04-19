@@ -23,7 +23,7 @@ public static class AuthCommandGroup
     /// </summary>
     private static readonly Regex ProfileNamePattern = new(
         @"^[a-zA-Z0-9](?:[a-zA-Z0-9 _-]*[a-zA-Z0-9])?$",
-        RegexOptions.Compiled);
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Creates the 'auth' command group with all subcommands.

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient, AuthWhoResponse } from '../daemonClient.js';
 import type { ProfileInfo } from '../types.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 /**
  * Registers all profile management commands and returns the disposables.
@@ -58,7 +59,7 @@ export function registerProfileCommands(
                 vscode.window.showInformationMessage(`Switched to profile: ${name ?? `Profile ${index}`}`);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to select profile: ${message}`);
+                void showErrorWithReport(`Failed to select profile: ${message}`);
             }
         }),
     );
@@ -107,12 +108,12 @@ export function registerProfileCommands(
                         vscode.window.showInformationMessage(`Switched to profile: ${selected.label}`);
                     } catch (error) {
                         const message = error instanceof Error ? error.message : String(error);
-                        vscode.window.showErrorMessage(`Failed to switch profile: ${message}`);
+                        void showErrorWithReport(`Failed to switch profile: ${message}`);
                     }
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to list profiles: ${message}`);
+                void showErrorWithReport(`Failed to list profiles: ${message}`);
             }
         }),
     );
@@ -125,7 +126,7 @@ export function registerProfileCommands(
                 await showProfileDetails(who);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to get profile details: ${message}`);
+                void showErrorWithReport(`Failed to get profile details: ${message}`);
             }
         }),
     );
@@ -137,7 +138,7 @@ export function registerProfileCommands(
                 await runCreateProfileWizard(daemonClient, refreshProfiles);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to create profile: ${message}`);
+                void showErrorWithReport(`Failed to create profile: ${message}`);
             }
         }),
     );
@@ -149,7 +150,7 @@ export function registerProfileCommands(
                 await runDeleteProfile(item, daemonClient, refreshProfiles);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to delete profile: ${message}`);
+                void showErrorWithReport(`Failed to delete profile: ${message}`);
             }
         }),
     );
@@ -161,7 +162,7 @@ export function registerProfileCommands(
                 await runRenameProfile(item, daemonClient, refreshProfiles);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to rename profile: ${message}`);
+                void showErrorWithReport(`Failed to rename profile: ${message}`);
             }
         }),
     );
@@ -195,7 +196,7 @@ export function registerProfileCommands(
                 vscode.window.showInformationMessage(`Tokens invalidated for "${displayName}".`);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to invalidate tokens: ${message}`);
+                void showErrorWithReport(`Failed to invalidate tokens: ${message}`);
             }
         }),
     );

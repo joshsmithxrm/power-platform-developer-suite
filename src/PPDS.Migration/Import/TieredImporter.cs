@@ -181,12 +181,17 @@ namespace PPDS.Migration.Import
             // Create shared import context for phase processors
             var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress)
             {
-                OutputManager = options.OutputManager
+                OutputManager = options.OutputManager,
+                Warnings = warnings
             };
 
             // Disable plugins on entities with disableplugins=true
             var disabledPluginSteps = await DisablePluginsForImportAsync(
                 data, options, progress, cancellationToken).ConfigureAwait(false);
+
+            // Track whether we've re-enabled plugins so the finally-block fallback
+            // doesn't double-run after the inline call on the happy/failure paths.
+            var pluginsReenabled = false;
 
             try
             {
@@ -262,6 +267,12 @@ namespace PPDS.Migration.Import
                 _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {Transitions} transitions, {M2M} relationships, {Files} files in {Duration}",
                     totalImported, deferredResult.SuccessCount, stateTransitionResult.SuccessCount, relationshipResult.SuccessCount, fileColumnResult.SuccessCount, stopwatch.Elapsed);
 
+                // D5: re-enable plugins before building the result so any re-enable
+                // warnings (PluginStepReenableException → per-step warnings) are
+                // captured in ImportResult.Warnings.
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                pluginsReenabled = true;
+
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,
                     totalImported, data.TotalRecordCount, deferredResult, relationshipResult,
@@ -273,13 +284,24 @@ namespace PPDS.Migration.Import
                 stopwatch.Stop();
                 _logger?.LogError(ex, "Import failed");
 
+                // Same as happy path: re-enable before building the failure result
+                // so post-import plugin state is visible in the surfaced warnings.
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                pluginsReenabled = true;
+
                 return BuildFailureResult(
                     plan, entityResults, errors, warnings,
                     totalImported, data.TotalRecordCount, stopwatch.Elapsed, ex, options, progress);
             }
             finally
             {
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                // Fallback: only fires if the try/catch above didn't reach the inline
+                // re-enable (e.g. OperationCanceledException). Plugins must not stay
+                // silently disabled if import is cancelled mid-flight.
+                if (!pluginsReenabled)
+                {
+                    await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                }
             }
         }
 
@@ -416,14 +438,43 @@ namespace PPDS.Migration.Import
 
                 _logger?.LogInformation("Re-enabled {Count} plugin steps", disabledPluginSteps.Count);
             }
+            catch (PluginStepReenableException ex)
+            {
+                // D5: per-step failures are surfaced explicitly so callers can detect
+                // that some plugin steps remain disabled post-import.
+                _logger?.LogError(ex,
+                    "Failed to re-enable {FailedCount}/{TotalCount} plugin steps — they remain disabled",
+                    ex.Failures.Count, disabledPluginSteps.Count);
+
+                foreach (var (stepId, error) in ex.Failures)
+                {
+                    warnings.AddWarning(new ImportWarning
+                    {
+                        Code = ImportWarningCodes.PluginReenableFailed,
+                        Message = $"Plugin step {stepId} could not be re-enabled: {error.Message}",
+                        Impact = "This plugin step remains disabled."
+                    });
+                }
+
+                // Also emit a roll-up warning for dashboards/aggregators.
+                warnings.AddWarning(new ImportWarning
+                {
+                    Code = ImportWarningCodes.PluginReenableFailed,
+                    Message = $"{ex.Failures.Count} of {disabledPluginSteps.Count} plugin step(s) failed to re-enable after import.",
+                    Impact = $"{ex.Failures.Count} plugin step(s) remain disabled and must be re-enabled manually."
+                });
+            }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to re-enable some plugin steps");
+                // Bulk/pool/token failure — no per-step detail available. Surface everything.
+                _logger?.LogError(ex,
+                    "Failed to re-enable plugin steps — {Count} step(s) may remain disabled",
+                    disabledPluginSteps.Count);
                 warnings.AddWarning(new ImportWarning
                 {
                     Code = ImportWarningCodes.PluginReenableFailed,
                     Message = $"Failed to re-enable {disabledPluginSteps.Count} plugin steps: {ex.Message}",
-                    Impact = $"{disabledPluginSteps.Count} plugin step(s) may remain disabled"
+                    Impact = $"{disabledPluginSteps.Count} plugin step(s) may remain disabled and must be re-enabled manually."
                 });
             }
         }

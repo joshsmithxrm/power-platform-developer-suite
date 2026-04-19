@@ -155,13 +155,23 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
         }
         catch (Exception ex)
         {
-            throw new AuthenticationException($"Failed to create ServiceClient: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Failed to create ServiceClient: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
 
         if (!client.IsReady)
         {
-            var error = client.LastError ?? "Unknown error";
-            client.Dispose();
+            // Dispose client regardless of whether redaction succeeds — Redact may throw on
+            // pathological input and we must not leak the underlying HTTP handler. CodeQL 1018.
+            string error;
+            try
+            {
+                error = SensitiveValueRedactor.Redact(client.LastError) ?? "Unknown error";
+            }
+            finally
+            {
+                client.Dispose();
+            }
             throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
         }
 
@@ -207,7 +217,8 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
         }
         catch (Exception ex) when (ex is not AuthenticationException)
         {
-            throw new AuthenticationException($"Failed to load certificate: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Failed to load certificate: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
     }
 

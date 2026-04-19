@@ -6,13 +6,13 @@ paths: ["src/PPDS.Dataverse/**", "src/PPDS.Cli/Services/**"]
 
 ## Connection Pool (NEVER violate)
 
-- Use `IDataverseConnectionPool` for all Dataverse access — never create `ServiceClient` per request (42,000x slower)
+- Use `IDataverseConnectionPool` for all Dataverse access — never create `ServiceClient` per request
 - Acquire from pool, use, release — never hold a pooled client across multiple queries (defeats parallelism)
 - For multi-request scenarios, acquire/release per request within the pool
 
 ## Bulk APIs (ALWAYS prefer)
 
-- Use `CreateMultiple`, `UpdateMultiple` — 5x faster than `ExecuteMultiple`
+- Use `CreateMultiple`, `UpdateMultiple` over `ExecuteMultiple`
 - Batch sizes: 1000 records per bulk call (Dataverse limit)
 
 ## Error Handling
