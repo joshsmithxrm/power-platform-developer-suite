@@ -422,51 +422,45 @@ class TestResultJsonSchema:
 
 
 class TestGeminiTimeout:
-    """AC-126: Gemini polling stops after GEMINI_MAX_WAIT (5 min)."""
+    """AC-126: Gemini polling stops after GEMINI_MAX_WAIT (5 min).
+
+    Updated for v1-prelaunch retro item #3: poll_gemini_comments now
+    delegates to triage_common.poll_gemini_review which polls 3 endpoints.
+    """
 
     def test_gemini_timeout(self, tmp_path):
-        """poll_gemini_comments returns empty list after max wait with no stable count."""
+        """poll_gemini_comments returns empty list after max wait."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
 
-        # Return incrementing counts so it never stabilizes
-        poll_count = [0]
+        poll_calls = [0]
 
-        def varying_counts(*args, **kwargs):
+        def empty_endpoints(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if cmd and "view" in cmd:
+            poll_calls[0] += 1
+            # gh repo view for slug
+            if cmd and "repo" in cmd and "view" in cmd:
                 return subprocess.CompletedProcess(
-                    args=[], returncode=0, stdout="owner/repo", stderr=""
-                )
-            if cmd and "--jq" in cmd and "length" in cmd[cmd.index("--jq") + 1]:
-                # Count query — return incrementing counts to prevent stabilization
-                poll_count[0] += 1
+                    args=[], returncode=0, stdout="owner/repo", stderr="")
+            # gh pr view for createdAt
+            if cmd and cmd[:2] == ["gh", "pr"] and "view" in cmd:
                 return subprocess.CompletedProcess(
-                    args=[], returncode=0, stdout=str(poll_count[0]), stderr=""
-                )
-            # Full fetch query — return JSON array
+                    args=[], returncode=0, stdout="2026-01-01T00:00:00Z",
+                    stderr="")
+            # gh api ... endpoints — always empty list
             return subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="[]", stderr=""
-            )
+                args=[], returncode=0, stdout="[]", stderr="")
 
-        # Use a small positive max_wait so the loop body actually executes
-        time_calls = [0]
-
-        def advancing_time():
-            time_calls[0] += 1
-            return time_calls[0] * 2.0  # 2s per call, timeout at 5s
-
-        with patch("pr_monitor.subprocess.run", side_effect=varying_counts), \
-             patch("pr_monitor.GEMINI_MAX_WAIT", 5), \
+        with patch("pr_monitor.subprocess.run", side_effect=empty_endpoints), \
+             patch("triage_common.subprocess.run", side_effect=empty_endpoints), \
+             patch("pr_monitor.GEMINI_MAX_WAIT", 1), \
              patch("pr_monitor.GEMINI_POLL_INTERVAL", 0), \
-             patch("pr_monitor.time.time", side_effect=advancing_time), \
-             patch("pr_monitor.time.sleep"):
+             patch("triage_common.time.sleep"):
             result = pr_monitor.poll_gemini_comments(wt, 5, logger)
 
-        # Should return empty since never got stable count and timed out
         assert result == []
-        # Verify polling actually happened (loop body executed)
-        assert poll_count[0] >= 1, f"Expected at least 1 poll attempt, got {poll_count[0]}"
+        # At minimum, the three endpoints should have been polled once
+        assert poll_calls[0] >= 1
 
 
 class TestPidFileLifecycle:

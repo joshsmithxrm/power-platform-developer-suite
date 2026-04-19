@@ -918,40 +918,60 @@ class TestPipelineNotify:
 # ---------------------------------------------------------------------------
 class TestPrGeminiStabilization:
     def test_pr_gemini_stabilization(self, tmp_path):
-        """AC-88: poll_gemini stops after 2 consecutive stable polls."""
+        """AC-88 (rewritten for v1-prelaunch retro #3):
+        poll_gemini terminates as soon as a Gemini bot review appears on
+        any of the three endpoints. Returns inline comments from
+        pulls/comments (may be empty if Gemini posted only a top-level
+        review with no inline notes)."""
         import pipeline
+        import triage_common
 
         logger = pipeline.open_logger(str(tmp_path / "test.log"))
 
-        # Mock gh api to return stable count of 3 comments each time
-        poll_count = [0]
+        gemini_review = {
+            "id": 1,
+            "user": {"login": triage_common.GEMINI_BOT_LOGIN},
+            "submitted_at": "2026-04-19T05:00:00Z",
+            "state": "COMMENTED",
+        }
+        inline_comments = [
+            {"id": i, "user": {"login": "x"}, "path": "a.py",
+             "line": i, "body": f"c{i}", "created_at": "2026-04-19T05:00:00Z"}
+            for i in range(3)
+        ]
+
         def mock_run(cmd, **kwargs):
             result = unittest.mock.MagicMock()
             result.returncode = 0
             result.stderr = ""
-            if "length" in cmd:
-                poll_count[0] += 1
-                result.stdout = "3\n"  # Always 3 comments — should stabilize
-            elif "--jq" in cmd:
-                result.stdout = json.dumps([
-                    {"id": i, "user": "gemini", "path": "a.py", "line": i, "body": f"comment {i}"}
-                    for i in range(3)
-                ])
+            if cmd[0] == "gh" and cmd[1] == "pr" and "view" in cmd:
+                result.stdout = "2026-04-19T04:00:00Z"  # PR createdAt
+            elif cmd[0] == "gh" and cmd[1] == "api":
+                path = cmd[2]
+                if "/reviews" in path:
+                    result.stdout = json.dumps([gemini_review])
+                elif "/pulls/" in path and path.endswith("/comments"):
+                    result.stdout = json.dumps(inline_comments)
+                elif "/issues/" in path and path.endswith("/comments"):
+                    result.stdout = json.dumps([])
+                else:
+                    result.stdout = "[]"
             else:
                 result.stdout = ""
             return result
 
-        with unittest.mock.patch.object(pipeline, "get_repo_slug", return_value="owner/repo"):
-            with unittest.mock.patch("subprocess.run", side_effect=mock_run):
-                with unittest.mock.patch("time.sleep"):  # Skip actual waits
-                    with unittest.mock.patch("time.time") as mock_time:
-                        # Simulate: start=0, then advance past min_wait, then 2 stable polls
-                        mock_time.side_effect = [0, 0, 100, 100, 130, 130, 160, 160, 190, 190, 220, 220, 250, 250, 280, 280, 310, 310, 400, 400]
-                        comments = pipeline.poll_gemini(str(tmp_path), "42", logger, min_wait=90, max_wait=300)
+        with unittest.mock.patch.object(pipeline, "get_repo_slug",
+                                         return_value="owner/repo"), \
+             unittest.mock.patch("triage_common.get_repo_slug",
+                                 return_value="owner/repo"), \
+             unittest.mock.patch("triage_common.subprocess.run",
+                                 side_effect=mock_run), \
+             unittest.mock.patch("subprocess.run", side_effect=mock_run), \
+             unittest.mock.patch("triage_common.time.sleep"):
+            comments = pipeline.poll_gemini(
+                str(tmp_path), "42", logger, min_wait=0, max_wait=10)
 
         assert len(comments) == 3, f"Expected 3 comments, got {len(comments)}"
-        # Should have polled at least twice with stable count before returning
-        assert poll_count[0] >= 2
         logger.close()
 
 

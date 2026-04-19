@@ -6,6 +6,13 @@ delegate to these pure-ish functions instead of duplicating logic.
 import json
 import os
 import subprocess
+import time
+from itertools import chain
+
+
+# Bot logins used by review-detection and triage code paths.
+GEMINI_BOT_LOGIN = "gemini-code-assist[bot]"
+CODEQL_BOT_LOGIN = "github-advanced-security[bot]"
 
 
 def get_repo_slug(worktree, shakedown=False):
@@ -23,6 +30,142 @@ def get_repo_slug(worktree, shakedown=False):
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
     return None
+
+
+def _flatten_paginate_slurp(payload):
+    """Flatten the result of ``gh api ... --paginate --slurp``.
+
+    v1-prelaunch retro item #5: ``--paginate --slurp`` returns a list of
+    pages where each page is itself a list of items. Iterating directly
+    crashes with ``AttributeError: 'list' object has no attribute 'get'``
+    when callers do ``comment.get(...)``. Flatten one level when we detect
+    the page-of-pages shape; otherwise return *payload* unchanged.
+    """
+    if not payload:
+        return payload or []
+    if isinstance(payload, list) and payload and isinstance(payload[0], list):
+        return list(chain.from_iterable(payload))
+    return payload
+
+
+def poll_gemini_review(worktree, pr_number, pr_created_at,
+                       max_wait=300, poll_interval=30,
+                       min_wait=0, shakedown=False, log_fn=None):
+    """Poll for a Gemini review across all three GitHub endpoints.
+
+    v1-prelaunch retro item #3: the previous implementation only polled
+    ``/pulls/{n}/comments`` (inline review comments). Gemini posts its
+    summary review via ``/pulls/{n}/reviews`` (a top-level review object),
+    so the old code never saw the review and timed out at 5 minutes.
+
+    Polls in parallel-ish (sequentially per tick — fast enough):
+      - GET /repos/{owner}/{repo}/pulls/{n}/reviews   (top-level reviews)
+      - GET /repos/{owner}/{repo}/pulls/{n}/comments  (inline review comments)
+      - GET /repos/{owner}/{repo}/issues/{n}/comments (PR-level discussion)
+
+    Termination: any submission whose ``user.login`` matches
+    ``GEMINI_BOT_LOGIN`` AND whose ``submitted_at`` (reviews) /
+    ``created_at`` (comments) is at or after *pr_created_at*.
+
+    Args:
+        worktree: directory to run gh from
+        pr_number: PR number
+        pr_created_at: ISO timestamp string of the PR's created_at; reviews
+            older than this are ignored (prevents matching stale reviews
+            from previous force-pushes).
+        max_wait: total seconds to poll before giving up
+        poll_interval: seconds between polls
+        min_wait: minimum seconds before considering termination
+        shakedown: if True, return ([], "shakedown") immediately
+        log_fn: optional callable(event, **kwargs) for status logging
+
+    Returns:
+        Tuple ``(comments, status)`` where:
+          - ``comments`` is a list of inline review comment dicts (may be
+            empty even on success — Gemini sometimes posts a top-level
+            review with no inline comments).
+          - ``status`` is one of: "review_received", "timeout", "error",
+            "shakedown".
+    """
+    def _log(event, **kwargs):
+        if log_fn:
+            log_fn(event, **kwargs)
+
+    if shakedown:
+        _log("SHAKEDOWN_SKIPPED")
+        return [], "shakedown"
+
+    repo = get_repo_slug(worktree, shakedown=shakedown)
+    if not repo:
+        _log("ERROR", reason="Cannot determine repo slug")
+        return [], "error"
+
+    start = time.time()
+
+    while time.time() - start < max_wait:
+        elapsed = time.time() - start
+        if elapsed < min_wait:
+            time.sleep(min(poll_interval, max(1, min_wait - elapsed)))
+            continue
+
+        endpoints = {
+            "reviews": f"repos/{repo}/pulls/{pr_number}/reviews",
+            "pulls_comments": f"repos/{repo}/pulls/{pr_number}/comments",
+            "issues_comments": f"repos/{repo}/issues/{pr_number}/comments",
+        }
+        gemini_seen = False
+        endpoint_results = {}
+        for key, path in endpoints.items():
+            try:
+                proc = subprocess.run(
+                    ["gh", "api", path, "--paginate", "--slurp"],
+                    cwd=worktree, capture_output=True, text=True, timeout=30,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+                _log("POLL_ERROR", endpoint=key, error=str(e))
+                continue
+            if proc.returncode != 0:
+                _log("POLL_ERROR", endpoint=key,
+                     stderr=proc.stderr.strip()[:120])
+                continue
+            try:
+                items = _flatten_paginate_slurp(json.loads(proc.stdout or "[]"))
+            except (json.JSONDecodeError, ValueError):
+                _log("PARSE_ERROR", endpoint=key)
+                continue
+            endpoint_results[key] = items
+            for item in items:
+                if (item.get("user") or {}).get("login") != GEMINI_BOT_LOGIN:
+                    continue
+                ts = item.get("submitted_at") or item.get("created_at") or ""
+                if pr_created_at and ts < pr_created_at:
+                    continue
+                gemini_seen = True
+                break
+
+        _log("POLL", elapsed=f"{int(elapsed)}s",
+             gemini_seen=gemini_seen,
+             reviews=len(endpoint_results.get("reviews", [])),
+             pull_comments=len(endpoint_results.get("pulls_comments", [])),
+             issue_comments=len(endpoint_results.get("issues_comments", [])))
+
+        if gemini_seen:
+            _log("REVIEW_RECEIVED")
+            inline = []
+            for c in endpoint_results.get("pulls_comments", []):
+                inline.append({
+                    "id": c.get("id"),
+                    "user": (c.get("user") or {}).get("login"),
+                    "path": c.get("path"),
+                    "line": c.get("line"),
+                    "body": c.get("body"),
+                })
+            return inline, "review_received"
+
+        time.sleep(poll_interval)
+
+    _log("TIMEOUT", elapsed=f"{int(time.time() - start)}s")
+    return [], "timeout"
 
 
 def get_unreplied_comments(worktree, pr_number, shakedown=False):
@@ -50,12 +193,12 @@ def get_unreplied_comments(worktree, pr_number, shakedown=False):
         )
         if result.returncode != 0:
             return []
-        comments = json.loads(result.stdout)
+        comments = _flatten_paginate_slurp(json.loads(result.stdout))
     except (subprocess.TimeoutExpired, FileNotFoundError,
             json.JSONDecodeError, OSError):
         return []
 
-    bot_usernames = {"gemini-code-assist[bot]", "github-advanced-security[bot]"}
+    bot_usernames = {GEMINI_BOT_LOGIN, CODEQL_BOT_LOGIN}
 
     bot_comments = [
         c for c in comments
@@ -114,13 +257,13 @@ def detect_gemini_overload(worktree, pr_number, shakedown=False):
         )
         if result.returncode != 0:
             return False
-        comments = json.loads(result.stdout)
+        comments = _flatten_paginate_slurp(json.loads(result.stdout))
     except (subprocess.TimeoutExpired, FileNotFoundError,
             json.JSONDecodeError, OSError):
         return False
 
     for comment in comments:
-        if comment.get("user", {}).get("login") != "gemini-code-assist[bot]":
+        if comment.get("user", {}).get("login") != GEMINI_BOT_LOGIN:
             continue
         body = (comment.get("body") or "").lower()
         if "higher than usual traffic" in body or "unable to create" in body:
