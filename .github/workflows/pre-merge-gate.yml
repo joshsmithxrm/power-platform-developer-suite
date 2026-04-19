@@ -1,0 +1,98 @@
+name: Pre-Merge Gate
+
+# Enforces three rules before any PR is merged into main, per the v1-launch
+# retro (item #11). Each rule is its own job so failures are individually
+# diagnosable in the PR Checks tab.
+#
+# Rule 1 (size):        scripts/ci/check_pr_size.py
+# Rule 2 (secret-refs): scripts/ci/check_workflow_secrets.py
+# Rule 3 (major-bump):  scripts/ci/check_major_bump_tested.py
+#
+# All three are ENFORCING from day one (no soft-warn) per retro recommendation.
+# Bypass markers are documented in docs/MERGE-POLICY.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  # Read-only access to repo secret/variable *names* (not values) for Rule 2.
+  actions: read
+
+concurrency:
+  group: pre-merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  size:
+    name: Rule 1 — PR size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check PR size
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python scripts/ci/check_pr_size.py --pr "$PR_NUMBER"
+
+  secret-refs:
+    name: Rule 2 — Workflow secret-refs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need the PR's HEAD ref so changed workflow files are present on disk.
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check workflow secret-refs
+        env:
+          # GITHUB_TOKEN can read repo secret/variable NAMES (not values) when
+          # used with `gh secret list --json name`. No elevated PAT required.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python scripts/ci/check_workflow_secrets.py --pr "$PR_NUMBER"
+
+  major-bump-tested:
+    name: Rule 3 — Major-bump test enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check major-bump test enforcement
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python scripts/ci/check_major_bump_tested.py --pr "$PR_NUMBER"
+
+  # Aggregate gate for branch protection. Branch protection should require
+  # this single check; it succeeds iff all three rules pass.
+  pre-merge-gate:
+    name: Pre-Merge Gate
+    runs-on: ubuntu-latest
+    needs: [size, secret-refs, major-bump-tested]
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          if [[ "${{ needs.size.result }}" == "success" \
+             && "${{ needs.secret-refs.result }}" == "success" \
+             && "${{ needs.major-bump-tested.result }}" == "success" ]]; then
+            echo "All pre-merge gate rules passed."
+            exit 0
+          fi
+          echo "Pre-merge gate failed:"
+          echo "  size:              ${{ needs.size.result }}"
+          echo "  secret-refs:       ${{ needs.secret-refs.result }}"
+          echo "  major-bump-tested: ${{ needs.major-bump-tested.result }}"
+          exit 1
