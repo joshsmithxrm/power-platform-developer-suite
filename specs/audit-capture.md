@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Last Updated:** 2026-04-18
-**Code:** [tools/audit-capture.mjs](../tools/audit-capture.mjs) | [tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs](../tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs) | [.claude/skills/audit-capture/](../.claude/skills/audit-capture/) | [.claude/audit-manifests/](../.claude/audit-manifests/)
+**Code:** [tools/audit-capture.mjs](../tools/audit-capture.mjs) | [tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs](../tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs) | [.claude/skills/audit-capture/](../.claude/skills/audit-capture/) | [tools/audit-manifests/](../tools/audit-manifests/)
 **Surfaces:** TUI | Extension
 
 ---
@@ -16,7 +16,7 @@ The contract is defined by [`AUDIT-SCHEMA.md`](https://github.com/joshsmithxrm/p
 ### Goals
 
 - **Uniform capture artifact** — every TUI screen and extension panel emits PNG + `meta.json`, layout per schema
-- **Manifest-driven** — adding a new screen means editing `.claude/audit-manifests/{surface}.yaml`, nothing else
+- **Manifest-driven** — adding a new screen means editing `tools/audit-manifests/{surface}.yaml`, nothing else
 - **Unattended** — once a profile+env is configured, `audit-capture run <surface>` walks the whole manifest with no prompts
 - **Robust** — a broken entry marks itself `state: error`, the run continues, exit is non-zero
 - **No new render engine for TUI** — reuse Playwright (already a dev dep) + xterm.js rather than adopting `agg` or native canvas libs
@@ -55,7 +55,7 @@ The contract is defined by [`AUDIT-SCHEMA.md`](https://github.com/joshsmithxrm/p
 │   xterm.js for PNG render    │   │                              │
 └──────────────────────────────┘   └──────────────────────────────┘
 
-Inputs:   .claude/audit-manifests/{surface}.yaml
+Inputs:   tools/audit-manifests/{surface}.yaml
 Outputs:  $AUDIT_OUT/{surface}/{entry-id}/{NN-name}.png
           $AUDIT_OUT/{surface}/{entry-id}/meta.json
           $AUDIT_OUT/manifest.json   (written last)
@@ -70,8 +70,8 @@ The runner is a thin orchestrator. All the heavy-lifting (PTY, VS Code, renderin
 | `tools/audit-capture.mjs` | Reads a manifest, drives the appropriate verify tool, writes schema-conformant output. Subcommands: `run`, `validate`, `list`. |
 | `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` | Existing PTY harness. Gains a `render` subcommand that writes a PNG of current terminal state. |
 | Render harness (internal to tui-verify daemon) | Headless Chromium page holding xterm.js. Kept warm across captures. |
-| `.claude/audit-manifests/tui.yaml` | Inventory of TUI screens to capture. Version-controlled. |
-| `.claude/audit-manifests/extension.yaml` | Inventory of extension panels to capture. Version-controlled. |
+| `tools/audit-manifests/tui.yaml` | Inventory of TUI screens to capture. Version-controlled. |
+| `tools/audit-manifests/extension.yaml` | Inventory of extension panels to capture. Version-controlled. |
 | `.claude/skills/audit-capture/SKILL.md` | Skill-authored documentation: usage, env vars, gotchas. |
 | Theme pin | On extension launch, `audit-capture` writes `settings.json` into webview-cdp's profile dir to lock `workbench.colorTheme`. |
 
@@ -89,7 +89,7 @@ No new npm dependencies for the runner itself (uses `yaml`, already transitively
 
 ### Core Requirements
 
-1. The runner MUST read manifests in YAML at `.claude/audit-manifests/{surface}.yaml`
+1. The runner MUST read manifests in YAML at `tools/audit-manifests/{surface}.yaml`
 2. The runner MUST write output conforming to `AUDIT-SCHEMA.md` v1: folder layout, `manifest.json`, `meta.json`
 3. The runner MUST refuse to write inside the repo working tree — `$AUDIT_OUT` must be an absolute path outside the repo
 4. The runner MUST write `manifest.json` **after** every entry directory is flushed, so a reader never sees a manifest referencing missing files
@@ -134,7 +134,7 @@ No new npm dependencies for the runner itself (uses `yaml`, already transitively
 YAML. One manifest per surface. Structure:
 
 ```yaml
-# .claude/audit-manifests/tui.yaml
+# tools/audit-manifests/tui.yaml
 surface: tui
 entries:
   - id: sql-query-main
@@ -408,7 +408,7 @@ It orchestrates tools from *two* subsystem dirs (`tests/PPDS.Tui.E2eTests/tools/
 
 ### Adding a new TUI screen capture
 
-1. Add an entry to `.claude/audit-manifests/tui.yaml`:
+1. Add an entry to `tools/audit-manifests/tui.yaml`:
    ```yaml
    - id: my-new-screen
      title: My New Screen — initial state
@@ -425,7 +425,7 @@ It orchestrates tools from *two* subsystem dirs (`tests/PPDS.Tui.E2eTests/tools/
 
 ### Adding a new extension panel capture
 
-Same pattern against `.claude/audit-manifests/extension.yaml`. Use `command:` to open the panel, `wait:` on the extension id, then `screenshot:`.
+Same pattern against `tools/audit-manifests/extension.yaml`. Use `command:` to open the panel, `wait:` on the extension id, then `screenshot:`.
 
 ### Adding a new surface (e.g., `mcp`)
 
