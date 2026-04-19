@@ -1,0 +1,231 @@
+# TUI audit manifest. Single source of truth for which TUI surfaces get
+# captured in a design audit. Adding a new screen = appending an entry.
+#
+# See specs/audit-capture.md for the runner contract; AUDIT-SCHEMA.md on
+# ppds-design-system for the output format.
+#
+# Tools menu order (from TuiShell.cs:279):
+#   0 SQL Query, 1 Solutions, 2 Import Jobs, 3 Connection References,
+#   4 Environment Variables, 5 Plugin Traces, 6 Plugin Registration,
+#   7 Metadata Browser, 8 Web Resources, 9 Data Migration
+# Use `key: down` N times after `alt+t` to navigate.
+
+surface: tui
+entries:
+  - id: splash
+    title: PPDS splash — no profile selected
+    requires: none
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - screenshot: 01-splash
+
+  - id: file-menu
+    title: File menu — open state
+    requires: none
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+f
+      - sleep: 200
+      - screenshot: 01-open
+
+  - id: help-menu
+    title: Help menu — open state
+    requires: none
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+h
+      - sleep: 200
+      - screenshot: 01-open
+
+  - id: profile-picker
+    title: Profile selector dialog
+    requires: none
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+p
+      - sleep: 300
+      - screenshot: 01-open
+
+  - id: environment-picker
+    title: Environment selector dialog
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+e
+      - sleep: 300
+      - screenshot: 01-open
+
+  - id: sql-query
+    title: SQL Query screen — empty editor
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: enter
+      - wait: { text: "SQL Query", timeout: 10000 }
+      - screenshot: 01-empty
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar contains tenant-identifying values" }
+
+  - id: solutions
+    title: Solutions screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: enter
+      - wait: { text: "Solutions", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: import-jobs
+    title: Import Jobs screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Import Jobs", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: connection-references
+    title: Connection References screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Connection References", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: environment-variables
+    title: Environment Variables screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Environment Variables", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: plugin-traces
+    title: Plugin Traces screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Plugin Traces", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: plugin-registration
+    title: Plugin Registration screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Plugin Registration", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: metadata-browser
+    title: Metadata Browser screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Metadata", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: web-resources
+    title: Web Resources screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Web Resources", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
+
+  - id: data-migration
+    title: Data Migration screen
+    requires: connected
+    steps:
+      - wait: { text: "PPDS", timeout: 15000 }
+      - key: alt+t
+      - sleep: 150
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: down
+      - key: enter
+      - wait: { text: "Migration", timeout: 30000 }
+      - screenshot: 01-loaded
+    masks:
+      - { row: 28, colStart: 0, colEnd: 120, reason: "profile/env status bar" }
