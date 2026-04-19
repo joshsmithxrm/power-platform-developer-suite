@@ -269,6 +269,61 @@ class TestPollGeminiReview:
         assert comments == []
         mock_run.assert_not_called()
 
+    def test_poll_gemini_filters_inline_to_bot_only(self, tmp_path):
+        """The returned inline list must contain ONLY gemini-authored
+        comments. The pulls/comments endpoint returns human-reviewer
+        comments and stale force-push comments alongside gemini's, and
+        callers must not triage those as if Gemini posted them."""
+        gemini_inline = {
+            "id": 100,
+            "user": {"login": GEMINI_BOT_LOGIN},
+            "created_at": "2026-04-19T05:00:00Z",
+            "path": "src/foo.py",
+            "line": 10,
+            "body": "Gemini suggestion",
+        }
+        human_inline = {
+            "id": 101,
+            "user": {"login": "alice"},
+            "created_at": "2026-04-19T05:00:01Z",
+            "path": "src/foo.py",
+            "line": 11,
+            "body": "Human comment",
+        }
+        other_bot_inline = {
+            "id": 102,
+            "user": {"login": "github-advanced-security[bot]"},
+            "created_at": "2026-04-19T05:00:02Z",
+            "path": "src/foo.py",
+            "line": 12,
+            "body": "CodeQL finding",
+        }
+
+        def mock_run(cmd, **kwargs):
+            path = cmd[2] if len(cmd) > 2 else ""
+            if "/reviews" in path:
+                return _gh_ok([])
+            if "/pulls/" in path and path.endswith("/comments"):
+                return _gh_ok(
+                    [gemini_inline, human_inline, other_bot_inline])
+            if "/issues/" in path and path.endswith("/comments"):
+                return _gh_ok([])
+            return _gh_ok([])
+
+        with patch("triage_common.subprocess.run", side_effect=mock_run), \
+             patch("triage_common.get_repo_slug", return_value="owner/repo"), \
+             patch("triage_common.time.sleep"):
+            comments, status = poll_gemini_review(
+                str(tmp_path), 816, "2026-04-19T04:00:00Z",
+                max_wait=60, poll_interval=0,
+            )
+
+        assert status == "review_received"
+        assert len(comments) == 1, (
+            f"expected only the gemini comment, got {comments!r}")
+        assert comments[0]["id"] == 100
+        assert comments[0]["user"] == GEMINI_BOT_LOGIN
+
     def test_logs_endpoint_counts(self, tmp_path):
         """log_fn is called with per-endpoint counts on each poll."""
         events = []

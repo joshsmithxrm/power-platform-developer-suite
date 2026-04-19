@@ -153,6 +153,12 @@ def poll_gemini_review(worktree, pr_number, pr_created_at,
             _log("REVIEW_RECEIVED")
             inline = []
             for c in endpoint_results.get("pulls_comments", []):
+                # Filter to gemini-authored inline comments only — the
+                # pulls/comments endpoint also returns human reviewer
+                # comments and stale force-push comments, which would
+                # otherwise be triaged as if Gemini had posted them.
+                if (c.get("user") or {}).get("login") != GEMINI_BOT_LOGIN:
+                    continue
                 inline.append({
                     "id": c.get("id"),
                     "user": (c.get("user") or {}).get("login"),
