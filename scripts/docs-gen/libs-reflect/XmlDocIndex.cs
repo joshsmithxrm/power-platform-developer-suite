@@ -98,14 +98,14 @@ internal sealed class XmlDocIndex
         string? firstCandidate = null;
         foreach (var iface in type.GetInterfaces())
         {
-            firstCandidate ??= iface.FullName ?? iface.Name;
+            firstCandidate ??= FormatMemberDisplay(iface);
             var doc = LookupByTypeId(iface);
             if (IsUsable(doc)) return (doc, firstCandidate);
         }
         for (var baseType = type.BaseType; baseType is not null; baseType = baseType.BaseType)
         {
             if (baseType.FullName == "System.Object") break;
-            firstCandidate ??= baseType.FullName ?? baseType.Name;
+            firstCandidate ??= FormatMemberDisplay(baseType);
             var doc = LookupByTypeId(baseType);
             if (IsUsable(doc)) return (doc, firstCandidate);
         }
@@ -145,15 +145,24 @@ internal sealed class XmlDocIndex
 
     private static string FormatMemberDisplay(MemberInfo member)
     {
-        var declaring = member.DeclaringType?.FullName ?? member.DeclaringType?.Name ?? "?";
-        return declaring + "." + member.Name;
+        if (member is Type t)
+        {
+            return TypeDocIdForRef(t, closedGeneric: true).Replace('{', '<').Replace('}', '>');
+        }
+
+        var declaring = member.DeclaringType is not null
+            ? TypeDocIdForRef(member.DeclaringType, closedGeneric: true)
+            : "?";
+        var paramsPart = member is MethodBase mb ? MethodParamPart(mb.GetParameters()) : string.Empty;
+        return (declaring + "." + member.Name + paramsPart).Replace('{', '<').Replace('}', '>');
     }
 
     private static string? StripDocIdPrefix(string? docId)
     {
         if (string.IsNullOrEmpty(docId)) return null;
         var colon = docId.IndexOf(':');
-        return colon < 0 ? docId : docId.Substring(colon + 1);
+        var stripped = colon < 0 ? docId : docId.Substring(colon + 1);
+        return stripped.Replace('{', '<').Replace('}', '>');
     }
 
     private static bool IsUsable(TypeDoc? doc) =>
