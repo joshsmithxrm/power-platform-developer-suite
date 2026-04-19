@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.0-beta.1] - 2026-04-17
+## [3.0.0] - 2026-04-18
+
+Promotes the `2.1.0-beta.1` annotation surface to stable, aligned with the broader PPDS v1.0.0 launch. Source-compatible with 2.x — all attribute additions are additive. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
+
+### Changed
+
+- **BREAKING:** Strong name signing key rotated. The assembly's public key token changed from `87a4b0dac59374c6` to `0b0809faff135778`, which changes the assembly identity. Consumers with strong-name references, binding redirects, or `InternalsVisibleTo` declarations targeting the old token must rebuild against the new identity. No source changes required.
 
 ### Added
 
@@ -21,11 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ApiProcessingStepType` enum** — `None`, `AsyncOnly`, `SyncAndAsync`.
 - **New `PluginStepAttribute` properties** — `Deployment` (default `ServerOnly`), `RunAsUser` (impersonation user), `CanBeBypassed` (default `true`), `CanUseReadOnlyConnection` (default `false`), `InvocationSource` (default `Parent`).
 - **New `PluginImageAttribute` properties** — `Description` for documenting image purpose; `MessagePropertyName` to override the auto-inferred message property.
-
-### Notes
-
-- All additions are backward compatible. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
-- Released as `2.1.0-beta.1` to validate the new annotation surface before promoting to a stable `2.1.0`.
 
 ## [2.0.0] - 2025-12-31
 
@@ -79,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full XML documentation
 - Comprehensive unit test suite
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v3.0.0...HEAD
+[3.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.0.0...Plugins-v3.0.0
 [2.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.1...Plugins-v2.0.0
 [1.1.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.0...Plugins-v1.1.1
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.0.0...Plugins-v1.1.0

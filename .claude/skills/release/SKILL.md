@@ -131,18 +131,24 @@ Bump `package.json` version AND sync the lock file:
 ( cd src/PPDS.Extension && npm install )
 ```
 
-### 5. Package Lineage Reference
+### 5. Package Lineage — discover at release time, do not hardcode
 
-| Package | v1.0 lineage | Notes |
-|---|---|---|
-| PPDS.Auth | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| PPDS.Cli | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| PPDS.Dataverse | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| PPDS.Mcp | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| PPDS.Migration | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| PPDS.Query | `1.0.0-beta.N` → `1.0.0` | First public stable |
-| **PPDS.Plugins** | `2.0.0` → `2.1.0-beta.N` → `2.1.0` | **Different lineage** — already past 1.0 publicly. Don't regress to 1.0. |
-| PPDS.Extension | `0.X.Y` (odd = pre, even = stable) | `package.json` controlled, not MinVer |
+Each package has its own lineage. Embedding the current version table here would go stale on every release. Instead, query the actual state when you need it:
+
+```bash
+# Latest published tag per package (sorted by semver, prerelease-aware)
+for prefix in Auth Cli Dataverse Extension Mcp Migration Plugins Query; do
+  last=$(git tag --list "${prefix}-v*" --sort=-v:refname | head -1)
+  echo "$prefix: $last"
+done
+```
+
+Principles to apply when picking the next version:
+
+- **Most NuGet packages** (Auth, Cli, Dataverse, Mcp, Migration, Query) share a unified `1.x` lineage — the prerelease-to-stable cadence keeps them in lockstep at major/minor.
+- **PPDS.Plugins has its own lineage** that pre-dates the unified lineage (first released as `1.0.0` in Jan 2026 before the other packages). It progresses independently — don't try to reconcile its version with the others. Whenever you would regress its major number, you've made a mistake.
+- **Strong-name rotation is a SemVer breaking change** (PublicKeyToken changes the assembly identity). Bump major on any package you re-sign with a new key — do not treat a key rotation as a minor or patch bump.
+- **PPDS.Extension** is not MinVer; version lives in `src/PPDS.Extension/package.json` and follows the odd/even-minor convention (odd = pre-release channel, even = stable).
 
 ### 6. Pre-Merge Verification
 

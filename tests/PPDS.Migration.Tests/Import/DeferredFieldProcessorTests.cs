@@ -253,6 +253,92 @@ public class DeferredFieldProcessorTests
         _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ProcessAsync_IndividualFallback_AcquiresClientPerUpdate()
+    {
+        // E5: ExecuteIndividualUpdatesAsync must acquire a pooled client per
+        // update call, not hold a single client across N sequential updates.
+        // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
+        var idMappings = new IdMappingCollection();
+        var records = new List<Entity>();
+
+        for (var i = 0; i < 3; i++)
+        {
+            var oldId = Guid.NewGuid();
+            var newId = Guid.NewGuid();
+            var oldRefId = Guid.NewGuid();
+            var newRefId = Guid.NewGuid();
+
+            idMappings.AddMapping("team", oldId, newId);
+            idMappings.AddMapping("team", oldRefId, newRefId);
+
+            var record = new Entity("team", oldId);
+            record["parentteamid"] = new EntityReference("team", oldRefId);
+            records.Add(record);
+        }
+
+        var context = CreateContext(
+            deferredFields: new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["team"] = new List<string> { "parentteamid" }
+            },
+            entityData: new Dictionary<string, IReadOnlyList<Entity>>
+            {
+                ["team"] = records
+            },
+            idMappings: idMappings);
+
+        // Force individual fallback by returning failure from bulk path.
+        _bulkExecutor.Setup(x => x.UpdateMultipleAsync(
+                "team",
+                It.IsAny<IEnumerable<Entity>>(),
+                It.IsAny<BulkOperationOptions>(),
+                It.IsAny<DataverseClientOptions>(),
+                It.IsAny<IProgress<ProgressSnapshot>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BulkOperationResult
+            {
+                SuccessCount = 0,
+                FailureCount = 1,
+                Errors = new List<BulkOperationError>
+                {
+                    new BulkOperationError
+                    {
+                        Index = 0,
+                        ErrorCode = -1,
+                        Message = "UpdateMultiple is not enabled on the entity team"
+                    }
+                }
+            });
+
+        // Track GetClientAsync acquisitions separately from ExecuteAsync calls.
+        var getClientCallCount = 0;
+        _pool.Reset();
+        _pool.Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                Interlocked.Increment(ref getClientCallCount);
+                return _client.Object;
+            });
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()))
+            .ReturnsAsync(new OrganizationResponse());
+        _client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+
+        // Act
+        var result = await _sut.ProcessAsync(context, CancellationToken.None);
+
+        // Assert — 3 updates, 3 client acquisitions (one per update).
+        result.Success.Should().BeTrue();
+        result.SuccessCount.Should().Be(3);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()), Times.Exactly(3));
+        getClientCallCount.Should().Be(3,
+            "E5: individual deferred-field updates must acquire the pooled client per update");
+    }
+
     #endregion
 
     #region ProcessAsync — empty deferred fields

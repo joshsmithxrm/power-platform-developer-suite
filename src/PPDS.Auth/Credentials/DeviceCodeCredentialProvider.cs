@@ -178,7 +178,7 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 
             if (account != null)
             {
-                AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
+                AuthDebugLog.WriteLine($"  Found account for silent auth: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
                 try
                 {
                     _cachedResult = await _msalClient!
@@ -233,9 +233,12 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 
         if (_deviceCodeCallback == null)
         {
+            // User-facing confirmation — displaying the full username is
+            // intentional here (they just completed the sign-in).
             AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
             AuthenticationOutput.WriteLine();
         }
+        AuthDebugLog.WriteLine($"  Device code authentication succeeded: upn={LogIdentityHelper.HashIdentifier(_cachedResult.Account?.Username)}");
 
         return _cachedResult.AccessToken;
     }
@@ -290,7 +293,7 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
             return null;
         }
 
-        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
+        AuthDebugLog.WriteLine($"  Found cached account: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
 
         try
         {

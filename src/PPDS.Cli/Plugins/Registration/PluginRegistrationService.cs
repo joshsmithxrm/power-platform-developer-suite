@@ -147,9 +147,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e => new PluginAssemblyInfo
+        return entities.Select(e => new PluginAssemblyInfo
         {
             Id = e.Id,
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
@@ -206,9 +206,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e => new PluginPackageInfo
+        return entities.Select(e => new PluginPackageInfo
         {
             Id = e.Id,
             Name = e.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? string.Empty,
@@ -248,9 +248,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e => new PluginAssemblyInfo
+        return entities.Select(e => new PluginAssemblyInfo
         {
             Id = e.Id,
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
@@ -309,9 +309,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e => new PluginTypeInfo
+        return entities.Select(e => new PluginTypeInfo
         {
             Id = e.Id,
             TypeName = e.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
@@ -383,9 +383,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e =>
+        return entities.Select(e =>
         {
             var impersonatingUserRef = e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.ImpersonatingUserId);
             var impersonatingUserName = e.GetAttributeValue<AliasedValue>($"impersonatinguser.{SystemUser.Fields.FullName}")?.Value?.ToString()
@@ -442,9 +442,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entities = await RetrieveAllPagesAsync(query, client, cancellationToken);
 
-        return results.Entities.Select(e => new PluginImageInfo
+        return entities.Select(e => new PluginImageInfo
         {
             Id = e.Id,
             Name = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty,
@@ -2355,6 +2355,48 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (client is IOrganizationServiceAsync2 asyncService)
             return await asyncService.RetrieveMultipleAsync(query, cancellationToken);
         return await Task.Run(() => client.RetrieveMultiple(query), cancellationToken);
+    }
+
+    // Default Dataverse page size. Explicit paging is required to retrieve >5000 records.
+    private const int DefaultPageSize = 5000;
+
+    /// <summary>
+    /// Retrieves every page of results for <paramref name="query"/>, aggregating all entities
+    /// into a single list. Guards against silent truncation for large plugin catalogs by
+    /// looping until <see cref="EntityCollection.MoreRecords"/> is false. The caller should not
+    /// pre-set <see cref="QueryExpression.PageInfo"/>; this helper overwrites it per iteration.
+    /// </summary>
+    private static async Task<List<Entity>> RetrieveAllPagesAsync(
+        QueryExpression query,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
+    {
+        var all = new List<Entity>();
+        var pageNumber = 1;
+        string? pagingCookie = null;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            query.PageInfo = new PagingInfo
+            {
+                Count = DefaultPageSize,
+                PageNumber = pageNumber,
+                PagingCookie = pagingCookie
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+            all.AddRange(results.Entities);
+
+            if (!results.MoreRecords)
+                break;
+
+            pagingCookie = results.PagingCookie;
+            pageNumber++;
+        }
+
+        return all;
     }
 
     private static async Task<Guid> CreateAsync(

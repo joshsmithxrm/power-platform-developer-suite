@@ -2,7 +2,7 @@
   "name": "power-platform-developer-suite",
   "displayName": "Power Platform Developer Suite",
   "description": "A comprehensive VS Code extension for Power Platform development and administration - your complete toolkit for Dynamics 365, Dataverse, and Power Platform solutions",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "publisher": "JoshSmithXRM",
   "engines": {
     "vscode": "^1.109.0"
@@ -649,7 +649,7 @@
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
-    "monaco-editor": "^0.55.1",
+    "monaco-editor": "0.53.0",
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {

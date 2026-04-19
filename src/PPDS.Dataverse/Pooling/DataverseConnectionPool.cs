@@ -936,6 +936,20 @@ namespace PPDS.Dataverse.Pooling
             };
         }
 
+        /// <summary>
+        /// Applies process-wide performance tunings (ThreadPool min threads, ServicePointManager
+        /// defaults) required for high-throughput Dataverse operations.
+        /// </summary>
+        /// <remarks>
+        /// FOOTGUN: <c>_performanceSettingsApplied</c> is a <b>process-global</b> static flag.
+        /// The first <see cref="DataverseConnectionPool"/> instance to call this method wins —
+        /// subsequent pool instances constructed with different options will <i>not</i> re-apply
+        /// these settings. Today this is benign because every pool uses identical values
+        /// (100 min threads, 65000 connection limit, Expect100Continue=false, UseNagleAlgorithm=false),
+        /// but if a future caller needs per-pool tuning, this design will silently ignore it.
+        /// These APIs also mutate CLR/runtime state that cannot be un-applied, which is why
+        /// the guard exists in the first place.
+        /// </remarks>
         private void ApplyPerformanceSettings()
         {
             lock (_performanceSettingsLock)

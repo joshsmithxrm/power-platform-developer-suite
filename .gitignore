@@ -2,8 +2,11 @@
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
-[Ll]og/
-[Ll]ogs/
+# Match log files anywhere — was previously [Ll]og/ + [Ll]ogs/, but those
+# directory-name rules silently shadowed real source dirs (e.g. CLI Logs
+# command group). File-pattern is strictly better and still covers runtime
+# log output at ~/.ppds/*.log and any local debug log captures.
+*.log
 
 # Visual Studio
 .vs/
@@ -111,3 +114,8 @@ __pycache__/
 
 # Shakedown scenarios (synthetic test data)
 .shakedown/
+
+# Strong-name private keys must NEVER be committed.
+# Public keys (*.PublicKey) ARE safe to commit and are not ignored here.
+# CI decodes the real private key from the PLUGINS_SNK_BASE64 secret at publish time.
+*.snk

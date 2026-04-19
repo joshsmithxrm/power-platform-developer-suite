@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -11,10 +13,22 @@ namespace PPDS.Cli.Tui.Dialogs;
 /// </summary>
 internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDetailsDialogState>
 {
+    /// <summary>
+    /// URL opened by the Report Issue button. Exposed for tests and state capture.
+    /// </summary>
+    internal const string ReportIssueUrl = "https://github.com/joshsmithxrm/power-platform-developer-suite/issues";
+
+    /// <summary>
+    /// Footer text shown in the dialog directing users to file issues on GitHub.
+    /// Exposed for tests and state capture.
+    /// </summary>
+    internal const string ReportIssueFooter = "Report issues at https://github.com/joshsmithxrm/power-platform-developer-suite/issues";
+
     private readonly ITuiErrorService _errorService;
     private readonly ListView _errorListView;
     private readonly TextView _detailsTextView;
     private readonly Label _logPathLabel;
+    private readonly Label _footerLabel;
     private TuiError? _selectedError;
 
     /// <summary>
@@ -31,12 +45,13 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
         Height = 24;
 
         // Recent errors list (left side)
+        // Height leaves room for log path (AnchorEnd 3), footer (AnchorEnd 2), and buttons (AnchorEnd 1).
         var errorsFrame = new FrameView("Recent Errors")
         {
             X = 0,
             Y = 0,
             Width = Dim.Percent(40),
-            Height = Dim.Fill() - 4,
+            Height = Dim.Fill() - 5,
             ColorScheme = TuiColorPalette.Default
         };
 
@@ -58,7 +73,7 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
             X = Pos.Right(errorsFrame),
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 4,
+            Height = Dim.Fill() - 5,
             ColorScheme = TuiColorPalette.Default
         };
 
@@ -77,6 +92,16 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
         // Log file path
         var logPath = _errorService.GetLogFilePath();
         _logPathLabel = new Label($"Log: {logPath}")
+        {
+            X = 1,
+            Y = Pos.AnchorEnd(4),
+            Width = Dim.Fill() - 2,
+            Height = 1,
+            ColorScheme = TuiColorPalette.Default
+        };
+
+        // Footer directing users to GitHub issues for bug reports.
+        _footerLabel = new Label(ReportIssueFooter)
         {
             X = 1,
             Y = Pos.AnchorEnd(3),
@@ -107,6 +132,13 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
         };
         clearButton.Clicked += OnClearClicked;
 
+        var reportIssueButton = new Button("_Report Issue")
+        {
+            X = Pos.Right(clearButton) + 2,
+            Y = Pos.AnchorEnd(1)
+        };
+        reportIssueButton.Clicked += OnReportIssueClicked;
+
         var closeButton = new Button("Cl_ose")
         {
             X = Pos.AnchorEnd(12),
@@ -114,7 +146,7 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
         };
         closeButton.Clicked += () => Application.RequestStop();
 
-        Add(errorsFrame, detailsFrame, _logPathLabel, copyButton, openLogButton, clearButton, closeButton);
+        Add(errorsFrame, detailsFrame, _logPathLabel, _footerLabel, copyButton, openLogButton, clearButton, reportIssueButton, closeButton);
 
         // Load errors
         RefreshErrorList();
@@ -220,6 +252,23 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
         }
     }
 
+    private void OnReportIssueClicked()
+    {
+        try
+        {
+            BrowserHelper.OpenUrl(ReportIssueUrl);
+        }
+        catch (PpdsException ex)
+        {
+            // BrowserHelper.OpenUrl only throws when the URL fails scheme validation.
+            // The compile-time constant URL should never trip this, but surface the message
+            // rather than crashing the dialog.
+            MessageBox.ErrorQuery("Report Issue",
+                $"Failed to open browser: {ex.Message}\n\nVisit: {ReportIssueUrl}",
+                "OK");
+        }
+    }
+
     private void OnClearClicked()
     {
         var result = MessageBox.Query("Clear Errors",
@@ -251,6 +300,9 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
             SelectedIndex: _errorListView.SelectedItem,
             SelectedErrorDetails: _selectedError?.GetFullDetails(),
             ErrorCount: errors.Count,
-            HasClearButton: true);
+            HasClearButton: true,
+            HasReportIssueButton: true,
+            ReportIssueUrl: ReportIssueUrl,
+            FooterText: _footerLabel.Text?.ToString());
     }
 }

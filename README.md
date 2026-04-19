@@ -11,6 +11,8 @@ Pro-grade tooling for Power Platform developers. CLI, TUI, MCP server, VS Code e
 
 ## Quick Start
 
+PPDS is available as a CLI (`dotnet tool install -g PPDS.Cli`), a VS Code extension, an MCP server for AI assistants, and NuGet libraries. Start with the CLI for most use cases.
+
 ```bash
 # Install the CLI tool
 dotnet tool install -g PPDS.Cli
@@ -23,6 +25,25 @@ ppds auth create --name dev
 ppds env select --environment "My Environment"
 ppds data export --schema schema.xml --output data.zip
 ```
+
+## Supported Platforms
+
+| Surface | Requirement |
+|---------|-------------|
+| Libraries & CLI | .NET 8.0+ (Windows / macOS / Linux) |
+| VS Code Extension | VS Code 1.109+ |
+| Extension development | Node.js 20+ |
+| Plugin assemblies | .NET Framework 4.6.2 (Dataverse sandbox target) |
+
+## v1.0 Highlights
+
+- SQL query engine with an SSMS-like experience, TDS endpoint routing, and DML support
+- VS Code extension with profile/environment management, solutions browser, and `.ppdsnb` notebooks
+- MCP server exposing 20+ Dataverse tools to AI assistants
+- Declarative plugin registration via attributes — no Plugin Registration Tool required
+- Fast bulk data operations over pooled Dataverse connections
+
+See [docs/whats-new-v1.md](docs/whats-new-v1.md) for the full v1.0 feature inventory.
 
 ## Platform Overview
 
@@ -118,7 +139,7 @@ Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 
 ## PPDS.Plugins
 
-Declarative attributes for configuring Dataverse plugin registrations directly in code.
+Attribute-driven plugin registration — no more manual Plugin Registration Tool rituals. Decorate your plugin classes with `[PluginStep]`, `[PluginImage]`, and `[CustomApi]`, and the PPDS CLI extracts step, image, and Custom API metadata from your plugin DLL via reflection and deploys the registration declaratively. Source-of-truth lives with your code, registrations diff cleanly in pull requests, and deployments are repeatable across environments.
 
 ```bash
 dotnet add package PPDS.Plugins
@@ -139,7 +160,7 @@ public class AccountCreatePlugin : IPlugin
 }
 ```
 
-See [PPDS.Plugins on NuGet](https://www.nuget.org/packages/PPDS.Plugins/) for details.
+See [PPDS.Plugins documentation](src/PPDS.Plugins/README.md) for details.
 
 ---
 

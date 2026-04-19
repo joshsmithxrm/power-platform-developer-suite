@@ -229,7 +229,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
             if (account != null)
             {
-                AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
+                AuthDebugLog.WriteLine($"  Found account for silent auth: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
                 try
                 {
                     _cachedResult = await _msalClient!
@@ -338,7 +338,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             .ConfigureAwait(false);
         _cachedResultUrl = environmentUrl;
 
-        AuthDebugLog.WriteLine($"  Device code authentication succeeded: {_cachedResult.Account.Username}");
+        AuthDebugLog.WriteLine($"  Device code authentication succeeded: upn={LogIdentityHelper.HashIdentifier(_cachedResult.Account?.Username)}");
+        // User-facing confirmation — displaying the full username is intentional.
         AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
         AuthenticationOutput.WriteLine();
 
@@ -395,7 +396,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             return null;
         }
 
-        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
+        AuthDebugLog.WriteLine($"  Found cached account: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
 
         try
         {

@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
@@ -85,13 +86,7 @@ internal static class MsalClientBuilder
 
             AuthDebugLog.WriteLine($"[MsalCache] Registering cache: path={cacheFilePath}, exists={cacheFileExists}, size={cacheFileSize} bytes");
 
-            var storageProperties = new StorageCreationPropertiesBuilder(
-                    ProfilePaths.TokenCacheFileName,
-                    ProfilePaths.DataDirectory)
-                .WithUnprotectedFile() // Fallback for Linux without libsecret
-                .Build();
-
-            var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties).ConfigureAwait(false);
+            var cacheHelper = await CreatePlatformCacheHelperAsync(warnOnFailure).ConfigureAwait(false);
 
             // Verify persistence works before registering - performs write/read/clear test
             // Throws MsalCachePersistenceException if persistence is unavailable
@@ -118,6 +113,65 @@ internal static class MsalClientBuilder
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Builds a platform-appropriate <see cref="MsalCacheHelper"/>:
+    /// Windows uses DPAPI (default), macOS uses the Keychain (default),
+    /// Linux prefers libsecret via <c>WithLinuxKeyring</c> and only falls
+    /// back to unprotected file storage when the keyring is unavailable.
+    /// </summary>
+    private static async Task<MsalCacheHelper> CreatePlatformCacheHelperAsync(bool warnOnFailure)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            // Prefer Secret Service / GNOME Keyring. Fall back to
+            // unprotected file only when the keyring is unavailable.
+            try
+            {
+                var keyringProps = new StorageCreationPropertiesBuilder(
+                        ProfilePaths.TokenCacheFileName,
+                        ProfilePaths.DataDirectory)
+                    .WithLinuxKeyring(
+                        schemaName: "com.ppds.tokencache",
+                        collection: MsalCacheHelper.LinuxKeyRingDefaultCollection,
+                        secretLabel: "PPDS MSAL token cache",
+                        attribute1: new System.Collections.Generic.KeyValuePair<string, string>("Version", "1"),
+                        attribute2: new System.Collections.Generic.KeyValuePair<string, string>("Product", "PPDS"))
+                    .Build();
+
+                var helper = await MsalCacheHelper.CreateAsync(keyringProps).ConfigureAwait(false);
+                helper.VerifyPersistence();
+                AuthDebugLog.WriteLine("[MsalCache] Using Linux keyring (libsecret) for token cache.");
+                return helper;
+            }
+            catch (MsalCachePersistenceException ex)
+            {
+                AuthDebugLog.WriteLine($"[MsalCache] Linux keyring unavailable ({ex.Message}); falling back to unprotected file.");
+                if (warnOnFailure)
+                {
+                    AuthenticationOutput.WriteLine(
+                        "Warning: Linux keyring (libsecret) unavailable. Token cache will be stored unprotected on disk. " +
+                        "Install libsecret-1-0 / gnome-keyring to enable encrypted storage.");
+                }
+
+                var fallbackProps = new StorageCreationPropertiesBuilder(
+                        ProfilePaths.TokenCacheFileName,
+                        ProfilePaths.DataDirectory)
+                    .WithUnprotectedFile()
+                    .Build();
+                return await MsalCacheHelper.CreateAsync(fallbackProps).ConfigureAwait(false);
+            }
+        }
+
+        // Windows (DPAPI) and macOS (Keychain) - MSAL selects the
+        // appropriate platform-native store by default when neither
+        // WithLinuxKeyring nor WithUnprotectedFile is specified.
+        var defaultProps = new StorageCreationPropertiesBuilder(
+                ProfilePaths.TokenCacheFileName,
+                ProfilePaths.DataDirectory)
+            .Build();
+        return await MsalCacheHelper.CreateAsync(defaultProps).ConfigureAwait(false);
     }
 
     /// <summary>

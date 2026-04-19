@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -247,10 +248,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
             var components = await service.GetComponentsAsync(solution.Id, cancellationToken: ScreenCancellation);
             _lastComponentCount = components.Count;
 
-            var grouped = components
-                .GroupBy(c => c.ComponentTypeName)
-                .OrderBy(g => g.Key)
-                .ToList();
+            var grouped = SolutionComponentGrouper.Group(components);
 
             var lines = new List<string>
             {
@@ -262,8 +260,8 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
             foreach (var group in grouped)
             {
-                lines.Add($"--- {group.Key} ({group.Count()}) ---");
-                foreach (var comp in group.OrderBy(c => c.DisplayName ?? c.LogicalName ?? c.ObjectId.ToString()))
+                lines.Add($"--- {group.TypeName} ({group.Components.Count}) ---");
+                foreach (var comp in group.Components.OrderBy(c => c.DisplayName ?? c.LogicalName ?? c.ObjectId.ToString()))
                 {
                     var name = comp.DisplayName ?? comp.LogicalName ?? comp.SchemaName ?? comp.ObjectId.ToString();
                     lines.Add($"  {name}");

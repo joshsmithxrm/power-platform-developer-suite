@@ -1,3 +1,5 @@
+using System;
+
 namespace PPDS.Dataverse.BulkOperations;
 
 /// <summary>
@@ -6,11 +8,45 @@ namespace PPDS.Dataverse.BulkOperations;
 public class BulkOperationOptions
 {
     /// <summary>
+    /// Minimum allowed batch size (inclusive).
+    /// </summary>
+    public const int MinBatchSize = 1;
+
+    /// <summary>
+    /// Maximum allowed batch size (inclusive). Dataverse rejects values greater than 1000
+    /// with an opaque error that can make the whole batch fail silently, so we validate
+    /// up-front.
+    /// </summary>
+    public const int MaxBatchSize = 1000;
+
+    private int _batchSize = 100;
+
+    /// <summary>
     /// Gets or sets the number of records per batch.
+    /// Must be between <see cref="MinBatchSize"/> and <see cref="MaxBatchSize"/> inclusive.
     /// Benchmarks show 100 is optimal for both standard and elastic tables.
     /// Default: 100
     /// </summary>
-    public int BatchSize { get; set; } = 100;
+    /// <exception cref="BulkOperationValidationException">
+    /// Thrown when the assigned value is outside the allowed range.
+    /// </exception>
+    public int BatchSize
+    {
+        get => _batchSize;
+        set
+        {
+            if (value < MinBatchSize || value > MaxBatchSize)
+            {
+                throw new BulkOperationValidationException(
+                    BulkOperationErrorCode.InvalidBatchSize,
+                    $"BatchSize must be between {MinBatchSize} and {MaxBatchSize} (got {value}). " +
+                    "Dataverse rejects larger batches with an opaque error that can cause the whole batch to fail silently.",
+                    nameof(BatchSize));
+            }
+
+            _batchSize = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether the target is an elastic table (Cosmos DB-backed).
@@ -136,4 +172,52 @@ public class BulkOperationOptions
     /// Default: null (use RecommendedDegreesOfParallelism)
     /// </summary>
     public int? MaxParallelBatches { get; set; } = null;
+}
+
+/// <summary>
+/// Exception thrown when bulk operation configuration fails validation.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This exception lives in the Dataverse layer (which cannot reference PPDS.Cli).
+/// The CLI's <c>ExceptionMapper</c> recognizes <see cref="BulkOperationValidationException"/>
+/// and maps it to the corresponding <c>PpdsException</c> with the matching
+/// <c>BulkOperation.*</c> error code.
+/// </para>
+/// <para>
+/// Mirrors the precedent set by <c>PPDS.Dataverse.Query.Execution.QueryExecutionException</c>.
+/// </para>
+/// </remarks>
+public class BulkOperationValidationException : ArgumentException
+{
+    /// <summary>
+    /// Structured error code for programmatic handling.
+    /// Uses the <c>BulkOperation.*</c> prefix (see <see cref="BulkOperationErrorCode"/>).
+    /// </summary>
+    public string ErrorCode { get; }
+
+    /// <summary>
+    /// Creates a new bulk operation validation exception.
+    /// </summary>
+    /// <param name="errorCode">The structured error code (use <see cref="BulkOperationErrorCode"/> constants).</param>
+    /// <param name="message">Human-readable error message.</param>
+    /// <param name="paramName">Optional parameter name that failed validation.</param>
+    public BulkOperationValidationException(string errorCode, string message, string? paramName = null)
+        : base(message, paramName)
+    {
+        ErrorCode = errorCode ?? throw new ArgumentNullException(nameof(errorCode));
+    }
+}
+
+/// <summary>
+/// Structured error codes for bulk operation validation failures.
+/// </summary>
+/// <remarks>
+/// Duplicated here (not referenced from PPDS.Cli) because PPDS.Dataverse cannot
+/// reference PPDS.Cli. The CLI's ExceptionMapper bridges them.
+/// </remarks>
+public static class BulkOperationErrorCode
+{
+    /// <summary>BatchSize is out of the allowed range (1 to 1000).</summary>
+    public const string InvalidBatchSize = "BulkOperation.InvalidBatchSize";
 }

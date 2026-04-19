@@ -30,11 +30,18 @@ public static class ExportCommand
             Description = "Export as managed solution"
         };
 
+        var allowOutsideWorkspaceOption = new Option<bool>("--allow-outside-workspace")
+        {
+            Description = "Permit --output paths that resolve outside the current working directory. " +
+                          "Off by default to prevent a mistyped or redirected path from writing anywhere on disk."
+        };
+
         var command = new Command("export", "Export a solution to a ZIP file")
         {
             uniqueNameArgument,
             outputOption,
             managedOption,
+            allowOutsideWorkspaceOption,
             SolutionsCommandGroup.ProfileOption,
             SolutionsCommandGroup.EnvironmentOption
         };
@@ -46,11 +53,12 @@ public static class ExportCommand
             var uniqueName = parseResult.GetValue(uniqueNameArgument)!;
             var output = parseResult.GetValue(outputOption);
             var managed = parseResult.GetValue(managedOption);
+            var allowOutsideWorkspace = parseResult.GetValue(allowOutsideWorkspaceOption);
             var profile = parseResult.GetValue(SolutionsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(SolutionsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(uniqueName, output, managed, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(uniqueName, output, managed, allowOutsideWorkspace, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -60,6 +68,7 @@ public static class ExportCommand
         string uniqueName,
         string? outputPath,
         bool managed,
+        bool allowOutsideWorkspace,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -104,7 +113,23 @@ public static class ExportCommand
 
             // Determine output path
             var filePath = outputPath ?? $"{uniqueName}{(managed ? "_managed" : "")}.zip";
-            var fullPath = Path.GetFullPath(filePath);
+            var workspaceRoot = Path.GetFullPath(Environment.CurrentDirectory);
+            var fullPath = Path.GetFullPath(filePath, workspaceRoot);
+
+            // Refuse to write outside the current working directory unless the operator explicitly
+            // opts in. Guards against mistyped paths and against an invoking script redirecting
+            // output to a privileged location. RPC callers have no opt-out — only the CLI does.
+            if (!allowOutsideWorkspace && !IsUnderWorkspace(fullPath, workspaceRoot))
+            {
+                var error = new StructuredError(
+                    ErrorCodes.Validation.PathOutsideWorkspace,
+                    $"Output path '{fullPath}' resolves outside the current working directory '{workspaceRoot}'. " +
+                    "Re-run with --allow-outside-workspace to permit this write.",
+                    null,
+                    "--output");
+                writer.WriteError(error);
+                return ExitCodes.ValidationError;
+            }
 
             await File.WriteAllBytesAsync(fullPath, solutionZip, cancellationToken);
 
@@ -133,6 +158,21 @@ public static class ExportCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if <paramref name="candidate"/> is equal to or nested under <paramref name="root"/>.
+    /// Uses a trailing directory separator to prevent prefix-match false positives (e.g., "C:\\work" vs "C:\\work-evil").
+    /// </summary>
+    internal static bool IsUnderWorkspace(string candidate, string root)
+    {
+        var rootWithSep = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return candidate.Equals(root, comparison) || candidate.StartsWith(rootWithSep, comparison);
     }
 
     private static string FormatBytes(long bytes)

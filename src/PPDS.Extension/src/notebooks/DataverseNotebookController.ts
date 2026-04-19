@@ -4,6 +4,7 @@ import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 import { renderResultsHtml } from './notebookResultRenderer.js';
 
@@ -79,7 +80,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         try {
             const envResult = await this.daemon.envList();
             if (envResult.environments.length === 0) {
-                vscode.window.showErrorMessage('No environments found. Create a profile and select an environment first.');
+                void showErrorWithReport('No environments found. Create a profile and select an environment first.');
                 return;
             }
 
@@ -117,7 +118,7 @@ export class DataverseNotebookController implements vscode.Disposable {
             }
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            vscode.window.showErrorMessage(`Failed to select environment: ${msg}`);
+            void showErrorWithReport(`Failed to select environment: ${msg}`);
         }
     }
 

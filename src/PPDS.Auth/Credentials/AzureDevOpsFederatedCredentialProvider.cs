@@ -117,7 +117,7 @@ public sealed class AzureDevOpsFederatedCredentialProvider : ICredentialProvider
         catch (AuthenticationFailedException ex)
         {
             throw new AuthenticationException(
-                $"Azure DevOps federated authentication failed. Ensure SYSTEM_ACCESSTOKEN is available and the service connection is configured: {ex.Message}", ex);
+                $"Azure DevOps federated authentication failed. Ensure SYSTEM_ACCESSTOKEN is available and the service connection is configured: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
 
         return _cachedToken.Value.Token;

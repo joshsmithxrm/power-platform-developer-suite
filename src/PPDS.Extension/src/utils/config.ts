@@ -13,11 +13,6 @@ function cfg(): vscode.WorkspaceConfiguration {
     return vscode.workspace.getConfiguration('ppds');
 }
 
-/** Whether to auto-start the daemon on activation (default: true). */
-export function autoStartDaemon(): boolean {
-    return cfg().get<boolean>('autoStartDaemon', true);
-}
-
 /** Default TOP clause for queries (default: 100, range: 1-5000). */
 export function queryDefaultTop(): number {
     return cfg().get<number>('queryDefaultTop', 100);
