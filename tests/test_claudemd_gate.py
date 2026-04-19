@@ -1,14 +1,17 @@
 """Tests for scripts/hooks/pre-commit.d/claudemd-gate.sh.
 
+This script enforces the CLAUDE.md line-cap (<=100 lines) against the
+staged (index) version of the file. The commit-message marker check lives
+in a separate commit-msg hook — see test_claudemd_marker.py.
+
 Spawns a fresh git repo, stages a CLAUDE.md, runs the gate as a
-subprocess. Verifies marker enforcement and line-cap enforcement.
+subprocess.
 """
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -64,18 +67,9 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_gate(repo: Path, msg: str) -> subprocess.CompletedProcess:
-    """Stage the prepared commit message file and run the gate."""
-    # Find the gitdir (handles worktrees too — but here it's a regular repo).
-    gitdir_proc = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-    )
-    gitdir = (repo / gitdir_proc.stdout.strip()).resolve()
-    (gitdir / "COMMIT_EDITMSG").write_text(msg, encoding="utf-8")
+def _run_gate(repo: Path) -> subprocess.CompletedProcess:
+    """Run the line-cap gate. The pre-commit gate no longer touches the
+    commit message — that is the commit-msg hook's job."""
     return subprocess.run(
         [BASH, str(GATE_SCRIPT)],
         cwd=repo,
@@ -87,30 +81,19 @@ def _run_gate(repo: Path, msg: str) -> subprocess.CompletedProcess:
 
 
 @pytest.mark.skipif(BASH is None, reason="Git Bash not available")
-class TestClaudeMdGate:
+class TestClaudeMdLineCapGate:
     def test_no_claude_md_change_passes(self, tmp_path: Path):
         repo = _init_repo(tmp_path)
         (repo / "src.cs").write_text("class A {}\n", encoding="utf-8")
         _git(repo, "add", "src.cs")
-        result = _run_gate(repo, "feat: add src\n")
+        result = _run_gate(repo)
         assert result.returncode == 0, result.stderr
 
-    def test_claude_md_change_without_marker_blocked(self, tmp_path: Path):
+    def test_claude_md_under_cap_passes(self, tmp_path: Path):
         repo = _init_repo(tmp_path)
         (repo / "CLAUDE.md").write_text("# Project\n\nshort.\n", encoding="utf-8")
         _git(repo, "add", "CLAUDE.md")
-        result = _run_gate(repo, "feat: update CLAUDE.md\n")
-        assert result.returncode == 1
-        assert "claude-md-reviewed" in result.stderr
-
-    def test_claude_md_change_with_marker_passes(self, tmp_path: Path):
-        repo = _init_repo(tmp_path)
-        (repo / "CLAUDE.md").write_text("# Project\n\nshort.\n", encoding="utf-8")
-        _git(repo, "add", "CLAUDE.md")
-        result = _run_gate(
-            repo,
-            "feat: update CLAUDE.md\n\n[claude-md-reviewed: 2026-04-18]\n",
-        )
+        result = _run_gate(repo)
         assert result.returncode == 0, result.stderr
 
     def test_claude_md_over_cap_blocked(self, tmp_path: Path):
@@ -118,46 +101,80 @@ class TestClaudeMdGate:
         big = "\n".join([f"line {i}" for i in range(120)]) + "\n"
         (repo / "CLAUDE.md").write_text(big, encoding="utf-8")
         _git(repo, "add", "CLAUDE.md")
-        result = _run_gate(
-            repo,
-            "feat: huge CLAUDE.md\n\n[claude-md-reviewed: 2026-04-18]\n",
-        )
+        result = _run_gate(repo)
         assert result.returncode == 1
         assert "120" in result.stderr or "lines" in result.stderr
 
-    def test_nested_claude_md_detected(self, tmp_path: Path):
+    def test_nested_claude_md_under_cap_passes(self, tmp_path: Path):
         repo = _init_repo(tmp_path)
         nested = repo / "src" / "PPDS.Foo"
         nested.mkdir(parents=True)
         (nested / "CLAUDE.md").write_text("# Sub\n\nshort.\n", encoding="utf-8")
         _git(repo, "add", "src/PPDS.Foo/CLAUDE.md")
-        result = _run_gate(repo, "feat: add subproject CLAUDE.md\n")
-        # No marker -> blocked.
-        assert result.returncode == 1
-        assert "claude-md-reviewed" in result.stderr
-
-    def test_marker_with_garbage_around_passes(self, tmp_path: Path):
-        repo = _init_repo(tmp_path)
-        (repo / "CLAUDE.md").write_text("short\n", encoding="utf-8")
-        _git(repo, "add", "CLAUDE.md")
-        msg = textwrap.dedent("""\
-            chore: tiny tweak
-
-            Body with stuff.
-            [claude-md-reviewed: 2026-04-18] inline marker also fine.
-
-            Co-Authored-By: foo <foo@bar>
-            """)
-        result = _run_gate(repo, msg)
+        result = _run_gate(repo)
         assert result.returncode == 0, result.stderr
 
-    def test_marker_wrong_format_blocked(self, tmp_path: Path):
+    def test_line_cap_uses_staged_content_not_working_dir(self, tmp_path: Path):
+        """If the working directory has fewer lines than the staged version,
+        the gate must STILL block on the staged version. This proves we read
+        the index, not the filesystem.
+        """
+        repo = _init_repo(tmp_path)
+        # Stage a 120-line CLAUDE.md.
+        big = "\n".join([f"line {i}" for i in range(120)]) + "\n"
+        (repo / "CLAUDE.md").write_text(big, encoding="utf-8")
+        _git(repo, "add", "CLAUDE.md")
+        # Then revert the working dir to a tiny version (NOT staged).
+        (repo / "CLAUDE.md").write_text("tiny\n", encoding="utf-8")
+        result = _run_gate(repo)
+        # Must block — gate should see the 120-line staged content.
+        assert result.returncode == 1, (
+            f"Gate read working dir instead of index. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "120" in result.stderr
+
+    def test_line_cap_ignores_unstaged_oversize(self, tmp_path: Path):
+        """Inverse: if the working dir is huge but the staged version is
+        small, the gate should pass — only the staged content matters.
+        """
+        repo = _init_repo(tmp_path)
+        # Stage a small CLAUDE.md.
+        (repo / "CLAUDE.md").write_text("short\n", encoding="utf-8")
+        _git(repo, "add", "CLAUDE.md")
+        # Now make the working dir huge (NOT staged).
+        big = "\n".join([f"line {i}" for i in range(200)]) + "\n"
+        (repo / "CLAUDE.md").write_text(big, encoding="utf-8")
+        result = _run_gate(repo)
+        assert result.returncode == 0, (
+            f"Gate read working dir instead of index. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+    def test_line_cap_at_exactly_100_passes(self, tmp_path: Path):
+        repo = _init_repo(tmp_path)
+        content = "\n".join([f"line{i}" for i in range(100)]) + "\n"
+        (repo / "CLAUDE.md").write_text(content, encoding="utf-8")
+        _git(repo, "add", "CLAUDE.md")
+        result = _run_gate(repo)
+        assert result.returncode == 0, result.stderr
+
+    def test_gate_does_not_check_commit_message(self, tmp_path: Path):
+        """The line-cap gate must not read the commit message at all — the
+        marker check moved to commit-msg.d/claudemd-marker.sh.
+        """
         repo = _init_repo(tmp_path)
         (repo / "CLAUDE.md").write_text("short\n", encoding="utf-8")
         _git(repo, "add", "CLAUDE.md")
-        # Wrong date format — not ISO YYYY-MM-DD.
-        result = _run_gate(
-            repo,
-            "feat: x\n\n[claude-md-reviewed: 04/18/2026]\n",
+        # Write an empty commit message; gate should still pass on size alone.
+        gitdir_proc = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
         )
-        assert result.returncode == 1
+        gitdir = (repo / gitdir_proc.stdout.strip()).resolve()
+        (gitdir / "COMMIT_EDITMSG").write_text("no marker here\n", encoding="utf-8")
+        result = _run_gate(repo)
+        assert result.returncode == 0, result.stderr

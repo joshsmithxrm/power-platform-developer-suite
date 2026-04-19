@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# pre-commit gate: enforce CLAUDE.md governance.
+# pre-commit gate: enforce CLAUDE.md line-cap.
 #
-# Fires when commit touches any CLAUDE.md (root or nested). Requires:
-#   1. Commit message contains [claude-md-reviewed: YYYY-MM-DD] marker.
-#   2. Post-edit CLAUDE.md is <=100 lines.
+# Fires when commit touches any CLAUDE.md (root or nested). Requires the
+# staged version of each file to be <=100 lines.
+#
+# NOTE: The commit-message marker check ([claude-md-reviewed: YYYY-MM-DD])
+# lives in scripts/hooks/commit-msg.d/claudemd-marker.sh — pre-commit runs
+# before the commit message is finalized, so checking the message here would
+# read stale data.
 #
 # See docs/CLAUDE-MD-GOVERNANCE.md for the rationale.
 
 set -euo pipefail
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
 LINE_CAP=100
 
 # Find every staged CLAUDE.md.
@@ -19,18 +22,19 @@ if [ -z "$STAGED_CLAUDE_MD" ]; then
     exit 0
 fi
 
-echo "[claudemd-gate] CLAUDE.md change detected — running governance gate..."
+echo "[claudemd-gate] CLAUDE.md change detected — running line-cap gate..."
 
-# 1. Line-cap enforcement.
+# Line-cap enforcement against the STAGED (index) content, not the working
+# directory. This way unstaged edits cannot bypass the cap.
 fail=0
 while IFS= read -r path; do
     [ -z "$path" ] && continue
-    abs="$REPO_ROOT/$path"
-    if [ ! -f "$abs" ]; then
-        # Deleted file — skip line check.
+    # Skip if not present in the index (e.g., deletion). git show :path
+    # returns non-zero in that case.
+    if ! git cat-file -e ":$path" 2>/dev/null; then
         continue
     fi
-    lines=$(wc -l < "$abs" | tr -d ' ')
+    lines=$(git show ":$path" | wc -l | tr -d ' ')
     if [ "$lines" -gt "$LINE_CAP" ]; then
         echo "[claudemd-gate] BLOCKED: $path is $lines lines (cap is $LINE_CAP)." >&2
         fail=1
@@ -59,38 +63,5 @@ EOF
     exit 1
 fi
 
-# 2. Marker enforcement. The marker must appear in the commit message.
-# Read the prepared commit message — git passes it via $1 to commit-msg, but
-# in pre-commit we read it from .git/COMMIT_EDITMSG (the staging file Git
-# writes when ``git commit -m`` or ``-F`` is invoked).
-COMMIT_MSG_FILE="$REPO_ROOT/.git/COMMIT_EDITMSG"
-
-# In a worktree, .git is a file pointing to the real gitdir.
-if [ -f "$REPO_ROOT/.git" ]; then
-    GITDIR=$(sed -n 's/^gitdir: //p' "$REPO_ROOT/.git" | tr -d '\r')
-    COMMIT_MSG_FILE="$GITDIR/COMMIT_EDITMSG"
-fi
-
-if [ ! -f "$COMMIT_MSG_FILE" ]; then
-    echo "[claudemd-gate] WARNING: $COMMIT_MSG_FILE not found — skipping marker check." >&2
-    exit 0
-fi
-
-# Marker format: [claude-md-reviewed: YYYY-MM-DD]
-if ! grep -Eq '\[claude-md-reviewed: [0-9]{4}-[0-9]{2}-[0-9]{2}\]' "$COMMIT_MSG_FILE"; then
-    cat >&2 <<EOF
-[claudemd-gate] BLOCKED: CLAUDE.md change requires a review marker in the commit message.
-
-Add this line to your commit message body (today's date, ISO 8601):
-
-  [claude-md-reviewed: $(date -u +%Y-%m-%d)]
-
-This marker certifies you applied the 4-question test from
-docs/CLAUDE-MD-GOVERNANCE.md before changing CLAUDE.md. The check is mechanical
-to protect future-you from one-line drift; the test is the part that matters.
-EOF
-    exit 1
-fi
-
-echo "[claudemd-gate] CLAUDE.md governance checks passed."
+echo "[claudemd-gate] CLAUDE.md line-cap check passed."
 exit 0

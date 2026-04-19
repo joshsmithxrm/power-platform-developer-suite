@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# commit-msg hook: run extensible drop-in checks against the prepared commit
+# message. Mirrors the pre-commit runner in scripts/hooks/pre-commit.
+#
+# Install: git config core.hooksPath scripts/hooks
+#
+# Each commit-msg.d/*.sh script receives the path to the commit message file
+# as $1 (per Git's commit-msg hook contract). Scripts share REPO_ROOT.
+
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+
+# Resolve REPO_ROOT (best-effort — git rev-parse will succeed inside the
+# repo we are committing into).
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+export REPO_ROOT
+
+# Drop-in directory lives beside this runner script. Using $(dirname "$0")
+# instead of $REPO_ROOT keeps the runner usable when invoked from anywhere
+# (e.g., test harnesses that point core.hooksPath elsewhere).
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+DROP_IN_DIR="$HOOK_DIR/commit-msg.d"
+
+if [ -d "$DROP_IN_DIR" ]; then
+    for script in "$DROP_IN_DIR"/*.sh; do
+        [ -e "$script" ] || continue
+        echo "[commit-msg] running $(basename "$script")..."
+        if ! bash "$script" "$COMMIT_MSG_FILE"; then
+            echo "[commit-msg] BLOCKED: $(basename "$script") failed." >&2
+            exit 1
+        fi
+    done
+fi
+
+exit 0
