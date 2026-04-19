@@ -152,7 +152,9 @@ public static class DmlValueCoercer
             string s when bool.TryParse(s, out var parsed) => parsed,
             string s when s == "1" => true,
             string s when s == "0" => false,
-            IConvertible conv => Convert.ToInt64(conv, CultureInfo.InvariantCulture) != 0,
+            int i => i != 0,
+            long l => l != 0,
+            decimal d => d != 0,
             _ => throw TypeMismatch(value, "Boolean")
         };
     }
@@ -164,8 +166,10 @@ public static class DmlValueCoercer
         return value switch
         {
             long l => l,
-            string s => long.Parse(s, CultureInfo.InvariantCulture),
-            IConvertible conv => Convert.ToInt64(conv, CultureInfo.InvariantCulture),
+            int i => i,
+            decimal d => (long)d,
+            double dbl => (long)dbl,
+            string s when long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l) => l,
             _ => throw TypeMismatch(value, "Int64")
         };
     }
@@ -177,8 +181,10 @@ public static class DmlValueCoercer
         return value switch
         {
             double d => d,
-            string s => double.Parse(s, CultureInfo.InvariantCulture),
-            IConvertible conv => Convert.ToDouble(conv, CultureInfo.InvariantCulture),
+            int i => i,
+            long l => l,
+            decimal d => (double)d,
+            string s when double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Double")
         };
     }
@@ -198,7 +204,7 @@ public static class DmlValueCoercer
         {
             DateTime dt => dt,
             DateTimeOffset dto => dto.UtcDateTime,
-            string s => DateTime.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) => dt,
             _ => throw TypeMismatch(value, "DateTime")
         };
     }
@@ -218,8 +224,10 @@ public static class DmlValueCoercer
         return value switch
         {
             int i => i,
-            string s => int.Parse(s, CultureInfo.InvariantCulture),
-            IConvertible conv => Convert.ToInt32(conv, CultureInfo.InvariantCulture),
+            long l when l >= int.MinValue && l <= int.MaxValue => (int)l,
+            decimal d when d >= int.MinValue && d <= int.MaxValue => (int)d,
+            double dbl when dbl >= int.MinValue && dbl <= int.MaxValue => (int)dbl,
+            string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) => i,
             _ => throw TypeMismatch(value, "Int32")
         };
     }
@@ -229,8 +237,10 @@ public static class DmlValueCoercer
         return value switch
         {
             decimal d => d,
-            string s => decimal.Parse(s, CultureInfo.InvariantCulture),
-            IConvertible conv => Convert.ToDecimal(conv, CultureInfo.InvariantCulture),
+            int i => i,
+            long l => l,
+            double dbl => (decimal)dbl,
+            string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Decimal")
         };
     }
