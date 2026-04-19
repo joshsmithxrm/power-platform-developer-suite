@@ -98,12 +98,21 @@ jobs:
           mkdir -p "$AUDIT_OUT"
           node tools/audit-capture.mjs run "${{ github.event.inputs.surface }}"
 
+      - name: Mint audit-repo token
+        id: audit-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AUDIT_APP_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          owner: joshsmithxrm
+          repositories: ppds-v1-audit
+
       - name: Checkout audit repo
         uses: actions/checkout@v6
         with:
           repository: joshsmithxrm/ppds-v1-audit
           path: audit-repo
-          token: ${{ secrets.AUDIT_REPO_TOKEN }}
+          token: ${{ steps.audit-token.outputs.token }}
           fetch-depth: 1
 
       - name: Compute capture branch name
@@ -127,8 +136,8 @@ jobs:
           set -e
           cp -r "$AUDIT_OUT"/* audit-repo/ 2>/dev/null || true
           cd audit-repo
-          git config user.email "audit-capture-bot@users.noreply.github.com"
-          git config user.name "audit-capture-bot"
+          git config user.email "${{ steps.audit-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git config user.name "${{ steps.audit-token.outputs.app-slug }}[bot]"
           git checkout -b "$BRANCH"
           git add -A
           if git diff --cached --quiet; then
