@@ -17,6 +17,9 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Use Application Services for all persistent state - single code path for CLI/TUI/RPC
 - Accept `IProgressReporter` for operations >1 second - all UIs need feedback
 - Include ErrorCode in `PpdsException` - enables programmatic handling
+- Give new public types/members in `PPDS.{Dataverse,Migration,Auth,Plugins}` a `/// <summary>` or mark `[EditorBrowsable(Never)]` — PPDS014 fails the build otherwise (see [`specs/docs-generation.md`](./specs/docs-generation.md))
+- Supply a non-empty Description at every `System.CommandLine.Command`, `Option<T>`, and `Argument<T>` creation site in CLI factory code (2-arg `Command` ctor or object initializer `Description = "..."`; Options/Arguments use object initializer) — PPDS015 fails the build
+- Set `Name` on every `[McpServerTool]` and pair with a `[Description]` — PPDS016 fails the build
 
 ## Tech Stack
 

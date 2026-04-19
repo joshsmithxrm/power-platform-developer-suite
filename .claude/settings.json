@@ -338,18 +338,7 @@
         ]
       }
     ],
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \".claude/hooks/notify.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
+    "Notification": [],
     "Stop": [
       {
         "hooks": [

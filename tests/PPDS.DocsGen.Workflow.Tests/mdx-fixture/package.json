@@ -1,0 +1,10 @@
+{
+  "name": "ppds-docsgen-mdx-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Minimal @mdx-js/mdx fixture for strict MDX parse validation of generated reference docs.",
+  "type": "module",
+  "dependencies": {
+    "@mdx-js/mdx": "3.0.1"
+  }
+}

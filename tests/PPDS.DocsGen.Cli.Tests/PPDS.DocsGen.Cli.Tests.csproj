@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PPDS.DocsGen.Cli.Tests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- The Fixtures directory holds a sibling fixture project plus its .cs
+       files; those belong to that project, not this test project. Keep the
+       default SDK globs (bin/obj are excluded automatically) and explicitly
+       strip Fixtures so the fixture .cs files are not compiled here. -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**\*.cs"
+             Exclude="Fixtures\**\*.cs;bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\scripts\docs-gen\cli-reflect\cli-reflect.csproj" />
+    <ProjectReference Include="..\..\scripts\docs-gen\PPDS.DocsGen.Common\PPDS.DocsGen.Common.csproj" />
+    <!-- The fixture assembly is consumed via its built DLL on disk, but we
+         take a ProjectReference to ensure it's built before tests run. -->
+    <ProjectReference Include="Fixtures\PPDS.DocsGen.Cli.Tests.FixtureCli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\Expected\**\*.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

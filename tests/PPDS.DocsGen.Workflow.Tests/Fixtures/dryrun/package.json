@@ -1,0 +1,21 @@
+{
+  "name": "ppds-extension-fixture",
+  "displayName": "PPDS (fixture)",
+  "contributes": {
+    "commands": [
+      { "command": "ppds.fixture.alpha", "title": "Alpha", "category": "PPDS" },
+      { "command": "ppds.fixture.beta", "title": "Beta", "category": "PPDS" },
+      { "command": "ppds.fixture.gamma", "title": "Gamma", "category": "PPDS" }
+    ],
+    "configuration": {
+      "type": "object",
+      "properties": {
+        "ppds.fixture.setting": {
+          "type": "string",
+          "default": "hello",
+          "description": "A fixture setting used by DryRunProducesExpectedArtifacts."
+        }
+      }
+    }
+  }
+}
