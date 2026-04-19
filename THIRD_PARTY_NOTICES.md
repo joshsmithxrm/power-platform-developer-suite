@@ -6,11 +6,13 @@ PPDS includes or depends on the third-party software components listed below. Ea
 
 Generated for the v1.0.0 launch by walking restored NuGet `project.assets.json` graphs for the runtime projects (PPDS.Auth, PPDS.Cli, PPDS.Dataverse, PPDS.Mcp, PPDS.Migration, PPDS.Plugins, PPDS.Query) and `license-checker-rseidelsohn --production` for the VS Code extension. Build-time-only references (`PrivateAssets="all"` — MinVer, Microsoft.SourceLink.GitHub) and test frameworks (xunit, Moq, FakeXrmEasy, FluentAssertions, coverlet, Microsoft.NET.Test.Sdk) are excluded: they ship only with test assemblies, not with distributed packages. `PPDS.Analyzers` is itself a development-dependency analyzer package and is likewise excluded.
 
+PPDS additionally vendors a subset of `microsoft/git-credential-manager` source (MIT, attributed separately in the "Vendored Source" section below); the counts in the table below are package-based and do not include vendored code.
+
 ## Summary
 
 | Ecosystem | Unique Packages | License Breakdown |
 |-----------|-----------------|-------------------|
-| NuGet (.NET runtime) | 98 | MIT: 91; Apache-2.0: 3; MS-PL OR Apache-2.0 (dual): 1; proprietary / Microsoft EULA: 3 |
+| NuGet (.NET runtime) | 97 | MIT: 91; Apache-2.0: 3; MS-PL OR Apache-2.0 (dual): 1; proprietary / Microsoft EULA: 2 |
 | NPM (VS Code extension) | 13 | MIT: 11; 0BSD: 2 |
 
 ---
@@ -231,13 +233,6 @@ See the Apache-2.0 full text above. The Microsoft Public License (MS-PL) is avai
 
 The following runtime dependencies are distributed under proprietary vendor terms rather than an OSI-approved license. They are included under each vendor's published license.
 
-### Devlooped.CredentialManager 2.7.0
-
-Project: https://github.com/devlooped/CredentialManager
-License: https://www.nuget.org/packages/Devlooped.CredentialManager/2.7.0/License
-
-Open Source Maintenance Fee Agreement (MIT-based license with an optional commercial maintenance fee layered on top). Source remains MIT-licensed; pre-compiled binaries are additionally subject to OSMFEULA terms.
-
 ### Microsoft.Data.SqlClient.SNI.runtime 6.0.2
 
 Project: https://github.com/dotnet/SqlClient
@@ -251,6 +246,24 @@ Project: https://github.com/microsoft/PowerPlatform-DataverseServiceClient
 License: https://go.microsoft.com/fwlink/?linkid=2108407
 
 Microsoft Software License Terms for the Dataverse ServiceClient. Redistributable as part of end-user applications that use Microsoft Dataverse.
+
+---
+
+## Vendored Source (MIT)
+
+### git-credential-manager
+
+Project: https://github.com/git-ecosystem/git-credential-manager
+License: MIT (full text below under "NuGet packages under the MIT License")
+Copyright (c) Microsoft Corporation and contributors.
+
+A minimal subset of the `microsoft/git-credential-manager` source for cross-platform
+credential storage (Windows Credential Manager, macOS Keychain, Linux libsecret) is
+vendored into `src/PPDS.Auth/Internal/CredentialStore/` at commit
+`5fa7116896c82164996a609accd1c5ad90fe730a` (tag v2.7.3). Original Microsoft/GitHub
+MIT copyright is attributed in each vendored file's header. Vendoring rationale:
+removed the `Devlooped.CredentialManager` package to eliminate its OSMFEULA-licensed
+binary distribution for enterprise consumers.
 
 ---
 

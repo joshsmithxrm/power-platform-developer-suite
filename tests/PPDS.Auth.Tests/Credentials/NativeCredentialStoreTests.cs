@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using GitCredentialManager;
+using PPDS.Auth.Internal.CredentialStore;
 using PPDS.Auth.Credentials;
 using Xunit;
 

@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
-using GitCredentialManager;
+using PPDS.Auth.Internal.CredentialStore;
 
 namespace PPDS.Auth.Credentials;
 
@@ -14,7 +14,8 @@ namespace PPDS.Auth.Credentials;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses platform-native security mechanisms via Git Credential Manager's credential store:
+/// Uses platform-native security mechanisms via a vendored subset of Microsoft's
+/// git-credential-manager (see <c>src/PPDS.Auth/Internal/CredentialStore/</c>):
 /// - Windows: Windows Credential Manager (DPAPI with CurrentUser scope)
 /// - macOS: Keychain Services
 /// - Linux: libsecret (GNOME Keyring/KWallet), with optional plaintext fallback for CI/CD
@@ -91,7 +92,9 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     }
 
     /// <summary>
-    /// Configures the GCM credential store backend via environment variable.
+    /// Configures the vendored credential store backend (Linux plaintext fallback) via
+    /// environment variable. Name <c>GCM_CREDENTIAL_STORE</c> preserved for compatibility
+    /// with any ops runbook that already sets it.
     /// </summary>
     private static void ConfigureCredentialStoreBackend(bool allowCleartextFallback)
     {
@@ -304,12 +307,14 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// Disposes resources used by this credential store.
     /// </summary>
     /// <remarks>
-    /// Currently a no-op. IDisposable is implemented for compatibility with
+    /// No-op. The vendored <c>ICredentialStore</c> implementations (Windows Credential
+    /// Manager, macOS Keychain, libsecret, plaintext fallback) hold no managed
+    /// resources requiring disposal. IDisposable is kept on the public surface for
     /// call sites that use <c>using</c> statements.
     /// </remarks>
     public void Dispose()
     {
-        // No-op: underlying ICredentialStore doesn't require disposal
+        // No-op: vendored ICredentialStore backends hold no disposable state.
     }
 
     /// <summary>
