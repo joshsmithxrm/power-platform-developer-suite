@@ -24,6 +24,7 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly ITdsQueryExecutor? _tdsQueryExecutor;
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
+    private readonly ICachedMetadataProvider? _metadataProvider;
     private readonly int _poolCapacity;
     private readonly ExecutionPlanBuilder _planBuilder;
     private readonly PlanExecutor _planExecutor;
@@ -61,17 +62,22 @@ public sealed class SqlQueryService : ISqlQueryService
     /// <param name="bulkOperationExecutor">Optional bulk operation executor for DML statements.</param>
     /// <param name="metadataQueryExecutor">Optional metadata query executor for metadata virtual tables.</param>
     /// <param name="poolCapacity">Connection pool parallelism capacity for aggregate partitioning.</param>
+    /// <param name="metadataProvider">Optional cached metadata provider. Required for DML type coercion
+    /// (lookup → <c>EntityReference</c>, choice → <c>OptionSetValue</c>, etc.); when null, DML passes
+    /// raw CLR values through to Dataverse, which rejects them for non-scalar columns.</param>
     public SqlQueryService(
         IQueryExecutor queryExecutor,
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
         IMetadataQueryExecutor? metadataQueryExecutor = null,
-        int poolCapacity = 1)
+        int poolCapacity = 1,
+        ICachedMetadataProvider? metadataProvider = null)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         _tdsQueryExecutor = tdsQueryExecutor;
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
+        _metadataProvider = metadataProvider;
         _poolCapacity = poolCapacity;
         _planBuilder = new ExecutionPlanBuilder(_fetchXmlGeneratorService);
         _planExecutor = new PlanExecutor();
@@ -157,7 +163,8 @@ public sealed class SqlQueryService : ISqlQueryService
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor,
-            executionOptions: executionOptions);
+            executionOptions: executionOptions,
+            metadataProvider: _metadataProvider);
 
         QueryResult result;
         try
@@ -295,7 +302,8 @@ public sealed class SqlQueryService : ISqlQueryService
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor,
-            executionOptions: executionOptions);
+            executionOptions: executionOptions,
+            metadataProvider: _metadataProvider);
 
         var chunkRows = new List<IReadOnlyDictionary<string, QueryValue>>(chunkSize);
         IReadOnlyList<QueryColumn>? columns = null;

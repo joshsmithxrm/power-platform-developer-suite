@@ -402,13 +402,15 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
             var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
             var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var metadataProvider = sp.GetService<ICachedMetadataProvider>();
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             return new SqlQueryService(
                 queryExecutor,
                 tdsExecutor,
                 bulkExecutor,
                 metadataExecutor,
-                pool.GetTotalRecommendedParallelism());
+                pool.GetTotalRecommendedParallelism(),
+                metadataProvider);
         });
 
         // Plugin registration services — used by plugins/* and domain-specific RPC handlers

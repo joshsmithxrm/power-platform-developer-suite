@@ -36,6 +36,14 @@ public sealed class QueryPlanContext
     public VariableScope? VariableScope { get; }
 
     /// <summary>
+    /// Optional cached metadata provider. When supplied, DML nodes use this to coerce
+    /// SQL literals into Dataverse SDK types (<c>EntityReference</c>, <c>OptionSetValue</c>, etc.)
+    /// for lookup, choice, and money attributes. Null disables coercion (raw CLR values are
+    /// passed through to <c>Entity[attr]</c>).
+    /// </summary>
+    public Metadata.ICachedMetadataProvider? MetadataProvider { get; }
+
+    /// <summary>
     /// Maximum rows a node may materialize in memory (e.g., for sorting or aggregation).
     /// Default is 500,000. Set to 0 for unlimited.
     /// </summary>
@@ -59,7 +67,8 @@ public sealed class QueryPlanContext
         IBulkOperationExecutor? bulkOperationExecutor = null,
         VariableScope? variableScope = null,
         int maxMaterializationRows = 500_000,
-        QueryExecutionOptions? executionOptions = null)
+        QueryExecutionOptions? executionOptions = null,
+        Metadata.ICachedMetadataProvider? metadataProvider = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         CancellationToken = cancellationToken;
@@ -71,5 +80,6 @@ public sealed class QueryPlanContext
         VariableScope = variableScope;
         MaxMaterializationRows = maxMaterializationRows;
         ExecutionOptions = executionOptions;
+        MetadataProvider = metadataProvider;
     }
 }
