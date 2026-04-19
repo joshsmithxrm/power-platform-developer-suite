@@ -91,13 +91,13 @@ class TestCiFailure:
     """AC-108: On CI failure, poll_ci returns 'fail'."""
 
     def test_ci_failure_returns_fail(self, tmp_path):
-        """poll_ci returns 'fail' when a check has FAILURE conclusion."""
+        """poll_ci returns 'fail' when a check has bucket=='fail'."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
 
         checks = [
-            {"name": "build", "state": "COMPLETED", "conclusion": "SUCCESS"},
-            {"name": "lint", "state": "COMPLETED", "conclusion": "FAILURE"},
+            {"name": "build", "state": "COMPLETED", "bucket": "pass"},
+            {"name": "lint", "state": "COMPLETED", "bucket": "fail"},
         ]
 
         with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks)):
@@ -110,7 +110,7 @@ class TestCiFailure:
         wt = _make_worktree(tmp_path)
 
         checks_fail = [
-            {"name": "build", "state": "COMPLETED", "conclusion": "FAILURE"},
+            {"name": "build", "state": "COMPLETED", "bucket": "fail"},
         ]
 
         with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks_fail)), \
