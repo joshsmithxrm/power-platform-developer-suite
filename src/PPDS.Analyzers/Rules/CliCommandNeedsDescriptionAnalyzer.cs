@@ -143,23 +143,25 @@ public sealed class CliCommandNeedsDescriptionAnalyzer : DiagnosticAnalyzer
         if (argumentList is null)
             return false;
 
-        // System.CommandLine.Command has a (string name, string? description = null)
-        // constructor. We accept any call site that passes a non-empty string
-        // expression in the description position — identified by matching the
-        // parameter name "description" on the resolved symbol.
+        // System.CommandLine has several Command-family constructors that
+        // accept a description — e.g. `Command(string name, string? description)`,
+        // `RootCommand(string description)`, `RootCommand()`. Rather than
+        // hardcode each shape, resolve the invoked constructor via the
+        // semantic model and accept any argument whose bound parameter is
+        // named "description" and whose expression is a non-empty string.
         var args = argumentList.Arguments;
-        if (args.Count < 2)
+        if (args.Count == 0)
             return false;
 
         var symbolInfo = model.GetSymbolInfo(argumentList.Parent!, ct);
-        if (symbolInfo.Symbol is IMethodSymbol ctor)
+        if (symbolInfo.Symbol is not IMethodSymbol ctor)
+            return false;
+
+        for (var i = 0; i < args.Count && i < ctor.Parameters.Length; i++)
         {
-            for (var i = 0; i < args.Count && i < ctor.Parameters.Length; i++)
-            {
-                var paramName = args[i].NameColon?.Name.Identifier.Text ?? ctor.Parameters[i].Name;
-                if (paramName == "description" && IsNonEmptyStringExpression(args[i].Expression))
-                    return true;
-            }
+            var paramName = args[i].NameColon?.Name.Identifier.Text ?? ctor.Parameters[i].Name;
+            if (paramName == "description" && IsNonEmptyStringExpression(args[i].Expression))
+                return true;
         }
 
         return false;

@@ -241,4 +241,40 @@ public class CliCommandNeedsDescriptionAnalyzerTests
         diagnostics.Should().ContainSingle()
             .Which.Id.Should().Be("PPDS015");
     }
+
+    /// <summary>
+    /// Regression: RootCommand has a 1-arg ctor `RootCommand(string description)`
+    /// where the single argument IS the description. The analyzer must accept
+    /// this — it previously required 2+ ctor args which incorrectly failed
+    /// `new RootCommand("...")`. Caught on PR #789 CI after initial push.
+    /// </summary>
+    [Fact]
+    public async Task PPDS015_AllowsRootCommandWithSingleDescriptionArgument()
+    {
+        const string body = """
+            namespace System.CommandLine
+            {
+                public class RootCommand : Command
+                {
+                    public RootCommand(string description = "") : base("root", description) { }
+                }
+            }
+
+            namespace TestApp
+            {
+                public static class Factory
+                {
+                    public static void Make()
+                    {
+                        var root = new System.CommandLine.RootCommand("The PPDS CLI root command.");
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
+
+        diagnostics.Should().BeEmpty();
+    }
 }
