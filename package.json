@@ -1,7 +1,16 @@
 {
   "private": true,
   "description": "PPDS workspace — root proxy scripts for extension and TUI",
+  "dependencies": {
+    "yaml": "^2.6.0",
+    "pngjs": "^7.0.0"
+  },
   "scripts": {
+    "audit:tui": "node tools/audit-capture.mjs run tui",
+    "audit:extension": "node tools/audit-capture.mjs run extension",
+    "audit:all": "node tools/audit-capture.mjs run all",
+    "audit:validate:tui": "node tools/audit-capture.mjs validate tui",
+    "audit:validate:extension": "node tools/audit-capture.mjs validate extension",
     "ext:compile": "npm run compile --prefix src/PPDS.Extension",
     "ext:watch": "npm run watch --prefix src/PPDS.Extension",
     "ext:package": "npm run package --prefix src/PPDS.Extension",

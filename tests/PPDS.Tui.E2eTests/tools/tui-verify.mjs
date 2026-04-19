@@ -13,7 +13,7 @@ const LOG_FILE = resolve(__dirname, '.tui-verify-daemon.log');
 export const ROWS = 30;
 export const COLS = 120;
 
-const VALID_COMMANDS = ['launch', 'close', 'screenshot', 'key', 'type', 'text', 'wait', 'rows'];
+const VALID_COMMANDS = ['launch', 'close', 'screenshot', 'render', 'key', 'type', 'text', 'wait', 'rows'];
 const VALID_MODIFIERS = ['ctrl', 'alt', 'shift'];
 
 // ── Pure functions (exported for testing) ────────────────────────────
@@ -66,6 +66,12 @@ export function parseArgs(argv) {
   if (command === 'screenshot') {
     const file = argv[1];
     if (!file) throw new Error('Usage: screenshot <file>');
+    return { command, file };
+  }
+
+  if (command === 'render') {
+    const file = argv[1];
+    if (!file) throw new Error('Usage: render <file.png>');
     return { command, file };
   }
 
@@ -125,6 +131,8 @@ async function runDaemon() {
 
   // Dynamic import — callers don't need tui-test
   const tuiTest = await import('@microsoft/tui-test/lib/terminal/term.js');
+  const { RenderSession } = await import('./render-harness.mjs');
+  const renderSession = new RenderSession();
 
   const repoRoot = resolve(__dirname, '..', '..', '..');
   const exe = resolve(repoRoot, 'src/PPDS.Cli/bin/Debug/net10.0/ppds.exe');
@@ -277,6 +285,23 @@ async function runDaemon() {
       case 'rows': {
         return { dimensions: `${COLS}x${ROWS}` };
       }
+      case 'render': {
+        const snapshot = terminal.serialize();
+        const shifts = {};
+        if (snapshot.shifts instanceof Map) {
+          for (const [k, v] of snapshot.shifts) shifts[k] = v;
+        } else {
+          Object.assign(shifts, snapshot.shifts);
+        }
+        try {
+          await renderSession.writeAndScreenshot({ view: snapshot.view, shifts }, resolve(params.file));
+        } catch (err) {
+          // Page may be in a bad state — tear down so next render call rebuilds.
+          try { await renderSession.close(); } catch {}
+          throw err;
+        }
+        return { path: resolve(params.file), serialize: { view: snapshot.view, shifts } };
+      }
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -341,6 +366,7 @@ async function runDaemon() {
   async function cleanup() {
     if (idleTimer) clearTimeout(idleTimer);
     try { terminal.kill(); } catch {}
+    try { await renderSession.close(); } catch {}
     deleteSession();
     if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
     server.close();
@@ -469,6 +495,14 @@ async function cmdScreenshot(parsed) {
   console.log(result.path);
 }
 
+async function cmdRender(parsed) {
+  const session = readSession();
+  const result = await sendToDaemon(session, 'render', { file: parsed.file });
+  // Emit the full JSON response so orchestrators can consume the serialize
+  // payload alongside the PNG path without a second shell-out.
+  console.log(JSON.stringify(result));
+}
+
 async function cmdRows() {
   const session = readSession();
   const result = await sendToDaemon(session, 'rows', {});
@@ -494,6 +528,7 @@ async function main() {
     case 'type': await cmdType(parsed); break;
     case 'wait': await cmdWait(parsed); break;
     case 'screenshot': await cmdScreenshot(parsed); break;
+    case 'render': await cmdRender(parsed); break;
     case 'rows': await cmdRows(); break;
   }
 }

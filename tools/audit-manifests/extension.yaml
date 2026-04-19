@@ -1,0 +1,129 @@
+# Extension audit manifest. Single source of truth for which extension
+# panels get captured in a design audit. Adding a new panel = appending
+# an entry.
+#
+# See specs/audit-capture.md for the runner contract; AUDIT-SCHEMA.md on
+# ppds-design-system for the output format.
+#
+# Command titles sourced from src/PPDS.Extension/package.json contributions.
+
+surface: extension
+entries:
+  - id: command-palette-ppds
+    title: Command palette — PPDS commands filter
+    requires: none
+    steps:
+      - key: ctrl+shift+p
+      - sleep: 300
+      - screenshot: 01-open
+
+  - id: data-explorer
+    title: Data Explorer panel — empty editor
+    requires: connected
+    steps:
+      - command: "PPDS: Open Data Explorer"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 800
+      - screenshot: 01-loaded
+
+  - id: data-explorer-results
+    title: Data Explorer — executed query with results
+    requires: connected
+    steps:
+      - command: "PPDS: Open Data Explorer"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 800
+      - eval: "monaco.editor.getEditors()[0].setValue('SELECT TOP 5 name, accountid FROM account')"
+      - sleep: 200
+      - click: "#execute-btn"
+      - sleep: 2500
+      - screenshot: 01-results
+
+  - id: notebooks
+    title: Notebooks panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Notebooks"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 800
+      - screenshot: 01-loaded
+
+  - id: new-notebook
+    title: New Notebook — empty cell
+    requires: connected
+    steps:
+      - command: "PPDS: New Notebook"
+      - sleep: 2000
+      - screenshot: 01-empty
+
+  - id: solutions
+    title: Solutions panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Solutions"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: import-jobs
+    title: Import Jobs panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Import Jobs"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: plugin-traces
+    title: Plugin Traces panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Plugin Traces"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: metadata-browser
+    title: Metadata Browser panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Metadata Browser"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: connection-references
+    title: Connection References panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Connection References"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: environment-variables
+    title: Environment Variables panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Environment Variables"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: web-resources
+    title: Web Resources panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Web Resources"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
+
+  - id: plugin-registration
+    title: Plugin Registration panel
+    requires: connected
+    steps:
+      - command: "PPDS: Open Plugin Registration"
+      - wait: { ext: "power-platform-developer-suite", timeout: 30000 }
+      - sleep: 1500
+      - screenshot: 01-loaded
