@@ -39,6 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="Microsoft.Extensions.Configuration" VersionOverride="10.0.5" />
   <PackageReference Include="Microsoft.Extensions.Configuration.Binder" VersionOverride="10.0.5" />
