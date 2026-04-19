@@ -141,9 +141,9 @@ function findPackage(startDir, pkgName) {
 }
 
 function loadXtermAssets() {
-  const pkgDir = findPackage(__dirname, 'xterm');
+  const pkgDir = findPackage(__dirname, '@xterm/xterm');
   if (!pkgDir) {
-    throw new Error('xterm package not installed. Run `npm install` in tests/PPDS.Tui.E2eTests first.');
+    throw new Error('@xterm/xterm not installed. Run `npm install` in tests/PPDS.Tui.E2eTests first.');
   }
   const js = readFileSync(join(pkgDir, 'lib', 'xterm.js'), 'utf8');
   const css = readFileSync(join(pkgDir, 'css', 'xterm.css'), 'utf8');

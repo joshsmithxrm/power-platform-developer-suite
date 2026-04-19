@@ -300,7 +300,7 @@ async function runDaemon() {
           try { await renderSession.close(); } catch {}
           throw err;
         }
-        return { path: resolve(params.file) };
+        return { path: resolve(params.file), serialize: { view: snapshot.view, shifts } };
       }
       default:
         throw new Error(`Unknown action: ${action}`);
@@ -498,7 +498,9 @@ async function cmdScreenshot(parsed) {
 async function cmdRender(parsed) {
   const session = readSession();
   const result = await sendToDaemon(session, 'render', { file: parsed.file });
-  console.log(result.path);
+  // Emit the full JSON response so orchestrators can consume the serialize
+  // payload alongside the PNG path without a second shell-out.
+  console.log(JSON.stringify(result));
 }
 
 async function cmdRows() {

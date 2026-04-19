@@ -7,7 +7,7 @@
 //
 // See specs/audit-capture.md for the contract this implements.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { resolve, join, dirname, isAbsolute, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -246,14 +246,9 @@ function extCmd(args, opts) { return runVerify(WEBVIEW_CDP, args, opts); }
 
 async function runTui(manifest, auditOut, cfg) {
   const surfaceDir = join(auditOut, 'tui');
+  // Clean any prior captures, then recreate fresh.
+  rmSync(surfaceDir, { recursive: true, force: true });
   mkdirSync(surfaceDir, { recursive: true });
-
-  // Clean prior captures for this surface
-  if (existsSync(surfaceDir)) {
-    for (const child of readdirSync(surfaceDir)) {
-      rmSync(join(surfaceDir, child), { recursive: true, force: true });
-    }
-  }
 
   // Ensure fresh daemon
   tuiCmd(['close']);
@@ -339,21 +334,15 @@ async function runTuiEntry(entry, entryDir) {
       await new Promise(r => setTimeout(r, step.sleep));
       stepsLog.push({ sleep: step.sleep });
     } else if (step.screenshot !== undefined) {
-      // Apply masks before rendering: currently we render first then post-mask
-      // via applyTuiMasks (simpler, decoupled from render pipeline).
       const outFile = join(entryDir, `${step.screenshot}.png`);
       const r = tuiCmd(['render', outFile], { timeout: 60000 });
       if (r.status !== 0) throw withStderr(new Error(`render failed: ${r.stderr}`), r.stderr);
+      // render now returns { path, serialize: { view, shifts } } as JSON on stdout —
+      // reuse that instead of a second `screenshot` shell-out.
+      let serialize = null;
+      try { serialize = JSON.parse(r.stdout).serialize ?? null; } catch {}
       if (entry.masks && entry.masks.length > 0) {
         await applyTuiMasks(outFile, entry.masks);
-      }
-      // Dump raw serialize JSON next to the PNG for meta.json use
-      const jsonPath = outFile.replace(/\.png$/, '.json');
-      const rj = tuiCmd(['screenshot', jsonPath], { timeout: 30000 });
-      let serialize = null;
-      if (rj.status === 0 && existsSync(jsonPath)) {
-        try { serialize = JSON.parse(readFileSync(jsonPath, 'utf8')); } catch {}
-        rmSync(jsonPath, { force: true });
       }
       const { PNG } = await import('pngjs');
       const png = PNG.sync.read(readFileSync(outFile));
@@ -435,14 +424,9 @@ function withStderr(err, stderr) { err.stderr = stderr; return err; }
 
 async function runExtension(manifest, auditOut, cfg) {
   const surfaceDir = join(auditOut, 'extension');
+  // Clean any prior captures, then recreate fresh.
+  rmSync(surfaceDir, { recursive: true, force: true });
   mkdirSync(surfaceDir, { recursive: true });
-
-  // Clean prior captures
-  if (existsSync(surfaceDir)) {
-    for (const child of readdirSync(surfaceDir)) {
-      rmSync(join(surfaceDir, child), { recursive: true, force: true });
-    }
-  }
 
   // Pin VS Code theme via profile settings.json
   ensureThemePin(WEBVIEW_PROFILE_DIR, EXT_THEME);
@@ -566,7 +550,7 @@ async function runExtensionEntry(entry, entryDir) {
     surfaceSpecific: {
       vscodeTheme: EXT_THEME,
       extensionId: EXT_ID,
-      panel: null,
+      panel: commandInvoked,
       commandInvoked,
     },
   };
