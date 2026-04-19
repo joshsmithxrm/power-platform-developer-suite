@@ -8,6 +8,7 @@ branch. They are pure functions — no network, no gh CLI, no git.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -261,7 +262,11 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "B")
         self.assertIn("auth-critical path", c.reason)
 
-    def test_grouped_bump_defaults_to_b(self):
+    def test_grouped_unparseable_defaults_to_group_c(self):
+        # No body to parse members from — fall back to Group C ("when unsure,
+        # default to manual merge"), matching the single-PR unparseable
+        # fallback. Previously defaulted to B; tightened to C per gemini
+        # second-pass review on PR #819.
         pr = make_pr(
             number=844,
             title="Bump the npm_and_yarn group across 1 directory with 2 updates",
@@ -270,8 +275,157 @@ class TestClassifyPR(unittest.TestCase):
             files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
         )
         c = classify.classify_pr(pr)
-        self.assertEqual(c.group, "B")
+        self.assertEqual(c.group, "C")
         self.assertIn("grouped", c.reason)
+        self.assertIn("manual review", c.reason)
+
+    # Grouped PR most-conservative-wins (issue #817) — three cases:
+    # all-patch -> A, any-minor (no major) -> B, any-major -> C.
+
+    def test_grouped_all_patch_is_group_a(self):
+        # All members are patch bumps -> Group A (auto-merge eligible).
+        pr = make_pr(
+            number=860,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n"
+                "Updates `baz` from 0.9.0 to 0.9.1\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("most-conservative=patch", c.reason)
+
+    def test_grouped_with_minor_is_group_b(self):
+        # Mix of patch + minor (no major) -> Group B (verify-then-merge).
+        pr = make_pr(
+            number=861,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.0 to 2.4.0\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("most-conservative=minor", c.reason)
+
+    def test_grouped_with_major_is_group_c(self):
+        # Any major bump in the group -> Group C (manual review).
+        pr = make_pr(
+            number=862,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.0 to 2.4.0\n"
+                "Updates `baz` from 3.0.0 to 4.0.0\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("most-conservative=major", c.reason)
+
+    def test_grouped_with_auth_critical_patch_is_group_b(self):
+        # All-patch group containing an auth-critical member must elevate to
+        # Group B per MERGE-POLICY.md "Auth-Critical Packages" override.
+        # Without the override this would incorrectly classify as Group A.
+        pr = make_pr(
+            number=863,
+            title="Bump the nuget group across 1 directory with 3 updates",
+            body=(
+                "Bumps the nuget group with 3 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Microsoft.Identity.Client` from 4.55.0 to 4.55.1\n"
+                "Updates `Bar` from 2.3.4 to 2.3.5\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical", c.reason)
+        self.assertIn("Microsoft.Identity.Client", c.reason)
+
+    def test_grouped_with_downgrade_member_is_group_c(self):
+        # A grouped PR where one member is a downgrade (1.0.2 -> 1.0.1)
+        # must classify as Group C — per-member group resolution treats the
+        # downgrade as 'major' (per classify_update_type) which routes to C.
+        pr = make_pr(
+            number=865,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n"
+                "Updates `baz` from 1.0.2 to 1.0.1\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("most-conservative=major", c.reason)
+
+    def test_grouped_with_unknown_member_is_group_c(self):
+        # A grouped PR with a member whose update_type can't be classified
+        # (non-numeric versions) must default to Group C per "when unsure,
+        # default to manual merge". Per-member resolver maps unknown -> C.
+        pr = make_pr(
+            number=866,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 0abc to 0xyz\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        # The unknown-typed member is the trigger; its update_type is "unknown".
+        self.assertEqual(c.update_type, "unknown")
+
+    def test_grouped_with_auth_critical_minor_is_group_b(self):
+        # Mix of patch + an auth-critical minor bump -> Group B.
+        # (Even without the auth-critical override this is B because of the
+        # minor; with the override the reason should still flag auth-critical.)
+        pr = make_pr(
+            number=864,
+            title="Bump the nuget group across 1 directory with 2 updates",
+            body=(
+                "Bumps the nuget group with 2 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Azure.Identity` from 1.12.0 to 1.13.0\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical", c.reason)
+        self.assertIn("Azure.Identity", c.reason)
 
     # Group C — manual review
 
@@ -394,6 +548,54 @@ class TestClassifyPR(unittest.TestCase):
         c = classify.classify_pr(pr)
         self.assertEqual(c.update_type, "major")
         self.assertEqual(c.group, "C")
+
+
+class TestAuthCriticalDocCodeDrift(unittest.TestCase):
+    """Drift detection (issue #818).
+
+    docs/MERGE-POLICY.md is the single source of truth for the auth-critical
+    package list. This test parses the list from the doc (between
+    AUTH_CRITICAL_PACKAGES:BEGIN / :END markers) and compares it to the
+    AUTH_CRITICAL_PACKAGES set in scripts/dependabot/classify.py. They MUST
+    agree — if you add or remove a package, update both places.
+    """
+
+    DOC_PATH = REPO_ROOT / "docs" / "MERGE-POLICY.md"
+    BEGIN_MARKER = "<!-- AUTH_CRITICAL_PACKAGES:BEGIN -->"
+    END_MARKER = "<!-- AUTH_CRITICAL_PACKAGES:END -->"
+
+    def _parse_doc_list(self) -> set[str]:
+        text = self.DOC_PATH.read_text(encoding="utf-8")
+        try:
+            block = text.split(self.BEGIN_MARKER, 1)[1].split(self.END_MARKER, 1)[0]
+        except IndexError:
+            self.fail(
+                f"docs/MERGE-POLICY.md is missing the {self.BEGIN_MARKER} / "
+                f"{self.END_MARKER} markers around the auth-critical package list."
+            )
+        # Lines look like: "- `Microsoft.Identity.Client`"
+        item_re = re.compile(r"^\s*-\s*`([^`]+)`\s*$")
+        out: set[str] = set()
+        for line in block.splitlines():
+            m = item_re.match(line)
+            if m:
+                out.add(m.group(1).lower())
+        return out
+
+    def test_doc_list_matches_code_list(self):
+        doc_set = self._parse_doc_list()
+        code_set = set(classify.AUTH_CRITICAL_PACKAGES)
+        self.assertEqual(
+            doc_set,
+            code_set,
+            (
+                "Auth-critical package list drift between docs/MERGE-POLICY.md and "
+                "scripts/dependabot/classify.py.\n"
+                f"  Only in doc:  {sorted(doc_set - code_set)}\n"
+                f"  Only in code: {sorted(code_set - doc_set)}\n"
+                "Update both places to match (see issue #818)."
+            ),
+        )
 
 
 class TestCLIRoundTrip(unittest.TestCase):

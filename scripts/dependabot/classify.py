@@ -123,6 +123,90 @@ _BUMP_TITLE_RE = re.compile(
 # Regex for grouped bumps: "Bump the <group> group ..."
 _GROUP_TITLE_RE = re.compile(r"^[Bb]ump\s+the\s+(?P<group>[A-Za-z0-9_.-]+)\s+group", re.IGNORECASE)
 
+# Regex for individual member updates inside a grouped dependabot PR body.
+# Dependabot writes each member as "Updates `<pkg>` from <from> to <to>" (markdown
+# code-fenced package name) or "Updates <pkg> from <from> to <to>" (plain).
+_GROUP_MEMBER_RE = re.compile(
+    r"Updates\s+`?(?P<pkg>[@A-Za-z0-9._/-]+)`?\s+from\s+(?P<from>v?[0-9][^\s]*)\s+to\s+(?P<to>v?[0-9][^\s]*)",
+)
+
+
+def parse_group_members(body: str) -> list[tuple[str, str, str]]:
+    """Extract individual (package, from_version, to_version) tuples from a grouped PR body.
+
+    Dependabot grouped PR bodies enumerate member updates with lines like
+    ``Updates `foo` from 1.0.0 to 1.0.1``. Returns one tuple per member
+    bump found; deduplicated on (package, from, to). Empty list if none parsed.
+    """
+    if not body:
+        return []
+    seen: set[tuple[str, str, str]] = set()
+    out: list[tuple[str, str, str]] = []
+    for m in _GROUP_MEMBER_RE.finditer(body):
+        key = (m.group("pkg"), m.group("from"), m.group("to"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def resolve_member_group(pkg: Optional[str], update_type: Optional[str]) -> str:
+    """Resolve the per-member group ("A" / "B" / "C") for a single grouped-PR member.
+
+    Mirrors the single-PR ``classify_pr`` decision tree, stripped to just the
+    A/B/C group selection:
+      - ``update_type`` in {"major", "unknown"} (or None coalesced to "unknown")
+        -> C (per MERGE-POLICY.md "When unsure, default to manual merge")
+      - auth-critical package at non-major -> B
+      - tooling/test package at non-major -> A
+      - otherwise: "minor" -> B, "patch" -> A, anything else -> C
+
+    Note: per-member file-path / breaking-change detection is NOT applied here
+    because grouped Dependabot PRs share a single diff and body across members;
+    those signals are evaluated at the group level by ``classify_pr``.
+    """
+    t = update_type or "unknown"
+    if t in ("major", "unknown"):
+        return "C"
+    if is_auth_critical_package(pkg):
+        # Auth-critical at any non-major version -> verify-then-merge.
+        return "B"
+    if is_tooling_package(pkg):
+        # Tooling at any non-major version -> auto-merge eligible.
+        return "A"
+    if t == "minor":
+        return "B"
+    if t == "patch":
+        return "A"
+    # Defensive — any unrecognised update_type defaults to manual review.
+    return "C"
+
+
+# Group ordering for "most conservative wins" comparisons.
+# Higher number = more conservative; max() picks the worst of the bunch.
+_GROUP_RANK = {"A": 0, "B": 1, "C": 2}
+
+
+def most_conservative_group(
+    members: Iterable[tuple[Optional[str], Optional[str]]],
+) -> Optional[str]:
+    """Return the most-conservative classification group ("A" / "B" / "C") across grouped-PR members.
+
+    ``members`` is an iterable of ``(package_name, update_type)`` tuples. Each
+    member's individual group is determined by ``resolve_member_group``, then
+    the most conservative (C > B > A) wins per docs/MERGE-POLICY.md "Grouped
+    Dependabot PRs".
+
+    Returns None for an empty iterable so the caller can fall back to a
+    grouped-PR-wide default (e.g., Group C for unparseable bodies).
+    """
+    member_list = list(members)
+    if not member_list:
+        return None
+    groups = [resolve_member_group(pkg, t) for (pkg, t) in member_list]
+    return max(groups, key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]))
+
 
 def parse_title(title: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Parse a dependabot PR title.
@@ -278,18 +362,70 @@ def classify_pr(pr: dict) -> Classification:
     ecosystem = detect_ecosystem(labels, head_ref)
     update_type = classify_update_type(from_v, to_v)
 
-    # Grouped bumps need conservative handling — defer to Group C if any member could be major.
+    # Grouped bumps — apply per-member group resolution then most-conservative-wins
+    # per docs/MERGE-POLICY.md "Grouped Dependabot PRs". Each member is classified
+    # individually (considering package name, update type, and downgrades), then
+    # the worst of (A < B < C) wins. Members are parsed from the PR body.
     if pkg and pkg.startswith("group:"):
-        # Without per-member version info on stdin, the safe default is Group A only
-        # for groups that are explicitly tooling/test (named in the dependabot.yml as such)
-        # and patch/minor only. The skill SKILL.md documents how to escalate — here,
-        # default to Group B so the skill operator sees the group and decides.
+        members = parse_group_members(body)
+        if not members:
+            # No member info parseable — default to Group C ("when unsure,
+            # default to manual merge") for consistency with the single-PR
+            # unparseable fallback further down.
+            return Classification(
+                pr_number=number,
+                group="C",
+                reason=f"grouped bump '{pkg}' — could not parse members from body, defaulting to manual review",
+                ecosystem=ecosystem,
+                update_type="unknown",
+                package=pkg,
+                from_version=None,
+                to_version=None,
+            )
+
+        # Resolve each member's update type and individual group. Null/None
+        # update types are coalesced to "unknown" by resolve_member_group,
+        # which itself maps "unknown" -> Group C.
+        member_records = []
+        for p, fv, tv in members:
+            t = classify_update_type(fv, tv) or "unknown"
+            g = resolve_member_group(p, t)
+            member_records.append((p, fv, tv, t, g))
+
+        chosen = max(
+            (r[4] for r in member_records),
+            key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]),
+        )
+
+        # Pick a trigger member to cite in the reason string. Prefer a member
+        # whose individual group matches the chosen group; among those, prefer
+        # an auth-critical package (so its override is named explicitly per
+        # MERGE-POLICY.md "Auth-Critical Packages").
+        chosen_members = [r for r in member_records if r[4] == chosen]
+        auth_critical_in_chosen = next(
+            (r for r in chosen_members if is_auth_critical_package(r[0])),
+            None,
+        )
+        trigger = auth_critical_in_chosen or chosen_members[0]
+        trigger_type = trigger[3]
+
+        reason = (
+            f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
+            f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
+        )
+        # When the trigger is an auth-critical package, surface that explicitly
+        # so the operator knows why the override applied.
+        if is_auth_critical_package(trigger[0]):
+            reason += (
+                f"; auth-critical override "
+                f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
+            )
         return Classification(
             pr_number=number,
-            group="B",
-            reason=f"grouped bump '{pkg}' — inspect members for highest update type",
+            group=chosen,
+            reason=reason,
             ecosystem=ecosystem,
-            update_type="unknown",
+            update_type=trigger_type,
             package=pkg,
             from_version=None,
             to_version=None,
