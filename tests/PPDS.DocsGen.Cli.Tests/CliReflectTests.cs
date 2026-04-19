@@ -112,6 +112,29 @@ public class CliReflectTests
     }
 
     /// <summary>
+    /// AC-15: options must be ordered alphabetically by long name, independent
+    /// of source-declaration order or System.CommandLine enumeration order.
+    /// The fixture declares <c>--tenant</c> before <c>--force</c>; the
+    /// generator must emit them in the reverse (alphabetical) order.
+    /// </summary>
+    [Fact]
+    public async Task OptionsAreAlphabeticalByLongName()
+    {
+        var result = await GenerateAsync();
+
+        var login = result.Files.Single(f => f.RelativePath == "auth/login.md").Contents;
+
+        var forceIndex = login.IndexOf("`--force`", StringComparison.Ordinal);
+        var tenantIndex = login.IndexOf("`--tenant`", StringComparison.Ordinal);
+
+        forceIndex.Should().BeGreaterThan(0, because: "--force must appear in login.md");
+        tenantIndex.Should().BeGreaterThan(0, because: "--tenant must appear in login.md");
+        forceIndex.Should().BeLessThan(tenantIndex,
+            because: "options must be ordered alphabetically by long name (AC-15), "
+                + "even though the fixture declares --tenant before --force");
+    }
+
+    /// <summary>
     /// Leaf commands with <c>Hidden = true</c> must not appear in any emitted
     /// file — including the group index.
     /// </summary>

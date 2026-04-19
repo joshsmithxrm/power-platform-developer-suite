@@ -20,6 +20,6 @@ ppds auth login [options]
 
 | Long | Short | Type | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--tenant` | `-t` | `string` |  | Tenant identifier, if your account belongs to multiple tenants. |
 | `--force` |  | `bool` |  | Skip the confirmation prompt. |
+| `--tenant` | `-t` | `string` |  | Tenant identifier, if your account belongs to multiple tenants. |
 
