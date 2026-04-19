@@ -331,8 +331,12 @@ class TestRetroBeforeNotify:
         def track_notify(worktree, pr_number, logger):
             call_order.append("notify")
 
+        # Pass all finding-#2 gates so the ready-step does NOT emit its
+        # own notify call — we want to observe retro->notify ordering.
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", side_effect=track_retro) as mock_retro, \
              patch("pr_monitor.run_notify", side_effect=track_notify) as mock_notify:
@@ -525,8 +529,12 @@ class TestRetroTrigger:
         def track_notify(worktree, pr_number, logger):
             call_order.append(("notify", worktree))
 
+        # Pass all finding-#2 gates so ready-step's skip-path does not
+        # emit an extra notify call — we want to observe retro->notify order.
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", side_effect=track_retro), \
              patch("pr_monitor.run_notify", side_effect=track_notify):
@@ -816,3 +824,266 @@ class TestUnifiedTriagePass:
         assert mock_triage.call_count == 1
         comments_arg = mock_triage.call_args[0][2]  # 3rd positional arg
         assert len(comments_arg) == 2
+
+
+# ---------------------------------------------------------------------------
+# Meta-retro (2026-04-19) findings #1, #2, #3, #6
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyBodyReplyGuard:
+    """Meta-retro finding #1: replies with empty/whitespace body must not POST."""
+
+    def test_empty_body_skips_common_post(self, tmp_path):
+        """Reply items that produce an empty body never reach _post_replies_common."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        # Reset the module-level dedupe set so this test is isolated.
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        # item 1: action "noop" with empty description -> body = "Reviewed."
+        #   (NOT empty, should post). item 2: action "unknown" with empty
+        #   description and whitespace body via None fallback. We need a
+        #   genuinely empty body — easiest is action="dismissed" with empty
+        #   description -> body = "Not applicable — " which is NOT empty.
+        # The real empty-body case: action not in {fixed,dismissed} AND
+        # description is empty/whitespace -> body falls to
+        # ``description or "Reviewed."`` = "Reviewed." which is also NOT
+        # empty. To construct a true empty body, description must be a
+        # whitespace string like "   " (truthy, so the fallback is bypassed).
+        items = [
+            {"id": 101, "action": "noop", "description": "   "},  # empty after strip
+            {"id": 102, "action": "fixed", "commit": "abc",
+             "description": "real fix"},  # real body
+        ]
+
+        with patch("pr_monitor._post_replies_common") as mock_common:
+            pr_monitor.post_replies(wt, 42, items, logger)
+
+        # _post_replies_common was called exactly once, with only the
+        # non-empty-body item.
+        assert mock_common.call_count == 1
+        forwarded = mock_common.call_args[0][2]
+        assert len(forwarded) == 1
+        assert forwarded[0]["id"] == 102
+
+    def test_all_empty_body_never_calls_common(self, tmp_path):
+        """If every triage item has a whitespace-only body, _post_replies_common is skipped."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        # Every item has a truthy-but-whitespace description so the
+        # default-fallback in _reply_body_for is bypassed and the body
+        # ends up whitespace-only.
+        items = [
+            {"id": 201, "action": "noop", "description": " "},
+            {"id": 202, "action": "noop", "description": "\t\n  "},
+        ]
+
+        with patch("pr_monitor._post_replies_common") as mock_common:
+            pr_monitor.post_replies(wt, 42, items, logger)
+
+        # All items had whitespace-only bodies — common POSTer never invoked.
+        mock_common.assert_not_called()
+
+
+class TestReadyFlipGates:
+    """Meta-retro finding #2: auto-ready-flip requires 3 conditions."""
+
+    def _base_result(self, **overrides):
+        r = pr_monitor._empty_result()
+        r["ci_result"] = "pass"
+        r["gemini_review_posted"] = True
+        r.update(overrides)
+        return r
+
+    def test_ready_flip_fires_when_all_conditions_met(self, tmp_path):
+        """Ready flip fires when CI=pass, Gemini reviewed, no unreplied comments."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result()
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch", return_value=True) as mock_rebase, \
+             patch("pr_monitor.mark_pr_ready", return_value=True) as mock_ready, \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor._step_ready(wt, 42, logger, result)
+
+        mock_rebase.assert_called_once()
+        mock_ready.assert_called_once()
+        # No extra notify — we only notify on skip paths in _step_ready.
+        mock_notify.assert_not_called()
+        assert result["steps_completed"]["ready"]["status"] == "done"
+
+    def test_ready_flip_skipped_when_ci_not_pass(self, tmp_path):
+        """Any non-pass CI result prevents the flip (and rebase)."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(ci_result="fail")
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch") as mock_rebase, \
+             patch("pr_monitor.mark_pr_ready") as mock_ready, \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor._step_ready(wt, 42, logger, result)
+
+        mock_rebase.assert_not_called()
+        mock_ready.assert_not_called()
+        mock_notify.assert_called_once()  # notify on skip
+        assert result["steps_completed"]["ready"]["status"] == "skipped"
+
+    def test_ready_flip_skipped_when_no_gemini_review(self, tmp_path):
+        """No Gemini review means no flip."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(gemini_review_posted=False)
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch") as mock_rebase, \
+             patch("pr_monitor.mark_pr_ready") as mock_ready, \
+             patch("pr_monitor.run_notify"):
+            pr_monitor._step_ready(wt, 42, logger, result)
+
+        mock_rebase.assert_not_called()
+        mock_ready.assert_not_called()
+        assert result["steps_completed"]["ready"]["status"] == "skipped"
+        assert "gemini_review_not_posted" in result["ready_skip_reasons"]
+
+    def test_ready_flip_skipped_when_unreplied_comments(self, tmp_path):
+        """Any unreplied bot comment prevents the flip."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result()
+
+        unreplied = [{"id": 9, "user": "gemini-code-assist[bot]",
+                      "path": "a.py", "line": 1, "body": "look here"}]
+        with patch("pr_monitor.get_unreplied_comments", return_value=unreplied), \
+             patch("pr_monitor._rebase_source_branch") as mock_rebase, \
+             patch("pr_monitor.mark_pr_ready") as mock_ready, \
+             patch("pr_monitor.run_notify"):
+            pr_monitor._step_ready(wt, 42, logger, result)
+
+        mock_rebase.assert_not_called()
+        mock_ready.assert_not_called()
+        assert result["steps_completed"]["ready"]["status"] == "skipped"
+        reasons = result["ready_skip_reasons"]
+        assert any("unreplied_comments" in r for r in reasons)
+
+
+class TestReplyDedupe:
+    """Meta-retro finding #3: in-process dedupe prevents duplicate POSTs."""
+
+    def test_duplicate_reply_skipped_on_second_call(self, tmp_path):
+        """Same (pr, id, action) tuple posts once; second call is a no-op."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        item = {"id": 777, "action": "fixed", "commit": "sha1",
+                "description": "renamed var"}
+
+        with patch("pr_monitor._post_replies_common") as mock_common:
+            pr_monitor.post_replies(wt, 42, [item], logger)
+            pr_monitor.post_replies(wt, 42, [item], logger)
+
+        # First call POSTed; second call should have been filtered out.
+        # Common POSTer is invoked only when at least one item survives
+        # filtering, so the second call never invokes it at all.
+        assert mock_common.call_count == 1
+        forwarded = mock_common.call_args[0][2]
+        assert [i["id"] for i in forwarded] == [777]
+
+    def test_different_action_not_deduped(self, tmp_path):
+        """Same comment_id with different action is NOT considered a duplicate."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        item_fixed = {"id": 500, "action": "fixed", "commit": "sha",
+                      "description": "ok"}
+        item_dismissed = {"id": 500, "action": "dismissed",
+                          "description": "nvm"}
+
+        with patch("pr_monitor._post_replies_common") as mock_common:
+            pr_monitor.post_replies(wt, 42, [item_fixed], logger)
+            pr_monitor.post_replies(wt, 42, [item_dismissed], logger)
+
+        # Both actions distinct -> both POST through.
+        assert mock_common.call_count == 2
+
+
+class TestRebaseBeforeReady:
+    """Meta-retro finding #6: rebase source branch before flipping ready."""
+
+    def test_rebase_clean_path_calls_all_three_git_commands(self, tmp_path):
+        """Clean rebase: fetch + rebase + push --force-with-lease all succeed."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            return ok
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, logger)
+
+        assert result is True
+        assert call_log[0] == ["git", "fetch", "origin", "main"]
+        assert call_log[1] == ["git", "rebase", "origin/main"]
+        assert call_log[2] == ["git", "push", "--force-with-lease"]
+        assert len(call_log) == 3  # no abort path
+
+    def test_rebase_conflict_aborts_and_returns_false(self, tmp_path):
+        """On rebase conflict: git rebase --abort is called; no push; returns False."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            # fetch succeeds; rebase conflicts; abort succeeds.
+            if cmd[:3] == ["git", "fetch", "origin"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="", stderr="")
+            if cmd[:3] == ["git", "rebase", "origin/main"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="",
+                    stderr="CONFLICT (content): Merge conflict in foo.py")
+            if cmd[:3] == ["git", "rebase", "--abort"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, logger)
+
+        assert result is False
+        # Must have attempted rebase --abort
+        assert ["git", "rebase", "--abort"] in call_log
+        # Must NOT have pushed
+        assert not any(c[:2] == ["git", "push"] for c in call_log)
+
+    def test_ready_step_does_not_flip_on_rebase_conflict(self, tmp_path):
+        """_step_ready: when rebase fails, mark_pr_ready is NOT called and user is notified."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = pr_monitor._empty_result()
+        result["ci_result"] = "pass"
+        result["gemini_review_posted"] = True
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch", return_value=False), \
+             patch("pr_monitor.mark_pr_ready") as mock_ready, \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor._step_ready(wt, 7, logger, result)
+
+        mock_ready.assert_not_called()
+        mock_notify.assert_called_once()
+        assert result["steps_completed"]["ready"]["status"] == "rebase_failed"

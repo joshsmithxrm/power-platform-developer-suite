@@ -125,6 +125,9 @@ def _empty_result():
         "comment_counts": {},
         "triage_summary": [],
         "retro_status": None,
+        # Set to True by _step_gemini whenever a poll returns
+        # status="review_received" (meta-retro finding #2 gate).
+        "gemini_review_posted": False,
         "timestamp": _timestamp(),
     }
 
@@ -275,13 +278,17 @@ def poll_gemini_comments(worktree, pr_number, logger):
     def _log(event, **kwargs):
         logger.log("gemini", event, **kwargs)
 
-    comments, _status = poll_gemini_review(
+    comments, status = poll_gemini_review(
         worktree, pr_number, pr_created_at,
         max_wait=GEMINI_MAX_WAIT,
         poll_interval=GEMINI_POLL_INTERVAL,
         shakedown=bool(SHAKEDOWN),
         log_fn=_log,
     )
+    # Expose the review status on the logger so _step_gemini can record it.
+    # (Stashed on the logger instance to avoid changing the return shape —
+    # _step_gemini reads and clears it before writing to result.)
+    logger.last_gemini_status = status
     return comments
 
 
@@ -368,6 +375,71 @@ def run_triage(worktree, pr_number, comments, logger):
     return results
 
 
+def _rebase_source_branch(worktree, logger):
+    """Rebase source onto origin/main + force-with-lease (meta-retro #6).
+
+    Runs ``git fetch origin main`` → ``git rebase origin/main`` →
+    ``git push --force-with-lease``. On rebase conflict, aborts cleanly
+    and returns False (caller must NOT flip-to-ready). Returns True
+    only on clean rebase+push. SHAKEDOWN short-circuits True.
+    """
+    if SHAKEDOWN:
+        logger.log("rebase", "SHAKEDOWN_SKIPPED")
+        return True
+
+    def _run(cmd, timeout=60):
+        return subprocess.run(
+            cmd, cwd=worktree, capture_output=True, text=True, timeout=timeout,
+        )
+
+    # 1. Fetch origin/main
+    try:
+        fetch = _run(["git", "fetch", "origin", "main"])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "FETCH_ERROR", reason=str(e))
+        return False
+    if fetch.returncode != 0:
+        logger.log("rebase", "FETCH_ERROR", stderr=fetch.stderr.strip()[:200])
+        return False
+
+    # 2. Rebase onto origin/main
+    try:
+        rebase = _run(["git", "rebase", "origin/main"], timeout=120)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "REBASE_ERROR", reason=str(e))
+        # Best-effort abort in case git is mid-rebase
+        try:
+            _run(["git", "rebase", "--abort"])
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        return False
+    if rebase.returncode != 0:
+        logger.log("rebase", "CONFLICT",
+                   stderr=rebase.stderr.strip()[:200])
+        # Abort so the working tree is clean. Do NOT force through.
+        try:
+            abort = _run(["git", "rebase", "--abort"])
+            if abort.returncode != 0:
+                logger.log("rebase", "ABORT_ERROR",
+                           stderr=abort.stderr.strip()[:200])
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            logger.log("rebase", "ABORT_ERROR", reason=str(e))
+        return False
+
+    # 3. Push with lease
+    try:
+        push = _run(["git", "push", "--force-with-lease"], timeout=60)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "PUSH_ERROR", reason=str(e))
+        return False
+    if push.returncode != 0:
+        logger.log("rebase", "PUSH_ERROR", stderr=push.stderr.strip()[:200])
+        return False
+
+    logger.log("rebase", "DONE")
+    return True
+
+
 def mark_pr_ready(worktree, pr_number, logger):
     """Convert draft PR to ready for review."""
     if SHAKEDOWN:
@@ -390,13 +462,56 @@ def mark_pr_ready(worktree, pr_number, logger):
         return False
 
 
+# In-process dedupe set for POSTed replies (meta-retro finding #3).
+# Key: (pr_number, comment_id, action). Monitor is per-PR subprocess, so
+# an in-memory set suffices — it's reset on every monitor spawn.
+_POSTED_REPLY_KEYS: "set[tuple]" = set()
+
+
+def _reply_body_for(item):
+    """Mirror of triage_common.format_reply_body for pre-POST filtering."""
+    action = item.get("action", "unknown")
+    description = item.get("description", "")
+    commit_sha = item.get("commit")
+    if action == "fixed" and commit_sha:
+        return f"Fixed in {commit_sha} \u2014 {description}"
+    if action == "dismissed":
+        return f"Not applicable \u2014 {description}"
+    return description or "Reviewed."
+
+
 def post_replies(worktree, pr_number, triage_results, logger):
-    """Post threaded replies to Gemini review comments from triage results."""
+    """Post threaded replies to Gemini review comments.
+
+    Applies two guards before delegating to _post_replies_common:
+      1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
+      2. Dedupe on (pr, comment_id, action) (meta-retro #3).
+    """
     def _log_fn(event, **kwargs):
         logger.log("replies", event, **kwargs)
 
+    filtered = []
+    for item in triage_results or []:
+        comment_id = item.get("id")
+        action = item.get("action", "unknown")
+
+        body = _reply_body_for(item)
+        if not body or not body.strip():
+            _log_fn("SKIPPED_EMPTY_BODY", comment_id=comment_id, action=action)
+            continue
+
+        key = (pr_number, comment_id, action)
+        if key in _POSTED_REPLY_KEYS:
+            _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
+            continue
+        _POSTED_REPLY_KEYS.add(key)
+        filtered.append(item)
+
+    if not filtered:
+        return
+
     _post_replies_common(
-        worktree, pr_number, triage_results, _log_fn,
+        worktree, pr_number, filtered, _log_fn,
         shakedown=bool(SHAKEDOWN),
     )
 
@@ -836,6 +951,12 @@ def _step_gemini(worktree, pr_number, logger, result, step_suffix=""):
         logger.log(step_name, "BEGIN")
         comments = poll_gemini_comments(worktree, pr_number, logger)
         result["comment_counts"][step_name] = len(comments)
+        # Capture review-received status for the ready-flip gate
+        # (meta-retro finding #2). Any poll that saw a Gemini review
+        # flips this flag true for the remainder of the monitor run.
+        status = getattr(logger, "last_gemini_status", None)
+        if status == "review_received":
+            result["gemini_review_posted"] = True
         mark_step(result, step_name, "done")
         write_result(worktree, result)
         return comments
@@ -868,9 +989,59 @@ def _step_triage(worktree, pr_number, comments, logger, result,
         return None
 
 
-def _step_ready(worktree, pr_number, logger, result):
-    """Mark PR as ready for review."""
+def _ready_flip_gates(worktree, pr_number, result, logger):
+    """Evaluate the 3 gates for auto-ready-flip (meta-retro #2).
+
+    Returns (ok, failing_reasons). ok is True only when all three gates
+    pass: CI green, Gemini posted review, no unreplied bot comments.
+    """
+    reasons = []
+    if result.get("ci_result") != "pass":
+        reasons.append(f"ci_result={result.get('ci_result')!r}")
+    if not result.get("gemini_review_posted"):
+        reasons.append("gemini_review_not_posted")
     try:
+        unreplied = get_unreplied_comments(
+            worktree, pr_number, shakedown=bool(SHAKEDOWN),
+        )
+    except Exception as e:  # noqa: BLE001 — defensive, don't crash monitor
+        logger.log("ready", "UNREPLIED_CHECK_ERROR", error=str(e))
+        unreplied = []
+        reasons.append("unreplied_check_error")
+    if unreplied:
+        reasons.append(f"unreplied_comments={len(unreplied)}")
+    return (not reasons), reasons
+
+
+def _step_ready(worktree, pr_number, logger, result):
+    """Auto-ready-flip gated on 3 conditions (#2), preceded by rebase (#6)."""
+    try:
+        ok, reasons = _ready_flip_gates(worktree, pr_number, result, logger)
+        if not ok:
+            logger.log("ready", "SKIPPED_GATES", reasons=",".join(reasons))
+            mark_step(result, "ready", "skipped")
+            result["ready_skip_reasons"] = reasons
+            write_result(worktree, result)
+            # Notify the user so they know the PR is still in draft.
+            try:
+                run_notify(worktree, pr_number, logger)
+            except Exception as e:  # noqa: BLE001
+                logger.log("ready", "NOTIFY_ERROR", error=str(e))
+            return
+
+        # Finding #6: rebase source branch before flipping to ready.
+        rebased = _rebase_source_branch(worktree, logger)
+        if not rebased:
+            logger.log("ready", "SKIPPED_REBASE_FAILED")
+            mark_step(result, "ready", "rebase_failed")
+            result["ready_skip_reasons"] = ["rebase_failed_or_conflict"]
+            write_result(worktree, result)
+            try:
+                run_notify(worktree, pr_number, logger)
+            except Exception as e:  # noqa: BLE001
+                logger.log("ready", "NOTIFY_ERROR", error=str(e))
+            return
+
         success = mark_pr_ready(worktree, pr_number, logger)
         mark_step(result, "ready", "done" if success else "error")
         write_result(worktree, result)
