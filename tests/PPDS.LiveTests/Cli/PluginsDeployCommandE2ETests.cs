@@ -15,6 +15,38 @@ namespace PPDS.LiveTests.Cli;
 /// </remarks>
 public class PluginsDeployCommandE2ETests : CliE2ETestBase
 {
+    /// <summary>
+    /// Empty-types config for pre-test state reset. Lists the fixture assembly with no types
+    /// and no allTypeNames so <c>plugins clean</c> treats every existing type and step as an
+    /// orphan and removes it. Ensures destructive tests start from a clean baseline even when
+    /// a prior run crashed before its <c>finally</c> cleanup (issue surfaced on PR #826 CI).
+    /// </summary>
+    private const string EmptyRegistrationsConfigJson = """
+        {
+            "version": "1.0",
+            "assemblies": [
+                {
+                    "name": "PPDS.LiveTests.Fixtures",
+                    "type": "Assembly",
+                    "path": "PPDS.LiveTests.Fixtures.dll",
+                    "types": []
+                }
+            ]
+        }
+        """;
+
+    /// <summary>
+    /// Runs <c>plugins clean</c> with an empty-types config to wipe any pre-existing
+    /// registrations from prior (possibly interrupted) test runs. Tolerates a non-zero
+    /// exit code — the follow-up deploy assertion is the real signal.
+    /// </summary>
+    private async Task EnsureCleanFixtureStateAsync()
+    {
+        var emptyConfigPath = GenerateTempFilePath(".json");
+        await File.WriteAllTextAsync(emptyConfigPath, EmptyRegistrationsConfigJson);
+        await RunCliAsync("plugins", "clean", "--config", emptyConfigPath);
+    }
+
     #region Tier 1: Safe tests (--dry-run)
 
     [CliE2EWithCredentials]
@@ -133,6 +165,9 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
+        // Reset env state in case a prior run crashed before its cleanup.
+        await EnsureCleanFixtureStateAsync();
+
         try
         {
             // Actually deploy the plugin
@@ -174,6 +209,9 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
             "--environment", Configuration.DataverseUrl!);
 
         await RunCliAsync("auth", "select", "--name", profileName);
+
+        // Reset env state in case a prior run crashed before its cleanup.
+        await EnsureCleanFixtureStateAsync();
 
         try
         {
