@@ -291,6 +291,20 @@ node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/css-verify.png
 
 You cannot hot-reload CSS in VS Code webviews — a full rebuild + relaunch is required.
 
+## Log File Locations
+
+VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT
+`N-Name.log` as the docs sometimes imply. When chasing extension log
+output across sessions, the path looks like:
+
+```
+<vscode-user>/logs/<window>/exthost/JoshSmithXRM.power-platform-developer-suite/PPDS.log
+```
+
+The numeric prefix on adjacent files (`1-CodeLens.log`, etc.) refers to
+core VS Code services, not extension-defined channels. Reading the wrong
+file is a recurring time-sink.
+
 ## Gap Protocol
 
 If you encounter a webview interaction that this tool cannot handle:

@@ -40,10 +40,15 @@ def main() -> None:
         sys.exit(0)
 
     try:
-        tool_input = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
+    # Claude Code envelope: {"tool_name": "...", "tool_input": {"command": "..."}}
+    # Reading at the top level was a bug (v1-prelaunch retro item #2) — command
+    # was always "" so allow checks never matched and even ``git checkout main``
+    # was blocked. Fix: read from nested ``tool_input`` dict.
+    tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command", "")
 
     # Allow: git checkout main, git checkout master

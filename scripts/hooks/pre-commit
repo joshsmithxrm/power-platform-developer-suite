@@ -6,6 +6,19 @@ set -euo pipefail
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
+# Run pre-commit.d/*.sh — extensible drop-in scripts.
+# Each script is sourced (sourced so they share REPO_ROOT and abort on error).
+if [ -d "$REPO_ROOT/scripts/hooks/pre-commit.d" ]; then
+    for script in "$REPO_ROOT/scripts/hooks/pre-commit.d"/*.sh; do
+        [ -e "$script" ] || continue
+        echo "[pre-commit] running $(basename "$script")..."
+        if ! bash "$script"; then
+            echo "[pre-commit] BLOCKED: $(basename "$script") failed." >&2
+            exit 1
+        fi
+    done
+fi
+
 # ── .NET Gate ──────────────────────────────────────────────────
 STAGED_CS=$(git diff --cached --name-only --diff-filter=ACMR -- ':(glob)**/*.cs' ':(glob)**/*.csproj')
 

@@ -26,11 +26,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from triage_common import (
+    GEMINI_BOT_LOGIN,
     build_triage_prompt,
     detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
     parse_triage_jsonl,
+    poll_gemini_review,
     post_replies as _post_replies_common,
 )
 
@@ -232,66 +234,55 @@ def poll_ci(worktree, pr_number, logger):
     return "timeout"
 
 
-def poll_gemini_comments(worktree, pr_number, logger):
-    """Poll for Gemini review comments until stable count or timeout.
+def _get_pr_created_at(worktree, pr_number):
+    """Return the PR's created_at ISO timestamp, or "" on failure.
 
-    Returns: list of comment dicts (may be empty).
+    Used by poll_gemini_comments to filter out stale Gemini reviews from
+    earlier force-pushes (v1-prelaunch retro item #3).
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number),
+             "--json", "createdAt", "--jq", ".createdAt"],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return ""
+
+
+def poll_gemini_comments(worktree, pr_number, logger):
+    """Poll for a Gemini review until received or timeout.
+
+    v1-prelaunch retro item #3: delegates to ``triage_common.poll_gemini_review``
+    which polls all three GitHub endpoints (reviews, pulls/comments,
+    issues/comments). The previous implementation only polled
+    ``pulls/comments`` (inline review comments), so it never saw Gemini's
+    top-level review (posted via ``pulls/reviews``) and timed out at 5
+    minutes on every PR.
+
+    Returns: list of inline comment dicts (may be empty even on success
+    when Gemini posts only a top-level review with no inline notes).
     """
     if SHAKEDOWN:
         logger.log("gemini", "SHAKEDOWN_SKIPPED")
         return []
 
-    repo = get_repo_slug(worktree)
-    if not repo:
-        logger.log("gemini", "ERROR", reason="Cannot determine repo slug")
-        return []
+    pr_created_at = _get_pr_created_at(worktree, pr_number)
 
-    start = time.time()
-    last_count = -1
-    stable_polls = 0
+    def _log(event, **kwargs):
+        logger.log("gemini", event, **kwargs)
 
-    while time.time() - start < GEMINI_MAX_WAIT:
-        try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
-                 "--jq", "length"],
-                cwd=worktree, capture_output=True, text=True, timeout=15,
-            )
-            count = int(result.stdout.strip()) if result.returncode == 0 else 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
-            count = 0
-
-        elapsed = int(time.time() - start)
-        logger.log("gemini", "POLL", elapsed=f"{elapsed}s", comments=count)
-
-        if count == last_count:
-            stable_polls += 1
-            if stable_polls >= GEMINI_STABLE_POLLS:
-                logger.log("gemini", "STABLE", comments=count)
-                break
-        else:
-            stable_polls = 0
-
-        last_count = count
-        time.sleep(GEMINI_POLL_INTERVAL)
-
-    if last_count <= 0:
-        logger.log("gemini", "NO_COMMENTS")
-        return []
-
-    # Fetch full comment data
-    try:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
-             "--jq", "[.[] | {id, user: .user.login, path, line, body}]"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode == 0:
-            return json.loads(result.stdout.strip())
-    except (subprocess.TimeoutExpired, FileNotFoundError,
-            json.JSONDecodeError, OSError):
-        pass
-    return []
+    comments, _status = poll_gemini_review(
+        worktree, pr_number, pr_created_at,
+        max_wait=GEMINI_MAX_WAIT,
+        poll_interval=GEMINI_POLL_INTERVAL,
+        shakedown=bool(SHAKEDOWN),
+        log_fn=_log,
+    )
+    return comments
 
 
 def run_triage(worktree, pr_number, comments, logger):

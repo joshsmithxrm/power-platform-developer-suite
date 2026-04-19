@@ -14,10 +14,15 @@ from _pathfix import get_project_dir
 
 def main() -> None:
     try:
-        tool_input = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
+    # Claude Code envelope: {"tool_name": "...", "tool_input": {"command": "..."}}
+    # Reading at the top level was a bug (v1-prelaunch retro item #2) — command
+    # was always "" so the gh-issue-create guard never enforced "fix don't file"
+    # during review/converge cycles. Fix: read from nested ``tool_input`` dict.
+    tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command", "")
 
     # Only enforce on gh issue create

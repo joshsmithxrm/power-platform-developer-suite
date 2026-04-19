@@ -131,6 +131,12 @@ Bump `package.json` version AND sync the lock file:
 ( cd src/PPDS.Extension && npm install )
 ```
 
+**Why odd/even split?** VS Code Marketplace publishes both channels from the
+same codebase; version gating happens at package time. Odd minors map to the
+pre-release channel; even minors map to the stable channel. A single git tag
+push does NOT automatically update the marketplace listing for both — see
+`extension-publish.yml` for the channel-specific publish flow.
+
 ### 5. Package Lineage — discover at release time, do not hardcode
 
 Each package has its own lineage. Embedding the current version table here would go stale on every release. Instead, query the actual state when you need it:
