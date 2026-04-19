@@ -63,7 +63,37 @@ git checkout -b feat/your-feature-name
 | TUI tests | `dotnet test --filter Category=TuiUnit` | When modifying TUI code |
 | Integration tests | `dotnet test --filter Category=Integration` | Requires Dataverse connection |
 
-The pre-commit hook automatically runs unit tests (~10s).
+The pre-commit hook automatically runs unit tests (~10s). It is configured
+by `npm install`; if you need to enable it manually:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+The hook runs:
+- **C# staged:** `dotnet build` + `dotnet test` (unit only)
+- **TS staged:** typecheck + eslint + Vitest
+
+Drop-in scripts under `scripts/hooks/pre-commit.d/` run before the .NET / TS
+gates. See `docs/CLAUDE-MD-GOVERNANCE.md` for the CLAUDE.md gate that lives there.
+
+### Coverage Bar
+
+PRs must achieve at least **80% patch coverage** on new code, enforced by
+Codecov. See `Test-NewCodeCoverage.ps1` (in `scripts/`) for the local
+check that mirrors CI.
+
+### File Placement
+
+Tests mirror the source path under `tests/`:
+
+```
+src/PPDS.Cli/Services/AuthService.cs
+tests/PPDS.Cli.Tests/Services/AuthServiceTests.cs
+```
+
+Per-area conventions (which framework to use where, trait categories) live
+in the `test-conventions` skill: `.claude/skills/test-conventions/SKILL.md`.
 
 ## Pull Request Process
 
