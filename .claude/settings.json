@@ -235,6 +235,26 @@
         ]
       },
       {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/claudemd-line-cap.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/claudemd-line-cap.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Bash(git commit:*)",
         "hooks": [
           {
