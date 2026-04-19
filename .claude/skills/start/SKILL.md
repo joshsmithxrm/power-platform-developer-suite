@@ -141,16 +141,36 @@ through to Step 5; otherwise stop here.
 
 ### Step 5: Create Worktree and Initialize State
 
+**Use the `worktree-create.py` helper — do NOT open-code
+`git worktree add`.** The helper enforces the safety properties that
+`/start` kept losing in practice (fixes #799):
+- always fetches `origin main` first, so the worktree is based on the
+  current remote tip (not a stale local `main` ref)
+- detects stranded target directories (exist on disk but not registered
+  as worktrees) and refuses loudly rather than producing a silently
+  broken worktree with stranded index residue
+- sanity-checks that `git status` is clean and HEAD matches `origin/main`
+  before handing the worktree back
+
 ```bash
-# Check if branch already exists
-git branch --list "feat/<name>"
+python scripts/worktree-create.py --name <name>
+# Optional: --branch <branch> to reuse/create a non-default branch name
+# Optional: --repo-root <path> when invoking from a non-cwd repo
+```
 
-# Create worktree (omit -b if branch exists)
-git worktree add .worktrees/<name> -b feat/<name>
-# or if branch exists:
-git worktree add .worktrees/<name> feat/<name>
+**Exit code handling — do not ignore non-zero:**
+- `0` — success, proceed to state init below
+- `1` — stranded directory detected. Surface the message verbatim to the
+  user (includes the cleanup command). Do NOT auto-delete; the stranded
+  directory may contain the user's in-progress work.
+- `2` — fetch or creation failed. Surface stderr and stop.
+- `3` — sanity check failed (dirty index or HEAD != origin/main). Surface
+  the diagnostic and stop; a worktree on a stale base is exactly the
+  #799 failure mode.
 
-# Initialize workflow state in the worktree
+On success, initialize workflow state in the new worktree:
+
+```bash
 python scripts/workflow-state.py init "feat/<name>"
 python scripts/workflow-state.py set phase starting
 ```
@@ -244,51 +264,62 @@ Routing instruction by launch command:
 - All paths relative to worktree root unless the reference is outside it.
 - Critical overrides go directly in the prompt — do not bury them in referenced files.
 
-#### 6c: Write launch script and spawn new window
+#### 6c: Write the prompt to a file and invoke the launch helper
 
-Platform detection:
+**Use the `launch-claude-session.py` helper — do NOT open-code
+`Start-Process` or the here-string yourself.** The v1 dispatch AI
+substituted `start pwsh -NoExit -Command "..."` for the correct
+`Start-Process pwsh -ArgumentList '-NoExit','-File','...'` pattern, which
+runs `claude` without a TTY — claude exits immediately, leaving a dead
+pwsh shell. See bug 3 of issue #799's PR. The helper writes a
+PowerShell here-string `.ps1` and spawns via
+`Start-Process -File`, so claude always gets a real TTY.
+
+The helper also:
+- resolves the claude binary's absolute Windows path (node version
+  managers like fnm/nvm use session-scoped shims that don't persist
+  into the spawned shell — embedding the absolute path avoids that)
+- escapes nothing — the prompt body is read verbatim from a file
+- writes NO `.plans/context.md` or any other handoff file (see Rule 8
+  — file-based handoffs are deprioritized by the receiving session)
 
 ```bash
-uname -s
+# 1. Write the prompt built in 6b to a temp file.
+PROMPT_FILE=$(mktemp -t start-prompt-XXXXXX.txt)
+cat > "$PROMPT_FILE" <<'PROMPT_EOF'
+<full prompt content from 6b, verbatim>
+PROMPT_EOF
+
+# 2. Invoke the helper from the main repo root.
+python scripts/launch-claude-session.py \
+  --target "<worktree-absolute-path>" \
+  --name <name> \
+  --prompt-file "$PROMPT_FILE"
+
+# 3. Clean up the temp prompt file once the helper exits.
+rm -f "$PROMPT_FILE"
 ```
 
-**Windows (MINGW/MSYS) — primary path:**
+Exit codes:
+- `0` — spawned successfully
+- `1` — prompt missing or malformed (e.g., a line starts with `'@`,
+  which would terminate the PowerShell here-string). Fix the prompt
+  content and retry.
+- `2` — spawn failed (pwsh not on PATH, policy blocks unsigned scripts,
+  etc.). The helper prints a manual-fallback command to stderr — show
+  it to the user verbatim.
 
-1. Create launch-script directory: `mkdir -p "$LOCALAPPDATA/ppds"`
-2. Resolve the worktree absolute Windows path: `cygpath -w "<worktree-absolute-path>"`
-3. Resolve the claude binary's full Windows path: `cygpath -w "$(which claude)"` — node version managers (fnm, nvm, volta) use session-scoped shims that may not persist in the spawned shell, so embed the absolute path.
-4. Write `$LOCALAPPDATA/ppds/launch-<name>.ps1` with a PowerShell single-quoted here-string (`@' ... '@`) wrapping the prompt content verbatim:
+**WSL2:** if `uname -r` contains `microsoft`, do not invoke the helper
+— WSL-local pwsh spawns inside WSL, not on the Windows host. Print the
+manual fallback (6d) directly.
 
-   ```powershell
-   Set-Location -Path "<worktree-windows-path>"
-
-   $prompt = @'
-   <full prompt content from 6b, verbatim>
-   '@
-
-   & "<claude-absolute-windows-path>" $prompt
-   ```
-
-   Use the Write tool to produce this file — do not shell-escape the prompt content manually.
-
-5. Spawn a new console window by invoking `Start-Process` from the current shell:
-
-   ```bash
-   pwsh -Command "Start-Process pwsh -ArgumentList '-NoExit','-File','<launch-script-windows-path>'"
-   ```
-
-   `Start-Process` opens a new console; on Windows 11 with Windows Terminal as default, the OS delegates to WT automatically.
-
-**Windows fallbacks, in order:**
-
-- If `pwsh` is not on PATH or execution policy is `Restricted`/`AllSigned` (check with `pwsh -Command "Get-ExecutionPolicy"`), skip to manual fallback.
-- If running under WSL2 (`uname -r` contains `microsoft`), do not use WSL-local pwsh — fall through to manual fallback.
-
-**Linux/Mac:** No reliable cross-distro terminal launch. Print the manual fallback (see 6d).
+**Linux/Mac:** no reliable cross-distro terminal launch. Print the
+manual fallback (6d).
 
 #### 6d: Manual fallback
 
-If the launcher fails or the platform has no reliable terminal-spawn path, print:
+If the helper returns non-zero or the platform has no reliable
+terminal-spawn path, print:
 
 ```
 Could not open a new terminal automatically. Open PowerShell and run:
@@ -299,6 +330,10 @@ Could not open a new terminal automatically. Open PowerShell and run:
   '@
   claude $prompt
 ```
+
+Note the bare `claude $prompt` — NOT `claude -p $prompt`. The `-p`
+flag is non-interactive (claude exits after one response); bare
+positional keeps the session interactive.
 
 On Linux/Mac, substitute shell-appropriate syntax (bash here-doc).
 

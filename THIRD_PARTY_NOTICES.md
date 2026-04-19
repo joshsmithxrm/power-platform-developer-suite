@@ -261,9 +261,7 @@ A minimal subset of the `microsoft/git-credential-manager` source for cross-plat
 credential storage (Windows Credential Manager, macOS Keychain, Linux libsecret) is
 vendored into `src/PPDS.Auth/Internal/CredentialStore/` at commit
 `5fa7116896c82164996a609accd1c5ad90fe730a` (tag v2.7.3). Original Microsoft/GitHub
-MIT copyright is attributed in each vendored file's header. Vendoring rationale:
-removed the `Devlooped.CredentialManager` package to eliminate its OSMFEULA-licensed
-binary distribution for enterprise consumers.
+MIT copyright is attributed in each vendored file's header.
 
 ---
 
