@@ -32,7 +32,8 @@ ppds data export --schema schema.xml --output data.zip
 |---------|-------------|
 | Libraries & CLI | .NET 8.0+ (Windows / macOS / Linux) |
 | VS Code Extension | VS Code 1.109+ |
-| Extension development | Node.js 20+ |
+| Extension development | Node.js 20+ / TypeScript 5+ |
+| Workflow scripts | Python 3.11+ (`scripts/`) |
 | Plugin assemblies | .NET Framework 4.6.2 (Dataverse sandbox target) |
 
 ## v1.0 Highlights

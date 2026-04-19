@@ -86,10 +86,15 @@ def main() -> None:
     project_dir = get_project_dir()
 
     try:
-        tool_input = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
+    # Claude Code envelope: {"tool_name": "...", "tool_input": {"command": "..."}}
+    # Reading at the top level was a bug (v1-prelaunch retro item #2) — command
+    # was always "" so the hook would silently allow every rm without checking
+    # whether the path was within the project. Fix: read from nested tool_input.
+    tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command", "")
     if not command:
         sys.exit(0)

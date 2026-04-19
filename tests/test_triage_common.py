@@ -369,6 +369,69 @@ class TestDetectGeminiOverload:
 
 
 # ---------------------------------------------------------------------------
+# v1-prelaunch retro item #5: paginate --slurp flatten
+# ---------------------------------------------------------------------------
+
+
+class TestPaginateSlurpFlatten:
+    """v1-prelaunch retro item #5: gh api --paginate --slurp returns a
+    list-of-pages where each page is itself a list. Without flattening,
+    callers crash with AttributeError: 'list' object has no attribute 'get'.
+
+    These tests verify get_unreplied_comments and detect_gemini_overload
+    survive paginated responses (the actual production-API shape).
+    """
+
+    def test_get_unreplied_comments_handles_paginated_response(self, tmp_path):
+        """gh api --paginate --slurp returns [[...], [...]] — must flatten."""
+        page1 = [
+            {"id": 1, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None,
+             "path": "a.py", "line": 1, "body": "Issue A"},
+        ]
+        page2 = [
+            {"id": 2, "user": {"login": "github-advanced-security[bot]"},
+             "in_reply_to_id": None,
+             "path": "b.py", "line": 1, "body": "Issue B"},
+        ]
+        # Slurp returns list-of-pages
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps([page1, page2]), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+        # Both bot comments unreplied -> both returned (no AttributeError)
+        assert len(result) == 2
+        ids = {c["id"] for c in result}
+        assert ids == {1, 2}
+
+    def test_get_unreplied_comments_handles_flat_response(self, tmp_path):
+        """Already-flat response is returned unchanged."""
+        flat = [
+            {"id": 1, "user": {"login": "gemini-code-assist[bot]"},
+             "in_reply_to_id": None,
+             "path": "a.py", "line": 1, "body": "Issue"},
+        ]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(flat), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                result = get_unreplied_comments(str(tmp_path), 42)
+        assert len(result) == 1
+
+    def test_detect_overload_handles_paginated_response(self, tmp_path):
+        """detect_gemini_overload must also flatten paginate-slurp output."""
+        page1 = [{"user": {"login": "user1"}, "body": "hello"}]
+        page2 = [{"user": {"login": "gemini-code-assist[bot]"},
+                  "body": "We're experiencing higher than usual traffic"}]
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps([page1, page2]), stderr="")
+        with patch("triage_common.subprocess.run", return_value=mock_result):
+            with patch("triage_common.get_repo_slug", return_value="owner/repo"):
+                assert detect_gemini_overload(str(tmp_path), 42) is True
+
+
+# ---------------------------------------------------------------------------
 # unified triage pass (AC-145)
 # ---------------------------------------------------------------------------
 
