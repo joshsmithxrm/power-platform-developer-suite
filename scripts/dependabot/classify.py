@@ -114,9 +114,10 @@ class Classification:
 
 
 # Regex for "Bump <pkg> from <a> to <b>" (case-insensitive on Bump).
-# Captures package and both versions. Handles npm-scoped (@org/pkg) and NuGet (Foo.Bar.Baz).
+# Captures package and both versions. Handles npm-scoped (@org/pkg), NuGet
+# (Foo.Bar.Baz), and GitHub Actions style "v"-prefixed versions (e.g. v3 -> v4).
 _BUMP_TITLE_RE = re.compile(
-    r"^[Bb]ump\s+(?P<pkg>[@A-Za-z0-9._/-]+)\s+from\s+(?P<from>[0-9][^\s]*)\s+to\s+(?P<to>[0-9][^\s]*)",
+    r"^[Bb]ump\s+(?P<pkg>[@A-Za-z0-9._/-]+)\s+from\s+(?P<from>v?[0-9][^\s]*)\s+to\s+(?P<to>v?[0-9][^\s]*)",
 )
 
 # Regex for grouped bumps: "Bump the <group> group ..."
@@ -170,12 +171,16 @@ def classify_update_type(from_v: Optional[str], to_v: Optional[str]) -> str:
     while len(tp) < 3:
         tp.append(0)
 
+    # Any downgrade (lexicographic on the version tuple) is treated as
+    # major-equivalent — requires manual review per docs/MERGE-POLICY.md.
+    # Catches not only major downgrades (2.x -> 1.x) but also minor (1.2 -> 1.1)
+    # and patch (1.0.2 -> 1.0.1) downgrades that would otherwise be classified
+    # as 'minor'/'patch' and slip through auto-merge gates.
+    if tp < fp:
+        return "major"
     if tp[0] > fp[0]:
         return "major"
-    if tp[0] < fp[0]:
-        # Downgrade — treat as major-equivalent (requires manual review)
-        return "major"
-    if tp[1] != fp[1]:
+    if tp[1] > fp[1]:
         return "minor"
     return "patch"
 
@@ -226,17 +231,25 @@ def touches_auth_critical_path(files: Iterable[str]) -> bool:
     return False
 
 
+_LOCKFILE_BASENAMES = frozenset({
+    "package-lock.json",
+    "packages.lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+})
+
+
 def is_lockfile_only(files: Iterable[str]) -> bool:
-    """True if the diff only touches lock files (package-lock.json, packages.lock.json)."""
+    """True if the diff only touches well-known lock files.
+
+    Uses exact basename matching to avoid false positives like
+    ``custom-package-lock.json`` or ``docs/package-lock.json.md`` slipping
+    through ``str.endswith`` checks.
+    """
     files = list(files)
     if not files:
         return False
-    return all(
-        f.endswith("package-lock.json")
-        or f.endswith("packages.lock.json")
-        or f.endswith("yarn.lock")
-        for f in files
-    )
+    return all(f.split("/")[-1] in _LOCKFILE_BASENAMES for f in files)
 
 
 def changelog_signals_breaking(body: str) -> bool:

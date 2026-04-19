@@ -69,6 +69,14 @@ class TestParseTitle(unittest.TestCase):
         self.assertIsNone(fv)
         self.assertIsNone(tv)
 
+    def test_v_prefix_github_actions(self):
+        # GitHub Actions commonly uses "vN" tags — make sure the bump-title
+        # regex captures both versions even when prefixed.
+        pkg, fv, tv = classify.parse_title("Bump actions/checkout from v3 to v4")
+        self.assertEqual(pkg, "actions/checkout")
+        self.assertEqual(fv, "v3")
+        self.assertEqual(tv, "v4")
+
 
 class TestClassifyUpdateType(unittest.TestCase):
     def test_patch(self):
@@ -100,6 +108,15 @@ class TestClassifyUpdateType(unittest.TestCase):
         self.assertEqual(classify.classify_update_type(None, "1.0.0"), "unknown")
         self.assertEqual(classify.classify_update_type("1.0.0", None), "unknown")
         self.assertEqual(classify.classify_update_type(None, None), "unknown")
+
+    def test_minor_downgrade_treated_as_major(self):
+        # Any downgrade — including minor (1.2.0 -> 1.1.0) — must classify as
+        # 'major' so it routes to Group C / manual review and never auto-merges.
+        self.assertEqual(classify.classify_update_type("1.2.0", "1.1.0"), "major")
+
+    def test_patch_downgrade_treated_as_major(self):
+        # Patch-level downgrade (1.0.2 -> 1.0.1) is also suspicious.
+        self.assertEqual(classify.classify_update_type("1.0.2", "1.0.1"), "major")
 
 
 class TestDetectEcosystem(unittest.TestCase):
@@ -318,6 +335,64 @@ class TestClassifyPR(unittest.TestCase):
             files=["Directory.Packages.props"],
         )
         c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+
+    def test_v_prefix_github_actions_major_is_group_c(self):
+        # actions/checkout v3 -> v4 must parse and route to Group C.
+        pr = make_pr(
+            number=855,
+            title="Bump actions/checkout from v3 to v4",
+            labels=["github_actions", "dependencies"],
+            head_ref="dependabot/github_actions/actions/checkout-v4",
+            files=[".github/workflows/ci.yml"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.package, "actions/checkout")
+        self.assertEqual(c.from_version, "v3")
+        self.assertEqual(c.to_version, "v4")
+        self.assertEqual(c.update_type, "major")
+        self.assertEqual(c.group, "C")
+
+    def test_minor_downgrade_is_group_c(self):
+        # 1.2.0 -> 1.1.0 was previously classified as 'minor' and could slip
+        # through auto-merge. Now any downgrade is Group C.
+        pr = make_pr(
+            number=856,
+            title="Bump SomePkg from 1.2.0 to 1.1.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/SomePkg-1.1.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.update_type, "major")
+        self.assertEqual(c.group, "C")
+
+    def test_pnpm_lockfile_detected(self):
+        # pnpm-lock.yaml-only diffs should be Group A (lockfile-only).
+        pr = make_pr(
+            number=857,
+            title="Bump some-transitive-dep from 1.0.0 to 1.0.1",
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/some-transitive-dep-1.0.1",
+            files=["pnpm-lock.yaml"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertIn("lockfile", c.reason.lower())
+
+    def test_lockfile_lookalike_not_detected(self):
+        # A file like custom-package-lock.json must NOT count as a lockfile.
+        # (Was a false-positive risk under the old endswith-based check.)
+        pr = make_pr(
+            number=858,
+            title="Bump SomePkg from 2.0.0 to 3.0.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/SomePkg-3.0.0",
+            files=["docs/custom-package-lock.json"],
+        )
+        # Major bump; lockfile-only short-circuit must NOT fire.
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.update_type, "major")
         self.assertEqual(c.group, "C")
 
 
