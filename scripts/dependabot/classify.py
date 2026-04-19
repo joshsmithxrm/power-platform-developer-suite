@@ -151,40 +151,61 @@ def parse_group_members(body: str) -> list[tuple[str, str, str]]:
     return out
 
 
-def most_conservative_group(
-    member_types: Iterable[str],
-    has_auth_critical: bool = False,
-) -> Optional[str]:
-    """Return the most-conservative classification group ("A" / "B" / "C") for a list of member update types.
+def resolve_member_group(pkg: Optional[str], update_type: Optional[str]) -> str:
+    """Resolve the per-member group ("A" / "B" / "C") for a single grouped-PR member.
 
-    Per docs/MERGE-POLICY.md "Grouped Dependabot PRs":
-      - any 'major' -> C
-      - any auth-critical member at non-major -> B (regardless of patch/minor mix)
-      - any 'minor' (no majors, no auth-critical) -> B
-      - only 'patch' (no auth-critical) -> A
-      - any 'unknown' (and no major/minor/auth-critical) -> None (caller must decide)
-      - empty input -> None
+    Mirrors the single-PR ``classify_pr`` decision tree, stripped to just the
+    A/B/C group selection:
+      - ``update_type`` in {"major", "unknown"} (or None coalesced to "unknown")
+        -> C (per MERGE-POLICY.md "When unsure, default to manual merge")
+      - auth-critical package at non-major -> B
+      - tooling/test package at non-major -> A
+      - otherwise: "minor" -> B, "patch" -> A, anything else -> C
 
-    The ``has_auth_critical`` flag should be True when any group member's package
-    name returns True from ``is_auth_critical_package``. This implements the
-    auth-critical override: a group of all-patch bumps is normally Group A, but
-    if any member is auth-critical (e.g., Microsoft.Identity.Client patch), the
-    group is elevated to Group B per MERGE-POLICY.md "Auth-Critical Packages".
+    Note: per-member file-path / breaking-change detection is NOT applied here
+    because grouped Dependabot PRs share a single diff and body across members;
+    those signals are evaluated at the group level by ``classify_pr``.
     """
-    types = list(member_types)
-    if not types:
-        return None
-    if "major" in types:
+    t = update_type or "unknown"
+    if t in ("major", "unknown"):
         return "C"
-    if has_auth_critical:
-        # Any non-major auth-critical bump elevates the whole group to B.
+    if is_auth_critical_package(pkg):
+        # Auth-critical at any non-major version -> verify-then-merge.
         return "B"
-    if "minor" in types:
-        return "B"
-    if all(t == "patch" for t in types):
+    if is_tooling_package(pkg):
+        # Tooling at any non-major version -> auto-merge eligible.
         return "A"
-    # Mix of patch and unknown — caller decides
-    return None
+    if t == "minor":
+        return "B"
+    if t == "patch":
+        return "A"
+    # Defensive — any unrecognised update_type defaults to manual review.
+    return "C"
+
+
+# Group ordering for "most conservative wins" comparisons.
+# Higher number = more conservative; max() picks the worst of the bunch.
+_GROUP_RANK = {"A": 0, "B": 1, "C": 2}
+
+
+def most_conservative_group(
+    members: Iterable[tuple[Optional[str], Optional[str]]],
+) -> Optional[str]:
+    """Return the most-conservative classification group ("A" / "B" / "C") across grouped-PR members.
+
+    ``members`` is an iterable of ``(package_name, update_type)`` tuples. Each
+    member's individual group is determined by ``resolve_member_group``, then
+    the most conservative (C > B > A) wins per docs/MERGE-POLICY.md "Grouped
+    Dependabot PRs".
+
+    Returns None for an empty iterable so the caller can fall back to a
+    grouped-PR-wide default (e.g., Group C for unparseable bodies).
+    """
+    member_list = list(members)
+    if not member_list:
+        return None
+    groups = [resolve_member_group(pkg, t) for (pkg, t) in member_list]
+    return max(groups, key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]))
 
 
 def parse_title(title: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -341,18 +362,20 @@ def classify_pr(pr: dict) -> Classification:
     ecosystem = detect_ecosystem(labels, head_ref)
     update_type = classify_update_type(from_v, to_v)
 
-    # Grouped bumps — apply most-conservative-wins per docs/MERGE-POLICY.md
-    # "Grouped Dependabot PRs": any major -> C, any minor (no majors) -> B,
-    # only patch -> A. Members are parsed from the PR body.
+    # Grouped bumps — apply per-member group resolution then most-conservative-wins
+    # per docs/MERGE-POLICY.md "Grouped Dependabot PRs". Each member is classified
+    # individually (considering package name, update type, and downgrades), then
+    # the worst of (A < B < C) wins. Members are parsed from the PR body.
     if pkg and pkg.startswith("group:"):
         members = parse_group_members(body)
         if not members:
-            # No member info parseable — fall back to Group B so the operator
-            # inspects manually rather than auto-merging blind.
+            # No member info parseable — default to Group C ("when unsure,
+            # default to manual merge") for consistency with the single-PR
+            # unparseable fallback further down.
             return Classification(
                 pr_number=number,
-                group="B",
-                reason=f"grouped bump '{pkg}' — could not parse members from body, defaulting to verify-then-merge",
+                group="C",
+                reason=f"grouped bump '{pkg}' — could not parse members from body, defaulting to manual review",
                 ecosystem=ecosystem,
                 update_type="unknown",
                 package=pkg,
@@ -360,54 +383,42 @@ def classify_pr(pr: dict) -> Classification:
                 to_version=None,
             )
 
-        member_types = [classify_update_type(fv, tv) for (_p, fv, tv) in members]
-        # Auth-critical override: any non-major auth-critical member elevates
-        # the whole group to Group B per MERGE-POLICY.md.
-        auth_critical_member = next(
-            (m for m in members if is_auth_critical_package(m[0])),
+        # Resolve each member's update type and individual group. Null/None
+        # update types are coalesced to "unknown" by resolve_member_group,
+        # which itself maps "unknown" -> Group C.
+        member_records = []
+        for p, fv, tv in members:
+            t = classify_update_type(fv, tv) or "unknown"
+            g = resolve_member_group(p, t)
+            member_records.append((p, fv, tv, t, g))
+
+        chosen = max(
+            (r[4] for r in member_records),
+            key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]),
+        )
+
+        # Pick a trigger member to cite in the reason string. Prefer a member
+        # whose individual group matches the chosen group; among those, prefer
+        # an auth-critical package (so its override is named explicitly per
+        # MERGE-POLICY.md "Auth-Critical Packages").
+        chosen_members = [r for r in member_records if r[4] == chosen]
+        auth_critical_in_chosen = next(
+            (r for r in chosen_members if is_auth_critical_package(r[0])),
             None,
         )
-        has_auth_critical = auth_critical_member is not None and "major" not in member_types
-        chosen = most_conservative_group(member_types, has_auth_critical=has_auth_critical)
-        if chosen is None:
-            # Mixed patch/unknown — be conservative.
-            return Classification(
-                pr_number=number,
-                group="B",
-                reason=f"grouped bump '{pkg}' — {len(members)} members with unparseable versions, defaulting to verify-then-merge",
-                ecosystem=ecosystem,
-                update_type="unknown",
-                package=pkg,
-                from_version=None,
-                to_version=None,
-            )
+        trigger = auth_critical_in_chosen or chosen_members[0]
+        trigger_type = trigger[3]
 
-        # Determine which member triggered the chosen group, for the reason string.
-        # Special case: Group B chosen via auth-critical override on an all-patch
-        # group has no "minor" trigger — pick the auth-critical member as the
-        # trigger and label its actual update type.
-        type_to_label = {"A": "patch", "B": "minor", "C": "major"}
-        if chosen == "B" and has_auth_critical and "minor" not in member_types:
-            trigger = auth_critical_member
-            trigger_type = classify_update_type(trigger[1], trigger[2])
-        else:
-            trigger_type = type_to_label[chosen]
-            trigger = next(
-                (m for m, t in zip(members, member_types) if t == trigger_type),
-                members[0],
-            )
         reason = (
             f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
             f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
         )
-        # When an auth-critical member contributed to the Group B classification,
-        # name it explicitly in the reason so the operator knows why the override
-        # applied (per MERGE-POLICY.md "Auth-Critical Packages").
-        if chosen == "B" and has_auth_critical:
-            ac_type = classify_update_type(auth_critical_member[1], auth_critical_member[2])
+        # When the trigger is an auth-critical package, surface that explicitly
+        # so the operator knows why the override applied.
+        if is_auth_critical_package(trigger[0]):
             reason += (
                 f"; auth-critical override "
-                f"({auth_critical_member[0]} {auth_critical_member[1]} -> {auth_critical_member[2]}, {ac_type})"
+                f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
             )
         return Classification(
             pr_number=number,

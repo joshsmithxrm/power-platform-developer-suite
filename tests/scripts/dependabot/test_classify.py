@@ -262,8 +262,11 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "B")
         self.assertIn("auth-critical path", c.reason)
 
-    def test_grouped_bump_no_body_defaults_to_b(self):
-        # No body to parse members from — fall back to Group B (verify-then-merge).
+    def test_grouped_unparseable_defaults_to_group_c(self):
+        # No body to parse members from — fall back to Group C ("when unsure,
+        # default to manual merge"), matching the single-PR unparseable
+        # fallback. Previously defaulted to B; tightened to C per gemini
+        # second-pass review on PR #819.
         pr = make_pr(
             number=844,
             title="Bump the npm_and_yarn group across 1 directory with 2 updates",
@@ -272,8 +275,9 @@ class TestClassifyPR(unittest.TestCase):
             files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
         )
         c = classify.classify_pr(pr)
-        self.assertEqual(c.group, "B")
+        self.assertEqual(c.group, "C")
         self.assertIn("grouped", c.reason)
+        self.assertIn("manual review", c.reason)
 
     # Grouped PR most-conservative-wins (issue #817) — three cases:
     # all-patch -> A, any-minor (no major) -> B, any-major -> C.
@@ -358,6 +362,49 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "B")
         self.assertIn("auth-critical", c.reason)
         self.assertIn("Microsoft.Identity.Client", c.reason)
+
+    def test_grouped_with_downgrade_member_is_group_c(self):
+        # A grouped PR where one member is a downgrade (1.0.2 -> 1.0.1)
+        # must classify as Group C — per-member group resolution treats the
+        # downgrade as 'major' (per classify_update_type) which routes to C.
+        pr = make_pr(
+            number=865,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n"
+                "Updates `baz` from 1.0.2 to 1.0.1\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("most-conservative=major", c.reason)
+
+    def test_grouped_with_unknown_member_is_group_c(self):
+        # A grouped PR with a member whose update_type can't be classified
+        # (non-numeric versions) must default to Group C per "when unsure,
+        # default to manual merge". Per-member resolver maps unknown -> C.
+        pr = make_pr(
+            number=866,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 0abc to 0xyz\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        # The unknown-typed member is the trigger; its update_type is "unknown".
+        self.assertEqual(c.update_type, "unknown")
 
     def test_grouped_with_auth_critical_minor_is_group_b(self):
         # Mix of patch + an auth-critical minor bump -> Group B.
