@@ -89,7 +89,7 @@ def fetch_pr_checks(pr_number: int) -> list[dict]:
 
 def is_dependabot_pr(pr: dict) -> bool:
     """True if the PR is dependabot-originated."""
-    labels = {lbl.get("name", "").lower() for lbl in pr.get("labels", [])}
+    labels = {(lbl.get("name") or "").lower() for lbl in (pr.get("labels") or [])}
     if "dependencies" in labels:
         return True
     author = (pr.get("author") or {}).get("login", "").lower()
@@ -118,7 +118,7 @@ def check_test_job_ran(checks: list[dict]) -> tuple[bool, str]:
       - FAILURE / CANCELLED / TIMED_OUT / ACTION_REQUIRED / NEUTRAL -> fail
       - missing entirely -> fail
     """
-    by_name = {c.get("name", ""): (c.get("state", "") or "").upper() for c in checks}
+    by_name = {(c.get("name") or ""): (c.get("state") or "").upper() for c in checks}
 
     found = []
     for required in REQUIRED_TEST_JOB_NAMES:

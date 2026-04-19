@@ -167,6 +167,37 @@ class TestMalformedInput:
         passed, _ = check_pr_size.check_pr_size({})
         assert passed  # all zeros — under limits
 
+    def test_null_additions_treated_as_zero(self):
+        passed, msg = check_pr_size.check_pr_size(
+            {"additions": None, "deletions": 0, "changedFiles": 5,
+             "title": "", "body": ""},
+        )
+        assert passed
+        assert "OK" in msg
+
+    def test_null_deletions_treated_as_zero(self):
+        passed, msg = check_pr_size.check_pr_size(
+            {"additions": 10, "deletions": None, "changedFiles": 5,
+             "title": "", "body": ""},
+        )
+        assert passed
+        assert "OK" in msg
+
+    def test_null_changed_files_treated_as_zero(self):
+        passed, msg = check_pr_size.check_pr_size(
+            {"additions": 10, "deletions": 0, "changedFiles": None,
+             "title": "", "body": ""},
+        )
+        assert passed
+        assert "0 files" in msg
+
+    def test_all_null_size_fields_treated_as_zero(self):
+        passed, _ = check_pr_size.check_pr_size(
+            {"additions": None, "deletions": None, "changedFiles": None,
+             "title": "", "body": ""},
+        )
+        assert passed
+
 
 # ---------------------------------------------------------------------------
 # CLI entry

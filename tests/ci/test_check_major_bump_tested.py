@@ -51,6 +51,15 @@ class TestIsDependabotPr:
     def test_label_match_is_case_insensitive(self):
         assert cmbt.is_dependabot_pr(make_pr(labels=["Dependencies"]))
 
+    def test_null_label_name_treated_as_empty(self):
+        # Defensive: gh shouldn't return null label names, but handle it.
+        pr = {"labels": [{"name": None}, {"name": "dependencies"}], "author": {"login": ""}}
+        assert cmbt.is_dependabot_pr(pr)
+
+    def test_null_labels_list_treated_as_empty(self):
+        pr = {"labels": None, "author": {"login": "alice"}}
+        assert not cmbt.is_dependabot_pr(pr)
+
 
 # ---------------------------------------------------------------------------
 # Major bump detection (delegates to classify_pr)
@@ -158,6 +167,23 @@ class TestCheckTestJobRan:
             {"name": "lint", "state": "SUCCESS"},
         ])
         assert passed
+
+    def test_null_check_name_does_not_crash(self):
+        # Defensive: a check entry with null name shouldn't crash.
+        passed, msg = cmbt.check_test_job_ran([
+            {"name": None, "state": "SUCCESS"},
+            {"name": "test", "state": "SUCCESS"},
+        ])
+        assert passed
+
+    def test_null_check_state_treated_as_pending(self):
+        # Defensive: a null state for the test job should be treated like
+        # "still running / unknown", not crash.
+        passed, msg = cmbt.check_test_job_ran([
+            {"name": "test", "state": None},
+        ])
+        assert not passed
+        assert "still running" in msg or "did not pass" in msg
 
 
 # ---------------------------------------------------------------------------

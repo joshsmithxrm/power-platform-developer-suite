@@ -80,9 +80,9 @@ def check_pr_size(pr: dict) -> tuple[bool, str]:
     `pr` must have keys: additions, deletions, changedFiles, title, body.
     """
     try:
-        additions = int(pr.get("additions", 0))
-        deletions = int(pr.get("deletions", 0))
-        files = int(pr.get("changedFiles", 0))
+        additions = int(pr.get("additions") or 0)
+        deletions = int(pr.get("deletions") or 0)
+        files = int(pr.get("changedFiles") or 0)
     except (TypeError, ValueError) as e:
         return False, f"malformed PR data (additions/deletions/changedFiles not numeric): {e}"
 

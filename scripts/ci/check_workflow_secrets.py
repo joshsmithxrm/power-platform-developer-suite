@@ -42,8 +42,8 @@ from typing import Iterable, Optional
 # Match ``${{ secrets.NAME }}`` and ``${{ vars.NAME }}`` allowing arbitrary
 # whitespace inside the ``${{ }}`` and around the dot. Names are
 # letters/digits/underscores per GitHub Actions spec.
-SECRET_REF_RE = re.compile(r"\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-VAR_REF_RE = re.compile(r"\$\{\{\s*vars\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+SECRET_REF_RE = re.compile(r"\$\{\{\s*secrets\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+VAR_REF_RE = re.compile(r"\$\{\{\s*vars\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 ALLOW_MARKER_RE = re.compile(r"\[secret-ref-allow:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]")
 
 # Built-in / always-present secrets.
@@ -70,7 +70,7 @@ def fetch_pr_metadata(pr_number: int) -> dict:
         "--json", "title,body,files",
     ])
     data = json.loads(raw)
-    files = [f.get("path", "") for f in data.get("files", [])]
+    files = [f.get("path") or "" for f in (data.get("files") or [])]
     workflow_files = [
         f for f in files
         if f.startswith(".github/workflows/")
@@ -84,17 +84,26 @@ def fetch_pr_metadata(pr_number: int) -> dict:
 
 
 def fetch_repo_secrets() -> set[str]:
-    """List repo-level secret names via `gh secret list`."""
+    """List repo-level secret names via `gh secret list`.
+
+    Names are normalized to uppercase because GitHub treats secret/variable
+    names case-insensitively — comparing case-sensitively against workflow
+    references would produce false positives.
+    """
     raw = _run_gh(["secret", "list", "--json", "name"])
     data = json.loads(raw) if raw.strip() else []
-    return {item["name"] for item in data if "name" in item}
+    return {(item.get("name") or "").upper() for item in data if "name" in item}
 
 
 def fetch_repo_variables() -> set[str]:
-    """List repo-level variable names via `gh variable list`."""
+    """List repo-level variable names via `gh variable list`.
+
+    Names are normalized to uppercase because GitHub treats secret/variable
+    names case-insensitively — see ``fetch_repo_secrets``.
+    """
     raw = _run_gh(["variable", "list", "--json", "name"])
     data = json.loads(raw) if raw.strip() else []
-    return {item["name"] for item in data if "name" in item}
+    return {(item.get("name") or "").upper() for item in data if "name" in item}
 
 
 def extract_refs(workflow_text: str) -> tuple[set[str], set[str]]:
@@ -104,8 +113,8 @@ def extract_refs(workflow_text: str) -> tuple[set[str], set[str]]:
     string-substituted before YAML semantics; regex catches them in any
     YAML position (key, value, multi-line scalar).
     """
-    secrets = set(SECRET_REF_RE.findall(workflow_text))
-    variables = set(VAR_REF_RE.findall(workflow_text))
+    secrets = {s.upper() for s in SECRET_REF_RE.findall(workflow_text)}
+    variables = {v.upper() for v in VAR_REF_RE.findall(workflow_text)}
     return secrets, variables
 
 
@@ -114,7 +123,7 @@ def find_allow_markers(title: str, body: str) -> set[str]:
     allowed: set[str] = set()
     for blob in (title or "", body or ""):
         for m in ALLOW_MARKER_RE.finditer(blob):
-            allowed.add(m.group(1))
+            allowed.add(m.group(1).upper())
     return allowed
 
 
