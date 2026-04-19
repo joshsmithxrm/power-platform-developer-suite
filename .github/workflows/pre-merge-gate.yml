@@ -53,11 +53,23 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      # The default GITHUB_TOKEN cannot enumerate repo secrets/variables via
+      # `gh secret list` / `gh variable list` (HTTP 403 — Resource not
+      # accessible by integration). The `ppds-pre-merge-gate` GitHub App is
+      # provisioned with secrets:read + variables:read so we mint a token
+      # from it for this step only. App ID lives at vars.PPDS_GATE_APP_ID;
+      # private key at secrets.PPDS_GATE_APP_PRIVATE_KEY.
+      - name: Generate App token for inventory access
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.PPDS_GATE_APP_ID }}
+          private-key: ${{ secrets.PPDS_GATE_APP_PRIVATE_KEY }}
       - name: Check workflow secret-refs
         env:
-          # GITHUB_TOKEN can read repo secret/variable NAMES (not values) when
-          # used with `gh secret list --json name`. No elevated PAT required.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # App token (not GITHUB_TOKEN) — required for `gh secret list` and
+          # `gh variable list`. Returns NAMES only, never values.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python scripts/ci/check_workflow_secrets.py --pr "$PR_NUMBER"
 

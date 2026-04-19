@@ -100,10 +100,12 @@ For any PR that touches `.github/workflows/*.yml` or `*.yaml`:
 
 1. Parses every changed workflow file.
 2. Extracts every `${{ secrets.X }}` and `${{ vars.X }}` reference.
-3. Compares against the actual repo's secret/variable inventory (`gh secret list --json name`, `gh variable list --json name` — names only, no elevated permissions needed).
+3. Compares against the actual repo's secret/variable inventory (`gh secret list --json name`, `gh variable list --json name` — names only, never values).
 4. Blocks merge if any referenced name is missing.
 
 `GITHUB_TOKEN` is built-in and always considered present. Repo-level inventories only — environment-scoped secrets are not enumerated by default; if your workflow uses one, bypass it.
+
+**App token requirement.** Rule 2 requires the `ppds-pre-merge-gate` GitHub App installed with `secrets:read` and `variables:read`. The default `GITHUB_TOKEN` cannot enumerate repo secrets/variables (HTTP 403 — Resource not accessible by integration), so the workflow mints a short-lived App token via `actions/create-github-app-token@v1` for this rule only. App ID is stored at `vars.PPDS_GATE_APP_ID`; the private key (full `.pem`) is stored at `secrets.PPDS_GATE_APP_PRIVATE_KEY`.
 
 Bypass: `[secret-ref-allow: <NAME>]` in the PR title or body, repeated for each missing name. Use for legitimate cases such as secrets defined on a reusable workflow caller, environment-scoped secrets, or org-level secrets that the repo's `gh secret list` doesn't enumerate.
 
