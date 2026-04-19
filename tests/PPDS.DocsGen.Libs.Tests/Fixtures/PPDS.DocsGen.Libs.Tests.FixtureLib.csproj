@@ -9,7 +9,9 @@
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- CS1591: missing XML comment — we test behavior of the generator when some types lack summaries, so silence the warning here. -->
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- CS1574: cref could not be resolved — the fallback fixture below intentionally
+         uses an unresolvable cref to exercise the inheritdoc fallback path. -->
+    <NoWarn>$(NoWarn);CS1591;CS1574</NoWarn>
   </PropertyGroup>
 
 </Project>

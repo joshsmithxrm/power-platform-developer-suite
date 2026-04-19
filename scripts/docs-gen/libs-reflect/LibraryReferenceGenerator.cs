@@ -50,9 +50,18 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             var typeDoc = xmlDocs.ForType(type);
             if (typeDoc is null || string.IsNullOrWhiteSpace(typeDoc.Summary))
             {
-                diagnostics.Add(
-                    $"{packageName}: type '{type.FullName}' has no <summary> and is not marked [EditorBrowsable(Never)]; skipping.");
-                continue;
+                if (TryFallbackSummary(typeDoc, out var typeFallback, out var typePointer))
+                {
+                    diagnostics.Add(
+                        $"{packageName}: type '{type.FullName}' uses <inheritdoc /> but base documentation is unresolvable (target: {typePointer}); rendering fallback pointer.");
+                    typeDoc = typeDoc! with { Summary = typeFallback };
+                }
+                else
+                {
+                    diagnostics.Add(
+                        $"{packageName}: type '{type.FullName}' has no <summary> and is not marked [EditorBrowsable(Never)]; skipping.");
+                    continue;
+                }
             }
 
             var nsSubPath = NamespaceSubPath(type, packageName);
@@ -399,18 +408,15 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             // Record synthesizes a copy-ctor with no XML doc; skip silently.
             if (isRecord && IsRecordSynthesizedCtor(ctor)) continue;
             var doc = xmlDocs.ForMember(ctor);
-            if (doc is null || string.IsNullOrWhiteSpace(doc.Summary))
-            {
-                diags.Add($"{type.FullName}: constructor '{SignatureOf(ctor)}' has no <summary>; skipping.");
-                continue;
-            }
+            var summary = ResolveMemberSummary(doc, type, "constructor", SignatureOf(ctor), diags);
+            if (summary is null) continue;
             rows.Add(new MemberRow(
                 Group: "Constructors",
                 Name: ".ctor",
                 Heading: $"{type.Name}({FormatParams(ctor.GetParameters())})",
                 Signature: SignatureOf(ctor),
-                Summary: doc.Summary!,
-                Params: doc.Params,
+                Summary: summary,
+                Params: doc?.Params ?? Array.Empty<ParamDoc>(),
                 Returns: null));
         }
 
@@ -422,19 +428,16 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             // Records synthesize ToString/GetHashCode/Equals/PrintMembers/Deconstruct.
             if (isRecord && IsRecordSynthesizedMethod(method)) continue;
             var doc = xmlDocs.ForMember(method);
-            if (doc is null || string.IsNullOrWhiteSpace(doc.Summary))
-            {
-                diags.Add($"{type.FullName}: method '{method.Name}' has no <summary>; skipping.");
-                continue;
-            }
+            var summary = ResolveMemberSummary(doc, type, "method", method.Name, diags);
+            if (summary is null) continue;
             rows.Add(new MemberRow(
                 Group: "Methods",
                 Name: method.Name,
                 Heading: method.Name,
                 Signature: SignatureOf(method),
-                Summary: doc.Summary!,
-                Params: doc.Params,
-                Returns: doc.Returns));
+                Summary: summary,
+                Params: doc?.Params ?? Array.Empty<ParamDoc>(),
+                Returns: doc?.Returns));
         }
 
         foreach (var prop in type.GetProperties(flags))
@@ -443,17 +446,14 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             // Record synthesizes EqualityContract; not part of the author's surface.
             if (isRecord && prop.Name == "EqualityContract") continue;
             var doc = xmlDocs.ForMember(prop);
-            if (doc is null || string.IsNullOrWhiteSpace(doc.Summary))
-            {
-                diags.Add($"{type.FullName}: property '{prop.Name}' has no <summary>; skipping.");
-                continue;
-            }
+            var summary = ResolveMemberSummary(doc, type, "property", prop.Name, diags);
+            if (summary is null) continue;
             rows.Add(new MemberRow(
                 Group: "Properties",
                 Name: prop.Name,
                 Heading: prop.Name,
                 Signature: SignatureOf(prop),
-                Summary: doc.Summary!,
+                Summary: summary,
                 Params: Array.Empty<ParamDoc>(),
                 Returns: null));
         }
@@ -462,17 +462,14 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
         {
             if (IsMemberHidden(evt)) continue;
             var doc = xmlDocs.ForMember(evt);
-            if (doc is null || string.IsNullOrWhiteSpace(doc.Summary))
-            {
-                diags.Add($"{type.FullName}: event '{evt.Name}' has no <summary>; skipping.");
-                continue;
-            }
+            var summary = ResolveMemberSummary(doc, type, "event", evt.Name, diags);
+            if (summary is null) continue;
             rows.Add(new MemberRow(
                 Group: "Events",
                 Name: evt.Name,
                 Heading: evt.Name,
                 Signature: SignatureOf(evt),
-                Summary: doc.Summary!,
+                Summary: summary,
                 Params: Array.Empty<ParamDoc>(),
                 Returns: null));
         }
@@ -483,22 +480,45 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             // Every enum carries an internal-layout sentinel field `value__`; not part of the surface.
             if (type.IsEnum && field.Name == "value__") continue;
             var doc = xmlDocs.ForMember(field);
-            if (doc is null || string.IsNullOrWhiteSpace(doc.Summary))
-            {
-                diags.Add($"{type.FullName}: field '{field.Name}' has no <summary>; skipping.");
-                continue;
-            }
+            var summary = ResolveMemberSummary(doc, type, "field", field.Name, diags);
+            if (summary is null) continue;
             rows.Add(new MemberRow(
                 Group: "Fields",
                 Name: field.Name,
                 Heading: field.Name,
                 Signature: SignatureOf(field),
-                Summary: doc.Summary!,
+                Summary: summary,
                 Params: Array.Empty<ParamDoc>(),
                 Returns: null));
         }
 
         return rows;
+    }
+
+    private static string? ResolveMemberSummary(TypeDoc? doc, Type type, string kind, string label, List<string> diags)
+    {
+        if (doc is not null && !string.IsNullOrWhiteSpace(doc.Summary))
+        {
+            return doc.Summary;
+        }
+        if (TryFallbackSummary(doc, out var fallback, out var pointer))
+        {
+            diags.Add($"{type.FullName}: {kind} '{label}' uses <inheritdoc /> but base documentation is unresolvable (target: {pointer}); rendering fallback pointer.");
+            return fallback;
+        }
+        diags.Add($"{type.FullName}: {kind} '{label}' has no <summary>; skipping.");
+        return null;
+    }
+
+    private static bool TryFallbackSummary(TypeDoc? doc, out string summary, out string pointer)
+    {
+        summary = string.Empty;
+        pointer = string.Empty;
+        if (doc is null) return false;
+        if (string.IsNullOrEmpty(doc.UnresolvedInheritTarget)) return false;
+        pointer = doc.UnresolvedInheritTarget!;
+        summary = $"*(inherited from `{pointer}`)*";
+        return true;
     }
 
     private static bool IsCompilerGenerated(MemberInfo member)

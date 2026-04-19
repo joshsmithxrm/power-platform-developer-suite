@@ -12,6 +12,7 @@
 
 | Type | Summary |
 |------|---------|
+| [ExternalDocsConsumer](./ExternalDocsConsumer.md) | Exercises the &lt;inheritdoc /&gt; fallback path: the type-level summary |
 | [Widget](./Widget.md) | Simple widget implementation. Has a constructor and a couple of members. |
 
 ## Records
