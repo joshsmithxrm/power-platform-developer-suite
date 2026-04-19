@@ -516,10 +516,10 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
     {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            if (!BrowserHelper.OpenUrl(url))
             {
-                UseShellExecute = true
-            });
+                MessageBox.ErrorQuery("Error", "Failed to open browser.", "OK");
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {

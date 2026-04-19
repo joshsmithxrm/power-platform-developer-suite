@@ -176,6 +176,12 @@ public static class ServiceRegistration
         // Update check service — singleton, manages its own cache file
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
 
+        // Browser launcher — swappable so tests can replace with a no-op (issue #809).
+        // Transient so each resolution re-reads BrowserHelper.Launcher; a singleton
+        // factory would capture whatever was installed at first resolution and miss
+        // per-test swaps.
+        services.AddTransient<IBrowserLauncher>(_ => BrowserHelper.Launcher);
+
         return services;
     }
 }
