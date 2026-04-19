@@ -7,6 +7,25 @@ description: How to verify CLI commands — build, run, check stdout/stderr, val
 
 Supporting knowledge for `/verify cli` and `/qa cli`. Documents how to build, run, and verify CLI commands.
 
+## Safety pre-check
+
+These verification flows talk to live Dataverse. Two PreToolUse hooks gate
+`ppds *` invocations to keep an agent from writing to a non-dev env:
+
+- `dev-env-check.py` -- always on. Blocks `ppds *` unless the active env is
+  in the allowlist (`$PPDS_SAFE_ENVS` or `.claude/state/safe-envs.json`).
+- `shakedown-readonly.py` -- active when `PPDS_SHAKEDOWN=1` is set (the
+  shakedown skill exports this in its Phase 0). Blocks write verbs
+  (`create`, `update`, `delete`, `plugins deploy` without `--dry-run`,
+  `solutions import`, etc.).
+
+Before running any of the patterns below:
+
+1. Confirm `ppds env who` shows a safe env (in the allowlist).
+2. If invoked from `/shakedown`, verify `PPDS_SHAKEDOWN=1` is set so write
+   commands fail closed.
+3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
+
 ## Build
 
 ```bash

@@ -17,6 +17,31 @@ A structured, multi-interface product validation session. Unlike `/qa` (automate
 
 ## Process
 
+### Phase 0: Safety Pre-checks
+
+Before any other work, validate the safety guardrails are configured and active.
+
+1. **Verify env allowlist is configured** -- read `.claude/state/safe-envs.json`
+   or `$PPDS_SAFE_ENVS`. If neither lists at least one safe env, STOP and ask
+   the user to configure (`docs/SAFE-SHAKEDOWN.md` for details).
+2. **Verify active env is in the allowlist** -- run `ppds env who` (or
+   `ppds env current`) and confirm the displayed env matches an allowlist
+   entry. The `dev-env-check` hook will block downstream `ppds *` calls
+   otherwise.
+3. **Set the read-only marker for this session:**
+   ```bash
+   export PPDS_SHAKEDOWN=1
+   ```
+   This activates the `shakedown-readonly` hook, which blocks write/mutation
+   commands (`plugins deploy`, `plugins delete`, `<surface> create/update/delete`,
+   `solutions import`, etc.) for the duration of the shakedown.
+4. **Acknowledge the model:** plugin deploys MUST be invoked with `--dry-run`
+   during shakedown. To run a real deploy, unset `PPDS_SHAKEDOWN` (deliberate
+   action -- there is no softer bypass).
+
+See `docs/SAFE-SHAKEDOWN.md` for the full safety model and how to add envs
+to the allowlist.
+
 ### Phase 1: Scope Declaration
 
 Ask the user which surfaces to test:
