@@ -99,9 +99,13 @@ def build_spawn_command(script_windows_path: str) -> List[str]:
     with `-NoExit`, pwsh runs the script in an interactive shell and
     the child `claude` process inherits a real TTY.
     """
+    # PowerShell single-quoted strings escape `'` by doubling it. Paths
+    # containing apostrophes (e.g. user home `O'Brien`) would otherwise
+    # break the ArgumentList.
+    escaped = script_windows_path.replace("'", "''")
     inner = (
         f"Start-Process pwsh -ArgumentList "
-        f"'-NoExit','-File','{script_windows_path}'"
+        f"'-NoExit','-File','{escaped}'"
     )
     return ["pwsh", "-Command", inner]
 
@@ -213,13 +217,15 @@ def launch(
 
 
 def _print_manual_fallback(target_win: str, prompt: str, claude_win: str) -> None:
+    target_escaped = target_win.replace("'", "''")
+    claude_escaped = claude_win.replace("'", "''")
     sys.stderr.write(
         "\nCould not open a new terminal automatically. Open PowerShell and run:\n\n"
-        f"  cd '{target_win}'\n"
+        f"  cd '{target_escaped}'\n"
         "  $prompt = @'\n"
         f"{prompt}\n"
         "'@\n"
-        f"  & '{claude_win}' $prompt\n"
+        f"  & '{claude_escaped}' $prompt\n"
     )
 
 
