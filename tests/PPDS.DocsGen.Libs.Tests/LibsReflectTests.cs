@@ -88,6 +88,34 @@ public sealed class LibsReflectTests
     }
 
     [Fact]
+    public async Task UnresolvableInheritdoc_EmitsFallbackPointerAndDiagnostic()
+    {
+        var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-fallback-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = await RunAsync(outputRoot);
+
+            // The fixture's ExternalDocsConsumer.DoExternalWork uses <inheritdoc />
+            // against an external cref that is not present in the XML map — the
+            // member must still be rendered with a fallback pointer, not dropped.
+            var consumerPage = result.Files.SingleOrDefault(f => f.RelativePath.EndsWith("/ExternalDocsConsumer.md"));
+            consumerPage.Should().NotBeNull("fallback inheritdoc must still produce a member page");
+            consumerPage!.Contents.Should().Contain("DoExternalWork",
+                "the member with unresolvable inheritdoc must still render");
+            consumerPage.Contents.Should().Contain("*(inherited from `External.Unresolvable.Api.SomeThing`)*",
+                "the fallback pointer must surface the cref the author specified");
+
+            result.Diagnostics.Should().Contain(
+                d => d.Contains("DoExternalWork") && d.Contains("<inheritdoc") && d.Contains("unresolvable"),
+                "a distinct diagnostic must flag the unresolvable inheritdoc — separate from the missing-summary category");
+        }
+        finally
+        {
+            if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SkipsEditorBrowsableNeverSilently()
     {
         var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-eb-" + Guid.NewGuid().ToString("N"));

@@ -170,8 +170,11 @@ public sealed class XmlDocIndexInheritdocTests
     }
 
     [Fact]
-    public void UnresolvableInheritdoc_ReturnsOriginalInheritdocMarker()
+    public void UnresolvableInheritdoc_SurfacesFallbackPointerFromInheritanceChain()
     {
+        // No ancestor entry is documented, so the implicit resolver walks the
+        // inheritance chain and reports the first candidate it finds (the
+        // interface member) as the fallback pointer.
         var path = WriteTempXml($$$"""
             <?xml version="1.0"?>
             <doc>
@@ -189,8 +192,77 @@ public sealed class XmlDocIndexInheritdocTests
             var doc = index.ForMember(typeof(InheritdocTestThingImpl).GetMethod(nameof(InheritdocTestThingImpl.DoWork))!);
 
             doc.Should().NotBeNull();
-            doc!.IsInheritDoc.Should().BeTrue(because: "no usable ancestor entry was found");
+            doc!.IsInheritDoc.Should().BeTrue();
             doc.Summary.Should().BeNullOrEmpty();
+            doc.UnresolvedInheritTarget
+                .Should().Be($"{typeof(IInheritdocTestThing).FullName}.DoWork",
+                    because: "the first unresolved candidate in the chain should surface as the fallback pointer");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void UnresolvableInheritdoc_WithExplicitCref_SurfacesCrefAsPointer()
+    {
+        // cref points at a member that is not present in the XML map; the
+        // explicit cref wins over any implicit chain candidate for the fallback
+        // pointer, because that is what the author asked us to inherit from.
+        var path = WriteTempXml($$$"""
+            <?xml version="1.0"?>
+            <doc>
+              <members>
+                <member name="M:{{{typeof(InheritdocTestThingImpl).FullName}}}.DoWork">
+                  <inheritdoc cref="M:Totally.Missing.Base.DoWork" />
+                </member>
+              </members>
+            </doc>
+            """);
+
+        try
+        {
+            var index = XmlDocIndex.Load(path);
+            var doc = index.ForMember(typeof(InheritdocTestThingImpl).GetMethod(nameof(InheritdocTestThingImpl.DoWork))!);
+
+            doc.Should().NotBeNull();
+            doc!.IsInheritDoc.Should().BeTrue();
+            doc.Summary.Should().BeNullOrEmpty();
+            doc.UnresolvedInheritTarget.Should().Be("Totally.Missing.Base.DoWork");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ResolvableInheritdoc_LeavesUnresolvedInheritTargetNull()
+    {
+        var path = WriteTempXml($$$"""
+            <?xml version="1.0"?>
+            <doc>
+              <members>
+                <member name="M:{{{typeof(IInheritdocTestThing).FullName}}}.DoWork">
+                  <summary>Interface-level summary for DoWork.</summary>
+                </member>
+                <member name="M:{{{typeof(InheritdocTestThingImpl).FullName}}}.DoWork">
+                  <inheritdoc />
+                </member>
+              </members>
+            </doc>
+            """);
+
+        try
+        {
+            var index = XmlDocIndex.Load(path);
+            var doc = index.ForMember(typeof(InheritdocTestThingImpl).GetMethod(nameof(InheritdocTestThingImpl.DoWork))!);
+
+            doc.Should().NotBeNull();
+            doc!.Summary.Should().Be("Interface-level summary for DoWork.");
+            doc.UnresolvedInheritTarget
+                .Should().BeNull(because: "successful resolution must not set the fallback pointer");
         }
         finally
         {

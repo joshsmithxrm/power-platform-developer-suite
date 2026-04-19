@@ -71,6 +71,18 @@ public sealed class UndocumentedThing
 public sealed record Measurement(int Id, string Label);
 
 /// <summary>
+/// Exercises the &lt;inheritdoc /&gt; fallback path: the type-level summary
+/// resolves against <see cref="IWidget"/>, but the <c>DoExternalWork</c> method
+/// points at a cref that is not present in the XML map. The generator must
+/// emit a fallback pointer instead of silently dropping the member.
+/// </summary>
+public sealed class ExternalDocsConsumer
+{
+    /// <inheritdoc cref="T:External.Unresolvable.Api.SomeThing" />
+    public void DoExternalWork() { }
+}
+
+/// <summary>
 /// Possible states for a fixture widget.
 /// </summary>
 public enum WidgetState
