@@ -164,7 +164,7 @@ def launch(
         return 1
 
     launch_dir = launch_dir or os.path.join(
-        os.environ.get("LOCALAPPDATA", os.path.expanduser("~/.ppds")), "ppds"
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ppds"
     )
     os.makedirs(launch_dir, exist_ok=True)
     script_path = os.path.join(launch_dir, f"launch-{name}.ps1")

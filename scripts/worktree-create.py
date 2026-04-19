@@ -118,11 +118,16 @@ def create(
         )
 
     # 4. Create from origin/main. Branch may or may not already exist.
+    #    Use `show-ref --verify` rather than `branch --list` — the latter
+    #    accepts shell globs, so a name like "*" would match and produce
+    #    a misleading result.
     branch_exists = (
         _run(
-            ["git", "branch", "--list", branch], cwd=repo_root, check=False
-        ).stdout.strip()
-        != ""
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            cwd=repo_root,
+            check=False,
+        ).returncode
+        == 0
     )
     if branch_exists:
         # Reuse existing branch; don't reparent it onto origin/main —
@@ -135,18 +140,25 @@ def create(
     if add.returncode != 0:
         return 2, f"git worktree add failed:\n{add.stderr}"
 
-    # 5. Sanity-check. If HEAD is detached or index is dirty, refuse to
-    #    hand the worktree back — the caller would commit on a broken
-    #    base.
+    # 5. Sanity-check. Filter to STAGED changes only — the #799
+    #    stranded-index pathology shows as staged modifications
+    #    (first porcelain column != ' '). Unstaged-only entries
+    #    (first column ' ', second column 'M') can be benign autocrlf
+    #    line-ending normalization on Windows and should not abort a
+    #    valid worktree.
     status = _run(
         ["git", "status", "--porcelain"], cwd=target_abs, check=False
     )
-    if status.stdout.strip():
+    staged_lines = [
+        line for line in status.stdout.splitlines()
+        if line and line[0] not in (" ", "?")
+    ]
+    if staged_lines:
         return 3, (
-            f"SANITY: new worktree {target_rel} has dirty index:\n"
-            f"{status.stdout}\n"
-            f"This is the #799 stranded-index pathology. Remove the "
-            f"worktree and clean up the directory before retrying."
+            f"SANITY: new worktree {target_rel} has staged residue "
+            f"(the #799 stranded-index pathology):\n"
+            + "\n".join(staged_lines) + "\n"
+            + "Remove the worktree and clean up the directory before retrying."
         )
 
     if not branch_exists:
@@ -156,7 +168,12 @@ def create(
         origin_sha = _run(
             ["git", "rev-parse", "origin/main"], cwd=repo_root, check=False
         ).stdout.strip()
-        if head_sha and origin_sha and head_sha != origin_sha:
+        if not head_sha or not origin_sha:
+            return 3, (
+                "SANITY: could not resolve HEAD or origin/main SHA in new "
+                "worktree — cannot verify it's based on the current remote tip."
+            )
+        if head_sha != origin_sha:
             return 3, (
                 f"SANITY: new worktree HEAD ({head_sha[:8]}) does not match "
                 f"origin/main ({origin_sha[:8]}). Refusing to hand back a "
