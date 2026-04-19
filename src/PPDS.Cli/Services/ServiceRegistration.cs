@@ -174,6 +174,11 @@ public static class ServiceRegistration
         // Update check service — singleton, manages its own cache file
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
 
+        // Browser launcher — swappable so tests can replace with a no-op (issue #809).
+        // Resolves to whatever BrowserHelper.Launcher currently points at, so
+        // the test module initializer still wins for code paths resolved from DI.
+        services.AddSingleton<IBrowserLauncher>(_ => BrowserHelper.Launcher);
+
         return services;
     }
 }

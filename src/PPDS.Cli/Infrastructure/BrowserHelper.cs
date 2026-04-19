@@ -1,62 +1,48 @@
 using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Infrastructure;
 
 /// <summary>
 /// Cross-platform helper for opening URLs in the default browser.
+/// Delegates the actual launch to a swappable <see cref="IBrowserLauncher"/> —
+/// production uses <see cref="DefaultBrowserLauncher"/>, tests install a
+/// <see cref="NoOpBrowserLauncher"/> so real browser windows never spawn.
 /// </summary>
 public static class BrowserHelper
 {
+    private static IBrowserLauncher _launcher = new DefaultBrowserLauncher();
+
     /// <summary>
-    /// Opens the specified URL in the system's default browser.
+    /// The launcher used by <see cref="OpenUrl"/>. Tests replace this with a
+    /// <see cref="NoOpBrowserLauncher"/> to suppress real browser launches.
+    /// </summary>
+    public static IBrowserLauncher Launcher
+    {
+        get => _launcher;
+        set => _launcher = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    /// <summary>
+    /// Opens the specified URL in the system's default browser via <see cref="Launcher"/>.
     /// </summary>
     /// <param name="url">The URL to open. Must use the <c>http</c> or <c>https</c> scheme.</param>
     /// <returns>True if the browser was opened successfully, false otherwise.</returns>
     /// <exception cref="PpdsException">
     /// Thrown with <see cref="ErrorCodes.Validation.InvalidUrlScheme"/> when the URL is null,
-    /// empty, malformed, or uses a scheme other than <c>http</c>/<c>https</c>. URLs are frequently
-    /// derived from Dataverse record values, so this guard blocks attempts to launch
-    /// <c>file:</c>, <c>ftp:</c>, or custom protocol handlers through shell execution.
+    /// empty, malformed, or uses a scheme other than <c>http</c>/<c>https</c>.
     /// </exception>
-    public static bool OpenUrl(string url)
-    {
-        ValidateUrl(url);
-
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                Process.Start("open", url);
-            }
-            else
-            {
-                // Linux and other Unix-like systems
-                Process.Start("xdg-open", url);
-            }
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Could not open browser: {ex.Message}");
-            Console.Error.WriteLine($"Please visit: {url}");
-            return false;
-        }
-    }
+    public static bool OpenUrl(string url) => _launcher.OpenUrl(url);
 
     /// <summary>
     /// Validates that a URL is safe to pass to the OS shell for browser launch.
-    /// Only <c>http</c> and <c>https</c> are allowed.
+    /// Only <c>http</c> and <c>https</c> are allowed. URLs may originate from
+    /// untrusted Dataverse record values, so <c>file:</c>, <c>ftp:</c>,
+    /// <c>javascript:</c>, <c>ms-*:</c>, and other custom handlers are rejected.
     /// </summary>
     /// <param name="url">The URL to validate.</param>
     /// <exception cref="PpdsException">Thrown when the URL is invalid or uses a disallowed scheme.</exception>
-    internal static void ValidateUrl(string? url)
+    public static void ValidateUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -72,9 +58,6 @@ public static class BrowserHelper
                 $"Cannot open browser: '{url}' is not a valid absolute URL.");
         }
 
-        // Explicit allowlist — never pass file:, ftp:, javascript:, ms-*:,
-        // or any custom protocol handler to the OS shell. URLs may originate
-        // from untrusted Dataverse record values.
         if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
             && !string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
         {
