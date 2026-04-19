@@ -86,14 +86,12 @@ public sealed class CliCommandNeedsDescriptionAnalyzer : DiagnosticAnalyzer
 
     private static TargetKind? ClassifyTargetType(INamedTypeSymbol type)
     {
-        // Walk the type and its base chain. First match wins.
+        // Walk the type and its base chain. First match wins. Normalize to
+        // the metadata form (e.g. "System.CommandLine.Option`1") so closed
+        // generics like Option<string> resolve to the same key as the open
+        // definition.
         for (var current = type; current is not null; current = current.BaseType)
         {
-            var metadataName = current.ConstructedFrom.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat.WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Omitted));
-
-            // Strip the generic-argument form so we match the open definition.
-            // ConstructedFrom on Option<string> returns Option<T> whose display is
-            // "System.CommandLine.Option<T>" — normalize to "System.CommandLine.Option`1".
             var normalized = NormalizeToMetadataName(current);
 
             if (normalized == CommandTypeName)
