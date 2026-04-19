@@ -29,11 +29,22 @@ public static class AuthCommandGroup
             Description = "Skip the confirmation prompt."
         };
 
+        // Hidden option declared with a long name that sorts between --force
+        // and --tenant alphabetically. It must be filtered out by the generator
+        // (and the filter must run BEFORE the sort, see filter-before-sort
+        // optimization in CliReferenceGenerator).
+        var secret = new Option<string?>("--secret")
+        {
+            Description = "Internal flag — must never appear in generated docs.",
+            Hidden = true,
+        };
+
         return new Command("login", "Sign in to the fixture service.")
         {
             username,
             tenant,
             force,
+            secret,
         };
     }
 

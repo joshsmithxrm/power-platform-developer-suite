@@ -160,10 +160,15 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
                 TypeDisplay: DescribeValueType(arg.GetType(), openGenericBase: "Argument")));
         }
 
+        // Options are sorted alphabetically by long name per AC-15 so that
+        // generated markdown does not depend on source-declaration order or
+        // System.CommandLine's enumeration order. Arguments remain in
+        // declaration order — their position is semantic for invocation.
         var options = new List<CommandOption>();
-        foreach (var opt in EnumerateChildren(command, "Options"))
+        foreach (var opt in EnumerateChildren(command, "Options")
+            .Where(o => !IsHidden(o))
+            .OrderBy(o => GetString(o, "Name") ?? string.Empty, StringComparer.Ordinal))
         {
-            if (IsHidden(opt)) continue;
             var (longName, shortName) = SplitOptionAliases(opt);
             options.Add(new CommandOption(
                 LongName: longName,

@@ -133,11 +133,24 @@ python scripts/workflow-state.py set spec specs/<name>.md
 
 ### Step 6: Handoff
 
-Update phase for handoff to implementation:
+**Do NOT flip `phase` here.** Leave it as `design`. The downstream skill
+owns its own phase transition:
 
-```bash
-python scripts/workflow-state.py set phase implementing
-```
+- `/implement` Step 3.5 sets `phase=implementing` when the user actually
+  starts building.
+- `scripts/pipeline.py` sets `phase=pipeline` when the headless pipeline
+  starts (and also sets `PPDS_PIPELINE=1`, which bypasses the stop hook
+  entirely).
+- If the user chooses **Defer**, phase stays `design` — which the
+  session-stop hook treats as a bypass phase, so the user can close the
+  session cleanly without triggering a premature gates-enforcement loop
+  on a spec-only commit.
+
+Historical note: this used to unconditionally run
+`workflow-state.py set phase implementing` here, which caused issue
+#800 — pausing between `/design` and `/implement` triggered the
+session-stop hook to block with a spurious "gates/verify/QA missing"
+message on a spec-only commit.
 
 Present three options:
 
@@ -154,9 +167,12 @@ Spec committed. Choose next step:
      → Spec is committed on branch feat/<name>. Resume anytime.
 ```
 
-If the user chooses option 1, run the pipeline command in the background.
-If option 2, invoke `/implement` immediately.
-If option 3, note the spec path and stop.
+If the user chooses option 1, run the pipeline command in the background
+(pipeline sets its own phase).
+If option 2, invoke `/implement` immediately (it sets `phase=implementing`
+at Step 3.5).
+If option 3, note the spec path and stop — phase stays `design`, stop
+hook allows clean exit.
 
 ## Key Principles
 
