@@ -72,17 +72,11 @@ git log main..<branch> --oneline
 
 If this produces **no output**, the branch has zero commits beyond main — it was created for future work or was fast-forward merged. Remove it from the merged list and classify it as **"not started"** (to be skipped).
 
-**Squash-merge detection (two-pass):** For each local branch (whether or not it has a worktree) that is NOT in the merged list **and NOT classified as "not started"**:
+**Squash-merge detection (freshly pruned only):** For each local branch (whether or not it has a worktree) that is NOT in the merged list **and NOT classified as "not started"**, check if `origin/<branch>` appears in the pruned refs list from the prune command above. If so, classify as **squash-merged**.
 
-1. **Pass 1 — freshly pruned:** Check if `origin/<branch>` appears in the pruned refs list from the prune command above. If so, classify as squash-merged.
-2. **Pass 2 — previously pruned:** If the branch was NOT caught by pass 1, check if a remote tracking ref exists locally:
-   ```bash
-   git rev-parse --verify refs/remotes/origin/<branch>
-   ```
-   If this **fails** (exit code 128, ref does not exist), the remote branch is gone — likely pruned in a prior session. Classify as **"squash-merged."**
-   If this **succeeds**, the remote branch still exists — classify as **"active."**
+**Do NOT infer squash-merge from a missing remote tracking ref alone.** A missing remote could mean the branch was pruned in a prior session, OR that the branch was never pushed (in-flight local work) — these are indistinguishable after the fact. Deleting in-flight work is catastrophic; leaving a stale branch is harmless. If a branch has no remote tracking ref and wasn't freshly pruned this run, classify as **active** and leave it alone.
 
-Note: a missing remote could also mean the branch was manually deleted or the PR was closed without merging. The `-D` deletion in step 5 is the consequence, so the report should flag squash-merged branches clearly so the user can intervene if needed. Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
+Squash-merged detection only fires for branches whose remote was pruned in *this* run's `git remote prune`. Branches whose remotes were pruned in a previous session without being cleaned up will stay around indefinitely — that's the safe trade-off. Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
 
 Build five lists:
 - **Merged:** branches in the `--merged` list (after filtering) — with or without worktrees
