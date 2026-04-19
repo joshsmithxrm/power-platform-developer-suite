@@ -1,42 +1,22 @@
-# PPDS - Power Platform Developer Suite
+# PPDS
 
-SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
+TUI-first multi-interface platform (CLI / TUI / VS Code Extension / MCP / NuGet).
+All business logic lives in **Application Services** — never in UI code.
+
+Read **`specs/CONSTITUTION.md`** before any work (Spec Laws SL1–SL5 are non-negotiable).
+Governance for THIS file: **`docs/CLAUDE-MD-GOVERNANCE.md`** (4-question test, line cap, marker).
 
 ## NEVER
 
-- Commit a `.snk` private keypair — these are decoded from CI secrets at publish time, never tracked. Public keys (`*.PublicKey`) are safe to commit.
-- Create new `ServiceClient` per request - use `IDataverseConnectionPool`
-- Hold single pooled client for multiple queries - defeats pool parallelism
-- Write CLI status messages to stdout - use `Console.Error.WriteLine`; stdout is for data
-- Throw raw exceptions from Application Services - wrap in `PpdsException` with ErrorCode
+- Hold a single pooled `IDataverseConnectionPool` client across multiple parallel queries — defeats pool parallelism. (No analyzer; subtle.)
+- Write CLI status messages to `stdout` — use `Console.Error.WriteLine`. `stdout` is reserved for data.
+- Throw raw exceptions from Application Services — wrap in `PpdsException` with an `ErrorCode`.
+- Trust an agent research summary without reading the underlying code yourself.
 
 ## ALWAYS
 
-- Use connection pool for multi-request scenarios
-- Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) over `ExecuteMultiple`
-- Use Application Services for all persistent state - single code path for CLI/TUI/RPC
-- Accept `IProgressReporter` for operations >1 second - all UIs need feedback
-- Include ErrorCode in `PpdsException` - enables programmatic handling
-- Give new public types/members in `PPDS.{Dataverse,Migration,Auth,Plugins}` a `/// <summary>` or mark `[EditorBrowsable(Never)]` — PPDS014 fails the build otherwise (see [`specs/docs-generation.md`](./specs/docs-generation.md))
-- Supply a non-empty Description at every `System.CommandLine.Command`, `Option<T>`, and `Argument<T>` creation site in CLI factory code (2-arg `Command` ctor or object initializer `Description = "..."`; Options/Arguments use object initializer) — PPDS015 fails the build
-- Set `Name` on every `[McpServerTool]` and pair with a `[Description]` — PPDS016 fails the build
-
-## Tech Stack
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| .NET | 4.6.2, 8.0, 9.0, 10.0 | Plugins: 4.6.2; libraries/CLI: 8.0+ |
-| Terminal.Gui | 1.19+ | TUI framework |
-| Node.js / TypeScript | 20+ / 5+ | VS Code extension, MCP server |
-| Python | 3.11+ | Workflow scripts (`scripts/`) |
-
-## Key Files
-
-- `src/PPDS.Cli/Services/` - Application Services
-- `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
-- `specs/` - Feature specifications
-- `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
-- `.plans/` - Implementation plans (ephemeral, gitignored)
+- Use Application Services for all persistent state — single code path for CLI / TUI / RPC.
+- Accept `IProgressReporter` for any operation likely to exceed 1 second.
 
 ## Testing
 
@@ -46,43 +26,3 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Extension unit: `npm run ext:test`
 - Extension E2E: `npm run ext:test:e2e`
 - TUI snapshots: `npm run tui:test`
-
-### Test Conventions
-
-| Area | Test Type | Trait / Framework | Notes |
-|------|-----------|-------------------|-------|
-| Application Services | Unit (mocked deps) | `Unit` | Mock IDataverseConnectionPool, IProgressReporter |
-| Dataverse SDK logic | FakeXrmEasy | `Unit` | Use FakeXrmEasyTestsBase for SDK behavior |
-| Query engine | Unit (pure functions) | `Unit` | Deterministic transforms |
-| Import orchestration | Unit + FakeXrmEasy | `Unit` | Mock pool, bulk executor |
-| CLI commands | Unit (mock services) | `Unit` | Commands are thin wrappers — test services |
-| TUI extracted logic | Unit | `TuiUnit` | Business logic, not Terminal.Gui rendering |
-| Extension panels | Vitest | N/A | Message contracts + handler behavior |
-| MCP tools | Unit (mock services) | `Unit` | Param validation + basic execution |
-| Live Dataverse | Integration | `Integration` | Needs test-dataverse environment |
-
-- **Coverage bar:** 80% on new code (patch), enforced by Codecov
-- **AC mapping:** every spec AC must have a corresponding test (Constitution I6)
-- **File placement:** `tests/{Project}.Tests/{mirror source path}/{ClassName}Tests.cs`
-
-## Specs
-
-- Constitution: `specs/CONSTITUTION.md` — read before any work (includes Spec Laws SL1–SL5)
-- Template: `specs/SPEC-TEMPLATE.md`
-
-## Extension Versioning
-
-Odd/even minor convention: odd minor = pre-release, even minor = stable. VS Code marketplace publishes both channels from the same codebase; version gating happens at package time.
-
-## Git Hooks
-
-Pre-commit hook (`scripts/hooks/`) runs:
-- **C# staged:** `dotnet build` + `dotnet test` (unit only)
-- **TS staged:** typecheck + eslint
-Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
-
-## Backlog
-
-- Rules and label taxonomy: `docs/BACKLOG.md`
-- Use `/backlog` skill for issue triage and management
-
