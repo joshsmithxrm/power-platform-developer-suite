@@ -91,7 +91,9 @@ public static class LogsDumpCommand
                 Directory.CreateDirectory(outputDir);
             }
 
-            var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            // UTC so the filename is unambiguous across timezones and matches the
+            // "Generated:" line in diagnostics.txt (DateTimeOffset.UtcNow, ISO-8601).
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
             var zipName = $"ppds-diagnostics-{timestamp}.zip";
             var zipPath = Path.Combine(outputDir, zipName);
 
@@ -157,7 +159,12 @@ public static class LogsDumpCommand
             return;
         }
 
-        foreach (var path in Directory.EnumerateFiles(ppdsDir, "*.log", SearchOption.TopDirectoryOnly))
+        // Sort so the archive has deterministic file ordering — matches LogsTailCommand
+        // and makes diffs between two user-submitted dumps easier to reason about.
+        var logFiles = Directory.EnumerateFiles(ppdsDir, "*.log", SearchOption.TopDirectoryOnly)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in logFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var name = Path.GetFileName(path);
@@ -291,7 +298,18 @@ public static class LogsDumpCommand
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Kill the tree so we don't orphan the child (and any grandchildren
+                // it spawned). WaitForExitAsync only signals the wait, it does not
+                // terminate the process.
+                try { process.Kill(entireProcessTree: true); } catch { /* best-effort */ }
+                throw;
+            }
 
             var stdout = await stdoutTask;
             var stderr = await stderrTask;

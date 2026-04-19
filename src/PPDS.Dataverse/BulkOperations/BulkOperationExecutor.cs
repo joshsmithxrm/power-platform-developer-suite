@@ -713,7 +713,8 @@ namespace PPDS.Dataverse.BulkOperations
             // retries should have had. On long imports, the first transient auth or deadlock
             // blip after repeated throttles would fail immediately and collapse the entire run.
             // Each category now has its own independent budget and exponential-backoff basis.
-            var throttleAttempts = 0;
+            // Throttle retries are infinite (service protection is transient and pool-managed),
+            // so no counter is kept for that category.
             var authAttempts = 0;
             var connectionAttempts = 0;
             var infraRaceAttempts = 0;
@@ -777,7 +778,6 @@ namespace PPDS.Dataverse.BulkOperations
                     // Service protection is transient - always retry, never fail.
                     // PooledClient already recorded the throttle via callback.
                     // GetClientAsync will wait for a non-throttled connection.
-                    throttleAttempts++;
                     LogThrottle(connectionName, retryAfter, errorCode);
 
                     // Adaptively reduce parallelism when throttled

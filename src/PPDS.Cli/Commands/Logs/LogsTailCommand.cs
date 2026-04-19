@@ -12,13 +12,20 @@ namespace PPDS.Cli.Commands.Logs;
 public static class LogsTailCommand
 {
     /// <summary>
+    /// Upper bound for <c>--lines</c>. The ring buffer holds this many strings per file,
+    /// so the cap also bounds peak memory. 10k is plenty for any reasonable tail use
+    /// case and prevents accidental OOM from a typo like <c>--lines 10000000</c>.
+    /// </summary>
+    internal const int MaxLines = 10_000;
+
+    /// <summary>
     /// Creates the 'logs tail' subcommand with --lines and --level options.
     /// </summary>
     public static Command Create()
     {
         var linesOption = new Option<int>("--lines", "-n")
         {
-            Description = "Number of lines to show from each log file (default: 50)",
+            Description = $"Number of lines to show from each log file (default: 50, max: {MaxLines})",
             DefaultValueFactory = _ => 50
         };
 
@@ -70,7 +77,13 @@ public static class LogsTailCommand
     {
         if (lineCount <= 0)
         {
-            Console.Error.WriteLine($"Error: --lines must be > 0 (got {lineCount})");
+            Console.Error.WriteLine($"Error: --lines must be between 1 and {MaxLines} (got {lineCount}). Try --lines 50 for the default tail size.");
+            return ExitCodes.Failure;
+        }
+
+        if (lineCount > MaxLines)
+        {
+            Console.Error.WriteLine($"Error: --lines must be between 1 and {MaxLines} (got {lineCount}). Try --lines {MaxLines} if you really need the full buffer, or pipe the log file directly for larger ranges.");
             return ExitCodes.Failure;
         }
 
