@@ -24,13 +24,29 @@ This enables the stop-hook bypass for the retro phase (no workflow enforcement d
 
 ## Mode Detection
 
-Detect automatically based on context:
+Detect automatically based on context AND the optional argument mode:
 
 **Pipeline mode** (CWD is a worktree AND `.workflow/pipeline.log` exists AND running via `claude -p`):
 → Jump to Pipeline Retro section below.
 
 **Interactive mode** (user is present in conversation):
 → Follow the full Interactive Retro process below.
+
+### Argument Modes
+
+When invoked interactively, the user can scope the analysis depth via argument:
+
+| Mode | Trigger | Depth | Time | Use when |
+|------|---------|-------|------|----------|
+| `/retro pr` | After a PR merges | Light | 5–10 min | Single PR retrospective — commit-history sweep, surface user corrections in transcript, file findings if any |
+| `/retro incident` | After something breaks (test, deploy, agent crash) | Medium | 20–40 min | Single incident investigation — timeline, contributing-factors, draft-fix where safe |
+| `/retro release` | After a release ships (or a multi-PR window closes) | Heavy | Hours | Cross-session pattern analysis — like the v1-prelaunch retro: parallel subagents, full transcript audit, governance / hygiene findings |
+
+If no argument is supplied, default to `pr` mode for the most recent PR.
+
+The three modes use the same skill (this file) — they differ only in scope
+breadth and time budget. The Interactive Retro process below applies to all
+three; sections marked `(release-mode only)` are skipped for lighter modes.
 
 ---
 
