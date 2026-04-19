@@ -86,6 +86,10 @@
     <!-- JWT token parsing for extracting claims -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
 
+    <!-- Explicit pin for System.Security.Cryptography.Xml to patched 8.0.3 (see Directory.Packages.props).
+         Transitive resolution otherwise pulls 8.0.2 via Microsoft.IdentityModel.*, which carries two High CVEs. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+
     <!-- Native OS credential storage (Windows Credential Manager, macOS Keychain, Linux libsecret) -->
     <PackageReference Include="Devlooped.CredentialManager" />
 

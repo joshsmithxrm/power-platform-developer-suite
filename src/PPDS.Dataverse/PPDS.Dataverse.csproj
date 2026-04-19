@@ -9,10 +9,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <!-- Strong naming for Dataverse compatibility -->
-    <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>PPDS.Dataverse.snk</AssemblyOriginatorKeyFile>
-
     <!-- MinVer Configuration -->
     <MinVerTagPrefix>Dataverse-v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
@@ -43,6 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="Microsoft.Extensions.Configuration" VersionOverride="10.0.5" />
   <PackageReference Include="Microsoft.Extensions.Configuration.Binder" VersionOverride="10.0.5" />

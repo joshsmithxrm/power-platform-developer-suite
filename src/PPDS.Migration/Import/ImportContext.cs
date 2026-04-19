@@ -88,6 +88,14 @@ namespace PPDS.Migration.Import
         public StateTransitionCollection StateTransitions { get; } = new();
 
         /// <summary>
+        /// Gets or sets the warning collector shared across the import pipeline.
+        /// Phase processors write non-fatal warnings here (e.g., skipped role mappings)
+        /// so <see cref="Import.TieredImporter"/> can surface them in the final result.
+        /// Defaults to a local <see cref="WarningCollector"/> so phase tests do not need to wire it.
+        /// </summary>
+        public IWarningCollector Warnings { get; set; } = new WarningCollector();
+
+        /// <summary>
         /// Gets or sets the source Entity Type Code to logical name mapping.
         /// Used by DuplicateRuleHandler to remap baseentitytypecode and matchingentitytypecode fields.
         /// Key is the source ETC (int), value is the entity logical name.

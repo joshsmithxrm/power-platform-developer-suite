@@ -4,9 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+## [1.0.0] - 2026-04-18
+
+First stable release. Per the odd/even minor convention, `1.0.0` is a stable-channel release on the VS Code Marketplace. Consolidates `0.5.0` (daemon-backed ground-up rebuild) and `0.7.0` (pre-release feature pass) into a single stable baseline.
+
+### Added
+
+- **Daemon-backed architecture** — Thin VS Code UI layer delegates all operations to the `ppds serve` daemon via JSON-RPC. Authentication managed by the CLI profile store.
+- **Profile and environment management** — Create, delete, rename, select profiles from the sidebar. Browse and select Dataverse environments. Status-bar profile indicator with click-to-switch quick pick. Environment color theming (4 px left border on panel toolbars by environment type with per-panel persistence).
+- **Notebooks (`.ppdsnb`)** — SSMS-like query experience with SQL and FetchXML cells, IntelliSense (autocomplete for tables, columns, FetchXML elements/attributes), FetchXML syntax highlighting, query history, CSV/JSON export per cell, notebook-environment selection.
+- **Data Explorer panel** — Webview for quick ad-hoc queries with virtual scrolling for large result sets.
+- **Solutions panel** — Expandable component groups with managed/visible toggles and Maker Portal buttons.
+- **Plugin Traces panel** — Split-pane interface with timeline waterfall, trace-level management, volume warnings, filter bar, age-based cleanup, date-range filters, and Maker Portal links.
+- **Metadata Browser panel** — Split-pane entity explorer with five-tab detail (Attributes, Relationships, Keys, Privileges, Choices), global option-set aggregation, per-panel environment picker with search/filter.
+- **Connection References panel** — Status badges (Connected / Error / N/A), detail pane with related flows, orphan detection.
+- **Environment Variables panel** — Type-aware editing, override / missing-value indicators, persisted solution filter.
+- **Web Resources panel** — Type-color badges, solution filtering, text-only toggle, publish-selected button, modified-on detection, binary-type protection.
+- **Import Jobs panel** — Search bar, Operation Context column, record count with filtered-status display.
+- **Plugin Registration panel** — Tree view with enable/disable/unregister step actions and binary download.
+- **Shared `SolutionFilter` component** — Reused across multiple panels for consistent filter UX.
+- **`ListResult<T>` and `DataTable` upgrades** — Virtual scrolling for large result sets, three-state column sorting with `sortValue` support for dates/numbers, cell selection plus `Ctrl+A` / `Ctrl+C` TSV copy via `SelectionManager`, header styling, row striping, cell tooltips, full-row search matching. All eight panels gain `findWidget` and `retainContextWhenHidden`.
+- **Query hints banner** — RPC response includes `dataSources` and `appliedHints`; webview renders a cross-environment banner when multi-profile queries are detected.
+- **Environment Details command** — Org and connection info for the active environment.
+- **Environment-variable authentication** — Stateless CI/CD via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`. Takes precedence over profiles.
+- **Session persistence** — Solution-filter selections restored across sessions via `globalState`.
+
+### Changed
+
+- **UX audit across all eight panels** — 28 findings addressed: search bars added to Import Jobs, Plugin Traces, Connection References, Environment Variables, Web Resources; Managed/Visible toggles for Solutions; status text labels (e.g. `Unknown` instead of `N/A`); ISO timestamp formatting; expandable detail rows with chevron toggles; `X of Y` record count display; Maker Portal buttons on Solutions and Plugin Traces; title-case headers (no uppercase transform).
+- **FetchXML parsing** — Lazy regex for multi-entity queries improves parse performance.
+- **CSS class standardization** — `.panel-content` → `.content` for naming consistency.
+- **`IMetadataService` consumption** — Renamed to `IMetadataQueryService` ahead of the `IMetadataAuthoringService` UI.
+
+### Fixed
+
+- **Multi-panel webview targeting** — Targets the active panel correctly.
+- **Environment-type resolution** — Reads from config when rendering toolbar borders.
+- **Webview message handlers** — Guarded against VS Code internal messages.
+- **Daemon binary shadow-copy** — Prevents file-locking issues during reinstalls (debug mode).
+- **Profile status bar** — Shows a friendly name for unnamed profiles.
+- **FetchXML nested-filter parsing** — Documented edge case and limitation.
+- **CSS reset** — `box-sizing` reset applied globally across all panels.
+
 ## [0.7.0] - 2026-04-17 (pre-release)
 
-Major feature pass restoring most legacy v0.3.4 panels and adding cross-cutting UX polish across all surfaces. Per the odd-minor pre-release convention, `0.7.0` is a pre-release; the next stable release will be `0.8.0`.
+Major feature pass restoring most legacy v0.3.4 panels and adding cross-cutting UX polish across all surfaces. Per the odd-minor pre-release convention, `0.7.0` is a pre-release; the next stable release is `1.0.0`.
 
 ### Added
 

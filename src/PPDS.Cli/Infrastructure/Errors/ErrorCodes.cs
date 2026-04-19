@@ -5,9 +5,66 @@ namespace PPDS.Cli.Infrastructure.Errors;
 /// Format: Category.Subcategory (e.g., "Auth.ProfileNotFound").
 /// </summary>
 /// <remarks>
+/// <para>
 /// These codes are designed for programmatic error handling by consumers
 /// (VS Code extension, scripts, CI/CD pipelines). Use the hierarchical
 /// format to enable both specific and category-level error matching.
+/// </para>
+/// <para>
+/// <b>Category conventions:</b>
+/// </para>
+/// <list type="bullet">
+/// <item>
+/// <term><see cref="Auth"/> / <see cref="Profile"/></term>
+/// <description>Authentication, authorization, and profile management
+/// failures (token expiry, missing credentials, unknown profile).</description>
+/// </item>
+/// <item>
+/// <term><see cref="Connection"/></term>
+/// <description>Dataverse connectivity problems (network, throttling,
+/// environment discovery, URL validation).</description>
+/// </item>
+/// <item>
+/// <term><see cref="Validation"/></term>
+/// <description>User-input validation — missing required fields, invalid
+/// values, schema violations, disallowed paths or URL schemes.</description>
+/// </item>
+/// <item>
+/// <term><see cref="Operation"/></term>
+/// <description>Generic operation outcomes — not found, duplicate,
+/// dependency missing, cancelled, timeout, partial failure.</description>
+/// </item>
+/// <item>
+/// <term><see cref="Query"/></term>
+/// <description>Query engine errors (SQL parsing, FetchXML, TDS endpoint,
+/// DML safety guards, aggregation limits).</description>
+/// </item>
+/// <item>
+/// <term><see cref="External"/> / <see cref="UpdateCheck"/></term>
+/// <description>Failures in out-of-process calls to external services
+/// (GitHub API, NuGet, <c>dotnet tool update</c>).</description>
+/// </item>
+/// <item>
+/// <term>Domain categories (<see cref="Solution"/>, <see cref="Plugin"/>,
+/// <see cref="ServiceEndpoint"/>, <see cref="CustomApi"/>,
+/// <see cref="DataProvider"/>, <see cref="DataSource"/>,
+/// <see cref="MetadataAuthoring"/>, <see cref="WebResource"/>)</term>
+/// <description>Feature-specific validation/not-found/conflict errors.
+/// Prefer a domain category when the failure is tightly coupled to a
+/// specific Dataverse entity type.</description>
+/// </item>
+/// </list>
+/// <para>
+/// <b>Cross-project bridge (deferred to v1.1):</b>
+/// <see cref="PPDS.Cli"/> defines these codes but <see cref="PPDS.Dataverse"/>
+/// uses its own enum <c>BulkOperationErrorCode</c> for bulk-op failures. For
+/// v1 they remain independent: <c>PPDS.Dataverse</c> throws its own exceptions
+/// with <c>BulkOperationErrorCode</c> values, and service-layer code wraps
+/// those in <see cref="PpdsException"/> using <see cref="Operation.PartialFailure"/>
+/// or a more specific code as appropriate. v1.1 will bridge the two via a
+/// static translation layer so callers see a single <see cref="ErrorCodes"/>
+/// surface regardless of which project raised the error.
+/// </para>
 /// </remarks>
 public static class ErrorCodes
 {
@@ -105,6 +162,15 @@ public static class ErrorCodes
 
         /// <summary>Invalid command-line argument combination.</summary>
         public const string InvalidArguments = "Validation.InvalidArguments";
+
+        /// <summary>URL scheme is not permitted (only http/https may be opened externally).</summary>
+        public const string InvalidUrlScheme = "Validation.InvalidUrlScheme";
+
+        /// <summary>
+        /// A user-supplied path resolved outside the allowed workspace root.
+        /// Raised by RPC handlers and CLI commands that reject arbitrary filesystem access.
+        /// </summary>
+        public const string PathOutsideWorkspace = "Validation.PathOutsideWorkspace";
     }
 
     /// <summary>

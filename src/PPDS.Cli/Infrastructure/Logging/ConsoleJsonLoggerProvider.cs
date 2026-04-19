@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using PPDS.Dataverse.Diagnostics;
 using PPDS.Dataverse.Security;
 
 namespace PPDS.Cli.Infrastructure.Logging;
@@ -79,13 +80,18 @@ internal sealed class ConsoleJsonLogger : ILogger
         var message = formatter(state, exception);
         var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(message);
 
+        // Prefer the ambient scope so correlation ids propagate across await points and
+        // into Dataverse services that don't know about the CLI LogContext. Fall back to
+        // the initial command-level id so every log line still carries a correlation id.
+        var correlationId = CorrelationIdScope.Current ?? _context.CorrelationId;
+
         var entry = new JsonLogEntry
         {
             Timestamp = DateTime.UtcNow.ToString("O"),
             Level = GetLevelString(logLevel),
             Category = _categoryName,
             Message = safeMessage,
-            CorrelationId = _context.CorrelationId,
+            CorrelationId = correlationId,
             Command = _context.CommandName,
             EventId = eventId.Id != 0 ? eventId.Id : null,
             Exception = exception != null

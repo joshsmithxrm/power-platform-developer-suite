@@ -32,6 +32,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private PpdsMenuBar? _menuBar;
 
     private readonly Task _initializationTask;
+    private readonly CancellationTokenSource _shellCts = new();
 
     private ITuiScreen? _currentScreen;
     private SplashView? _splashView;
@@ -930,8 +931,17 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             {
                 _splashView?.SetStatus($"Init error: {ex.Message}");
             });
-            // Brief pause so user can see the error
-            await Task.Delay(2000).ConfigureAwait(false);
+            // Brief pause so user can see the error. Thread the shell CT so shutdown
+            // doesn't sit through a gratuitous 2-second sleep when disposal cancels it.
+            try
+            {
+                await Task.Delay(2000, _shellCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shell is being torn down — skip the splash-ready transition below.
+                return;
+            }
         }
 
         // Mark splash as ready — it stays as home screen
@@ -1033,6 +1043,11 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _statusBar.EnvironmentConfigureRequested -= OnStatusBarEnvironmentConfigureRequested;
             _errorService.ErrorOccurred -= OnErrorOccurred;
             _session.ConfigChanged -= OnConfigChanged;
+
+            // Cancel any in-flight shell-scoped awaits (e.g. splash error pause)
+            // so shutdown isn't gratuitously delayed.
+            try { _shellCts.Cancel(); } catch { /* already disposed */ }
+            _shellCts.Dispose();
         }
 
         base.Dispose(disposing);

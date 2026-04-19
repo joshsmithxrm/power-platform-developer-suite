@@ -85,12 +85,46 @@ public sealed class PluginRegistrationConfig
         {
             foreach (var type in assembly.Types)
             {
+                // Track step names (resolved — explicit or auto-generated) to detect collisions
+                // within this plugin type. Collisions would silently overwrite each other during
+                // deployment (see GH issue #781).
+                var stepNameUsages = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
                 foreach (var step in type.Steps)
                 {
                     if (step.ExecutionOrder is < PluginStepConfig.MinExecutionOrder or > PluginStepConfig.MaxExecutionOrder)
                     {
                         errors.Add($"Step '{step.Name ?? type.TypeName}' has invalid executionOrder {step.ExecutionOrder}. " +
                             $"Must be between {PluginStepConfig.MinExecutionOrder} and {PluginStepConfig.MaxExecutionOrder}.");
+                    }
+
+                    // Resolve name the same way DeployCommand/DiffCommand do:
+                    // "{TypeName}: {Message} of {Entity}" when no explicit Name is provided.
+                    var resolvedName = !string.IsNullOrWhiteSpace(step.Name)
+                        ? step.Name!
+                        : $"{type.TypeName}: {step.Message} of {step.Entity}";
+
+                    var origin = !string.IsNullOrWhiteSpace(step.Name)
+                        ? "explicit name"
+                        : $"auto-generated from message '{step.Message}' on '{step.Entity}'";
+
+                    if (!stepNameUsages.TryGetValue(resolvedName, out var origins))
+                    {
+                        origins = [];
+                        stepNameUsages[resolvedName] = origins;
+                    }
+                    origins.Add(origin);
+                }
+
+                foreach (var (name, origins) in stepNameUsages)
+                {
+                    if (origins.Count > 1)
+                    {
+                        errors.Add(
+                            $"Plugin type '{type.TypeName}' has {origins.Count} steps resolving to the same name '{name}'. " +
+                            $"Conflicting sources: {string.Join("; ", origins)}. " +
+                            $"Provide a unique explicit Name on at least {origins.Count - 1} of these steps, " +
+                            "or change the Message/Entity combination so the auto-generated names differ.");
                     }
                 }
             }

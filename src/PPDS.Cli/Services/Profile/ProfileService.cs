@@ -19,7 +19,7 @@ public sealed class ProfileService : IProfileService
     /// </summary>
     private static readonly Regex ProfileNamePattern = new(
         @"^[a-zA-Z0-9](?:[a-zA-Z0-9 _-]*[a-zA-Z0-9])?$",
-        RegexOptions.Compiled);
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly ProfileStore _store;
     private readonly ILogger<ProfileService> _logger;

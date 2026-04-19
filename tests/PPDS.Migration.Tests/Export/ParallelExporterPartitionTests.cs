@@ -423,6 +423,245 @@ public class ParallelExporterPartitionTests
     }
 
     [Fact]
+    public async Task CountQuery_RejectsInvalidLogicalName()
+    {
+        // C4 backstop: invalid logical names (e.g. XML injection attempts) must be
+        // rejected by the regex guard before being interpolated into FetchXML.
+        var entitySchema = new EntitySchema
+        {
+            LogicalName = "account'/><inject/>",
+            PrimaryIdField = "accountid",
+            Fields = new List<FieldSchema>
+            {
+                new FieldSchema { LogicalName = "name", Type = "string" }
+            },
+            Relationships = new List<RelationshipSchema>()
+        };
+        var schema = CreateSchema(entitySchema);
+        var options = new ExportOptions { PageLevelParallelism = 1, DegreeOfParallelism = 1 };
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool
+            .Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var client = new Mock<IPooledClient>();
+                client
+                    .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
+                    .ReturnsAsync(new EntityCollection { MoreRecords = false });
+                client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+                return client.Object;
+            });
+
+        var exporter = CreateExporter(pool);
+
+        // Act — exporter should not submit a malformed FetchXML. Count query is
+        // swallowed by the partitioning path; the entity falls back to sequential.
+        var result = await exporter.ExportAsync(schema, "output.zip", options);
+
+        // Assert — fell back to sequential (count was rejected) and surfaced a warning.
+        result.Warnings.Should().Contain(w =>
+            w.Code == ExportWarningCodes.CountFailedSequentialFallback);
+    }
+
+    [Fact]
+    public async Task SequentialExport_AcquiresClientPerPage_NotOncePerEntity()
+    {
+        // E1: ExportEntitySequentialAsync must acquire a pooled client per page
+        // and release before the next await. CLAUDE.md NEVER: "Hold single pooled
+        // client for multiple queries."
+        var entitySchema = CreateAccountSchema();
+        var schema = CreateSchema(entitySchema);
+        var options = new ExportOptions
+        {
+            PageLevelParallelism = 1, // force sequential path
+            PageSize = 2,
+            DegreeOfParallelism = 1
+        };
+
+        var getClientCallCount = 0;
+        var dataPageCalls = 0; // shared across client instances
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool
+            .Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                Interlocked.Increment(ref getClientCallCount);
+                var client = new Mock<IPooledClient>();
+
+                client
+                    .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
+                    .ReturnsAsync((QueryBase query) =>
+                    {
+                        var fetchExpr = query as FetchExpression;
+                        var xml = fetchExpr?.Query ?? "";
+
+                        // Aggregate count query is a one-off
+                        if (xml.Contains("aggregate"))
+                        {
+                            var countEntity = new Entity("account");
+                            countEntity["cnt"] = new AliasedValue("account", "accountid", 4);
+                            return new EntityCollection(new List<Entity> { countEntity });
+                        }
+
+                        // Data query — termination tracked across clients so the
+                        // per-page acquire loop actually stops.
+                        var dataIndex = Interlocked.Increment(ref dataPageCalls);
+                        return new EntityCollection(new List<Entity>
+                        {
+                            new Entity("account", Guid.NewGuid()),
+                            new Entity("account", Guid.NewGuid())
+                        })
+                        { MoreRecords = dataIndex == 1 };
+                    });
+
+                client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+                return client.Object;
+            });
+
+        var exporter = CreateExporter(pool);
+
+        // Act
+        var result = await exporter.ExportAsync(schema, "output.zip", options);
+
+        // Assert — 1 (count) + 2 (one per page) = 3 acquisitions minimum.
+        result.Success.Should().BeTrue();
+        getClientCallCount.Should().BeGreaterThanOrEqualTo(3,
+            "E1: sequential export must acquire a client per page");
+    }
+
+    [Fact]
+    public async Task PartitionExport_AcquiresClientPerPage_NotOncePerPartition()
+    {
+        // E2: ExportPartitionAsync must acquire per page as well.
+        var entitySchema = CreateAccountSchema();
+        var schema = CreateSchema(entitySchema);
+        var options = new ExportOptions
+        {
+            PageLevelParallelism = 2, // force exactly 2 partitions
+            PageSize = 2,
+            DegreeOfParallelism = 1
+        };
+
+        var getClientCallCount = 0;
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool
+            .Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                Interlocked.Increment(ref getClientCallCount);
+                var client = new Mock<IPooledClient>();
+
+                var calls = 0;
+                client
+                    .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
+                    .ReturnsAsync((QueryBase query) =>
+                    {
+                        var fetchExpr = query as FetchExpression;
+                        var xml = fetchExpr?.Query ?? "";
+
+                        if (xml.Contains("aggregate"))
+                        {
+                            var countEntity = new Entity("account");
+                            countEntity["cnt"] = new AliasedValue("account", "accountid", 100_000);
+                            return new EntityCollection(new List<Entity> { countEntity });
+                        }
+
+                        // Data page: return one record, MoreRecords=false.
+                        calls++;
+                        return new EntityCollection(new List<Entity>
+                        {
+                            new Entity("account", Guid.NewGuid())
+                        })
+                        { MoreRecords = false };
+                    });
+
+                client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+                return client.Object;
+            });
+
+        var exporter = CreateExporter(pool);
+
+        // Act
+        var result = await exporter.ExportAsync(schema, "output.zip", options);
+
+        // Assert — 1 (count) + 2 (one per partition's single page) = 3 minimum.
+        result.Success.Should().BeTrue();
+        getClientCallCount.Should().BeGreaterThanOrEqualTo(3,
+            "E2: partitioned export must acquire a client per page");
+    }
+
+    [Fact]
+    public async Task CountFailure_EmitsWarning_AndSurfacesSequentialFallback()
+    {
+        // F1: when the count query fails, log at Warning, emit a WarningCollector
+        // entry, and surface the sequential fallback to the caller.
+        var entitySchema = CreateAccountSchema();
+        var schema = CreateSchema(entitySchema);
+        var options = new ExportOptions
+        {
+            PageLevelParallelism = 0,
+            PageLevelParallelismThreshold = 5000,
+            DegreeOfParallelism = 1
+        };
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool
+            .Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var client = new Mock<IPooledClient>();
+
+                client
+                    .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
+                    .ReturnsAsync((QueryBase query) =>
+                    {
+                        var fetchExpr = query as FetchExpression;
+                        var xml = fetchExpr?.Query ?? "";
+
+                        if (xml.Contains("aggregate"))
+                        {
+                            throw new InvalidOperationException(
+                                "Simulated count failure (service protection).");
+                        }
+
+                        return new EntityCollection(new List<Entity>
+                        {
+                            new Entity("account", Guid.NewGuid())
+                        })
+                        { MoreRecords = false };
+                    });
+
+                client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+                return client.Object;
+            });
+
+        var exporter = CreateExporter(pool);
+
+        // Act
+        var result = await exporter.ExportAsync(schema, "output.zip", options);
+
+        // Assert — warning surfaced on result and the entity still exported.
+        result.Success.Should().BeTrue();
+        result.Warnings.Should().ContainSingle(w =>
+            w.Code == ExportWarningCodes.CountFailedSequentialFallback
+            && w.Entity == "account");
+    }
+
+    [Fact]
     public async Task UsesSequentialBelowThreshold()
     {
         // Arrange: record count of 3000 < threshold of 5000 => sequential

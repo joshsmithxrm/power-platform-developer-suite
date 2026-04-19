@@ -76,6 +76,8 @@ The pre-commit hook automatically runs unit tests (~10s).
 4. **Address review feedback** - Respond to comments and make requested changes
 5. **Squash and merge** - Once approved
 
+For merge mechanics — when auto-merge is appropriate, when it isn't, and squash/branch-protection rules — see [`docs/MERGE-POLICY.md`](docs/MERGE-POLICY.md).
+
 ### PR Guidelines
 
 - Keep PRs focused - one feature/fix per PR
@@ -118,13 +120,27 @@ power-platform-developer-suite/
 │   ├── PPDS.Dataverse/      # Connection pooling, bulk ops
 │   ├── PPDS.Migration/      # Data migration engine
 │   ├── PPDS.Auth/           # Authentication profiles
-│   ├── PPDS.Cli/            # CLI tool + TUI
+│   ├── PPDS.Query/          # SQL query engine + ADO.NET provider
+│   ├── PPDS.Cli/            # CLI tool + TUI (NuGet package name; installed tool command is `ppds`)
 │   ├── PPDS.Mcp/            # MCP server
 │   └── PPDS.Extension/       # VS Code extension
 ├── tests/                   # Test projects
 ├── specs/                  # Feature specifications
 └── templates/claude/       # Claude Code integration
 ```
+
+### Per-package READMEs
+
+| Package | README |
+|---------|--------|
+| PPDS.Plugins | [src/PPDS.Plugins/README.md](src/PPDS.Plugins/README.md) |
+| PPDS.Dataverse | [src/PPDS.Dataverse/README.md](src/PPDS.Dataverse/README.md) |
+| PPDS.Migration | [src/PPDS.Migration/README.md](src/PPDS.Migration/README.md) |
+| PPDS.Auth | [src/PPDS.Auth/README.md](src/PPDS.Auth/README.md) |
+| PPDS.Query | [src/PPDS.Query/README.md](src/PPDS.Query/README.md) |
+| PPDS.Cli | [src/PPDS.Cli/README.md](src/PPDS.Cli/README.md) |
+| PPDS.Mcp | [src/PPDS.Mcp/README.md](src/PPDS.Mcp/README.md) |
+| PPDS.Extension | [src/PPDS.Extension/README.md](src/PPDS.Extension/README.md) |
 
 ## Getting Help
 

@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using PPDS.Auth.Credentials;
 
 namespace PPDS.Auth.Profiles;
 
@@ -9,19 +10,48 @@ namespace PPDS.Auth.Profiles;
 /// Provides platform-specific encryption for sensitive profile data.
 /// </summary>
 /// <remarks>
-/// Kept <c>internal</c> — profile encryption is an implementation detail of
-/// <see cref="ProfileStore"/>. Exposed to <c>PPDS.Auth.Tests</c> via
-/// <c>InternalsVisibleTo</c>.
+/// <para>
+/// Windows uses DPAPI (CurrentUser scope). On non-Windows platforms there is
+/// no equivalent user-scoped data protection API available in-process, so
+/// this type refuses to persist values unless the caller has explicitly
+/// opted in to cleartext via the <see cref="AllowCleartextEnvVar"/> environment variable
+/// or by setting <see cref="AllowCleartext"/>. Callers that need secure
+/// credential storage on macOS/Linux should use
+/// <see cref="NativeCredentialStore"/> (Keychain/libsecret) instead.
+/// </para>
 /// </remarks>
-internal static class ProfileEncryption
+public static class ProfileEncryption
 {
     private const string EncryptedPrefix = "ENCRYPTED:";
+    private const string CleartextPrefix = "CLEARTEXT:";
+
+    /// <summary>
+    /// Environment variable that, when set to "1" or "true", allows storing
+    /// profile values as base64-encoded cleartext on platforms without
+    /// in-process encryption. Intended for CI/CD only.
+    /// </summary>
+    public const string AllowCleartextEnvVar = "PPDS_ALLOW_CLEARTEXT";
+
+    /// <summary>
+    /// Process-wide override that, when set to true, allows cleartext
+    /// persistence on non-Windows platforms. Primarily used by tests.
+    /// </summary>
+    public static bool AllowCleartext { get; set; }
 
     /// <summary>
     /// Encrypts a string value using platform-specific encryption.
     /// </summary>
     /// <param name="value">The value to encrypt.</param>
-    /// <returns>The encrypted value with ENCRYPTED: prefix.</returns>
+    /// <returns>
+    /// The encrypted value with <c>ENCRYPTED:</c> prefix on Windows, or a
+    /// <c>CLEARTEXT:</c>-prefixed base64 value on other platforms when
+    /// cleartext caching has been opted in. Returns an empty string when
+    /// <paramref name="value"/> is null or empty.
+    /// </returns>
+    /// <exception cref="AuthenticationException">
+    /// Thrown on non-Windows platforms when cleartext caching has not been
+    /// explicitly allowed. Error code: <c>Auth.SecureStorageUnavailable</c>.
+    /// </exception>
     public static string Encrypt(string? value)
     {
         if (string.IsNullOrEmpty(value))
@@ -30,22 +60,30 @@ internal static class ProfileEncryption
         }
 
         var bytes = Encoding.UTF8.GetBytes(value);
-        byte[] encrypted;
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            // Use DPAPI on Windows
-            encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
-        }
-        else
-        {
-            // On other platforms, use a simple obfuscation
-            // Note: This is NOT secure encryption, just basic obfuscation
-            // For production, consider using platform-specific keychains
-            encrypted = ObfuscateBytes(bytes);
+            // Use DPAPI on Windows - user-scoped, machine-bound.
+            var encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+            return EncryptedPrefix + Convert.ToBase64String(encrypted);
         }
 
-        return EncryptedPrefix + Convert.ToBase64String(encrypted);
+        // No in-process secure store available. Refuse unless explicitly
+        // opted into cleartext. Callers should prefer NativeCredentialStore
+        // (Keychain/libsecret) for real secrets.
+        if (!IsCleartextAllowed())
+        {
+            throw new AuthenticationException(
+                "Secure profile encryption is not available on this platform. " +
+                "Use PPDS's native credential store (Keychain/libsecret) for secrets, " +
+                "or set PPDS_ALLOW_CLEARTEXT=1 to opt in to cleartext storage for CI/CD.",
+                "Auth.SecureStorageUnavailable");
+        }
+
+        // Cleartext fallback (opt-in only). Base64 for transport-safety,
+        // not confidentiality. The CLEARTEXT: prefix makes the format
+        // explicit at rest.
+        return CleartextPrefix + Convert.ToBase64String(bytes);
     }
 
     /// <summary>
@@ -60,12 +98,31 @@ internal static class ProfileEncryption
             return string.Empty;
         }
 
-        // Handle both prefixed and non-prefixed values
-        var base64 = encryptedValue.StartsWith(EncryptedPrefix, StringComparison.Ordinal)
+        // Cleartext fallback marker (non-Windows opt-in).
+        if (encryptedValue.StartsWith(CleartextPrefix, StringComparison.Ordinal))
+        {
+            var base64 = encryptedValue[CleartextPrefix.Length..];
+            if (string.IsNullOrEmpty(base64))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+            }
+            catch (FormatException)
+            {
+                return encryptedValue;
+            }
+        }
+
+        // Encrypted (DPAPI) values — with or without prefix.
+        var encryptedBase64 = encryptedValue.StartsWith(EncryptedPrefix, StringComparison.Ordinal)
             ? encryptedValue[EncryptedPrefix.Length..]
             : encryptedValue;
 
-        if (string.IsNullOrEmpty(base64))
+        if (string.IsNullOrEmpty(encryptedBase64))
         {
             return string.Empty;
         }
@@ -73,80 +130,75 @@ internal static class ProfileEncryption
         byte[] encrypted;
         try
         {
-            encrypted = Convert.FromBase64String(base64);
+            encrypted = Convert.FromBase64String(encryptedBase64);
         }
         catch (FormatException)
         {
-            // If it's not valid base64, return as-is (might be plaintext)
+            // Not base64 — treat as already-plaintext legacy value.
             return encryptedValue;
         }
 
-        byte[] decrypted;
-
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            // Use DPAPI on Windows
             try
             {
-                decrypted = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
+                var decrypted = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(decrypted);
             }
             catch (CryptographicException)
             {
-                // Might be obfuscated data from another platform, try that
-                decrypted = DeobfuscateBytes(encrypted);
+                // Ciphertext produced by another user/machine — cannot recover.
+                return string.Empty;
             }
         }
-        else
-        {
-            decrypted = DeobfuscateBytes(encrypted);
-        }
 
-        return Encoding.UTF8.GetString(decrypted);
+        // On non-Windows we do not attempt to decrypt legacy XOR-obfuscated values:
+        // the previous scheme was not a confidentiality boundary, and rehydrating it
+        // here would keep pretending it was. Surface a typed exception so callers can
+        // trigger reauth UX instead of silently treating the credential as empty —
+        // the latter cascades into "wrong credentials" downstream, which is the worst
+        // kind of bug to debug. Symmetric with Encrypt's behavior on the same platform.
+        throw new AuthenticationException(
+            "Cannot decrypt a legacy ENCRYPTED: profile value on this platform. " +
+            "Re-authenticate the profile, or migrate to the CLEARTEXT: format with " +
+            "PPDS_ALLOW_CLEARTEXT=1. Production credential storage should use " +
+            "NativeCredentialStore (Keychain/libsecret) instead of ProfileEncryption.",
+            "Auth.LegacyEncryptedProfileUnsupported");
     }
 
     /// <summary>
-    /// Checks if a value is encrypted (has the ENCRYPTED: prefix).
+    /// Checks if a value is encrypted (has the ENCRYPTED: or CLEARTEXT: prefix).
     /// </summary>
     /// <param name="value">The value to check.</param>
-    /// <returns>True if the value is encrypted.</returns>
+    /// <returns>True if the value carries one of the known prefixes.</returns>
     public static bool IsEncrypted(string? value)
     {
-        return value?.StartsWith(EncryptedPrefix, StringComparison.Ordinal) == true;
-    }
-
-    /// <summary>
-    /// Simple XOR-based obfuscation for non-Windows platforms.
-    /// This is NOT cryptographically secure, just prevents casual viewing.
-    /// </summary>
-    private static byte[] ObfuscateBytes(byte[] data)
-    {
-        // Use a machine-specific key based on username and machine name
-        var key = GetMachineKey();
-        var result = new byte[data.Length];
-
-        for (int i = 0; i < data.Length; i++)
+        if (value == null)
         {
-            result[i] = (byte)(data[i] ^ key[i % key.Length]);
+            return false;
         }
 
-        return result;
+        return value.StartsWith(EncryptedPrefix, StringComparison.Ordinal)
+            || value.StartsWith(CleartextPrefix, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Reverses the XOR obfuscation.
+    /// Returns true when cleartext storage has been opted in (env var or API).
     /// </summary>
-    private static byte[] DeobfuscateBytes(byte[] data)
+    internal static bool IsCleartextAllowed()
     {
-        // XOR is its own inverse
-        return ObfuscateBytes(data);
-    }
+        if (AllowCleartext)
+        {
+            return true;
+        }
 
-    /// <summary>
-    /// Gets a machine-specific key for obfuscation.
-    /// </summary>
-    private static byte[] GetMachineKey()
-    {
-        var keySource = $"{Environment.UserName}:{Environment.MachineName}:PPDS";
-        return SHA256.HashData(Encoding.UTF8.GetBytes(keySource));
+        var envValue = Environment.GetEnvironmentVariable(AllowCleartextEnvVar);
+        if (string.IsNullOrEmpty(envValue))
+        {
+            return false;
+        }
+
+        return envValue.Equals("1", StringComparison.Ordinal)
+            || envValue.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 }

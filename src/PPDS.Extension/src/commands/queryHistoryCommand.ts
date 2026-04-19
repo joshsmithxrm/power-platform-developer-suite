@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryHistoryEntryDto } from '../types.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 // ── Button constants (identity-comparable) ───────────────────────────────────
 
@@ -133,7 +134,7 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                         quickPick.items = newItems as HistoryQuickPickItem[];
                     } catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
-                        vscode.window.showErrorMessage(`Failed to delete history entry: ${msg}`);
+                        void showErrorWithReport(`Failed to delete history entry: ${msg}`);
                     }
                 }
             } else if (e.button === RUN_BUTTON) {

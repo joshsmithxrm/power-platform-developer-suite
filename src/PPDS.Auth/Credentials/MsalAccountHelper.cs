@@ -35,7 +35,7 @@ internal static class MsalAccountHelper
             var account = await msalClient.GetAccountAsync(homeAccountId).ConfigureAwait(false);
             if (account != null)
             {
-                AuthDebugLog.WriteLine($"  SUCCESS: Found account by HomeAccountId ({account.Username})");
+                AuthDebugLog.WriteLine($"  SUCCESS: Found account by HomeAccountId (upn={LogIdentityHelper.HashIdentifier(account.Username)})");
                 return account;
             }
             AuthDebugLog.WriteLine("  HomeAccountId lookup returned null - account not in cache");
@@ -61,7 +61,7 @@ internal static class MsalAccountHelper
                 string.Equals(a.HomeAccountId?.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             if (tenantAccount != null)
             {
-                AuthDebugLog.WriteLine($"  SUCCESS: Found account by TenantId ({tenantAccount.Username})");
+                AuthDebugLog.WriteLine($"  SUCCESS: Found account by TenantId (upn={LogIdentityHelper.HashIdentifier(tenantAccount.Username)})");
                 return tenantAccount;
             }
             AuthDebugLog.WriteLine("  TenantId lookup found no match");
@@ -70,12 +70,12 @@ internal static class MsalAccountHelper
         // Fall back to username match
         if (!string.IsNullOrEmpty(username))
         {
-            AuthDebugLog.WriteLine($"  Attempting Username lookup: {username}");
+            AuthDebugLog.WriteLine($"  Attempting Username lookup: upn={LogIdentityHelper.HashIdentifier(username)}");
             var usernameAccount = accountList.FirstOrDefault(a =>
                 string.Equals(a.Username, username, StringComparison.OrdinalIgnoreCase));
             if (usernameAccount != null)
             {
-                AuthDebugLog.WriteLine($"  SUCCESS: Found account by Username ({usernameAccount.Username})");
+                AuthDebugLog.WriteLine($"  SUCCESS: Found account by Username (upn={LogIdentityHelper.HashIdentifier(usernameAccount.Username)})");
                 return usernameAccount;
             }
             AuthDebugLog.WriteLine("  Username lookup found no match");

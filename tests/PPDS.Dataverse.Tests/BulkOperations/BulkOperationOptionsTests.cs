@@ -109,6 +109,78 @@ public class BulkOperationOptionsTests
         options.BatchSize.Should().Be(batchSize);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  C3: BatchSize validation (1 ≤ BatchSize ≤ 1000)
+    // ═══════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    [InlineData(1001)]
+    [InlineData(5000)]
+    [InlineData(int.MaxValue)]
+    [InlineData(int.MinValue)]
+    public void BatchSize_ThrowsBulkOperationValidationException_WhenOutOfRange(int invalidBatchSize)
+    {
+        // Arrange
+        var options = new BulkOperationOptions();
+
+        // Act
+        var act = () => options.BatchSize = invalidBatchSize;
+
+        // Assert
+        act.Should().Throw<BulkOperationValidationException>()
+            .Which.ErrorCode.Should().Be(BulkOperationErrorCode.InvalidBatchSize);
+    }
+
+    [Fact]
+    public void BatchSize_ThrowsOnConstruction_WhenInitializerOutOfRange()
+    {
+        // Act
+        var act = () => new BulkOperationOptions { BatchSize = 1500 };
+
+        // Assert: object initializer invokes the setter which must reject the value
+        act.Should().Throw<BulkOperationValidationException>()
+            .Which.ErrorCode.Should().Be(BulkOperationErrorCode.InvalidBatchSize);
+    }
+
+    [Fact]
+    public void BatchSize_ValidationException_IncludesParamName()
+    {
+        // Arrange
+        var options = new BulkOperationOptions();
+
+        // Act
+        var act = () => options.BatchSize = 0;
+
+        // Assert: ArgumentException carries the property name to aid debugging
+        act.Should().Throw<BulkOperationValidationException>()
+            .Which.ParamName.Should().Be(nameof(BulkOperationOptions.BatchSize));
+    }
+
+    [Fact]
+    public void BatchSize_DefaultRemainsWithinRange()
+    {
+        // Act
+        var options = new BulkOperationOptions();
+
+        // Assert: default value (100) must satisfy the validation contract
+        options.BatchSize.Should().BeInRange(BulkOperationOptions.MinBatchSize, BulkOperationOptions.MaxBatchSize);
+    }
+
+    [Theory]
+    [InlineData(1)]     // boundary: min
+    [InlineData(1000)]  // boundary: max
+    public void BatchSize_AcceptsBoundaryValues(int boundary)
+    {
+        // Act
+        var options = new BulkOperationOptions { BatchSize = boundary };
+
+        // Assert
+        options.BatchSize.Should().Be(boundary);
+    }
+
     [Fact]
     public void ElasticTable_CanBeSetToTrue()
     {

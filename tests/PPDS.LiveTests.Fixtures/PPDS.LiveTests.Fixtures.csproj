@@ -4,8 +4,12 @@
     <TargetFramework>net462</TargetFramework>
     <AssemblyName>PPDS.LiveTests.Fixtures</AssemblyName>
     <RootNamespace>PPDS.LiveTests.Fixtures</RootNamespace>
+    <!-- Test fixture simulating a plugin assembly. Uses PublicSign with the
+         PPDS.Plugins public key so it can ride along with PPDS.Plugins'
+         strong-name identity for tests that exercise strong-named extraction. -->
     <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>..\..\src\PPDS.Plugins\PPDS.Plugins.snk</AssemblyOriginatorKeyFile>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>..\..\src\PPDS.Plugins\PPDS.Plugins.PublicKey</AssemblyOriginatorKeyFile>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
   </PropertyGroup>

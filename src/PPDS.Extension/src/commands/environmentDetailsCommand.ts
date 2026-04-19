@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 /**
  * Registers the environment details command.
@@ -79,7 +80,7 @@ export function registerEnvironmentDetailsCommand(
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to get environment details: ${message}`);
+                void showErrorWithReport(`Failed to get environment details: ${message}`);
             }
         }),
     );

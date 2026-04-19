@@ -45,6 +45,12 @@ namespace PPDS.Migration.Export
         public IReadOnlyList<MigrationError> Errors { get; set; } = Array.Empty<MigrationError>();
 
         /// <summary>
+        /// Gets or sets non-fatal warnings produced during export (e.g., count-query failures
+        /// that forced an entity to sequential export).
+        /// </summary>
+        public IReadOnlyList<ImportWarning> Warnings { get; set; } = Array.Empty<ImportWarning>();
+
+        /// <summary>
         /// Gets the average records per second.
         /// </summary>
         public double RecordsPerSecond => Duration.TotalSeconds > 0

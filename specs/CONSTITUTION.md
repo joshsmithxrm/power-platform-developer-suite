@@ -20,11 +20,11 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 ## Dataverse Laws
 
-**D1.** Use `IDataverseConnectionPool` for all Dataverse operations — never create `ServiceClient` directly. Creating a client per request is 42,000x slower than pooling.
+**D1.** Use `IDataverseConnectionPool` for all Dataverse operations — never create `ServiceClient` directly. `ServiceClient` construction performs authentication round-trips (hundreds of milliseconds to seconds per client), whereas pool checkout clones an already-authenticated seed; creating a client per request is drastically slower than pooling.
 
 **D2.** Never hold a pooled client across multiple operations. Pattern: get, use, dispose within a single method scope. Holding defeats pool parallelism.
 
-**D3.** Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) over `ExecuteMultiple`. Bulk APIs are 5x faster.
+**D3.** Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) over `ExecuteMultiple`. Bulk APIs are significantly faster for supported tables — see `docs/BULK_OPERATIONS_BENCHMARKS.md` for Microsoft's reference numbers and PPDS measurements.
 
 **D4.** Wrap all exceptions from Application Services in `PpdsException` with an `ErrorCode`. Raw exceptions prevent programmatic error handling by callers.
 
