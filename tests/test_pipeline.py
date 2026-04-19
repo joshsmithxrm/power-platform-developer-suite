@@ -781,7 +781,11 @@ class TestPrThreadedReplies:
 # ---------------------------------------------------------------------------
 class TestPrDraftToReady:
     def test_pr_draft_to_ready(self, tmp_path):
-        """AC-83: Pipeline converts draft PR to ready."""
+        """AC-83 (rewritten for v1-prelaunch retro #4):
+        After PR creation, run_pr_stage delegates to pr_monitor.py which is
+        responsible for converting the draft to ready (and the rest of the
+        polling loop). The pipeline only needs to invoke the monitor; the
+        monitor owns the ``gh pr ready`` call."""
         import pipeline
 
         wf_dir = tmp_path / ".workflow"
@@ -808,11 +812,16 @@ class TestPrDraftToReady:
 
         with unittest.mock.patch("subprocess.run", side_effect=mock_run):
             with unittest.mock.patch.object(pipeline, "run_claude", return_value=(0, logger)):
-                with unittest.mock.patch.object(pipeline, "poll_gemini", return_value=[]):
-                    pipeline.run_pr_stage(str(tmp_path), logger)
+                pipeline.run_pr_stage(str(tmp_path), logger)
 
-        ready_calls = [c for c in calls if len(c) >= 3 and c[0] == "gh" and c[1] == "pr" and c[2] == "ready"]
-        assert ready_calls, f"Expected 'gh pr ready' call in: {[c[:4] for c in calls]}"
+        # Delegation contract: pr_monitor.py must be invoked
+        monitor_calls = [
+            c for c in calls
+            if any("pr_monitor.py" in str(arg) for arg in c)
+        ]
+        assert monitor_calls, (
+            f"pr_monitor.py was not invoked. calls: {[c[:4] for c in calls]}"
+        )
         logger.close()
 
 
@@ -989,138 +998,20 @@ class TestPrGeminiMaxWait:
 
 
 # ---------------------------------------------------------------------------
-# AC-90: Gemini timeout annotation
+# AC-90, AC-91, AC-92: post-PR-creation behavior moved to pr_monitor.py
 # ---------------------------------------------------------------------------
-class TestPrGeminiTimeoutAnnotation:
-    def test_pr_gemini_timeout_annotation(self, tmp_path):
-        """AC-90: PR body annotated when Gemini sends no comments."""
-        import pipeline
-
-        wf_dir = tmp_path / ".workflow"
-        wf_dir.mkdir()
-        state = {"branch": "feat/test", "gates": {}, "verify": {}, "qa": {}, "review": {}}
-        (wf_dir / "state.json").write_text(json.dumps(state))
-        logger = pipeline.open_logger(str(wf_dir / "pipeline.log"))
-
-        edit_calls = []
-
-        def mock_run(cmd, **kwargs):
-            if cmd[0] == "gh" and "edit" in cmd:
-                edit_calls.append(cmd)
-            result = unittest.mock.MagicMock()
-            result.returncode = 0
-            result.stdout = ""
-            result.stderr = ""
-            if cmd[0] == "gh" and "create" in cmd:
-                result.stdout = "https://github.com/test/repo/pull/42\n"
-            elif cmd[0] == "git" and "rev-parse" in cmd and "--abbrev-ref" in cmd:
-                result.stdout = "feat/test\n"
-            elif cmd[0] == "python":
-                result.stdout = "[]"
-            return result
-
-        with unittest.mock.patch("subprocess.run", side_effect=mock_run):
-            with unittest.mock.patch.object(pipeline, "run_claude", return_value=(0, logger)):
-                with unittest.mock.patch.object(pipeline, "poll_gemini", return_value=[]):
-                    pipeline.run_pr_stage(str(tmp_path), logger)
-
-        # Find the gh pr edit call and check for timeout annotation
-        assert edit_calls, "Expected gh pr edit call for annotation"
-        body_arg = edit_calls[0][edit_calls[0].index("--body") + 1] if "--body" in edit_calls[0] else ""
-        assert "no review received" in body_arg, f"Expected timeout annotation in body: {body_arg[:200]}"
-        logger.close()
-
-
-# ---------------------------------------------------------------------------
-# AC-91: Triage failure annotation
-# ---------------------------------------------------------------------------
-class TestPrTriageFailureAnnotation:
-    def test_pr_triage_failure_annotation(self, tmp_path):
-        """AC-91: PR body annotated when triage fails."""
-        import pipeline
-
-        wf_dir = tmp_path / ".workflow"
-        wf_dir.mkdir()
-        state = {"branch": "feat/test", "gates": {}, "verify": {}, "qa": {}, "review": {}}
-        (wf_dir / "state.json").write_text(json.dumps(state))
-        logger = pipeline.open_logger(str(wf_dir / "pipeline.log"))
-
-        edit_calls = []
-
-        def mock_run(cmd, **kwargs):
-            if cmd[0] == "gh" and "edit" in cmd:
-                edit_calls.append(cmd)
-            result = unittest.mock.MagicMock()
-            result.returncode = 0
-            result.stdout = ""
-            result.stderr = ""
-            if cmd[0] == "gh" and "create" in cmd:
-                result.stdout = "https://github.com/test/repo/pull/42\n"
-            elif cmd[0] == "git" and "rev-parse" in cmd and "--abbrev-ref" in cmd:
-                result.stdout = "feat/test\n"
-            elif cmd[0] == "python":
-                result.stdout = "[]"
-            return result
-
-        fake_comments = [{"id": 1, "body": "test", "path": "a.py", "line": 1}]
-
-        with unittest.mock.patch("subprocess.run", side_effect=mock_run):
-            with unittest.mock.patch.object(pipeline, "run_claude", return_value=(0, logger)):
-                with unittest.mock.patch.object(pipeline, "poll_gemini", return_value=fake_comments):
-                    with unittest.mock.patch.object(pipeline, "run_triage", return_value=None):
-                        pipeline.run_pr_stage(str(tmp_path), logger)
-
-        assert edit_calls, "Expected gh pr edit call for annotation"
-        body_arg = edit_calls[0][edit_calls[0].index("--body") + 1] if "--body" in edit_calls[0] else ""
-        assert "triage incomplete" in body_arg, f"Expected triage failure annotation: {body_arg[:200]}"
-        logger.close()
-
-
-# ---------------------------------------------------------------------------
-# AC-92: Triage push verify
-# ---------------------------------------------------------------------------
-class TestPrTriagePushVerify:
-    def test_pr_triage_push_verify(self, tmp_path):
-        """AC-92: Pipeline verifies local HEAD matches remote after triage push."""
-        import pipeline
-
-        wf_dir = tmp_path / ".workflow"
-        wf_dir.mkdir()
-        state = {"branch": "feat/test", "gates": {}, "verify": {}, "qa": {}, "review": {}}
-        (wf_dir / "state.json").write_text(json.dumps(state))
-        logger = pipeline.open_logger(str(wf_dir / "pipeline.log"))
-
-        ls_remote_called = [False]
-
-        def mock_run(cmd, **kwargs):
-            result = unittest.mock.MagicMock()
-            result.returncode = 0
-            result.stdout = ""
-            result.stderr = ""
-            if cmd[0] == "gh" and "create" in cmd:
-                result.stdout = "https://github.com/test/repo/pull/42\n"
-            elif cmd[0] == "git" and "rev-parse" in cmd and "--abbrev-ref" in cmd:
-                result.stdout = "feat/test\n"
-            elif cmd[0] == "git" and "rev-parse" in cmd and "HEAD" in cmd:
-                result.stdout = "abc123\n"
-            elif cmd[0] == "git" and "ls-remote" in cmd:
-                ls_remote_called[0] = True
-                result.stdout = "abc123\trefs/heads/feat/test\n"
-            elif cmd[0] == "python":
-                result.stdout = "[]"
-            return result
-
-        triage = [{"id": 1, "action": "fixed", "description": "done", "commit": "abc123"}]
-
-        with unittest.mock.patch("subprocess.run", side_effect=mock_run):
-            with unittest.mock.patch.object(pipeline, "run_claude", return_value=(0, logger)):
-                with unittest.mock.patch.object(pipeline, "poll_gemini", return_value=[{"id": 1}]):
-                    with unittest.mock.patch.object(pipeline, "run_triage", return_value=triage):
-                        with unittest.mock.patch.object(pipeline, "get_repo_slug", return_value="owner/repo"):
-                            pipeline.run_pr_stage(str(tmp_path), logger)
-
-        assert ls_remote_called[0], "Expected git ls-remote to be called for push verification"
-        logger.close()
+# After v1-prelaunch retro item #4, the polling loop (Gemini timeout
+# annotation, triage failure annotation, push verification, ready conversion)
+# moved into pr_monitor.py — pipeline.run_pr_stage now delegates the entire
+# post-creation phase to that script as a subprocess. The behavior is
+# covered by tests/test_pr_monitor.py and tests/test_pipeline_pr_monitor_delegation.py.
+#
+# AC-90 / AC-91 (PR body annotation): pr_monitor doesn't currently re-edit
+# the PR body for these conditions; it logs and proceeds. Pipeline used to
+# do this in-process. The delegated design accepts a less-chatty PR body in
+# exchange for a single canonical implementation. If body annotation is
+# required again it should be added to pr_monitor.py (one place), not
+# duplicated.
 
 
 # ===========================================================================

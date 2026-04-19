@@ -1074,109 +1074,91 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
         log(logger, "pr", "DONE", exit=-1, duration=f"{int(time.time() - start)}s")
         return -1, logger
 
-    # 5. Poll for CodeQL completion (AC-144) — 5 min timeout
-    _poll_codeql_check(worktree_path, pr_number, logger)
+    # 5–8. Delegate the post-PR-creation polling loop (CI → Gemini → triage →
+    # ready → retro → notify) to pr_monitor.py. v1-prelaunch retro item #4:
+    # The two scripts had drifted apart and the duplicated polling logic was
+    # the root drift cause. Pipeline now retains *orchestration* (start, push,
+    # PR creation, wait); pr_monitor.py owns the *polling loop*. Single
+    # canonical implementation.
+    monitor_exit = _delegate_to_pr_monitor(
+        worktree_path, pr_number, logger, dry_run=dry_run)
+    if monitor_exit not in (0,):
+        # pr_monitor failed (CI failure, timeout, etc.); pipeline still
+        # records the PR URL but reports stage failure so the orchestrator
+        # can decide what to do.
+        log(logger, "pr", "DONE", exit=monitor_exit,
+            duration=f"{int(time.time() - start)}s",
+            via="pr_monitor")
+        return monitor_exit, logger
 
-    # 6. Poll for Gemini comments
-    comments = poll_gemini(worktree_path, pr_number, logger)
-
-    # 7. Handle triage or annotation
-    annotation = None
-    if not comments:
-        # Check for Gemini overload (AC-141, AC-142)
-        shakedown = bool(os.environ.get("PPDS_SHAKEDOWN"))
-        if detect_gemini_overload(worktree_path, pr_number, shakedown=shakedown):
-            log(logger, "pr", "GEMINI_OVERLOAD_DETECTED")
-            # Post /gemini review to retry
-            repo = get_repo_slug(worktree_path, shakedown=shakedown)
-            if repo:
-                try:
-                    subprocess.run(
-                        ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
-                         "-f", "body=/gemini review"],
-                        cwd=worktree_path, capture_output=True, text=True, timeout=15,
-                    )
-                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                    pass
-            # Re-poll for 5 more minutes
-            comments = poll_gemini(worktree_path, pr_number, logger,
-                                   min_wait=30, max_wait=300)
-        if not comments:
-            annotation = "\n\n**Gemini:** no review received within 5 minutes."
-    else:
-        # Filter to unreplied bot comments for initial triage (AC-140 hardening)
-        shakedown_flag = bool(os.environ.get("PPDS_SHAKEDOWN"))
-        unreplied_initial = get_unreplied_comments(
-            worktree_path, pr_number, shakedown=shakedown_flag)
-        triage_comments = unreplied_initial if unreplied_initial else comments
-        triage_results = run_triage(worktree_path, pr_number, triage_comments,
-                                    logger, dry_run=dry_run)
-        if triage_results is None:
-            annotation = "\n\n**Gemini:** triage incomplete — manual review needed."
-        else:
-            # Verify push before posting replies
-            try:
-                local_head = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
-                ).stdout.strip()
-                remote_result = subprocess.run(
-                    ["git", "ls-remote", "origin", branch],
-                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
-                )
-                remote_head = remote_result.stdout.split()[0] if remote_result.stdout.strip() else ""
-                if local_head == remote_head:
-                    post_replies(worktree_path, pr_number, triage_results, logger)
-                    # Reconciliation: re-check for unreplied and re-triage delta (AC-140)
-                    for recon_round in range(3):
-                        unreplied = get_unreplied_comments(
-                            worktree_path, pr_number,
-                            shakedown=bool(os.environ.get("PPDS_SHAKEDOWN")))
-                        if not unreplied:
-                            break
-                        log(logger, "pr", "RECONCILE",
-                            round=recon_round + 1, unreplied=len(unreplied))
-                        delta_results = run_triage(
-                            worktree_path, pr_number, unreplied, logger,
-                            dry_run=dry_run)
-                        if delta_results:
-                            post_replies(worktree_path, pr_number,
-                                         delta_results, logger)
-                else:
-                    log(logger, "pr", "PUSH_MISMATCH",
-                        local=local_head[:8], remote=remote_head[:8])
-                    annotation = ("\n\n**Gemini:** triage fixes committed locally "
-                                  "but push may have failed. Check branch.")
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                annotation = "\n\n**Gemini:** could not verify push status."
-
-    # Check timeout before finalizing
-    if _check_timeout():
-        # Still convert to ready so the PR isn't stuck as draft
-        subprocess.run(
-            ["gh", "pr", "ready", pr_number],
-            cwd=worktree_path, capture_output=True, text=True, timeout=30,
-        )
-        log(logger, "pr", "DONE", exit=-1, duration=f"{int(time.time() - start)}s")
-        return -1, logger
-
-    # Append annotation to PR body if needed
-    if annotation:
-        subprocess.run(
-            ["gh", "pr", "edit", pr_number, "--body", pr_body + annotation],
-            cwd=worktree_path, capture_output=True, text=True, timeout=30,
-        )
-
-    # 8. Convert draft → ready
-    subprocess.run(
-        ["gh", "pr", "ready", pr_number],
-        cwd=worktree_path, capture_output=True, text=True, timeout=30,
-    )
     log(logger, "pr", "PR_READY", url=pr_url)
-
     duration = int(time.time() - start)
-    log(logger, "pr", "DONE", exit=0, duration=f"{duration}s")
+    log(logger, "pr", "DONE", exit=0, duration=f"{duration}s", via="pr_monitor")
     return 0, logger
+
+
+def _delegate_to_pr_monitor(worktree_path, pr_number, logger, dry_run=False):
+    """Invoke ``scripts/pr_monitor.py`` as a subprocess for the polling loop.
+
+    v1-prelaunch retro item #4: the previous pipeline.run_pr_stage embedded a
+    full copy of pr_monitor.py's polling logic (CI → Gemini → triage →
+    reconcile → ready → retro → notify). Two implementations of the same
+    logic drifted apart over time. Now pipeline delegates the polling phase
+    to pr_monitor.py via subprocess; pr_monitor.py is the single canonical
+    implementation.
+
+    Args:
+        worktree_path: absolute path to the worktree
+        pr_number: PR number (str or int)
+        logger: pipeline log handle
+        dry_run: if True, log the planned invocation but skip exec
+
+    Returns:
+        Exit code: 0 on success, non-zero on failure.
+    """
+    script_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "pr_monitor.py")
+    cmd = [
+        sys.executable, script_path,
+        "--worktree", worktree_path,
+        "--pr", str(pr_number),
+    ]
+    log(logger, "pr", "MONITOR_DELEGATE",
+        script="pr_monitor.py", pr=pr_number)
+
+    if dry_run:
+        log(logger, "pr", "MONITOR_DRY_RUN", cmd=" ".join(cmd))
+        return 0
+
+    env = os.environ.copy()
+    # Propagate orchestrator hints. PPDS_PIPELINE keeps Claude hooks in
+    # headless mode within the spawned monitor and any downstream `claude -p`.
+    env.setdefault("PPDS_PIPELINE", "1")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=worktree_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=HARD_CEILING,
+        )
+    except subprocess.TimeoutExpired:
+        log(logger, "pr", "MONITOR_TIMEOUT", ceiling=f"{HARD_CEILING}s")
+        return -1
+    except (FileNotFoundError, OSError) as e:
+        log(logger, "pr", "MONITOR_ERROR", error=str(e))
+        return 1
+
+    # Surface stderr tail in the pipeline log so failures are diagnosable
+    # without opening the monitor log.
+    if proc.stderr:
+        for line in proc.stderr.strip().splitlines()[-10:]:
+            log(logger, "pr", "MONITOR_STDERR", line=line[:200])
+
+    log(logger, "pr", "MONITOR_DONE", exit=proc.returncode)
+    return proc.returncode
 
 
 def _read_last_lines(worktree_path, stage_name, n=50):
