@@ -128,6 +128,10 @@ def locked_state(path: Path | None = None) -> Iterator[tuple[Any, dict[str, Any]
                 state = json.loads(raw) if raw.strip() else empty_state()
             except json.JSONDecodeError:
                 state = empty_state()
+            # Guard against valid JSON that isn't an object (null, [], "abc"):
+            # downstream code assumes ``state`` is a dict, so coerce here.
+            if not isinstance(state, dict):
+                state = empty_state()
             if "open_work" not in state:
                 state["open_work"] = []
             if "version" not in state:
@@ -173,13 +177,24 @@ def _branch_exists(branch: str) -> bool:
     try:
         import subprocess
 
+        # ``--`` separates the branch pattern from option flags so that a
+        # branch name beginning with ``-`` cannot be parsed as a git option.
         result = subprocess.run(
-            ["git", "branch", "--list", branch],
+            ["git", "branch", "--list", "--", branch],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return result.returncode == 0 and bool(result.stdout.strip())
+        if result.returncode != 0:
+            # git itself failed (not in a repo, etc.) — log to stderr so the
+            # failure is visible, but stay fail-open: assume the branch
+            # exists rather than aggressively pruning.
+            sys.stderr.write(
+                f"[inflight] git branch --list failed (rc={result.returncode}): "
+                f"{result.stderr.strip()}\n"
+            )
+            return True
+        return bool(result.stdout.strip())
     except Exception:
         # If git is unavailable, don't aggressively prune.
         return True

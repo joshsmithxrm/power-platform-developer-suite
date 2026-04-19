@@ -10,7 +10,6 @@ Covers:
 from __future__ import annotations
 
 import concurrent.futures
-import importlib
 import json
 import os
 import sys
@@ -36,8 +35,7 @@ def tmp_state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def register_module():
-    return importlib.import_module("inflight-register".replace("-", "_")) \
-        if False else _import_script("inflight-register")
+    return _import_script("inflight-register")
 
 
 @pytest.fixture
