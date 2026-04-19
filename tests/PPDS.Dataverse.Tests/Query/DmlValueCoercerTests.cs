@@ -248,4 +248,93 @@ public class DmlValueCoercerTests
         var result = DmlValueCoercer.Coerce(42, Attr("SomeFutureType"));
         Assert.Equal(42, result);
     }
+
+    // -----------------------------------------------------------------------
+    // Structured-error coverage for Gemini findings on PR #827 (DmlValueCoercer
+    // lines 155, 168, 181, 201, 222, 233). Verifies that bad inputs surface as
+    // QueryExecutionException(TypeMismatch) instead of raw Format/Overflow
+    // exceptions from Convert.To* / Parse.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void Coerce_BooleanFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("yes", Attr("Boolean")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("Boolean", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_BooleanFromUnsupportedType_ThrowsQueryExecutionException()
+    {
+        // DateTime is not in the Boolean coercion switch — must throw structured.
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce(DateTime.UtcNow, Attr("Boolean")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void Coerce_BigIntFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("not-a-number", Attr("BigInt")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("Int64", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_DoubleFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("nan-not-a-num", Attr("Double")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("Double", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_DateTimeFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("not-a-date", Attr("DateTime")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("DateTime", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_IntegerFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("xyz", Attr("Integer")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("Int32", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_IntegerFromOverflowLong_ThrowsQueryExecutionException()
+    {
+        // long > int.MaxValue must surface a structured error rather than a
+        // checked-conversion OverflowException from Convert.ToInt32.
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce((long)int.MaxValue + 1L, Attr("Integer")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void Coerce_DecimalFromBadString_ThrowsQueryExecutionException()
+    {
+        var ex = Assert.Throws<QueryExecutionException>(
+            () => DmlValueCoercer.Coerce("not-a-decimal", Attr("Decimal")));
+        Assert.Equal(QueryErrorCode.TypeMismatch, ex.ErrorCode);
+        Assert.Contains("Decimal", ex.Message);
+    }
+
+    [Fact]
+    public void Coerce_BigIntFromInvariantString_Parses()
+    {
+        // Confirms the explicit InvariantCulture-bound TryParse path works for the
+        // common ScriptDom string-literal case.
+        var result = DmlValueCoercer.Coerce("9223372036854775807", Attr("BigInt"));
+        Assert.Equal(long.MaxValue, Assert.IsType<long>(result));
+    }
 }
