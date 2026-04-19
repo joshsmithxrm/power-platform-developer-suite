@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import { buildMakerUrl } from '../commands/browserCommands.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
@@ -275,7 +276,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 vscode.window.showInformationMessage(`Table '${entityLogicalName}' deleted successfully.`);
                 await this.refreshAll();
             } else {
-                vscode.window.showErrorMessage(result.error ?? 'Delete failed');
+                void showErrorWithReport(result.error ?? 'Delete failed');
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -332,7 +333,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 vscode.window.showInformationMessage(`Column '${columnLogicalName}' deleted successfully.`);
                 await this.loadEntityDetail(entityLogicalName);
             } else {
-                vscode.window.showErrorMessage(result.error ?? 'Delete failed');
+                void showErrorWithReport(result.error ?? 'Delete failed');
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);

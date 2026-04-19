@@ -193,19 +193,24 @@ namespace PPDS.Migration.Import
             var failureCount = 0;
             var errors = new List<BulkOperationError>();
 
-            // Use single client for sequential individual updates
-            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-
             for (var i = 0; i < updates.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 try
                 {
+                    // E5: Acquire a pooled client per update and release before next iteration's await.
+                    // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
                     var updateRequest = new UpdateRequest { Target = updates[i] };
                     updateRequest.ApplyBypassOptions(context.Options);
-                    await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
+
+                    await using (var client = await _connectionPool
+                        .GetClientAsync(null, cancellationToken: cancellationToken)
+                        .ConfigureAwait(false))
+                    {
+                        await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
+                    }
+
                     successCount++;
                 }
                 catch (Exception ex)

@@ -687,3 +687,17 @@ export interface WebResourceDetailDto {
     content?: string;
     modifiedOn?: string;
 }
+
+// ── Heartbeat ───────────────────────────────────────────────────────────────
+
+// Mirrors PPDS.Cli.Commands.Serve.Handlers.RpcMethodHandler.HeartbeatResponse.
+// Required by scripts/check-rpc-dto-drift.py — keep field names and JSON casing
+// in sync with the C# [JsonPropertyName] attributes there.
+export interface HeartbeatResponse {
+    ok: boolean;
+    uptimeSeconds: number;
+    startedAt: string;
+    correlationId: string;
+    heartbeatCount: number;
+    daemonVersion: string;
+}

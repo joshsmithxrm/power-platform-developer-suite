@@ -15,7 +15,7 @@ The system achieves full parity with Microsoft's Configuration Migration Tool wh
 
 ### Goals
 
-- **Performance**: Parallel export with entity-level concurrency; parallel import with tier-level and entity-level parallelism; bulk APIs (5x faster than CMT)
+- **Performance**: Parallel export with entity-level concurrency; parallel import with tier-level and entity-level parallelism; bulk APIs (`CreateMultiple`/`UpdateMultiple`) that are significantly faster than the `ExecuteMultiple` path CMT uses (see `docs/BULK_OPERATIONS_BENCHMARKS.md`)
 - **Correctness**: Dependency-aware import ordering via topological sort; deferred fields for circular references; state machine entity transitions via SDK messages
 - **Interoperability**: Full CMT format support including date shifting modes, file column data, and schema attributes
 - **Resilience**: Entity-specific handlers for special cases; external lookup resolution; owner preservation; failure cascading

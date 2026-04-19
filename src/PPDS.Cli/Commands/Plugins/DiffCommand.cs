@@ -213,24 +213,43 @@ public static class DiffCommand
         // Get all types for this assembly
         var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id);
 
-        // Build a map of all configured steps
+        // Build a map of all configured steps. Duplicate resolved names within a config file
+        // are blocked earlier by PluginRegistrationConfig.Validate(); if we still hit one here
+        // (e.g., Validate() was skipped), throw a PpdsException so the mismatch is visible in
+        // diff output instead of silently collapsing.
         var configuredSteps = new Dictionary<string, (PluginTypeConfig Type, PluginStepConfig Step)>();
         foreach (var typeConfig in config.Types)
         {
             foreach (var stepConfig in typeConfig.Steps)
             {
                 var key = stepConfig.Name ?? $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
+                if (configuredSteps.ContainsKey(key))
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Operation.Duplicate,
+                        $"Assembly '{config.Name}' has multiple configured steps resolving to name '{key}'. " +
+                        "Provide unique explicit Name values so the diff output reflects every step.");
+                }
                 configuredSteps[key] = (typeConfig, stepConfig);
             }
         }
 
-        // Get all existing steps
+        // Get all existing steps. Duplicate names in the environment are a real (though rare)
+        // possibility — surface them rather than letting one silently overwrite the other.
         var existingSteps = new Dictionary<string, (PluginTypeInfo Type, PluginStepInfo Step)>();
         foreach (var existingType in existingTypes)
         {
             var steps = await service.ListStepsForTypeAsync(existingType.Id);
             foreach (var step in steps)
             {
+                if (existingSteps.TryGetValue(step.Name, out var priorEntry))
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Operation.Duplicate,
+                        $"Environment contains duplicate plugin step name '{step.Name}' " +
+                        $"(ids: {priorEntry.Step.Id}, {step.Id}) under assembly '{config.Name}'. " +
+                        "Rename or delete one of the conflicting steps in the environment before diffing.");
+                }
                 existingSteps[step.Name] = (existingType, step);
             }
         }

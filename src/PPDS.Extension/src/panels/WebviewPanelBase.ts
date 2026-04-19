@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
+import { showErrorWithReport } from '../utils/errorNotify.js';
 
 import { showEnvironmentPicker } from './environmentPicker.js';
 
@@ -104,7 +105,7 @@ export abstract class WebviewPanelBase<
         console.error(`[PPDS Webview] ${error}`);
         // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
         if (stack) console.error(`[PPDS Webview Stack] ${stack}`);
-        vscode.window.showErrorMessage(`PPDS: ${error}`);
+        void showErrorWithReport(`PPDS: ${error}`);
     }
 
     /** Copy text to the system clipboard. Call from handleMessage for 'copyToClipboard'. */

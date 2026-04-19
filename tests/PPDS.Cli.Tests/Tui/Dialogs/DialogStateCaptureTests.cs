@@ -3,6 +3,7 @@ using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing.States;
 using Terminal.Gui;
 using Xunit;
+using Moq;
 
 namespace PPDS.Cli.Tests.Tui.Dialogs;
 
@@ -145,6 +146,43 @@ public class DialogStateCaptureTests
         var state = dialog.CaptureState();
 
         Assert.Equal("Cancel", state.SelectedOption);
+    }
+
+    #endregion
+
+    #region ErrorDetailsDialog Tests
+
+    [Fact]
+    public void ErrorDetailsDialog_CaptureState_ExposesReportIssueAffordances()
+    {
+        var errorService = new Mock<ITuiErrorService>();
+        errorService.SetupGet(s => s.RecentErrors).Returns(new List<TuiError>());
+        errorService.Setup(s => s.GetLogFilePath()).Returns("/tmp/ppds.log");
+
+        using var dialog = new ErrorDetailsDialog(errorService.Object);
+
+        var state = dialog.CaptureState();
+
+        Assert.True(state.HasReportIssueButton);
+        Assert.Equal("https://github.com/joshsmithxrm/power-platform-developer-suite/issues", state.ReportIssueUrl);
+        Assert.NotNull(state.FooterText);
+        Assert.Contains("Report issues at", state.FooterText);
+        Assert.Contains("github.com/joshsmithxrm/power-platform-developer-suite/issues", state.FooterText!);
+    }
+
+    [Fact]
+    public void ErrorDetailsDialog_ReportIssueUrl_UsesHttpsScheme()
+    {
+        // Guard: A4 scheme validation in BrowserHelper only permits http/https.
+        // If this URL constant is ever changed to an unsupported scheme, the
+        // Report Issue button will throw at click time — fail fast in tests.
+        Assert.StartsWith("https://", ErrorDetailsDialog.ReportIssueUrl);
+    }
+
+    [Fact]
+    public void ErrorDetailsDialog_ReportIssueFooter_ContainsIssuesUrl()
+    {
+        Assert.Contains(ErrorDetailsDialog.ReportIssueUrl, ErrorDetailsDialog.ReportIssueFooter);
     }
 
     #endregion

@@ -200,9 +200,10 @@ public class PluginStepManagerTests
     }
 
     [Fact]
-    public async Task EnablePluginStepsAsync_ContinuesOnFailure()
+    public async Task EnablePluginStepsAsync_ContinuesOnFailure_AndAggregates()
     {
-        // Arrange
+        // Arrange (D5): all steps are attempted even when one fails; the method
+        // then throws a PluginStepReenableException summarising every failure.
         var stepId1 = Guid.NewGuid();
         var stepId2 = Guid.NewGuid();
 
@@ -211,11 +212,54 @@ public class PluginStepManagerTests
             .ThrowsAsync(new InvalidOperationException("First step failed"))
             .Returns(Task.CompletedTask);
 
-        // Act - should not throw
-        await _sut.EnablePluginStepsAsync(new[] { stepId1, stepId2 });
+        // Act
+        var act = async () => await _sut.EnablePluginStepsAsync(new[] { stepId1, stepId2 });
 
-        // Assert - both steps attempted
+        // Assert — all steps attempted and aggregated exception thrown
+        var ex = await act.Should().ThrowAsync<PluginStepReenableException>();
         _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Exactly(2));
+
+        ex.Which.Failures.Should().HaveCount(1);
+        ex.Which.Failures[0].StepId.Should().Be(stepId1);
+        ex.Which.Failures[0].Error.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task EnablePluginStepsAsync_DoesNotThrow_WhenAllStepsSucceed()
+    {
+        // Arrange — D5 regression guard: the new aggregation path must stay
+        // quiet when nothing fails.
+        _pooledClient
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .Returns(Task.CompletedTask);
+
+        var stepIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+
+        // Act
+        await _sut.EnablePluginStepsAsync(stepIds);
+
+        // Assert — all three updates attempted, no throw
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task EnablePluginStepsAsync_CollectsAllFailures_InExceptionPayload()
+    {
+        // Arrange — all three steps fail; aggregated exception captures each one.
+        var stepIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+
+        _pooledClient
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .ThrowsAsync(new InvalidOperationException("token expired"));
+
+        // Act
+        var act = async () => await _sut.EnablePluginStepsAsync(stepIds);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PluginStepReenableException>();
+        ex.Which.Failures.Should().HaveCount(3);
+        ex.Which.Failures.Select(f => f.StepId).Should().BeEquivalentTo(stepIds);
+        ex.Which.Message.Should().Contain("3 plugin step(s)");
     }
 
     #endregion

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -164,41 +165,75 @@ namespace PPDS.Migration.UserMapping
             IDataverseConnectionPool pool,
             CancellationToken cancellationToken)
         {
-            await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            // F2: Thread PageInfo through the query and loop until MoreRecords == false.
+            // Without paging, large user directories (>5000) are silently truncated.
+            const int pageSize = 5000;
+            var users = new List<UserInfo>();
+            var pageNumber = 1;
+            string? pagingCookie = null;
 
-            var query = new QueryExpression(SystemUser.EntityLogicalName)
+            while (true)
             {
-                ColumnSet = new ColumnSet(
-                    SystemUser.Fields.SystemUserId,
-                    SystemUser.Fields.FullName,
-                    SystemUser.Fields.DomainName,
-                    SystemUser.Fields.InternalEMailAddress,
-                    SystemUser.Fields.AzureActiveDirectoryObjectId,
-                    SystemUser.Fields.IsDisabled,
-                    SystemUser.Fields.AccessMode
-                ),
-                Criteria = new FilterExpression
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var query = new QueryExpression(SystemUser.EntityLogicalName)
                 {
-                    Conditions =
+                    ColumnSet = new ColumnSet(
+                        SystemUser.Fields.SystemUserId,
+                        SystemUser.Fields.FullName,
+                        SystemUser.Fields.DomainName,
+                        SystemUser.Fields.InternalEMailAddress,
+                        SystemUser.Fields.AzureActiveDirectoryObjectId,
+                        SystemUser.Fields.IsDisabled,
+                        SystemUser.Fields.AccessMode
+                    ),
+                    Criteria = new FilterExpression
                     {
-                        // Exclude disabled users
-                        new ConditionExpression(SystemUser.Fields.IsDisabled, ConditionOperator.Equal, false)
+                        Conditions =
+                        {
+                            // Exclude disabled users
+                            new ConditionExpression(SystemUser.Fields.IsDisabled, ConditionOperator.Equal, false)
+                        }
+                    },
+                    PageInfo = new PagingInfo
+                    {
+                        Count = pageSize,
+                        PageNumber = pageNumber,
+                        PagingCookie = pagingCookie
                     }
+                };
+
+                // Acquire-per-page to comply with pool discipline.
+                EntityCollection results;
+                await using (var client = await pool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
+                {
+                    results = await client.RetrieveMultipleAsync(query).ConfigureAwait(false);
                 }
-            };
 
-            var results = await client.RetrieveMultipleAsync(query).ConfigureAwait(false);
+                foreach (var e in results.Entities)
+                {
+                    users.Add(new UserInfo
+                    {
+                        SystemUserId = e.Id,
+                        FullName = e.GetAttributeValue<string>(SystemUser.Fields.FullName) ?? "(no name)",
+                        DomainName = e.GetAttributeValue<string>(SystemUser.Fields.DomainName),
+                        Email = e.GetAttributeValue<string>(SystemUser.Fields.InternalEMailAddress),
+                        AadObjectId = e.GetAttributeValue<Guid?>(SystemUser.Fields.AzureActiveDirectoryObjectId),
+                        IsDisabled = e.GetAttributeValue<bool>(SystemUser.Fields.IsDisabled),
+                        AccessMode = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(SystemUser.Fields.AccessMode)?.Value ?? 0
+                    });
+                }
 
-            return results.Entities.Select(e => new UserInfo
-            {
-                SystemUserId = e.Id,
-                FullName = e.GetAttributeValue<string>(SystemUser.Fields.FullName) ?? "(no name)",
-                DomainName = e.GetAttributeValue<string>(SystemUser.Fields.DomainName),
-                Email = e.GetAttributeValue<string>(SystemUser.Fields.InternalEMailAddress),
-                AadObjectId = e.GetAttributeValue<Guid?>(SystemUser.Fields.AzureActiveDirectoryObjectId),
-                IsDisabled = e.GetAttributeValue<bool>(SystemUser.Fields.IsDisabled),
-                AccessMode = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(SystemUser.Fields.AccessMode)?.Value ?? 0
-            }).ToList();
+                if (!results.MoreRecords)
+                {
+                    break;
+                }
+
+                pagingCookie = results.PagingCookie;
+                pageNumber++;
+            }
+
+            return users;
         }
     }
 

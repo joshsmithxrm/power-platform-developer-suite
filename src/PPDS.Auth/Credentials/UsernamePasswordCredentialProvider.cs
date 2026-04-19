@@ -124,7 +124,8 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
         }
         catch (MsalServiceException ex)
         {
-            throw new AuthenticationException($"Authentication failed: {ex.Message}", ex);
+            throw new AuthenticationException(
+                $"Authentication failed: {SensitiveValueRedactor.Redact(ex.Message)}", ex);
         }
 
         return _cachedResult.AccessToken;
@@ -173,7 +174,7 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
             return null;
         }
 
-        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
+        AuthDebugLog.WriteLine($"  Found cached account: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
 
         try
         {

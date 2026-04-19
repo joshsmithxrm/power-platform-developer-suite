@@ -169,12 +169,15 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
         }
         catch (Exception ex)
         {
-            throw new AuthenticationException($"Failed to create ServiceClient: {ex.Message}", ex);
+            // Redact any sensitive values that may have been interpolated
+            // into ServiceClient's internal error messages before surfacing.
+            var redacted = SensitiveValueRedactor.Redact(ex.Message);
+            throw new AuthenticationException($"Failed to create ServiceClient: {redacted}", ex);
         }
 
         if (!client.IsReady)
         {
-            var error = client.LastError ?? "Unknown error";
+            var error = SensitiveValueRedactor.Redact(client.LastError) ?? "Unknown error";
             client.Dispose();
             throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
         }
