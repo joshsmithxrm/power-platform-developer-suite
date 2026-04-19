@@ -49,13 +49,15 @@ public static class ServiceRegistration
             var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
             var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
             var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var metadataProvider = sp.GetService<ICachedMetadataProvider>();
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             return new SqlQueryService(
                 queryExecutor,
                 tdsExecutor,
                 bulkExecutor,
                 metadataExecutor,
-                pool.GetTotalRecommendedParallelism());
+                pool.GetTotalRecommendedParallelism(),
+                metadataProvider);
         });
 
         // TDS Endpoint executor — per-environment, uses same auth pattern as IConnectionService

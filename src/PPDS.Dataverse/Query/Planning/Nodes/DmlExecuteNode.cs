@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Progress;
 using PPDS.Dataverse.Query.Execution;
 
@@ -209,6 +210,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         CancellationToken cancellationToken)
     {
         var entities = new List<Microsoft.Xrm.Sdk.Entity>();
+        var attributeMap = await LoadAttributeMapAsync(context, cancellationToken).ConfigureAwait(false);
 
         foreach (var row in InsertValueRows!)
         {
@@ -221,7 +223,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             for (var i = 0; i < InsertColumns!.Count; i++)
             {
                 var value = row[i](EmptyRow);
-                entity[InsertColumns[i]] = value;
+                entity[InsertColumns[i]] = CoerceForColumn(InsertColumns[i], value, attributeMap);
             }
             entities.Add(entity);
         }
@@ -241,6 +243,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         CancellationToken cancellationToken)
     {
         var entities = new List<Microsoft.Xrm.Sdk.Entity>();
+        var attributeMap = await LoadAttributeMapAsync(context, cancellationToken).ConfigureAwait(false);
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
@@ -259,7 +262,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                     var sourceKey = SourceColumns[i];
                     if (row.Values.TryGetValue(sourceKey, out var qv))
                     {
-                        entity[InsertColumns[i]] = qv.Value;
+                        entity[InsertColumns[i]] = CoerceForColumn(InsertColumns[i], qv.Value, attributeMap);
                     }
                 }
             }
@@ -271,7 +274,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                     var columnName = InsertColumns[i];
                     if (row.Values.TryGetValue(columnName, out var qv))
                     {
-                        entity[columnName] = qv.Value;
+                        entity[columnName] = CoerceForColumn(columnName, qv.Value, attributeMap);
                     }
                 }
             }
@@ -297,6 +300,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     {
         var entities = new List<Microsoft.Xrm.Sdk.Entity>();
         var idColumn = EntityLogicalName + "id";
+        var attributeMap = await LoadAttributeMapAsync(context, cancellationToken).ConfigureAwait(false);
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
@@ -318,7 +322,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             foreach (var clause in SetClauses!)
             {
                 var value = clause.Value(row.Values);
-                entity[clause.ColumnName] = value;
+                entity[clause.ColumnName] = CoerceForColumn(clause.ColumnName, value, attributeMap);
             }
 
             entities.Add(entity);
@@ -369,6 +373,45 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return result.SuccessCount;
+    }
+
+    /// <summary>
+    /// Loads the attribute metadata map for <see cref="EntityLogicalName"/> from
+    /// <see cref="QueryPlanContext.MetadataProvider"/>. Returns null when no provider
+    /// is configured (callers fall back to raw CLR values, matching pre-coercion behavior).
+    /// </summary>
+    private async System.Threading.Tasks.Task<IReadOnlyDictionary<string, AttributeMetadataDto>?> LoadAttributeMapAsync(
+        QueryPlanContext context,
+        CancellationToken cancellationToken)
+    {
+        if (context.MetadataProvider == null)
+            return null;
+
+        var attrs = await context.MetadataProvider
+            .GetAttributesAsync(EntityLogicalName, cancellationToken)
+            .ConfigureAwait(false);
+
+        var map = new Dictionary<string, AttributeMetadataDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in attrs)
+        {
+            map[a.LogicalName] = a;
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Coerces <paramref name="value"/> using metadata for <paramref name="columnName"/>
+    /// when available. Unknown columns and missing maps pass through unchanged.
+    /// </summary>
+    private static object? CoerceForColumn(
+        string columnName,
+        object? value,
+        IReadOnlyDictionary<string, AttributeMetadataDto>? attributeMap)
+    {
+        if (attributeMap == null)
+            return value;
+        attributeMap.TryGetValue(columnName, out var attr);
+        return DmlValueCoercer.Coerce(value, attr);
     }
 
     /// <summary>

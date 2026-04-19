@@ -69,7 +69,7 @@ internal sealed class XmlDocIndex
         return ResolveEntry(id, resolver: () => ResolveMemberInheritance(member));
     }
 
-    private TypeDoc? ResolveEntry(string id, Func<TypeDoc?> resolver)
+    private TypeDoc? ResolveEntry(string id, Func<(TypeDoc? Doc, string? Candidate)> resolver)
     {
         if (!_entries.TryGetValue(id, out var direct)) return null;
         if (!direct.IsInheritDoc) return direct;
@@ -84,37 +84,49 @@ internal sealed class XmlDocIndex
         }
 
         // Implicit chain resolution (interface → base class).
-        return resolver() ?? direct;
+        var (resolved, candidate) = resolver();
+        if (resolved is not null) return resolved;
+
+        // Unresolvable: expose the best-effort pointer so callers can render
+        // "inherited from X" and distinguish failure from a genuinely missing summary.
+        var pointer = StripDocIdPrefix(direct.InheritCref) ?? candidate;
+        return direct with { UnresolvedInheritTarget = pointer };
     }
 
-    private TypeDoc? ResolveTypeInheritance(Type type)
+    private (TypeDoc? Doc, string? Candidate) ResolveTypeInheritance(Type type)
     {
+        string? firstCandidate = null;
         foreach (var iface in type.GetInterfaces())
         {
+            firstCandidate ??= FormatMemberDisplay(iface);
             var doc = LookupByTypeId(iface);
-            if (IsUsable(doc)) return doc;
+            if (IsUsable(doc)) return (doc, firstCandidate);
         }
         for (var baseType = type.BaseType; baseType is not null; baseType = baseType.BaseType)
         {
             if (baseType.FullName == "System.Object") break;
+            firstCandidate ??= FormatMemberDisplay(baseType);
             var doc = LookupByTypeId(baseType);
-            if (IsUsable(doc)) return doc;
+            if (IsUsable(doc)) return (doc, firstCandidate);
         }
-        return null;
+        return (null, firstCandidate);
     }
 
-    private TypeDoc? ResolveMemberInheritance(MemberInfo member)
+    private (TypeDoc? Doc, string? Candidate) ResolveMemberInheritance(MemberInfo member)
     {
         var declaringType = member.DeclaringType;
-        if (declaringType is null) return null;
+        if (declaringType is null) return (null, null);
+
+        string? firstCandidate = null;
 
         // Interface implementations first.
         foreach (var iface in declaringType.GetInterfaces())
         {
             var candidate = FindMatchingMember(iface, member);
             if (candidate is null) continue;
+            firstCandidate ??= FormatMemberDisplay(candidate);
             var doc = LookupByMemberId(candidate);
-            if (IsUsable(doc)) return doc;
+            if (IsUsable(doc)) return (doc, firstCandidate);
         }
 
         // Base-class overrides.
@@ -123,11 +135,34 @@ internal sealed class XmlDocIndex
             if (baseType.FullName == "System.Object") break;
             var candidate = FindMatchingMember(baseType, member);
             if (candidate is null) continue;
+            firstCandidate ??= FormatMemberDisplay(candidate);
             var doc = LookupByMemberId(candidate);
-            if (IsUsable(doc)) return doc;
+            if (IsUsable(doc)) return (doc, firstCandidate);
         }
 
-        return null;
+        return (null, firstCandidate);
+    }
+
+    private static string FormatMemberDisplay(MemberInfo member)
+    {
+        if (member is Type t)
+        {
+            return TypeDocIdForRef(t, closedGeneric: true).Replace('{', '<').Replace('}', '>');
+        }
+
+        var declaring = member.DeclaringType is not null
+            ? TypeDocIdForRef(member.DeclaringType, closedGeneric: true)
+            : "?";
+        var paramsPart = member is MethodBase mb ? MethodParamPart(mb.GetParameters()) : string.Empty;
+        return (declaring + "." + member.Name + paramsPart).Replace('{', '<').Replace('}', '>');
+    }
+
+    private static string? StripDocIdPrefix(string? docId)
+    {
+        if (string.IsNullOrEmpty(docId)) return null;
+        var colon = docId.IndexOf(':');
+        var stripped = colon < 0 ? docId : docId.Substring(colon + 1);
+        return stripped.Replace('{', '<').Replace('}', '>');
     }
 
     private static bool IsUsable(TypeDoc? doc) =>
@@ -368,6 +403,7 @@ internal sealed record TypeDoc(
     string? Returns,
     IReadOnlyList<ParamDoc> Params,
     bool IsInheritDoc = false,
-    string? InheritCref = null);
+    string? InheritCref = null,
+    string? UnresolvedInheritTarget = null);
 
 internal sealed record ParamDoc(string Name, string Description);
