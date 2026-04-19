@@ -131,6 +131,29 @@ After removing merged worktrees, check for orphan directories — directories in
 
 4. If `rm -rf` fails (e.g., permission denied), log as failed in the report and continue with the next orphan.
 
+### 4c. Deregister In-Flight Entries
+
+For every branch that was removed (merged, squash-merged, or its
+worktree deleted), deregister its entry from the cross-session in-flight
+state file so sibling sessions stop seeing stale claims:
+
+```bash
+python scripts/inflight-deregister.py --branch <branch-name>
+```
+
+This is idempotent — sessions that were never registered (or already
+deregistered) succeed silently. Skip in `--dry-run` mode.
+
+Additionally, sweep stale entries (older than 24h with a missing local
+branch) by issuing a no-op check:
+
+```bash
+python scripts/inflight-check.py --area scripts/ >/dev/null 2>&1 || true
+```
+
+The pruning is a side-effect of `inflight-check` — running it ensures
+abandoned sessions do not accumulate in the registry forever.
+
 ### 5. Delete Local Branches
 
 After worktrees are removed, delete their local branches:

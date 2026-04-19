@@ -114,6 +114,31 @@ If the worktree already exists:
 - If resume: skip creation, proceed to Step 6 (open terminal)
 - If new: ask for an alternative name, loop back to Step 4
 
+### Step 4b: Check for In-Flight Conflicts
+
+Before creating the worktree, check whether another concurrent session is
+already working on the same issue or area (prevents the duplicate-work
+pattern that produced #802):
+
+```bash
+# For each extracted issue:
+python scripts/inflight-check.py --issue <N>
+
+# Plus the primary code area implied by the work (best-effort guess from
+# the worktree name or first known affected path):
+python scripts/inflight-check.py --area <area>
+```
+
+If exit code is `1`, the script prints a JSON list of conflicting
+sessions on stdout. Show the operator the conflicting `session_id`,
+`branch`, `intent`, and `started` timestamp, and ask:
+
+> "Session `<id>` is already working on this. Continue anyway, coordinate
+> with that session, or abort?"
+
+Do not silently proceed. If the operator chooses to continue, fall
+through to Step 5; otherwise stop here.
+
 ### Step 5: Create Worktree and Initialize State
 
 ```bash
@@ -142,6 +167,21 @@ python scripts/workflow-state.py set launch_command "<confirmed-claude-command>"
 ```
 
 Run these commands from within the worktree directory (use the `cwd` parameter when executing via Bash tool).
+
+#### Step 5c: Register the Session as In-Flight
+
+After workflow state is initialized, announce this session in the cross-
+session in-flight registry so sibling sessions can detect overlap:
+
+```bash
+python scripts/inflight-register.py --branch feat/<name> --worktree .worktrees/<name> --issue <N> --area <area> --intent "<short description>"
+```
+
+Repeat `--issue` / `--area` flags as needed. Run from the main repo
+root (the file lives at `.claude/state/in-flight-issues.json` and is
+shared across all worktrees).
+
+Deregistration is handled by `/cleanup` after the branch merges.
 
 ### Step 6: Launch New Session with Inline Prompt
 

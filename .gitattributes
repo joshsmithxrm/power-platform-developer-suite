@@ -18,3 +18,8 @@ devcontainer.json text eol=lf
 *.exe binary
 *.nupkg binary
 *.snupkg binary
+
+# In-flight session state — concurrent sessions append/remove their own
+# entries, so a basic union merge avoids most conflicts. Operators are
+# expected to re-run /cleanup if the file ever lands invalid.
+.claude/state/in-flight-issues.json merge=union

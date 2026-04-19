@@ -46,6 +46,7 @@ def is_allowed_path(file_path: str) -> bool:
         "/temp/",
         "appdata/local/temp",
         ".worktrees/",
+        ".claude/worktrees/",
     ]
     # Check both absolute and relative forms
     return any(s in normalized for s in allowed_substrings) or any(
