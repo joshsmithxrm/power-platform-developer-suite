@@ -77,6 +77,49 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 - Pass all required status checks
 - Have any required reviews approved
 
+## Pre-Merge Gate Rules
+
+The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces three rules on every PR before merge. All three are **enforcing from day one** — there is no soft-warn period (per the v1-launch retro). Each rule is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check is what branch protection should require.
+
+Rule logic lives in `scripts/ci/`. Bypass markers are **case-sensitive** in the PR title or body — a deliberate copy-paste is required, not a casual mention.
+
+### Rule 1 — PR size (`scripts/ci/check_pr_size.py`)
+
+Blocks merge when:
+
+- Changed files > **50**, OR
+- Total LoC (additions + deletions) > **2000**
+
+Bypass: `[size-waived: <reason>]` in the PR title or body. The reason must be non-empty (whitespace-only is rejected). Use sparingly and explain why review of a large diff is acceptable (e.g., vendored 3p code, codegen output, mechanical rename).
+
+Catches the failure mode from PR #792 (131 files / 7.5K LoC merged unreviewed).
+
+### Rule 2 — Workflow secret-ref drift (`scripts/ci/check_workflow_secrets.py`)
+
+For any PR that touches `.github/workflows/*.yml` or `*.yaml`:
+
+1. Parses every changed workflow file.
+2. Extracts every `${{ secrets.X }}` and `${{ vars.X }}` reference.
+3. Compares against the actual repo's secret/variable inventory (`gh secret list --json name`, `gh variable list --json name` — names only, no elevated permissions needed).
+4. Blocks merge if any referenced name is missing.
+
+`GITHUB_TOKEN` is built-in and always considered present. Repo-level inventories only — environment-scoped secrets are not enumerated by default; if your workflow uses one, bypass it.
+
+Bypass: `[secret-ref-allow: <NAME>]` in the PR title or body, repeated for each missing name. Use for legitimate cases such as secrets defined on a reusable workflow caller, environment-scoped secrets, or org-level secrets that the repo's `gh secret list` doesn't enumerate.
+
+Catches the failure mode from PR #797 / ppds-docs#15 (`AUDIT_REPO_TOKEN` referenced but didn't exist).
+
+### Rule 3 — Major-bump test enforcement (`scripts/ci/check_major_bump_tested.py`)
+
+For dependabot PRs (label `dependencies` OR author `app/dependabot` / `dependabot[bot]`) whose title indicates a major-version bump (per `_BUMP_TITLE_RE` + `classify_update_type` from `scripts/dependabot/classify.py`):
+
+- Requires the actual `test` job (not the path-filter `check-changes` skip-status) to have **run AND passed** in the PR's CI rollup.
+- Blocks merge if `test` is `SKIPPED`, `FAILURE`, still pending, or absent.
+
+**No bypass marker.** A major bump that didn't trigger the real test job is by definition unverified — fix the cause (push an empty commit, re-run all jobs, or expand path filters), don't wave it through.
+
+Catches the failure mode from PR #806 (`vite 5 → 8` — two major-version jumps, auto-merged after only `check-changes` ran).
+
 ## Squash Policy
 
 All merges to `main` use **squash merge** with branch deletion. Rebase merges are disabled. Use:
