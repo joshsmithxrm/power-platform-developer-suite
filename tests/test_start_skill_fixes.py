@@ -356,6 +356,60 @@ class TestBuildSpawnCommand:
         assert "'-Command'" not in inner
 
 
+class TestPowerShellSingleQuoteEscaping:
+    """Gemini PR #830 review (medium): paths with embedded apostrophes
+    (e.g. `C:\\Users\\O'Brien\\repo` or worktree names like
+    `it's-a-fix`) must be escaped per PowerShell single-quoted literal
+    rules — one `'` becomes `''`. Otherwise the literal terminates
+    early and the spawn command (or copy-pasted fallback snippet)
+    silently corrupts. Fixed in commit f1bef48.
+    """
+
+    def test_powershell_path_with_apostrophe_escaped(self):
+        """build_spawn_command must double single quotes in the
+        script path before interpolating into the inner PowerShell
+        single-quoted literal."""
+        script_path = "C:\\Users\\O'Brien\\launch.ps1"
+        cmd = launch_session.build_spawn_command(script_path)
+        inner = cmd[2]
+        # Doubled apostrophe must be present (escaped form).
+        assert "O''Brien" in inner
+        # The escaped path must be properly wrapped in PS single quotes.
+        assert "'C:\\Users\\O''Brien\\launch.ps1'" in inner
+
+    def test_powershell_path_without_apostrophe_unchanged(self):
+        """Regression: the escape must not corrupt normal paths."""
+        cmd = launch_session.build_spawn_command("C:\\plain\\launch.ps1")
+        inner = cmd[2]
+        assert "'-NoExit','-File','C:\\plain\\launch.ps1'" in inner
+
+    def test_manual_fallback_path_with_apostrophe_escaped(self, capsys):
+        """_print_manual_fallback writes copy-pasteable PowerShell to
+        stderr; both target and claude paths are interpolated into
+        single-quoted literals and must be escaped."""
+        launch_session._print_manual_fallback(
+            target_win="C:\\Users\\O'Brien\\worktree",
+            prompt="hello",
+            claude_win="C:\\Users\\O'Brien\\bin\\claude.exe",
+        )
+        err = capsys.readouterr().err
+        # Both apostrophes must be doubled in the rendered snippet.
+        assert "cd 'C:\\Users\\O''Brien\\worktree'" in err
+        assert "& 'C:\\Users\\O''Brien\\bin\\claude.exe' $prompt" in err
+
+    def test_manual_fallback_path_without_apostrophe_unchanged(self, capsys):
+        """Regression: the escape must not corrupt normal paths in
+        the fallback snippet."""
+        launch_session._print_manual_fallback(
+            target_win="C:\\plain\\worktree",
+            prompt="hello",
+            claude_win="C:\\plain\\claude.exe",
+        )
+        err = capsys.readouterr().err
+        assert "cd 'C:\\plain\\worktree'" in err
+        assert "& 'C:\\plain\\claude.exe' $prompt" in err
+
+
 class TestLaunchDryRun:
     """End-to-end dry-run: writes the script, prints the spawn
     command, does NOT execute. Validates the file contents.
