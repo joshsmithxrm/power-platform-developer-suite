@@ -56,13 +56,42 @@ public class MdxEscapeTests
     }
 
     [Fact]
-    public void InlineCode_ContainsSingleBacktick_WrapsInDoubleBacktick()
+    public void InlineCode_ContainsSingleBacktick_WrapsInDoubleBacktickWithPadding()
     {
-        // Input has backticks but no ``` run — double-backtick wrapper is the
-        // canonical choice so the outer delimiter differs from inner content.
+        // Input has a max backtick run of 1 → delimiter is 2 backticks. Content
+        // ends with a backtick, so a space is padded before the closing
+        // delimiter to prevent the last backtick of content from merging with
+        // the delimiter run.
         var result = MdxEscape.InlineCode("foo `bar`");
 
-        result.Should().Be("``foo `bar```");
+        result.Should().Be("``foo `bar` ``");
+    }
+
+    [Fact]
+    public void InlineCode_ContainsDoubleBacktickRun_WrapsInTripleBacktick()
+    {
+        // Content contains a run of 2 backticks → delimiter must be 3.
+        var result = MdxEscape.InlineCode("a``b");
+
+        result.Should().Be("```a``b```");
+    }
+
+    [Fact]
+    public void InlineCode_ContainsTripleBacktickRun_UsesFourBacktickDelimiter()
+    {
+        // Content contains a run of 3 backticks → delimiter must be 4. No
+        // fallback to a fenced block — inline code stays inline.
+        var result = MdxEscape.InlineCode("x```y");
+
+        result.Should().Be("````x```y````");
+    }
+
+    [Fact]
+    public void InlineCode_StartsAndEndsWithBacktick_PadsBothSides()
+    {
+        var result = MdxEscape.InlineCode("`hello`");
+
+        result.Should().Be("`` `hello` ``");
     }
 
     [Fact]

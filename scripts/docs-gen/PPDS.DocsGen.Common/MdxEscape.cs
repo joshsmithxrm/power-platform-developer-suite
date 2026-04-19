@@ -116,18 +116,20 @@ public static class MdxEscape
 
     /// <summary>
     /// Canonical, deterministic inline-code wrapper (AC-19). For any given
-    /// input, produces exactly one output string.
+    /// input, produces exactly one output string that parses correctly under
+    /// CommonMark and MDX.
     /// </summary>
     /// <remarks>
-    /// Rules, in priority order:
+    /// CommonMark inline-code delimiters must contain a run of backticks that
+    /// is not present anywhere in the content. The adaptive rule:
     /// <list type="bullet">
-    /// <item>No backtick in <paramref name="raw"/>: wrap in single backticks.</item>
-    /// <item>Contains backticks but no triple-backtick run: wrap in double
-    /// backticks (the outer delimiter must differ from any delimiter that
-    /// appears in the content).</item>
-    /// <item>Contains a triple-backtick run: emit a fenced code block with
-    /// the <c>csharp</c> info string as a deterministic fallback.</item>
+    /// <item>Find the longest run of consecutive backticks in <paramref name="raw"/> (call it <c>N</c>).</item>
+    /// <item>Use <c>N+1</c> backticks as the delimiter — guaranteed not to appear inside the content.</item>
+    /// <item>If the content starts or ends with a backtick, pad that side with a single space so the first/last backtick is part of the content, not a longer delimiter run.</item>
     /// </list>
+    /// This handles arbitrary backtick patterns safely (single, double, triple,
+    /// or longer runs) without ever falling back to a fenced block — inline code
+    /// is never multi-line in generator output.
     /// </remarks>
     public static string InlineCode(string raw)
     {
@@ -138,12 +140,26 @@ public static class MdxEscape
             return "`" + raw + "`";
         }
 
-        if (raw.IndexOf("```", StringComparison.Ordinal) < 0)
+        var maxRun = 0;
+        var currentRun = 0;
+        foreach (var c in raw)
         {
-            return "``" + raw + "``";
+            if (c == '`')
+            {
+                currentRun++;
+                if (currentRun > maxRun) maxRun = currentRun;
+            }
+            else
+            {
+                currentRun = 0;
+            }
         }
 
-        return "```csharp\n" + raw + "\n```";
+        var delimiter = new string('`', maxRun + 1);
+        var padStart = raw[0] == '`' ? " " : string.Empty;
+        var padEnd = raw[^1] == '`' ? " " : string.Empty;
+
+        return delimiter + padStart + raw + padEnd + delimiter;
     }
 
     private static bool IsAtLineStart(string s, int index)

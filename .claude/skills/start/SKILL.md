@@ -200,7 +200,7 @@ Routing instruction by launch command:
 - `claude` (docs) → "Edit the relevant docs and commit. No design or implement needed. When done: `/pr`."
 
 **Prompt rules:**
-- No single quotes in prompt content (here-string terminator sensitivity). Rephrase or use double quotes.
+- No `'@` at the start of a line in prompt content — that exact sequence terminates PowerShell's single-quoted here-string (`@' ... '@`). Apostrophes mid-line (`it's`, `Claude's`, `don't`) are fine. If a line must literally begin with `'@`, prefix it with a space or reword.
 - All paths relative to worktree root unless the reference is outside it.
 - Critical overrides go directly in the prompt — do not bury them in referenced files.
 

@@ -288,8 +288,10 @@ Shared utility used by all generators to produce MDX-safe markdown.
 ```csharp
 public static class MdxEscape
 {
-    public static string Prose(string raw);    // < → &lt;, > → &gt; outside code fences
-    public static string InlineCode(string raw); // wraps in backticks, escapes backticks
+    public static string Prose(string raw);     // < → &lt;, > → &gt; outside code fences / inline-code spans
+    public static string InlineCode(string raw); // adaptive delimiter: (maxBacktickRun+1) backticks;
+                                                 // pads leading/trailing space if content starts/ends
+                                                 // with a backtick so CommonMark parses correctly
 }
 ```
 
