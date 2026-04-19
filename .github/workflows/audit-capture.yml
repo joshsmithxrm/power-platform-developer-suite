@@ -1,0 +1,195 @@
+name: Audit Capture
+
+# Manual-only for v1. No `schedule:` trigger until we intentionally enable it
+# after the first clean capture against a fixed post-shakedown baseline.
+
+on:
+  workflow_dispatch:
+    inputs:
+      surface:
+        description: 'Which surface(s) to capture'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - tui
+          - extension
+      branch_name:
+        description: 'Override capture branch name in ppds-v1-audit (default: capture/<timestamp>)'
+        required: false
+        type: string
+
+concurrency:
+  group: audit-capture-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      AUDIT_OUT: ${{ runner.temp }}\audit-out
+      # Git metadata written into manifest.json
+      AUDIT_SOURCE_REPO: ${{ github.repository }}
+      AUDIT_SOURCE_REF: ${{ github.ref }}
+      AUDIT_SOURCE_COMMIT: ${{ github.sha }}
+      # When absent, entries with `requires: connected` are skipped with a clear reason.
+      PPDS_PROFILE: ${{ secrets.PPDS_TEST_PROFILE }}
+      PPDS_ENV: ${{ secrets.PPDS_TEST_ENV }}
+
+    steps:
+      - name: Checkout PPDS
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install root npm deps
+        run: npm install
+
+      - name: Install TUI E2E deps
+        run: npm install
+        working-directory: tests/PPDS.Tui.E2eTests
+
+      - name: Install Extension deps
+        run: npm install
+        working-directory: src/PPDS.Extension
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/PPDS.Tui.E2eTests
+
+      - name: Build PPDS CLI
+        run: dotnet build src/PPDS.Cli/PPDS.Cli.csproj -f net10.0 -v q
+
+      - name: Optional — seed test profile
+        if: ${{ env.PPDS_PROFILE != '' }}
+        shell: pwsh
+        env:
+          PPDS_TEST_PROFILE_JSON: ${{ secrets.PPDS_TEST_PROFILE_JSON }}
+        run: |
+          $ProfileDir = Join-Path $env:APPDATA 'PPDS'
+          New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
+          $env:PPDS_TEST_PROFILE_JSON | Out-File -FilePath (Join-Path $ProfileDir 'profiles.json') -Encoding utf8
+          Write-Host "Profile seeded at $ProfileDir/profiles.json"
+
+      - name: Capture
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p "$AUDIT_OUT"
+          node tools/audit-capture.mjs run "${{ github.event.inputs.surface }}"
+
+      - name: Checkout audit repo
+        uses: actions/checkout@v6
+        with:
+          repository: joshsmithxrm/ppds-v1-audit
+          path: audit-repo
+          token: ${{ secrets.AUDIT_REPO_TOKEN }}
+          fetch-depth: 1
+
+      - name: Compute capture branch name
+        id: branch
+        shell: bash
+        run: |
+          INPUT="${{ github.event.inputs.branch_name }}"
+          if [ -n "$INPUT" ]; then
+            BRANCH="$INPUT"
+          else
+            BRANCH="capture/$(date -u +%Y%m%d-%H%M%S)"
+          fi
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Copy captures and commit
+        id: push
+        shell: bash
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -e
+          cp -r "$AUDIT_OUT"/* audit-repo/ 2>/dev/null || true
+          cd audit-repo
+          git config user.email "audit-capture-bot@users.noreply.github.com"
+          git config user.name "audit-capture-bot"
+          git checkout -b "$BRANCH"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            echo "commit_url=" >> "$GITHUB_OUTPUT"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "capture: ${{ github.sha }} (surface=${{ github.event.inputs.surface }})"
+            git push origin "$BRANCH"
+            SHA=$(git rev-parse HEAD)
+            echo "commit_url=https://github.com/joshsmithxrm/ppds-v1-audit/commit/$SHA" >> "$GITHUB_OUTPUT"
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summarize manifest
+        id: summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$AUDIT_OUT/manifest.json" ]; then
+            TOTAL=$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.env.AUDIT_OUT + '/manifest.json', 'utf8')).summary.total)")
+            OK=$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.env.AUDIT_OUT + '/manifest.json', 'utf8')).summary.ok)")
+            ERR=$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.env.AUDIT_OUT + '/manifest.json', 'utf8')).summary.error)")
+            SKIPPED=$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.env.AUDIT_OUT + '/manifest.json', 'utf8')).summary.skipped)")
+            echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+            echo "ok=$OK" >> "$GITHUB_OUTPUT"
+            echo "error=$ERR" >> "$GITHUB_OUTPUT"
+            echo "skipped=$SKIPPED" >> "$GITHUB_OUTPUT"
+          else
+            echo "total=0" >> "$GITHUB_OUTPUT"
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+            echo "error=1" >> "$GITHUB_OUTPUT"
+            echo "skipped=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify webhook
+        if: always()
+        env:
+          AUDIT_WEBHOOK_URL: ${{ secrets.AUDIT_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$AUDIT_WEBHOOK_URL" ]; then
+            echo "AUDIT_WEBHOOK_URL not configured — skipping notification"
+            exit 0
+          fi
+          STATUS="ready"
+          if [ "${{ steps.summary.outputs.error }}" != "0" ]; then STATUS="with errors"; fi
+          if [ "${{ job.status }}" != "success" ]; then STATUS="failed"; fi
+          COMMIT="${{ steps.push.outputs.commit_url }}"
+          if [ -z "$COMMIT" ]; then COMMIT="(no commit — see workflow run)"; fi
+          CONTENT="Audit capture $STATUS: $COMMIT — ${{ steps.summary.outputs.ok }} ok / ${{ steps.summary.outputs.error }} error / ${{ steps.summary.outputs.skipped }} skipped (surface=${{ github.event.inputs.surface }}, commit ${{ github.sha }}). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          node -e "
+            const url = process.env.AUDIT_WEBHOOK_URL;
+            const content = process.argv[1];
+            const payload = JSON.stringify({ content, text: content });
+            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+              .then(r => { if (!r.ok) { console.error('webhook status:', r.status); process.exit(1); } });
+          " "$CONTENT"
+
+      - name: Fail job if capture had errors
+        if: steps.summary.outputs.error != '0'
+        run: |
+          echo "::error::Capture reported ${{ steps.summary.outputs.error }} errored entry/entries. See manifest.json."
+          exit 1
