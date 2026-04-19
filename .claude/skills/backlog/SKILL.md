@@ -44,6 +44,28 @@ cat docs/BACKLOG.md
 
 #### Create Issue
 
+##### Pre-flight: In-Flight Conflict Check
+
+Before `gh issue create`, ALWAYS check whether a sibling session is
+already working on the same area or has already filed a related issue
+(prevents the duplicate-work pattern from retro B3 / #802):
+
+```bash
+python scripts/inflight-check.py --area <best-guess-area>
+```
+
+If exit `1`, surface the conflict to the operator and ASK before filing:
+
+> "Session `<id>` (branch `<branch>`) is actively working on this area
+> with intent `<intent>`. They may already be addressing this — file
+> anyway, or coordinate first?"
+
+The same check MUST be repeated before `gh issue close`: if a sibling
+session has open work referencing the issue, surface the related branch
+so the closer does not misattribute the fix to the wrong PR.
+
+##### Steps
+
 1. Determine `type:` label from the description (bug, enhancement, docs, performance, refactor)
 2. Determine `area:` label from the affected subsystem (auth, cli, data, extension, plugins, tui)
 3. Ask user for milestone or default to no milestone
