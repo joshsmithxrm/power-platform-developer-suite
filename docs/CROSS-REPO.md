@@ -24,7 +24,7 @@ If in doubt, see [section 4](#4-when-in-doubt).
 Cross-repo work assumes `ppds-docs` is checked out as a sibling directory next to `ppds`. The canonical layout is:
 
 ```
-C:\Users\josh_\source\repos\
+C:\src\repos\
   power-platform-developer-suite\   # this repo (PPDS)
   ppds-docs\                        # docs site
 ```
