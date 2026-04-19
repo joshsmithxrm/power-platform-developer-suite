@@ -166,9 +166,9 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
         // declaration order — their position is semantic for invocation.
         var options = new List<CommandOption>();
         foreach (var opt in EnumerateChildren(command, "Options")
+            .Where(o => !IsHidden(o))
             .OrderBy(o => GetString(o, "Name") ?? string.Empty, StringComparer.Ordinal))
         {
-            if (IsHidden(opt)) continue;
             var (longName, shortName) = SplitOptionAliases(opt);
             options.Add(new CommandOption(
                 LongName: longName,

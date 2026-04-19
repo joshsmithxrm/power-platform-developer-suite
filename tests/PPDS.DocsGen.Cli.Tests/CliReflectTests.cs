@@ -135,6 +135,39 @@ public class CliReflectTests
     }
 
     /// <summary>
+    /// Options with <c>Hidden = true</c> must be excluded from the generated
+    /// markdown, and the remaining options must still be emitted in
+    /// alphabetical order. The fixture declares a hidden <c>--secret</c>
+    /// option whose long name sorts between <c>--force</c> and <c>--tenant</c>
+    /// — if the filter ran AFTER the sort, the hidden item would still be
+    /// dropped, but the filter-before-sort optimization (Gemini PR #828
+    /// review) avoids comparing it at all. This test guards both the
+    /// exclusion contract AND the alphabetical order it must preserve.
+    /// </summary>
+    [Fact]
+    public async Task ExcludesHiddenOptionsAndPreservesAlphabeticalOrder()
+    {
+        var result = await GenerateAsync();
+
+        var login = result.Files.Single(f => f.RelativePath == "auth/login.md").Contents;
+
+        login.Should().NotContain(
+            "`--secret`",
+            because: "options with Hidden=true must be excluded from generated markdown");
+        login.Should().NotContain(
+            "Internal flag",
+            because: "the hidden option's description must not leak into output");
+
+        var forceIndex = login.IndexOf("`--force`", StringComparison.Ordinal);
+        var tenantIndex = login.IndexOf("`--tenant`", StringComparison.Ordinal);
+
+        forceIndex.Should().BeGreaterThan(0, because: "--force must still appear after filtering");
+        tenantIndex.Should().BeGreaterThan(0, because: "--tenant must still appear after filtering");
+        forceIndex.Should().BeLessThan(tenantIndex,
+            because: "the surviving non-hidden options must remain in alphabetical order");
+    }
+
+    /// <summary>
     /// Leaf commands with <c>Hidden = true</c> must not appear in any emitted
     /// file — including the group index.
     /// </summary>
