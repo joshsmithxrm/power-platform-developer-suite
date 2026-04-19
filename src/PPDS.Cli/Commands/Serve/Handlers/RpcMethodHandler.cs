@@ -437,7 +437,6 @@ public class RpcMethodHandler : IDisposable
 
         // 2. Get configured environments from environments.json and tag discovered envs with profile
         var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
-        var configCollection = await configStore.LoadAsync(cancellationToken);
         var profileName = profile.Name ?? profile.DisplayIdentifier;
 
         // Tag all discovered environments with this profile in environments.json
@@ -450,9 +449,9 @@ public class RpcMethodHandler : IDisposable
                 ct: cancellationToken);
         }
 
-        // Reload config after tagging
+        // Load config (fresh — after tagging) so the merge below reflects the writes above.
         configStore.ClearCache();
-        configCollection = await configStore.LoadAsync(cancellationToken);
+        var configCollection = await configStore.LoadAsync(cancellationToken);
 
         // 3. Merge: start with discovered, add configured that belong to this profile
         var merged = new List<EnvironmentInfo>(discovered);

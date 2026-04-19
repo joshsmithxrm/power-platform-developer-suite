@@ -731,9 +731,9 @@ public class TieredImporterTests
             .Setup(p => p.EnablePluginStepsAsync(
                 It.IsAny<IEnumerable<Guid>>(),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new PluginStepReenableException(new[]
+            .ThrowsAsync(new PluginStepReenableException(new (Guid, Exception)[]
             {
-                (stepId1, (Exception)new InvalidOperationException("token expired"))
+                (stepId1, new InvalidOperationException("token expired"))
             }));
 
         var options = new ImportOptions { RespectDisablePluginsSetting = true };

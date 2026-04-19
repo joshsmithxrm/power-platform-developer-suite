@@ -160,8 +160,17 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
 
         if (!client.IsReady)
         {
-            var error = SensitiveValueRedactor.Redact(client.LastError) ?? "Unknown error";
-            client.Dispose();
+            // Dispose client regardless of whether redaction succeeds — Redact may throw on
+            // pathological input and we must not leak the underlying HTTP handler. CodeQL 1019.
+            string error;
+            try
+            {
+                error = SensitiveValueRedactor.Redact(client.LastError) ?? "Unknown error";
+            }
+            finally
+            {
+                client.Dispose();
+            }
             throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
         }
 
