@@ -23,3 +23,8 @@ devcontainer.json text eol=lf
 # entries, so a basic union merge avoids most conflicts. Operators are
 # expected to re-run /cleanup if the file ever lands invalid.
 .claude/state/in-flight-issues.json merge=union
+
+# Safe-env allowlist for shakedown/verify hooks. Treated like in-flight
+# state — operators add their own dev/test envs locally; the file is
+# committed as a template. Union merge avoids friction across sessions.
+.claude/state/safe-envs.json merge=union

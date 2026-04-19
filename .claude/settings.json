@@ -353,6 +353,26 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/dev-env-check.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/shakedown-readonly.py\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
