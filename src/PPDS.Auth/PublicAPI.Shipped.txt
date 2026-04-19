@@ -1,0 +1,625 @@
+#nullable enable
+PPDS.Auth.AuthDebugLog
+PPDS.Auth.AuthenticationOutput
+PPDS.Auth.Cloud.CloudEndpoints
+PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Cloud.CloudEnvironment.China = 4 -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Cloud.CloudEnvironment.Public = 0 -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Cloud.CloudEnvironment.UsGov = 1 -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Cloud.CloudEnvironment.UsGovDod = 3 -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Cloud.CloudEnvironment.UsGovHigh = 2 -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Credentials.AuthenticationException
+PPDS.Auth.Credentials.AuthenticationException.AuthenticationException(string! message) -> void
+PPDS.Auth.Credentials.AuthenticationException.AuthenticationException(string! message, System.Exception! innerException) -> void
+PPDS.Auth.Credentials.AuthenticationException.AuthenticationException(string! message, string! errorCode, System.Exception? innerException = null) -> void
+PPDS.Auth.Credentials.AuthenticationException.ErrorCode.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.AzureDevOpsFederatedCredentialProvider(string! applicationId, string! tenantId, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.AzureDevOpsFederatedCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.CachedTokenInfo
+PPDS.Auth.Credentials.CachedTokenInfo.<Clone>$() -> PPDS.Auth.Credentials.CachedTokenInfo!
+PPDS.Auth.Credentials.CachedTokenInfo.CachedTokenInfo(System.DateTimeOffset ExpiresOn, string? Username, bool IsExpired) -> void
+PPDS.Auth.Credentials.CachedTokenInfo.Deconstruct(out System.DateTimeOffset ExpiresOn, out string? Username, out bool IsExpired) -> void
+PPDS.Auth.Credentials.CachedTokenInfo.Equals(PPDS.Auth.Credentials.CachedTokenInfo? other) -> bool
+PPDS.Auth.Credentials.CachedTokenInfo.ExpiresOn.get -> System.DateTimeOffset
+PPDS.Auth.Credentials.CachedTokenInfo.ExpiresOn.init -> void
+PPDS.Auth.Credentials.CachedTokenInfo.IsExpired.get -> bool
+PPDS.Auth.Credentials.CachedTokenInfo.IsExpired.init -> void
+PPDS.Auth.Credentials.CachedTokenInfo.Username.get -> string?
+PPDS.Auth.Credentials.CachedTokenInfo.Username.init -> void
+PPDS.Auth.Credentials.CertificateFileCredentialProvider
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.CertificateFileCredentialProvider(string! applicationId, string! certificatePath, string? certificatePassword, string! tenantId, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.CertificateFileCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.CertificateStoreCredentialProvider(string! applicationId, string! thumbprint, string! tenantId, System.Security.Cryptography.X509Certificates.StoreName storeName = System.Security.Cryptography.X509Certificates.StoreName.My, System.Security.Cryptography.X509Certificates.StoreLocation storeLocation = System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.CertificateStoreCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.ClientSecretCredentialProvider(string! applicationId, string! clientSecret, string! tenantId, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.ClientSecretCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.CredentialProviderFactory
+PPDS.Auth.Credentials.CredentialResult
+PPDS.Auth.Credentials.CredentialResult.Client.get -> Microsoft.PowerPlatform.Dataverse.Client.ServiceClient?
+PPDS.Auth.Credentials.CredentialResult.Client.init -> void
+PPDS.Auth.Credentials.CredentialResult.CredentialResult() -> void
+PPDS.Auth.Credentials.CredentialResult.ErrorMessage.get -> string?
+PPDS.Auth.Credentials.CredentialResult.ErrorMessage.init -> void
+PPDS.Auth.Credentials.CredentialResult.Exception.get -> System.Exception?
+PPDS.Auth.Credentials.CredentialResult.Exception.init -> void
+PPDS.Auth.Credentials.CredentialResult.Identity.get -> string?
+PPDS.Auth.Credentials.CredentialResult.Identity.init -> void
+PPDS.Auth.Credentials.CredentialResult.Success.get -> bool
+PPDS.Auth.Credentials.CredentialResult.Success.init -> void
+PPDS.Auth.Credentials.CredentialResult.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.CredentialResult.TokenExpiresAt.init -> void
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.DeviceCodeCredentialProvider(PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null, string? username = null, string? homeAccountId = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> void
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.DeviceCodeCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.DeviceCodeInfo
+PPDS.Auth.Credentials.DeviceCodeInfo.DeviceCodeInfo(string! userCode, string! verificationUrl, string! message) -> void
+PPDS.Auth.Credentials.DeviceCodeInfo.Message.get -> string!
+PPDS.Auth.Credentials.DeviceCodeInfo.UserCode.get -> string!
+PPDS.Auth.Credentials.DeviceCodeInfo.VerificationUrl.get -> string!
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.GitHubFederatedCredentialProvider(string! applicationId, string! tenantId, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.GitHubFederatedCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.ICredentialProvider
+PPDS.Auth.Credentials.ICredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.ICredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.ICredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.ICredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.ICredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.ICredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.ICredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.ICredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.ICredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.ICredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.IPowerPlatformTokenProvider
+PPDS.Auth.Credentials.IPowerPlatformTokenProvider.GetFlowApiTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.IPowerPlatformTokenProvider.GetPowerAppsTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.IPowerPlatformTokenProvider.GetPowerAutomateTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.IPowerPlatformTokenProvider.GetTokenForResourceAsync(string! resource, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.ISecureCredentialStore
+PPDS.Auth.Credentials.ISecureCredentialStore.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Credentials.ISecureCredentialStore.ExistsAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Credentials.ISecureCredentialStore.GetAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.StoredCredential?>!
+PPDS.Auth.Credentials.ISecureCredentialStore.IsCleartextCachingEnabled.get -> bool
+PPDS.Auth.Credentials.ISecureCredentialStore.RemoveAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Credentials.ISecureCredentialStore.StoreAsync(PPDS.Auth.Credentials.StoredCredential! credential, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.InteractiveBrowserCredentialProvider(PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null, string? username = null, string? homeAccountId = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null) -> void
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.JwtClaimsParser
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.ManagedIdentityCredentialProvider(string? clientId = null) -> void
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.NativeCredentialStore
+PPDS.Auth.Credentials.NativeCredentialStore.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Credentials.NativeCredentialStore.Dispose() -> void
+PPDS.Auth.Credentials.NativeCredentialStore.ExistsAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Credentials.NativeCredentialStore.GetAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.StoredCredential?>!
+PPDS.Auth.Credentials.NativeCredentialStore.IsCleartextCachingEnabled.get -> bool
+PPDS.Auth.Credentials.NativeCredentialStore.NativeCredentialStore(bool allowCleartextFallback = false) -> void
+PPDS.Auth.Credentials.NativeCredentialStore.RemoveAsync(string! applicationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Credentials.NativeCredentialStore.StoreAsync(PPDS.Auth.Credentials.StoredCredential! credential, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Credentials.ParsedJwtClaims
+PPDS.Auth.Credentials.ParsedJwtClaims.ParsedJwtClaims() -> void
+PPDS.Auth.Credentials.ParsedJwtClaims.Puid.get -> string?
+PPDS.Auth.Credentials.ParsedJwtClaims.Puid.set -> void
+PPDS.Auth.Credentials.PowerPlatformToken
+PPDS.Auth.Credentials.PowerPlatformToken.AccessToken.get -> string!
+PPDS.Auth.Credentials.PowerPlatformToken.AccessToken.init -> void
+PPDS.Auth.Credentials.PowerPlatformToken.ExpiresOn.get -> System.DateTimeOffset
+PPDS.Auth.Credentials.PowerPlatformToken.ExpiresOn.init -> void
+PPDS.Auth.Credentials.PowerPlatformToken.Identity.get -> string?
+PPDS.Auth.Credentials.PowerPlatformToken.Identity.init -> void
+PPDS.Auth.Credentials.PowerPlatformToken.IsExpired(int bufferMinutes = 5) -> bool
+PPDS.Auth.Credentials.PowerPlatformToken.PowerPlatformToken() -> void
+PPDS.Auth.Credentials.PowerPlatformToken.Resource.get -> string!
+PPDS.Auth.Credentials.PowerPlatformToken.Resource.init -> void
+PPDS.Auth.Credentials.PowerPlatformTokenProvider
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.Dispose() -> void
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.GetFlowApiTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.GetPowerAppsTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.GetPowerAutomateTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.GetTokenForResourceAsync(string! resource, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.PowerPlatformToken!>!
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.PowerPlatformTokenProvider(PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null, string? username = null, string? homeAccountId = null) -> void
+PPDS.Auth.Credentials.PowerPlatformTokenProvider.PowerPlatformTokenProvider(string! applicationId, string! clientSecret, string! tenantId, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public) -> void
+PPDS.Auth.Credentials.PreAuthDialogResult
+PPDS.Auth.Credentials.PreAuthDialogResult.Cancel = 2 -> PPDS.Auth.Credentials.PreAuthDialogResult
+PPDS.Auth.Credentials.PreAuthDialogResult.OpenBrowser = 0 -> PPDS.Auth.Credentials.PreAuthDialogResult
+PPDS.Auth.Credentials.PreAuthDialogResult.UseDeviceCode = 1 -> PPDS.Auth.Credentials.PreAuthDialogResult
+PPDS.Auth.Credentials.StoredCredential
+PPDS.Auth.Credentials.StoredCredential.ApplicationId.get -> string!
+PPDS.Auth.Credentials.StoredCredential.ApplicationId.set -> void
+PPDS.Auth.Credentials.StoredCredential.CertificatePassword.get -> string?
+PPDS.Auth.Credentials.StoredCredential.CertificatePassword.set -> void
+PPDS.Auth.Credentials.StoredCredential.CertificatePath.get -> string?
+PPDS.Auth.Credentials.StoredCredential.CertificatePath.set -> void
+PPDS.Auth.Credentials.StoredCredential.ClientSecret.get -> string?
+PPDS.Auth.Credentials.StoredCredential.ClientSecret.set -> void
+PPDS.Auth.Credentials.StoredCredential.Password.get -> string?
+PPDS.Auth.Credentials.StoredCredential.Password.set -> void
+PPDS.Auth.Credentials.StoredCredential.StoredCredential() -> void
+PPDS.Auth.Credentials.TokenCacheManager
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.AccessToken.get -> string?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.CreateServiceClientAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), bool forceInteractive = false) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.Dispose() -> void
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.GetCachedTokenInfoAsync(string! environmentUrl, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.CachedTokenInfo?>!
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.HomeAccountId.get -> string?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.IdTokenClaims.get -> System.Security.Claims.ClaimsPrincipal?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.Identity.get -> string?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.ObjectId.get -> string?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.TenantId.get -> string?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.TokenExpiresAt.get -> System.DateTimeOffset?
+PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.UsernamePasswordCredentialProvider(string! username, string! password, PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null) -> void
+PPDS.Auth.DependencyInjection.ServiceCollectionExtensions
+PPDS.Auth.Discovery.AmbiguousMatchException
+PPDS.Auth.Discovery.AmbiguousMatchException.AmbiguousMatchException(string! message) -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment
+PPDS.Auth.Discovery.DiscoveredEnvironment.ApiUrl.get -> string!
+PPDS.Auth.Discovery.DiscoveredEnvironment.ApiUrl.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.DiscoveredEnvironment() -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.EnvironmentId.get -> string?
+PPDS.Auth.Discovery.DiscoveredEnvironment.EnvironmentId.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.EnvironmentType.get -> string!
+PPDS.Auth.Discovery.DiscoveredEnvironment.FriendlyName.get -> string!
+PPDS.Auth.Discovery.DiscoveredEnvironment.FriendlyName.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.Id.get -> System.Guid
+PPDS.Auth.Discovery.DiscoveredEnvironment.Id.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.IsEnabled.get -> bool
+PPDS.Auth.Discovery.DiscoveredEnvironment.IsTrial.get -> bool
+PPDS.Auth.Discovery.DiscoveredEnvironment.IsUserSysAdmin.get -> bool
+PPDS.Auth.Discovery.DiscoveredEnvironment.IsUserSysAdmin.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.OrganizationType.get -> int
+PPDS.Auth.Discovery.DiscoveredEnvironment.OrganizationType.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.Region.get -> string?
+PPDS.Auth.Discovery.DiscoveredEnvironment.Region.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.State.get -> int
+PPDS.Auth.Discovery.DiscoveredEnvironment.State.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.TenantId.get -> System.Guid?
+PPDS.Auth.Discovery.DiscoveredEnvironment.TenantId.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.TrialExpirationDate.get -> System.DateTimeOffset?
+PPDS.Auth.Discovery.DiscoveredEnvironment.TrialExpirationDate.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.UniqueName.get -> string!
+PPDS.Auth.Discovery.DiscoveredEnvironment.UniqueName.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.Url.get -> string?
+PPDS.Auth.Discovery.DiscoveredEnvironment.Url.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.UrlName.get -> string?
+PPDS.Auth.Discovery.DiscoveredEnvironment.UrlName.set -> void
+PPDS.Auth.Discovery.DiscoveredEnvironment.Version.get -> string?
+PPDS.Auth.Discovery.DiscoveredEnvironment.Version.set -> void
+PPDS.Auth.Discovery.EnvironmentResolutionResult
+PPDS.Auth.Discovery.EnvironmentResolutionResult.Environment.get -> PPDS.Auth.Profiles.EnvironmentInfo?
+PPDS.Auth.Discovery.EnvironmentResolutionResult.ErrorMessage.get -> string?
+PPDS.Auth.Discovery.EnvironmentResolutionResult.Method.get -> PPDS.Auth.Discovery.ResolutionMethod
+PPDS.Auth.Discovery.EnvironmentResolutionResult.Success.get -> bool
+PPDS.Auth.Discovery.EnvironmentResolutionService
+PPDS.Auth.Discovery.EnvironmentResolutionService.Dispose() -> void
+PPDS.Auth.Discovery.EnvironmentResolutionService.EnvironmentResolutionService(PPDS.Auth.Profiles.AuthProfile! profile, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null) -> void
+PPDS.Auth.Discovery.EnvironmentResolutionService.ResolveAsync(string! identifier, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Discovery.EnvironmentResolutionResult!>!
+PPDS.Auth.Discovery.EnvironmentResolver
+PPDS.Auth.Discovery.GlobalDiscoveryService
+PPDS.Auth.Discovery.GlobalDiscoveryService.CapturedHomeAccountId.get -> string?
+PPDS.Auth.Discovery.GlobalDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
+PPDS.Auth.Discovery.GlobalDiscoveryService.Dispose() -> void
+PPDS.Auth.Discovery.GlobalDiscoveryService.GlobalDiscoveryService(PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null, string? homeAccountId = null, PPDS.Auth.Profiles.AuthMethod? preferredAuthMethod = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> void
+PPDS.Auth.Discovery.IGlobalDiscoveryService
+PPDS.Auth.Discovery.IGlobalDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
+PPDS.Auth.Discovery.ResolutionMethod
+PPDS.Auth.Discovery.ResolutionMethod.DirectConnection = 0 -> PPDS.Auth.Discovery.ResolutionMethod
+PPDS.Auth.Discovery.ResolutionMethod.GlobalDiscovery = 1 -> PPDS.Auth.Discovery.ResolutionMethod
+PPDS.Auth.EnvironmentVariableAuth
+PPDS.Auth.Pooling.ConnectionResolver
+PPDS.Auth.Pooling.ConnectionResolver.ConnectionResolver(PPDS.Auth.Profiles.ProfileStore? store = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null) -> void
+PPDS.Auth.Pooling.ConnectionResolver.Dispose() -> void
+PPDS.Auth.Pooling.ConnectionResolver.ResolveActiveAsync(string? environmentOverride = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Pooling.ConnectionResolver.ResolveAsync(string? profileName, string? environmentOverride = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Pooling.ConnectionResolver.ResolveByNameAsync(string! profileName, string? environmentOverride = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.Pooling.ConnectionResolver.ResolveMultipleAsync(System.Collections.Generic.IEnumerable<string!>! profileNames, string? environmentOverride = null, int maxPoolSizePerProfile = 52, string? environmentDisplayName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Pooling.ProfileConnectionSource!>!>!
+PPDS.Auth.Pooling.ProfileConnectionSource
+PPDS.Auth.Pooling.ProfileConnectionSource.Dispose() -> void
+PPDS.Auth.Pooling.ProfileConnectionSource.EnvironmentUrl.get -> string!
+PPDS.Auth.Pooling.ProfileConnectionSource.GetSeedClient() -> Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!
+PPDS.Auth.Pooling.ProfileConnectionSource.InvalidateSeed() -> void
+PPDS.Auth.Pooling.ProfileConnectionSource.MaxPoolSize.get -> int
+PPDS.Auth.Pooling.ProfileConnectionSource.Name.get -> string!
+PPDS.Auth.Pooling.ProfileConnectionSource.Profile.get -> PPDS.Auth.Profiles.AuthProfile!
+PPDS.Auth.Pooling.ProfileConnectionSource.ProfileConnectionSource(PPDS.Auth.Profiles.AuthProfile! profile, string! environmentUrl, int maxPoolSize = 52, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null, string? environmentDisplayName = null, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, string? clientSecretOverride = null, System.Action<PPDS.Auth.Profiles.AuthProfile!>? onProfileUpdated = null) -> void
+PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.AzureDevOpsFederated = 7 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.CertificateFile = 3 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.CertificateStore = 4 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.ClientSecret = 2 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.DeviceCode = 1 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.GitHubFederated = 6 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.InteractiveBrowser = 0 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.ManagedIdentity = 5 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthMethod.UsernamePassword = 8 -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthProfile
+PPDS.Auth.Profiles.AuthProfile.ApplicationId.get -> string?
+PPDS.Auth.Profiles.AuthProfile.ApplicationId.set -> void
+PPDS.Auth.Profiles.AuthProfile.AuthMethod.get -> PPDS.Auth.Profiles.AuthMethod
+PPDS.Auth.Profiles.AuthProfile.AuthMethod.set -> void
+PPDS.Auth.Profiles.AuthProfile.AuthProfile() -> void
+PPDS.Auth.Profiles.AuthProfile.Authority.get -> string?
+PPDS.Auth.Profiles.AuthProfile.Authority.set -> void
+PPDS.Auth.Profiles.AuthProfile.CertificatePath.get -> string?
+PPDS.Auth.Profiles.AuthProfile.CertificatePath.set -> void
+PPDS.Auth.Profiles.AuthProfile.CertificateStoreLocation.get -> string?
+PPDS.Auth.Profiles.AuthProfile.CertificateStoreLocation.set -> void
+PPDS.Auth.Profiles.AuthProfile.CertificateStoreName.get -> string?
+PPDS.Auth.Profiles.AuthProfile.CertificateStoreName.set -> void
+PPDS.Auth.Profiles.AuthProfile.CertificateThumbprint.get -> string?
+PPDS.Auth.Profiles.AuthProfile.CertificateThumbprint.set -> void
+PPDS.Auth.Profiles.AuthProfile.Clone() -> PPDS.Auth.Profiles.AuthProfile!
+PPDS.Auth.Profiles.AuthProfile.Cloud.get -> PPDS.Auth.Cloud.CloudEnvironment
+PPDS.Auth.Profiles.AuthProfile.Cloud.set -> void
+PPDS.Auth.Profiles.AuthProfile.CreatedAt.get -> System.DateTimeOffset
+PPDS.Auth.Profiles.AuthProfile.CreatedAt.set -> void
+PPDS.Auth.Profiles.AuthProfile.DisplayIdentifier.get -> string!
+PPDS.Auth.Profiles.AuthProfile.Environment.get -> PPDS.Auth.Profiles.EnvironmentInfo?
+PPDS.Auth.Profiles.AuthProfile.Environment.set -> void
+PPDS.Auth.Profiles.AuthProfile.HasEnvironment.get -> bool
+PPDS.Auth.Profiles.AuthProfile.HasName.get -> bool
+PPDS.Auth.Profiles.AuthProfile.HomeAccountId.get -> string?
+PPDS.Auth.Profiles.AuthProfile.HomeAccountId.set -> void
+PPDS.Auth.Profiles.AuthProfile.IdentityDisplay.get -> string!
+PPDS.Auth.Profiles.AuthProfile.Index.get -> int
+PPDS.Auth.Profiles.AuthProfile.Index.set -> void
+PPDS.Auth.Profiles.AuthProfile.LastUsedAt.get -> System.DateTimeOffset?
+PPDS.Auth.Profiles.AuthProfile.LastUsedAt.set -> void
+PPDS.Auth.Profiles.AuthProfile.Name.get -> string?
+PPDS.Auth.Profiles.AuthProfile.Name.set -> void
+PPDS.Auth.Profiles.AuthProfile.ObjectId.get -> string?
+PPDS.Auth.Profiles.AuthProfile.ObjectId.set -> void
+PPDS.Auth.Profiles.AuthProfile.Puid.get -> string?
+PPDS.Auth.Profiles.AuthProfile.Puid.set -> void
+PPDS.Auth.Profiles.AuthProfile.TenantId.get -> string?
+PPDS.Auth.Profiles.AuthProfile.TenantId.set -> void
+PPDS.Auth.Profiles.AuthProfile.Username.get -> string?
+PPDS.Auth.Profiles.AuthProfile.Username.set -> void
+PPDS.Auth.Profiles.AuthProfile.Validate() -> void
+PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.BypassPluginMode.All = 3 -> PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.BypassPluginMode.Asynchronous = 2 -> PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.BypassPluginMode.None = 0 -> PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.BypassPluginMode.Synchronous = 1 -> PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy
+PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy.Allow = 2 -> PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy
+PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy.Prompt = 1 -> PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy
+PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy.ReadOnly = 0 -> PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy
+PPDS.Auth.Profiles.DateTimeMode
+PPDS.Auth.Profiles.DateTimeMode.EnvironmentTimezone = 2 -> PPDS.Auth.Profiles.DateTimeMode
+PPDS.Auth.Profiles.DateTimeMode.Local = 1 -> PPDS.Auth.Profiles.DateTimeMode
+PPDS.Auth.Profiles.DateTimeMode.Utc = 0 -> PPDS.Auth.Profiles.DateTimeMode
+PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Blue = 4 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.BrightBlue = 12 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.BrightCyan = 11 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.BrightGreen = 9 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.BrightRed = 8 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.BrightYellow = 10 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Brown = 6 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Cyan = 3 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Gray = 5 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Green = 1 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Red = 0 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.White = 7 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentColor.Yellow = 2 -> PPDS.Auth.Profiles.EnvironmentColor
+PPDS.Auth.Profiles.EnvironmentConfig
+PPDS.Auth.Profiles.EnvironmentConfig.Color.get -> PPDS.Auth.Profiles.EnvironmentColor?
+PPDS.Auth.Profiles.EnvironmentConfig.Color.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.DiscoveredType.get -> string?
+PPDS.Auth.Profiles.EnvironmentConfig.DiscoveredType.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.EnvironmentConfig() -> void
+PPDS.Auth.Profiles.EnvironmentConfig.Label.get -> string?
+PPDS.Auth.Profiles.EnvironmentConfig.Label.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.Profiles.get -> System.Collections.Generic.List<string!>!
+PPDS.Auth.Profiles.EnvironmentConfig.Profiles.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.Protection.get -> PPDS.Auth.Profiles.ProtectionLevel?
+PPDS.Auth.Profiles.EnvironmentConfig.Protection.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.SafetySettings.get -> PPDS.Auth.Profiles.QuerySafetySettings?
+PPDS.Auth.Profiles.EnvironmentConfig.SafetySettings.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.Type.get -> PPDS.Auth.Profiles.EnvironmentType?
+PPDS.Auth.Profiles.EnvironmentConfig.Type.set -> void
+PPDS.Auth.Profiles.EnvironmentConfig.Url.get -> string!
+PPDS.Auth.Profiles.EnvironmentConfig.Url.set -> void
+PPDS.Auth.Profiles.EnvironmentConfigCollection
+PPDS.Auth.Profiles.EnvironmentConfigCollection.EnvironmentConfigCollection() -> void
+PPDS.Auth.Profiles.EnvironmentConfigCollection.Environments.get -> System.Collections.Generic.List<PPDS.Auth.Profiles.EnvironmentConfig!>!
+PPDS.Auth.Profiles.EnvironmentConfigCollection.Environments.set -> void
+PPDS.Auth.Profiles.EnvironmentConfigCollection.TypeDefaults.get -> System.Collections.Generic.Dictionary<PPDS.Auth.Profiles.EnvironmentType, PPDS.Auth.Profiles.EnvironmentColor>!
+PPDS.Auth.Profiles.EnvironmentConfigCollection.TypeDefaults.set -> void
+PPDS.Auth.Profiles.EnvironmentConfigCollection.Version.get -> int
+PPDS.Auth.Profiles.EnvironmentConfigCollection.Version.set -> void
+PPDS.Auth.Profiles.EnvironmentConfigStore
+PPDS.Auth.Profiles.EnvironmentConfigStore.ClearCache() -> void
+PPDS.Auth.Profiles.EnvironmentConfigStore.Dispose() -> void
+PPDS.Auth.Profiles.EnvironmentConfigStore.EnvironmentConfigStore() -> void
+PPDS.Auth.Profiles.EnvironmentConfigStore.EnvironmentConfigStore(string! filePath) -> void
+PPDS.Auth.Profiles.EnvironmentConfigStore.FilePath.get -> string!
+PPDS.Auth.Profiles.EnvironmentConfigStore.GetConfigAsync(string! url, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfig?>!
+PPDS.Auth.Profiles.EnvironmentConfigStore.LoadAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfigCollection!>!
+PPDS.Auth.Profiles.EnvironmentConfigStore.RemoveConfigAsync(string! url, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Profiles.EnvironmentConfigStore.SaveAsync(PPDS.Auth.Profiles.EnvironmentConfigCollection! collection, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Profiles.EnvironmentConfigStore.SaveConfigAsync(string! url, string? label = null, PPDS.Auth.Profiles.EnvironmentType? type = null, PPDS.Auth.Profiles.EnvironmentColor? color = null, bool clearColor = false, string? discoveredType = null, string? profileName = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfig!>!
+PPDS.Auth.Profiles.EnvironmentInfo
+PPDS.Auth.Profiles.EnvironmentInfo.Clone() -> PPDS.Auth.Profiles.EnvironmentInfo!
+PPDS.Auth.Profiles.EnvironmentInfo.DisplayName.get -> string!
+PPDS.Auth.Profiles.EnvironmentInfo.DisplayName.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.EnvironmentId.get -> string?
+PPDS.Auth.Profiles.EnvironmentInfo.EnvironmentId.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.EnvironmentInfo() -> void
+PPDS.Auth.Profiles.EnvironmentInfo.OrganizationId.get -> string?
+PPDS.Auth.Profiles.EnvironmentInfo.OrganizationId.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.Region.get -> string?
+PPDS.Auth.Profiles.EnvironmentInfo.Region.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.Type.get -> string?
+PPDS.Auth.Profiles.EnvironmentInfo.Type.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.UniqueName.get -> string?
+PPDS.Auth.Profiles.EnvironmentInfo.UniqueName.set -> void
+PPDS.Auth.Profiles.EnvironmentInfo.Url.get -> string!
+PPDS.Auth.Profiles.EnvironmentInfo.Url.set -> void
+PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Development = 3 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Production = 1 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Sandbox = 2 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Test = 4 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Trial = 5 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.EnvironmentType.Unknown = 0 -> PPDS.Auth.Profiles.EnvironmentType
+PPDS.Auth.Profiles.ProfileCollection
+PPDS.Auth.Profiles.ProfileCollection.ActiveProfile.get -> PPDS.Auth.Profiles.AuthProfile?
+PPDS.Auth.Profiles.ProfileCollection.ActiveProfileIndex.get -> int?
+PPDS.Auth.Profiles.ProfileCollection.ActiveProfileIndex.set -> void
+PPDS.Auth.Profiles.ProfileCollection.ActiveProfileName.get -> string?
+PPDS.Auth.Profiles.ProfileCollection.ActiveProfileName.set -> void
+PPDS.Auth.Profiles.ProfileCollection.Add(PPDS.Auth.Profiles.AuthProfile! profile, bool setAsActive = false) -> void
+PPDS.Auth.Profiles.ProfileCollection.All.get -> System.Collections.Generic.IEnumerable<PPDS.Auth.Profiles.AuthProfile!>!
+PPDS.Auth.Profiles.ProfileCollection.Clear() -> void
+PPDS.Auth.Profiles.ProfileCollection.Clone() -> PPDS.Auth.Profiles.ProfileCollection!
+PPDS.Auth.Profiles.ProfileCollection.Count.get -> int
+PPDS.Auth.Profiles.ProfileCollection.GetByIndex(int index) -> PPDS.Auth.Profiles.AuthProfile?
+PPDS.Auth.Profiles.ProfileCollection.GetByName(string! name) -> PPDS.Auth.Profiles.AuthProfile?
+PPDS.Auth.Profiles.ProfileCollection.GetByNameOrIndex(string! nameOrIndex) -> PPDS.Auth.Profiles.AuthProfile?
+PPDS.Auth.Profiles.ProfileCollection.IsNameInUse(string! name, int? excludeIndex = null) -> bool
+PPDS.Auth.Profiles.ProfileCollection.NextIndex.get -> int
+PPDS.Auth.Profiles.ProfileCollection.ProfileCollection() -> void
+PPDS.Auth.Profiles.ProfileCollection.Profiles.get -> System.Collections.Generic.List<PPDS.Auth.Profiles.AuthProfile!>!
+PPDS.Auth.Profiles.ProfileCollection.Profiles.set -> void
+PPDS.Auth.Profiles.ProfileCollection.RemoveByIndex(int index) -> bool
+PPDS.Auth.Profiles.ProfileCollection.RemoveByName(string! name) -> bool
+PPDS.Auth.Profiles.ProfileCollection.SetActiveByIndex(int index) -> void
+PPDS.Auth.Profiles.ProfileCollection.SetActiveByName(string! name) -> void
+PPDS.Auth.Profiles.ProfileCollection.Version.get -> int
+PPDS.Auth.Profiles.ProfileCollection.Version.set -> void
+PPDS.Auth.Profiles.ProfilePaths
+PPDS.Auth.Profiles.ProfileResolver
+PPDS.Auth.Profiles.ProfileStore
+PPDS.Auth.Profiles.ProfileStore.ClearCache() -> void
+PPDS.Auth.Profiles.ProfileStore.Delete() -> void
+PPDS.Auth.Profiles.ProfileStore.Dispose() -> void
+PPDS.Auth.Profiles.ProfileStore.FilePath.get -> string!
+PPDS.Auth.Profiles.ProfileStore.Load() -> PPDS.Auth.Profiles.ProfileCollection!
+PPDS.Auth.Profiles.ProfileStore.LoadAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.ProfileCollection!>!
+PPDS.Auth.Profiles.ProfileStore.ProfileStore(Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+PPDS.Auth.Profiles.ProfileStore.ProfileStore(string! filePath, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+PPDS.Auth.Profiles.ProfileStore.Save(PPDS.Auth.Profiles.ProfileCollection! collection) -> void
+PPDS.Auth.Profiles.ProfileStore.SaveAsync(PPDS.Auth.Profiles.ProfileCollection! collection, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PPDS.Auth.Profiles.ProfileStore.UpdateProfileAsync(string! profileNameOrIndex, System.Action<PPDS.Auth.Profiles.AuthProfile!>! updateAction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Profiles.ProtectionLevel
+PPDS.Auth.Profiles.ProtectionLevel.Development = 0 -> PPDS.Auth.Profiles.ProtectionLevel
+PPDS.Auth.Profiles.ProtectionLevel.Production = 2 -> PPDS.Auth.Profiles.ProtectionLevel
+PPDS.Auth.Profiles.ProtectionLevel.Test = 1 -> PPDS.Auth.Profiles.ProtectionLevel
+PPDS.Auth.Profiles.QuerySafetySettings
+PPDS.Auth.Profiles.QuerySafetySettings.BypassCustomPlugins.get -> PPDS.Auth.Profiles.BypassPluginMode
+PPDS.Auth.Profiles.QuerySafetySettings.BypassCustomPlugins.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.BypassPowerAutomateFlows.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.BypassPowerAutomateFlows.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.CrossEnvironmentDmlPolicy.get -> PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy
+PPDS.Auth.Profiles.QuerySafetySettings.CrossEnvironmentDmlPolicy.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.DateTimeMode.get -> PPDS.Auth.Profiles.DateTimeMode
+PPDS.Auth.Profiles.QuerySafetySettings.DateTimeMode.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.DmlBatchSize.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.DmlBatchSize.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.MaxPageRetrievals.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.MaxPageRetrievals.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.MaxParallelism.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.MaxParallelism.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.MaxResultRows.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.MaxResultRows.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.PreventDeleteWithoutWhere.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.PreventDeleteWithoutWhere.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.PreventUpdateWithoutWhere.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.PreventUpdateWithoutWhere.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.QuerySafetySettings() -> void
+PPDS.Auth.Profiles.QuerySafetySettings.QueryTimeoutSeconds.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.QueryTimeoutSeconds.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.ShowFetchXmlInExplain.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.ShowFetchXmlInExplain.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.UseBulkDelete.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.UseBulkDelete.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.UseTdsEndpoint.get -> bool
+PPDS.Auth.Profiles.QuerySafetySettings.UseTdsEndpoint.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.WarnDeleteThreshold.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.WarnDeleteThreshold.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.WarnInsertThreshold.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.WarnInsertThreshold.set -> void
+PPDS.Auth.Profiles.QuerySafetySettings.WarnUpdateThreshold.get -> int?
+PPDS.Auth.Profiles.QuerySafetySettings.WarnUpdateThreshold.set -> void
+PPDS.Auth.Profiles.TokenCacheDetector
+PPDS.Auth.Profiles.TokenCacheType
+PPDS.Auth.Profiles.TokenCacheType.File = 1 -> PPDS.Auth.Profiles.TokenCacheType
+PPDS.Auth.Profiles.TokenCacheType.Memory = 2 -> PPDS.Auth.Profiles.TokenCacheType
+PPDS.Auth.Profiles.TokenCacheType.OperatingSystem = 0 -> PPDS.Auth.Profiles.TokenCacheType
+PPDS.Auth.ServiceClientFactory
+PPDS.Auth.ServiceClientFactory.CreateFromActiveProfileAsync(string? environmentUrl = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.ServiceClientFactory.CreateFromProfileNameAsync(string! profileName, string? environmentUrl = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!
+PPDS.Auth.ServiceClientFactory.CreateFromProfileNamesAsync(System.Collections.Generic.IEnumerable<string!>! profileNames, string? environmentUrl = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!>!
+PPDS.Auth.ServiceClientFactory.Dispose() -> void
+PPDS.Auth.ServiceClientFactory.ServiceClientFactory(PPDS.Auth.Profiles.ProfileStore? profileStore = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> void
+const PPDS.Auth.Credentials.CredentialProviderFactory.SpnSecretEnvVar = "PPDS_SPN_SECRET" -> string!
+const PPDS.Auth.Credentials.CredentialProviderFactory.TestClientSecretEnvVar = "PPDS_TEST_CLIENT_SECRET" -> string!
+const PPDS.Auth.EnvironmentVariableAuth.ClientIdVar = "PPDS_CLIENT_ID" -> string!
+const PPDS.Auth.EnvironmentVariableAuth.ClientSecretVar = "PPDS_CLIENT_SECRET" -> string!
+const PPDS.Auth.EnvironmentVariableAuth.CloudVar = "PPDS_CLOUD" -> string!
+const PPDS.Auth.EnvironmentVariableAuth.EnvironmentUrlVar = "PPDS_ENVIRONMENT_URL" -> string!
+const PPDS.Auth.EnvironmentVariableAuth.TenantIdVar = "PPDS_TENANT_ID" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.AppName = "PPDS" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.ConfigDirEnvVar = "PPDS_CONFIG_DIR" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.CredentialCacheFileName = "ppds.credentials.dat" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.EnvironmentsFileName = "environments.json" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.ProfilesFileName = "profiles.json" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.TokenCacheFileName = "msal_token_cache.bin" -> string!
+const PPDS.Auth.Profiles.ProfilePaths.TuiStateFileName = "tui-state.json" -> string!
+const PPDS.Auth.Profiles.ProfileResolver.ProfileEnvironmentVariable = "PPDS_PROFILE" -> string!
+const PPDS.Auth.Profiles.ProfileStore.CurrentVersion = 2 -> int
+override PPDS.Auth.Credentials.CachedTokenInfo.Equals(object? obj) -> bool
+override PPDS.Auth.Credentials.CachedTokenInfo.GetHashCode() -> int
+override PPDS.Auth.Credentials.CachedTokenInfo.ToString() -> string!
+override PPDS.Auth.Discovery.DiscoveredEnvironment.ToString() -> string!
+override PPDS.Auth.Profiles.AuthProfile.ToString() -> string!
+override PPDS.Auth.Profiles.EnvironmentInfo.ToString() -> string!
+static PPDS.Auth.AuthDebugLog.Reset() -> void
+static PPDS.Auth.AuthDebugLog.Writer.get -> System.Action<string!>?
+static PPDS.Auth.AuthDebugLog.Writer.set -> void
+static PPDS.Auth.AuthenticationOutput.Reset() -> void
+static PPDS.Auth.AuthenticationOutput.Writer.get -> System.Action<string!>?
+static PPDS.Auth.AuthenticationOutput.Writer.set -> void
+static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityBaseUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityHost(PPDS.Auth.Cloud.CloudEnvironment cloud) -> System.Uri!
+static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityUrl(PPDS.Auth.Cloud.CloudEnvironment cloud, string? tenantId = null) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetAzureCloudInstance(PPDS.Auth.Cloud.CloudEnvironment cloud) -> Microsoft.Identity.Client.AzureCloudInstance
+static PPDS.Auth.Cloud.CloudEndpoints.GetGlobalDiscoveryUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAppsApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAppsServiceScope(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAutomateApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.Parse(string! value) -> PPDS.Auth.Cloud.CloudEnvironment
+static PPDS.Auth.Credentials.CachedTokenInfo.Create(System.DateTimeOffset expiresOn, string? username) -> PPDS.Auth.Credentials.CachedTokenInfo!
+static PPDS.Auth.Credentials.CachedTokenInfo.operator !=(PPDS.Auth.Credentials.CachedTokenInfo? left, PPDS.Auth.Credentials.CachedTokenInfo? right) -> bool
+static PPDS.Auth.Credentials.CachedTokenInfo.operator ==(PPDS.Auth.Credentials.CachedTokenInfo? left, PPDS.Auth.Credentials.CachedTokenInfo? right) -> bool
+static PPDS.Auth.Credentials.CertificateFileCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.StoredCredential? credential) -> PPDS.Auth.Credentials.CertificateFileCredentialProvider!
+static PPDS.Auth.Credentials.CertificateFileCredentialProvider.FromProfileWithPassword(PPDS.Auth.Profiles.AuthProfile! profile, string? certificatePassword) -> PPDS.Auth.Credentials.CertificateFileCredentialProvider!
+static PPDS.Auth.Credentials.CertificateStoreCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile) -> PPDS.Auth.Credentials.CertificateStoreCredentialProvider!
+static PPDS.Auth.Credentials.ClientSecretCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.StoredCredential! credential) -> PPDS.Auth.Credentials.ClientSecretCredentialProvider!
+static PPDS.Auth.Credentials.ClientSecretCredentialProvider.FromProfileWithSecret(PPDS.Auth.Profiles.AuthProfile! profile, string! clientSecret) -> PPDS.Auth.Credentials.ClientSecretCredentialProvider!
+static PPDS.Auth.Credentials.CredentialProviderFactory.Create(PPDS.Auth.Profiles.AuthProfile! profile, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null) -> PPDS.Auth.Credentials.ICredentialProvider!
+static PPDS.Auth.Credentials.CredentialProviderFactory.CreateAsync(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null, string? clientSecretOverride = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Credentials.ICredentialProvider!>!
+static PPDS.Auth.Credentials.CredentialProviderFactory.GetSpnSecretFromEnvironment() -> string?
+static PPDS.Auth.Credentials.CredentialProviderFactory.IsSupported(PPDS.Auth.Profiles.AuthMethod authMethod) -> bool
+static PPDS.Auth.Credentials.CredentialProviderFactory.RequiresCredentialStore(PPDS.Auth.Profiles.AuthMethod authMethod) -> bool
+static PPDS.Auth.Credentials.CredentialProviderFactory.ShouldBypassCredentialStore() -> bool
+static PPDS.Auth.Credentials.CredentialResult.Failed(string! message, System.Exception? exception = null) -> PPDS.Auth.Credentials.CredentialResult!
+static PPDS.Auth.Credentials.CredentialResult.Succeeded(Microsoft.PowerPlatform.Dataverse.Client.ServiceClient! client, string? identity, System.DateTimeOffset? expiresAt) -> PPDS.Auth.Credentials.CredentialResult!
+static PPDS.Auth.Credentials.DeviceCodeCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> PPDS.Auth.Credentials.DeviceCodeCredentialProvider!
+static PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null) -> PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider!
+static PPDS.Auth.Credentials.InteractiveBrowserCredentialProvider.IsAvailable() -> bool
+static PPDS.Auth.Credentials.JwtClaimsParser.Parse(System.Security.Claims.ClaimsPrincipal? claimsPrincipal, string? accessToken) -> PPDS.Auth.Credentials.ParsedJwtClaims?
+static PPDS.Auth.Credentials.JwtClaimsParser.Parse(string? accessToken) -> PPDS.Auth.Credentials.ParsedJwtClaims?
+static PPDS.Auth.Credentials.ManagedIdentityCredentialProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile) -> PPDS.Auth.Credentials.ManagedIdentityCredentialProvider!
+static PPDS.Auth.Credentials.PowerPlatformTokenProvider.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile) -> PPDS.Auth.Credentials.PowerPlatformTokenProvider!
+static PPDS.Auth.Credentials.PowerPlatformTokenProvider.FromProfileWithSecret(PPDS.Auth.Profiles.AuthProfile! profile, string! clientSecret) -> PPDS.Auth.Credentials.PowerPlatformTokenProvider!
+static PPDS.Auth.Credentials.TokenCacheManager.ClearAllCachesAsync(string? tokenCachePath = null) -> System.Threading.Tasks.Task!
+static PPDS.Auth.DependencyInjection.ServiceCollectionExtensions.AddAuthServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
+static PPDS.Auth.Discovery.EnvironmentResolutionResult.Succeeded(PPDS.Auth.Profiles.EnvironmentInfo! environment, PPDS.Auth.Discovery.ResolutionMethod method) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
+static PPDS.Auth.Discovery.EnvironmentResolver.Resolve(System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>! environments, string! identifier) -> PPDS.Auth.Discovery.DiscoveredEnvironment?
+static PPDS.Auth.Discovery.EnvironmentResolver.ResolveByUrl(System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>! environments, string! url) -> PPDS.Auth.Discovery.DiscoveredEnvironment?
+static PPDS.Auth.Discovery.GlobalDiscoveryService.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> PPDS.Auth.Discovery.GlobalDiscoveryService!
+static PPDS.Auth.Discovery.GlobalDiscoveryService.SupportsGlobalDiscovery(PPDS.Auth.Profiles.AuthMethod authMethod) -> bool
+static PPDS.Auth.EnvironmentVariableAuth.TryCreateProfile() -> (PPDS.Auth.Profiles.AuthProfile! Profile, string! ClientSecret)?
+static PPDS.Auth.Pooling.ConnectionResolver.ParseProfileString(string? profileString) -> System.Collections.Generic.IReadOnlyList<string!>!
+static PPDS.Auth.Pooling.ProfileConnectionSource.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, int maxPoolSize = 52, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, System.Action<PPDS.Auth.Profiles.AuthProfile!>? onProfileUpdated = null) -> PPDS.Auth.Pooling.ProfileConnectionSource!
+static PPDS.Auth.Profiles.EnvironmentConfig.NormalizeUrl(string! url) -> string!
+static PPDS.Auth.Profiles.EnvironmentInfo.Create(string! url, string! displayName) -> PPDS.Auth.Profiles.EnvironmentInfo!
+static PPDS.Auth.Profiles.ProfilePaths.CredentialCacheFile.get -> string!
+static PPDS.Auth.Profiles.ProfilePaths.DataDirectory.get -> string!
+static PPDS.Auth.Profiles.ProfilePaths.EnsureDirectoryExists() -> void
+static PPDS.Auth.Profiles.ProfilePaths.EnvironmentsFile.get -> string!
+static PPDS.Auth.Profiles.ProfilePaths.ProfilesFile.get -> string!
+static PPDS.Auth.Profiles.ProfilePaths.TokenCacheFile.get -> string!
+static PPDS.Auth.Profiles.ProfilePaths.TuiStateFile.get -> string!
+static PPDS.Auth.Profiles.ProfileResolver.GetEffectiveProfileName(string? explicitProfile = null) -> string?
+static PPDS.Auth.Profiles.ProfileResolver.ResolveProfile(PPDS.Auth.Profiles.ProfileCollection! collection, string? explicitProfile = null) -> PPDS.Auth.Profiles.AuthProfile?
+static PPDS.Auth.Profiles.TokenCacheDetector.GetCacheType() -> PPDS.Auth.Profiles.TokenCacheType

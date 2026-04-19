@@ -32,6 +32,17 @@ if [ -n "$STAGED_CS" ]; then
     echo "[pre-commit] .NET tests passed."
 fi
 
+# ── Extension Contribution Lint ────────────────────────────────
+if git diff --cached --name-only --diff-filter=ACMR | grep -q "^src/PPDS\.Extension/package\.json$"; then
+    echo "[pre-commit] Extension package.json staged — linting contributions..."
+    if ! node "$REPO_ROOT/scripts/docs-gen/lint-extension-contributions.js" --package-json "$REPO_ROOT/src/PPDS.Extension/package.json"; then
+        echo ""
+        echo "[pre-commit] BLOCKED: extension contribution lint failed. Fix errors before committing."
+        exit 1
+    fi
+    echo "[pre-commit] Extension contribution lint passed."
+fi
+
 # ── TypeScript Gate ────────────────────────────────────────────
 STAGED_TS=$(git diff --cached --name-only --diff-filter=ACMR -- ':(glob)src/PPDS.Extension/**/*.ts' ':(glob)src/PPDS.Extension/**/*.tsx' ':(glob)src/PPDS.Extension/**/*.js')
 

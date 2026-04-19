@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
@@ -8,6 +9,12 @@ namespace PPDS.Auth.Credentials;
 /// <summary>
 /// Parses JWT tokens and ClaimsPrincipal to extract claims for profile storage.
 /// </summary>
+/// <remarks>
+/// Exposed publicly only because PPDS CLI surfaces (not third-party consumers) use it
+/// during profile enrichment. Hidden from IntelliSense — prefer letting the credential
+/// provider populate claim-derived fields on the profile.
+/// </remarks>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public static class JwtClaimsParser
 {
     /// <summary>
@@ -85,6 +92,11 @@ public static class JwtClaimsParser
 /// <summary>
 /// Claims extracted from authentication tokens.
 /// </summary>
+/// <remarks>
+/// Return type of <see cref="JwtClaimsParser"/>. Hidden from IntelliSense with
+/// the same visibility rationale as <c>JwtClaimsParser</c>.
+/// </remarks>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class ParsedJwtClaims
 {
     /// <summary>

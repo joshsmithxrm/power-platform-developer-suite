@@ -1,0 +1,53 @@
+name: docs-smoke
+
+# Reusable workflow invoked by the ppds-docs repo whenever a docs guide PR
+# modifies a C# code sample. Compiles every fenced `csharp` block against the
+# ppds assemblies at the pinned ref and fails the check on the first bad block.
+# Spec: specs/docs-generation.md — AC-20 through AC-22 + AC-30.
+
+on:
+  workflow_call:
+    inputs:
+      docs_repo:
+        description: "Caller repo slug (e.g., 'user/ppds-docs')."
+        type: string
+        required: true
+      docs_ref:
+        description: "Ref in the docs repo to test."
+        type: string
+        required: true
+      ppds_ref:
+        description: "Ref of this repo to compile against."
+        type: string
+        required: false
+        default: "main"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ppds
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ppds_ref }}
+
+      - name: Checkout docs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.docs_repo }}
+          ref: ${{ inputs.docs_ref }}
+          path: .docs-repo
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build product
+        run: dotnet build PPDS.sln -c Release -o artifacts/bin
+
+      - name: Run smoke
+        run: |
+          dotnet run --project scripts/docs-gen/smoke -c Release -- \
+            --docs-path .docs-repo \
+            --assemblies artifacts/bin
