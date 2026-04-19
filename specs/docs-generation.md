@@ -36,7 +36,7 @@ ppds monorepo                                                      ppds-docs rep
 ┌─────────────────────────────────────────────────────────────┐    ┌────────────────────────┐
 │  src/                                                       │    │                        │
 │   PPDS.{Dataverse,Migration,Auth,Plugins}  (annotated)      │    │  docs/reference/       │
-│   PPDS.Cli/Commands/**                     (Spectre)        │    │    cli/{group}/*.md    │
+│   PPDS.Cli/Commands/**          (System.CommandLine)        │    │    cli/{group}/*.md    │
 │   PPDS.Mcp/Tools/**                        ([McpServerTool])│    │    libraries/{pkg}/*.md│
 │   PPDS.Extension/package.json              (contributes)    │    │    mcp/{tool}/*.md     │
 │   PPDS.Analyzers/Rules/                                     │    │    extension/          │
@@ -223,9 +223,9 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-05 | PPDS014 skips types marked `[GeneratedCode]` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.SkipsGeneratedCodeAttribute` | 🔲 |
 | AC-06 | PPDS014 skips files whose path contains `/Generated/` or `\Generated\` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.SkipsGeneratedDirectory` | 🔲 |
 | AC-07 | PublicApiAnalyzers (RS0016) fails build when a new public type is not listed in `PublicAPI.Unshipped.txt` in each of the four library projects (Dataverse, Migration, Auth, Plugins) | `PPDS.DocsGen.Workflow.Tests/PublicApiBaselineTests.FailsOnUnbaselinedAddition` (parametrized over all four libs) | 🔲 |
-| AC-08 | PPDS015 fails build for a Spectre command type (either subclass of `Command<T>` or attributed with `[CommandFor]` / analogous attribute) whose `Description` property is not set via attribute, property initializer, or ctor assignment | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.FlagsMissingDescription` | 🔲 |
-| AC-09 | PPDS015 allows Description set via attribute (`[Description("...")]` on the type) | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.AllowsAttributeDescription` | 🔲 |
-| AC-10 | PPDS015 allows Description set via property initializer or constructor assignment | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.AllowsPropertyOrCtorDescription` | 🔲 |
+| AC-08 | PPDS015 fails build for a `new System.CommandLine.Command(name)` creation expression (single-arg ctor, no description) with no object-initializer `Description = "..."` assignment | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.PPDS015_FlagsCommandWithoutDescription` | 🔲 |
+| AC-09 | PPDS015 allows a `Command` constructed with its 2-arg `Command(name, description)` ctor where the description is a non-empty string; also allows any Command-family ctor (e.g. `RootCommand(description)`) that passes a non-empty string to a parameter named `description` | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.PPDS015_AllowsCommandWithCtorDescription` + `.PPDS015_AllowsRootCommandWithSingleDescriptionArgument` | 🔲 |
+| AC-10 | PPDS015 allows `Command`, `Option<T>`, and `Argument<T>` creation expressions that set `Description = "..."` via an object initializer with a non-empty string | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.PPDS015_AllowsCommandWithInitializerDescription` + `.PPDS015_AllowsOptionWithInitializerDescription` + `.PPDS015_AllowsArgumentWithInitializerDescription` | 🔲 |
 | AC-11 | PPDS016 fails build for a method `[McpServerTool]` with no `Name` argument | `PPDS.Analyzers.Tests/McpToolNeedsMetadataAnalyzerTests.FlagsMissingName` | 🔲 |
 | AC-12 | PPDS016 fails build for a method `[McpServerTool]` with no `Description` argument | `PPDS.Analyzers.Tests/McpToolNeedsMetadataAnalyzerTests.FlagsMissingDescription` | 🔲 |
 | AC-13 | `lint-extension-contributions.js` exits non-zero when a `contributes.commands` entry lacks `title` | `PPDS.DocsGen.Extension.Tests/LintExtensionContributionsTests.FailsOnMissingTitle` | 🔲 |
