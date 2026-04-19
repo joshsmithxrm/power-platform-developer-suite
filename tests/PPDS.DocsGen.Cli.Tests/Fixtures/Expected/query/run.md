@@ -20,5 +20,5 @@ ppds query run [options]
 
 | Long | Short | Type | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--top` | `-t` | `int` | `50` | Limit the number of rows returned. |
+| `--top` | `-t` | `int` |  | Limit the number of rows returned. |
 

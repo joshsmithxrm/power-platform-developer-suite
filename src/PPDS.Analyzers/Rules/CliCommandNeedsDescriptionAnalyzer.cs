@@ -7,30 +7,33 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace PPDS.Analyzers.Rules;
 
 /// <summary>
-/// PPDS015: Requires every concrete Spectre.Console.Cli command class to expose a
-/// non-empty <c>Description</c> — supplied via <c>[System.ComponentModel.Description]</c>
-/// attribute, a <c>Description</c> property/field initializer, or a constructor assignment.
+/// PPDS015: Requires every <c>System.CommandLine.Command</c>, <c>Option&lt;T&gt;</c>, or
+/// <c>Argument&lt;T&gt;</c> construction site to carry a non-empty description. For
+/// <c>Command</c>, description may be supplied as the 2-arg constructor's second
+/// parameter or via an object initializer <c>Description = "..."</c>. For
+/// <c>Option&lt;T&gt;</c> and <c>Argument&lt;T&gt;</c>, description must be supplied via
+/// an object initializer (System.CommandLine's constructors take only name/aliases).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class CliCommandNeedsDescriptionAnalyzer : DiagnosticAnalyzer
 {
     private static readonly DiagnosticDescriptor Rule = new(
         id: DiagnosticIds.CliCommandNeedsDescription,
-        title: "Spectre CLI command requires a Description",
-        messageFormat: "CLI command '{0}' requires a Description — set via [Description(...)] attribute, Description property initializer, or constructor assignment",
+        title: "System.CommandLine Command/Option/Argument requires a Description",
+        messageFormat: "{0} construction at this site requires a non-empty Description — pass it via the 2-arg constructor (Command only) or set Description via object initializer",
         category: DiagnosticCategories.Documentation,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Concrete subclasses of Spectre.Console.Cli.Command, Command<TSettings>, AsyncCommand, " +
-                     "or AsyncCommand<TSettings> must provide a non-empty Description so generated reference docs " +
-                     "and CLI help text are meaningful. See specs/docs-generation.md.");
+        description: "Every System.CommandLine Command, Option<T>, and Argument<T> created in " +
+                     "CLI factory methods must expose a non-empty Description so generated reference docs " +
+                     "and --help output are meaningful. See specs/docs-generation.md.");
 
-    private const string DescriptionAttributeFullName = "System.ComponentModel.DescriptionAttribute";
-
-    private static readonly ImmutableHashSet<string> SpectreCommandBaseTypes = ImmutableHashSet.Create(
-        StringComparer.Ordinal,
-        "Spectre.Console.Cli.Command",
-        "Spectre.Console.Cli.AsyncCommand");
+    // Fully-qualified metadata names of the types we enforce. Generic arity
+    // markers are part of the metadata name; Option`1 / Argument`1 catch the
+    // typed forms and their subclasses.
+    private const string CommandTypeName = "System.CommandLine.Command";
+    private const string OptionGenericTypeName = "System.CommandLine.Option`1";
+    private const string ArgumentGenericTypeName = "System.CommandLine.Argument`1";
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Rule);
@@ -39,164 +42,151 @@ public sealed class CliCommandNeedsDescriptionAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSymbolAction(AnalyzeNamedType, SymbolKind.NamedType);
+        context.RegisterSyntaxNodeAction(
+            AnalyzeCreation,
+            SyntaxKind.ObjectCreationExpression,
+            SyntaxKind.ImplicitObjectCreationExpression);
     }
 
-    private static void AnalyzeNamedType(SymbolAnalysisContext context)
+    private static void AnalyzeCreation(SyntaxNodeAnalysisContext context)
     {
-        if (context.Symbol is not INamedTypeSymbol type)
+        var node = context.Node;
+        var typeInfo = context.SemanticModel.GetTypeInfo(node, context.CancellationToken);
+        if (typeInfo.Type is not INamedTypeSymbol namedType)
             return;
 
-        // Only concrete classes are considered.
-        if (type.TypeKind != TypeKind.Class || type.IsAbstract)
+        var kind = ClassifyTargetType(namedType);
+        if (kind is null)
             return;
 
-        if (type.IsImplicitlyDeclared)
+        // Extract argument list + initializer depending on expression shape.
+        ArgumentListSyntax? argumentList = node switch
+        {
+            ObjectCreationExpressionSyntax oce => oce.ArgumentList,
+            ImplicitObjectCreationExpressionSyntax ioce => ioce.ArgumentList,
+            _ => null,
+        };
+
+        InitializerExpressionSyntax? initializer = node switch
+        {
+            ObjectCreationExpressionSyntax oce => oce.Initializer,
+            ImplicitObjectCreationExpressionSyntax ioce => ioce.Initializer,
+            _ => null,
+        };
+
+        if (HasDescriptionInInitializer(initializer))
             return;
 
-        if (!InheritsFromSpectreCommand(type))
+        if (kind == TargetKind.Command && HasCommandDescriptionArgument(argumentList, context.SemanticModel, context.CancellationToken))
             return;
 
-        if (HasDescriptionAttribute(type))
-            return;
-
-        if (HasDescriptionMemberInitializer(type, context.CancellationToken))
-            return;
-
-        if (HasConstructorDescriptionAssignment(type, context.CancellationToken))
-            return;
-
-        var location = type.Locations.FirstOrDefault(l => l.IsInSource) ?? Location.None;
-        var diagnostic = Diagnostic.Create(Rule, location, type.Name);
+        var diagnostic = Diagnostic.Create(Rule, node.GetLocation(), kind.ToString());
         context.ReportDiagnostic(diagnostic);
     }
 
-    private static bool InheritsFromSpectreCommand(INamedTypeSymbol type)
+    private static TargetKind? ClassifyTargetType(INamedTypeSymbol type)
     {
-        for (var current = type.BaseType; current is not null; current = current.BaseType)
+        // Walk the type and its base chain. First match wins.
+        for (var current = type; current is not null; current = current.BaseType)
         {
-            // Use the original (unconstructed) definition so Command<TSettings> matches Command<T>.
-            var originalName = current.OriginalDefinition.ToDisplayString(
-                SymbolDisplayFormat.FullyQualifiedFormat.WithGlobalNamespaceStyle(
-                    SymbolDisplayGlobalNamespaceStyle.Omitted));
+            var metadataName = current.ConstructedFrom.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat.WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Omitted));
 
-            // Strip generic arity (e.g. "Spectre.Console.Cli.Command<TSettings>" -> "Spectre.Console.Cli.Command")
-            var backtick = originalName.IndexOf('<');
-            var baseName = backtick >= 0 ? originalName.Substring(0, backtick) : originalName;
+            // Strip the generic-argument form so we match the open definition.
+            // ConstructedFrom on Option<string> returns Option<T> whose display is
+            // "System.CommandLine.Option<T>" — normalize to "System.CommandLine.Option`1".
+            var normalized = NormalizeToMetadataName(current);
 
-            if (SpectreCommandBaseTypes.Contains(baseName))
+            if (normalized == CommandTypeName)
+                return TargetKind.Command;
+            if (normalized == OptionGenericTypeName)
+                return TargetKind.Option;
+            if (normalized == ArgumentGenericTypeName)
+                return TargetKind.Argument;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeToMetadataName(INamedTypeSymbol type)
+    {
+        var def = type.OriginalDefinition;
+        var ns = def.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat.WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Omitted)) ?? string.Empty;
+        var name = def.MetadataName; // includes `N arity suffix
+        return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
+    }
+
+    private static bool HasDescriptionInInitializer(InitializerExpressionSyntax? initializer)
+    {
+        if (initializer is null)
+            return false;
+
+        foreach (var expr in initializer.Expressions)
+        {
+            if (expr is not AssignmentExpressionSyntax { Left: IdentifierNameSyntax ident } assignment)
+                continue;
+
+            if (ident.Identifier.Text != "Description")
+                continue;
+
+            if (IsNonEmptyStringExpression(assignment.Right))
                 return true;
         }
 
         return false;
     }
 
-    private static bool HasDescriptionAttribute(INamedTypeSymbol type)
+    private static bool HasCommandDescriptionArgument(
+        ArgumentListSyntax? argumentList,
+        SemanticModel model,
+        CancellationToken ct)
     {
-        foreach (var attribute in type.GetAttributes())
+        if (argumentList is null)
+            return false;
+
+        // System.CommandLine.Command has a (string name, string? description = null)
+        // constructor. We accept any call site that passes a non-empty string
+        // expression in the description position — identified by matching the
+        // parameter name "description" on the resolved symbol.
+        var args = argumentList.Arguments;
+        if (args.Count < 2)
+            return false;
+
+        var symbolInfo = model.GetSymbolInfo(argumentList.Parent!, ct);
+        if (symbolInfo.Symbol is IMethodSymbol ctor)
         {
-            var attrClass = attribute.AttributeClass;
-            if (attrClass is null)
-                continue;
-
-            if (attrClass.ToDisplayString() != DescriptionAttributeFullName)
-                continue;
-
-            if (attribute.ConstructorArguments.Length == 0)
-                continue;
-
-            var arg = attribute.ConstructorArguments[0];
-            if (arg.Value is string text && !string.IsNullOrWhiteSpace(text))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool HasDescriptionMemberInitializer(INamedTypeSymbol type, CancellationToken ct)
-    {
-        foreach (var syntaxRef in type.DeclaringSyntaxReferences)
-        {
-            var node = syntaxRef.GetSyntax(ct);
-            if (node is not TypeDeclarationSyntax typeDecl)
-                continue;
-
-            foreach (var member in typeDecl.Members)
+            for (var i = 0; i < args.Count && i < ctor.Parameters.Length; i++)
             {
-                if (member is PropertyDeclarationSyntax property
-                    && property.Identifier.Text == "Description"
-                    && property.Initializer is { Value: var propValue }
-                    && IsNonEmptyStringLiteral(propValue))
-                {
+                var paramName = args[i].NameColon?.Name.Identifier.Text ?? ctor.Parameters[i].Name;
+                if (paramName == "description" && IsNonEmptyStringExpression(args[i].Expression))
                     return true;
-                }
-
-                if (member is FieldDeclarationSyntax field)
-                {
-                    foreach (var variable in field.Declaration.Variables)
-                    {
-                        if (variable.Identifier.Text == "Description"
-                            && variable.Initializer is { Value: var fieldValue }
-                            && IsNonEmptyStringLiteral(fieldValue))
-                        {
-                            return true;
-                        }
-                    }
-                }
             }
         }
 
         return false;
     }
 
-    private static bool HasConstructorDescriptionAssignment(INamedTypeSymbol type, CancellationToken ct)
+    private static bool IsNonEmptyStringExpression(ExpressionSyntax expression)
     {
-        foreach (var syntaxRef in type.DeclaringSyntaxReferences)
+        switch (expression)
         {
-            var node = syntaxRef.GetSyntax(ct);
-            if (node is not TypeDeclarationSyntax typeDecl)
-                continue;
-
-            foreach (var ctor in typeDecl.Members.OfType<ConstructorDeclarationSyntax>())
-            {
-                if (ctor.Body is null && ctor.ExpressionBody is null)
-                    continue;
-
-                var assignments = ctor.DescendantNodes().OfType<AssignmentExpressionSyntax>();
-                foreach (var assignment in assignments)
-                {
-                    if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
-                        continue;
-
-                    var leftName = GetAssignmentTargetName(assignment.Left);
-                    if (leftName != "Description")
-                        continue;
-
-                    if (IsNonEmptyStringLiteral(assignment.Right))
-                        return true;
-                }
-            }
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
+                return !string.IsNullOrWhiteSpace(literal.Token.ValueText);
+            case InterpolatedStringExpressionSyntax interpolated:
+                return interpolated.Contents.Count > 0;
+            case LiteralExpressionSyntax n when n.IsKind(SyntaxKind.NullLiteralExpression):
+                return false;
+            default:
+                // Identifier references, method calls, etc. — we can't prove emptiness
+                // statically without data-flow. Treat as "non-empty" to avoid false
+                // positives; the runtime caller sees the value.
+                return true;
         }
-
-        return false;
     }
 
-    private static string? GetAssignmentTargetName(ExpressionSyntax expression) => expression switch
+    private enum TargetKind
     {
-        IdentifierNameSyntax identifier => identifier.Identifier.Text,
-        MemberAccessExpressionSyntax memberAccess when memberAccess.Expression is ThisExpressionSyntax
-            => memberAccess.Name.Identifier.Text,
-        _ => null,
-    };
-
-    private static bool IsNonEmptyStringLiteral(ExpressionSyntax expression)
-    {
-        if (expression is LiteralExpressionSyntax literal
-            && literal.IsKind(SyntaxKind.StringLiteralExpression))
-        {
-            return !string.IsNullOrWhiteSpace(literal.Token.ValueText);
-        }
-
-        return false;
+        Command,
+        Option,
+        Argument,
     }
 }

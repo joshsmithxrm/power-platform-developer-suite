@@ -8,130 +8,237 @@ namespace PPDS.Analyzers.Tests.Rules;
 public class CliCommandNeedsDescriptionAnalyzerTests
 {
     /// <summary>
-    /// Shared Spectre stubs and a Settings stub. Kept minimal — we only need types the analyzer
-    /// can match by metadata name. The real Spectre assembly is not referenced because the test
-    /// harness compiles fixtures in isolation.
+    /// Minimal System.CommandLine stubs. We only need the types the analyzer
+    /// recognizes by fully-qualified name — the real package is not referenced
+    /// because the test harness compiles fixtures in isolation.
     /// </summary>
-    private const string SpectreStubs = """
-        namespace Spectre.Console.Cli
+    private const string CommandLineStubs = """
+        namespace System.CommandLine
         {
-            public abstract class CommandSettings { }
-            public abstract class Command
+            public class Command
             {
-                public virtual int Execute() { return 0; }
+                public Command(string name) { Name = name; }
+                public Command(string name, string? description = null) { Name = name; Description = description; }
+                public string Name { get; }
+                public string? Description { get; set; }
             }
-            public abstract class Command<TSettings> where TSettings : CommandSettings
-            {
-                public virtual int Execute(TSettings settings) { return 0; }
-            }
-            public abstract class AsyncCommand
-            {
-                public virtual System.Threading.Tasks.Task<int> ExecuteAsync() { return System.Threading.Tasks.Task.FromResult(0); }
-            }
-            public abstract class AsyncCommand<TSettings> where TSettings : CommandSettings
-            {
-                public virtual System.Threading.Tasks.Task<int> ExecuteAsync(TSettings settings) { return System.Threading.Tasks.Task.FromResult(0); }
-            }
-        }
 
-        namespace System.ComponentModel
-        {
-            [System.AttributeUsage(System.AttributeTargets.All)]
-            public sealed class DescriptionAttribute : System.Attribute
+            public class Option<T>
             {
-                public DescriptionAttribute(string description) { Description = description; }
-                public string Description { get; }
+                public Option(string name, params string[] aliases) { Name = name; }
+                public string Name { get; }
+                public string? Description { get; set; }
             }
-        }
 
-        namespace TestApp
-        {
-            public sealed class FooSettings : Spectre.Console.Cli.CommandSettings { }
+            public class Argument<T>
+            {
+                public Argument(string name) { Name = name; }
+                public string Name { get; }
+                public string? Description { get; set; }
+            }
         }
         """;
 
-    /// <summary>AC-08: a Spectre command subclass with no Description flags PPDS015.</summary>
-    [Fact]
-    public async Task PPDS015_FlagsMissingDescription()
-    {
-        const string body = """
-            namespace TestApp
+    private const string TestHarness = """
+        namespace TestApp
+        {
+            public static class Factory
             {
-                public class FooCommand : Spectre.Console.Cli.Command<FooSettings>
-                {
-                }
+                public static System.CommandLine.Command Make() => BODY;
             }
-            """;
+        }
+        """;
+
+    /// <summary>AC-08: a Command constructed with only a name (no description) flags PPDS015.</summary>
+    [Fact]
+    public async Task PPDS015_FlagsCommandWithoutDescription()
+    {
+        var source = CommandLineStubs + "\n" + TestHarness
+            .Replace("BODY", """new System.CommandLine.Command("auth")""");
 
         var diagnostics = await AnalyzerTestHelper
-            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(SpectreStubs + "\n" + body);
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(source);
 
         diagnostics.Should().ContainSingle()
             .Which.Id.Should().Be("PPDS015");
     }
 
-    /// <summary>AC-09: `[Description("...")]` on the type satisfies the rule.</summary>
+    /// <summary>AC-09: Command with 2-arg ctor (name, description) satisfies the rule.</summary>
     [Fact]
-    public async Task PPDS015_AllowsAttributeDescription()
+    public async Task PPDS015_AllowsCommandWithCtorDescription()
     {
-        const string body = """
-            namespace TestApp
-            {
-                [System.ComponentModel.Description("bar")]
-                public class FooCommand : Spectre.Console.Cli.Command<FooSettings>
-                {
-                }
-            }
-            """;
+        var source = CommandLineStubs + "\n" + TestHarness
+            .Replace("BODY", """new System.CommandLine.Command("auth", "Manage authentication profiles")""");
 
         var diagnostics = await AnalyzerTestHelper
-            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(SpectreStubs + "\n" + body);
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(source);
 
         diagnostics.Should().BeEmpty();
     }
 
-    /// <summary>AC-10 (a): a Description property initializer satisfies the rule.</summary>
+    /// <summary>AC-10: Command with single-arg ctor plus object initializer Description satisfies the rule.</summary>
     [Fact]
-    public async Task PPDS015_AllowsPropertyInitializerDescription()
+    public async Task PPDS015_AllowsCommandWithInitializerDescription()
     {
-        const string body = """
-            namespace TestApp
-            {
-                public class FooCommand : Spectre.Console.Cli.Command<FooSettings>
-                {
-                    public string Description { get; } = "x";
-                }
-            }
-            """;
+        var source = CommandLineStubs + "\n" + TestHarness
+            .Replace("BODY", """new System.CommandLine.Command("auth") { Description = "Manage authentication profiles" }""");
 
         var diagnostics = await AnalyzerTestHelper
-            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(SpectreStubs + "\n" + body);
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(source);
 
         diagnostics.Should().BeEmpty();
     }
 
-    /// <summary>AC-10 (b): a constructor assignment of Description satisfies the rule.</summary>
+    /// <summary>AC-08 (Option): Option&lt;T&gt; without a Description in its initializer flags PPDS015.</summary>
     [Fact]
-    public async Task PPDS015_AllowsConstructorAssignmentDescription()
+    public async Task PPDS015_FlagsOptionWithoutDescription()
     {
         const string body = """
             namespace TestApp
             {
-                public class FooCommand : Spectre.Console.Cli.Command<FooSettings>
+                public static class Factory
                 {
-                    public string Description { get; set; }
-
-                    public FooCommand()
+                    public static void Make()
                     {
-                        Description = "x";
+                        var opt = new System.CommandLine.Option<string>("--name", "-n");
                     }
                 }
             }
             """;
 
         var diagnostics = await AnalyzerTestHelper
-            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(SpectreStubs + "\n" + body);
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS015");
+    }
+
+    /// <summary>AC-09 (Option): Option&lt;T&gt; with Description in initializer satisfies the rule.</summary>
+    [Fact]
+    public async Task PPDS015_AllowsOptionWithInitializerDescription()
+    {
+        const string body = """
+            namespace TestApp
+            {
+                public static class Factory
+                {
+                    public static void Make()
+                    {
+                        var opt = new System.CommandLine.Option<string>("--name", "-n")
+                        {
+                            Description = "The thing"
+                        };
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
 
         diagnostics.Should().BeEmpty();
+    }
+
+    /// <summary>Argument&lt;T&gt; without a Description flags PPDS015.</summary>
+    [Fact]
+    public async Task PPDS015_FlagsArgumentWithoutDescription()
+    {
+        const string body = """
+            namespace TestApp
+            {
+                public static class Factory
+                {
+                    public static void Make()
+                    {
+                        var arg = new System.CommandLine.Argument<string>("input");
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS015");
+    }
+
+    /// <summary>Argument&lt;T&gt; with initializer Description satisfies the rule.</summary>
+    [Fact]
+    public async Task PPDS015_AllowsArgumentWithInitializerDescription()
+    {
+        const string body = """
+            namespace TestApp
+            {
+                public static class Factory
+                {
+                    public static void Make()
+                    {
+                        var arg = new System.CommandLine.Argument<string>("input")
+                        {
+                            Description = "Input path"
+                        };
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
+
+        diagnostics.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Command with empty-string description in its ctor still flags — whitespace-only
+    /// doesn't satisfy the "non-empty" requirement.
+    /// </summary>
+    [Fact]
+    public async Task PPDS015_FlagsCommandWithEmptyCtorDescription()
+    {
+        var source = CommandLineStubs + "\n" + TestHarness
+            .Replace("BODY", """new System.CommandLine.Command("auth", "")""");
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(source);
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS015");
+    }
+
+    /// <summary>
+    /// Subclasses of System.CommandLine.Command (e.g. RootCommand) fall under the
+    /// same rule — object initializer description satisfies it.
+    /// </summary>
+    [Fact]
+    public async Task PPDS015_AppliesToCommandSubclasses()
+    {
+        const string body = """
+            namespace System.CommandLine
+            {
+                public class RootCommand : Command
+                {
+                    public RootCommand() : base("root") { }
+                }
+            }
+
+            namespace TestApp
+            {
+                public static class Factory
+                {
+                    public static void Make()
+                    {
+                        // No description in initializer — must flag.
+                        var root = new System.CommandLine.RootCommand();
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<CliCommandNeedsDescriptionAnalyzer>(CommandLineStubs + "\n" + body);
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS015");
     }
 }

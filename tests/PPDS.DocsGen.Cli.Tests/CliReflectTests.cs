@@ -45,8 +45,8 @@ public class CliReflectTests
     }
 
     /// <summary>
-    /// AC-15: emits one markdown file per Spectre command (plus per-group index)
-    /// that matches the committed golden-file fixture byte-for-byte.
+    /// AC-15: emits one markdown file per System.CommandLine leaf command (plus
+    /// per-group index) that matches the committed golden-file fixture byte-for-byte.
     /// </summary>
     [Fact]
     public async Task EmitsExpectedMarkdownForFixtureCommandTree()
@@ -112,21 +112,18 @@ public class CliReflectTests
     }
 
     /// <summary>
-    /// Commands decorated with <c>[EditorBrowsable(Never)]</c> must not appear
-    /// in any emitted file — including the group index.
+    /// Leaf commands with <c>Hidden = true</c> must not appear in any emitted
+    /// file — including the group index.
     /// </summary>
     [Fact]
-    public async Task SkipsEditorBrowsableNeverCommands()
+    public async Task SkipsHiddenCommands()
     {
         var result = await GenerateAsync();
 
-        // The hidden fixture is named "hidden" (from HiddenCommand → "hidden")
-        // and lives in namespace ".../Commands/Query" (group "query").
         result.Files.Should().NotContain(
             f => f.RelativePath.Equals("query/hidden.md", StringComparison.Ordinal),
-            because: "HiddenCommand is marked [EditorBrowsable(Never)] and must be excluded");
+            because: "the hidden fixture command is marked Hidden=true and must be excluded");
 
-        // The query group should only reference the one visible command.
         var queryIndex = result.Files.Single(f => f.RelativePath == "query/_index.md");
         queryIndex.Contents.Should().NotContain(
             "`hidden`",

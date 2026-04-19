@@ -14,5 +14,5 @@ ppds env list [options]
 
 | Long | Short | Type | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--format` | `-f` | `string` | `text` | Output format (text or json). |
+| `--format` | `-f` | `string` |  | Output format (text or json). |
 

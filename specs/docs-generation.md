@@ -65,10 +65,10 @@ ppds monorepo                                                      ppds-docs rep
 | Component | Responsibility |
 |-----------|----------------|
 | `PPDS014 XmlDocOnPublicApi` | Analyzer: fails build if a public type/member in the four libraries lacks `/// <summary>` and is not marked `[EditorBrowsable(Never)]` |
-| `PPDS015 CliCommandNeedsDescription` | Analyzer: fails build if a Spectre `Command<T>` subclass or `[Command]`-attributed type lacks a `Description = "..."` setting |
+| `PPDS015 CliCommandNeedsDescription` | Analyzer: fails build if a `System.CommandLine.Command`, `Option<T>`, or `Argument<T>` creation expression lacks a non-empty Description (via 2-arg `Command` ctor or object initializer) |
 | `PPDS016 McpToolNeedsMetadata` | Analyzer: fails build if a method with `[McpServerTool]` lacks `Name` or `Description` |
 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` | Vendored: enforces `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt` baseline convention (RS0016, RS0017) |
-| `scripts/docs-gen/cli-reflect` | C# console tool: reflects Spectre command tree → one markdown file per group |
+| `scripts/docs-gen/cli-reflect` | C# console tool: loads the built CLI assembly in an `AssemblyLoadContext`, invokes every `public static Command Create()` on `*CommandGroup` types, walks the resulting `Command.Subcommands` tree → one markdown file per leaf command plus per-group index |
 | `scripts/docs-gen/libs-reflect` | C# console tool with Roslyn: walks public surface of four libraries filtered by `[EditorBrowsable(Never)]` → markdown per type |
 | `scripts/docs-gen/mcp-reflect` | C# console tool: enumerates `[McpServerTool]` methods → markdown per tool |
 | `scripts/docs-gen/ext-reflect` | Node script: reads `src/PPDS.Extension/package.json` `contributes` → `extension/commands.md` table |
@@ -95,7 +95,7 @@ Note on Constitution A1/A2: generators are tooling, not Application Services. Th
 
 1. **Curated public-API annotation.** Every public type and member in PPDS.Dataverse, PPDS.Migration, PPDS.Auth, and PPDS.Plugins must have either `/// <summary>` documentation or be marked `[EditorBrowsable(Never)]`. The rule applies to everything in the baseline (Phase 0) and to every future addition (drift check).
 2. **Public-surface baseline.** Each of the four libraries has committed `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` files. Any change to the public surface requires a corresponding baseline update or the build fails.
-3. **CLI command annotation.** Every concrete Spectre `Command<T>` subclass or `[Command]`-attributed type must set `Description`. Enforced at build time.
+3. **CLI command annotation.** Every `System.CommandLine.Command`, `Option<T>`, and `Argument<T>` creation site in the CLI factory code must supply a non-empty Description — for `Command`, via the 2-arg constructor `Command(name, description)` or via an object initializer `Description = "..."`; for `Option<T>` / `Argument<T>`, only via object initializer since their constructors take only name/aliases. Enforced at build time by PPDS015.
 4. **MCP tool annotation.** Every method annotated `[McpServerTool]` must supply `Name` and `Description`. Enforced at build time.
 5. **Extension contribution annotation.** Every entry in `src/PPDS.Extension/package.json` `contributes.commands` must supply `title` and `category`. Enforced by pre-commit lint script.
 6. **Reference generation.** Four generators emit markdown into a well-defined output tree matching the ppds-docs layout under `docs/reference/`.
@@ -156,11 +156,13 @@ Dry-run does not require the GitHub App token (no cross-repo writes). Used for C
 
 #### CLI Surface (`cli-reflect`)
 
-- Input: `PPDS.Cli.dll` (built in Release) + introspection via Spectre's command tree API
+- Input: `PPDS.Cli.dll` (built in Release) loaded in a real `AssemblyLoadContext` (not `MetadataLoadContext`); each `public static Command Create()` method on a public `*CommandGroup` type is invoked and the returned `System.CommandLine.Command` is walked for metadata
 - Output: `docs/reference/cli/{group}/{command}.md` + `docs/reference/cli/{group}/_index.md`
-- Per-command fields emitted: name, description, aliases, arguments (name, description, required), options (name, short, description, default), examples (from XML docs), exit codes (from `[ExitCode]` attribute if present)
-- Group index: table of commands with one-line descriptions
-- MDX escaping: applies Core Requirement 9 — type references render as inline code; prose from XML-doc summary bodies passes through `MdxEscape.Prose`
+- Group name: the root `Command.Name` returned by the `Create()` factory. Per-group markdown files cover the group's direct subcommands; nested subgroups are out of scope for v1 (no consumer uses them in current CLI source)
+- Per-command fields emitted: name, description, arguments (name, description, required — inferred from absence of `DefaultValueFactory`), options (long name from `Command.Name`, short name from the first dash-prefixed alias, type display from `Option<T>` generic argument, default from `DefaultValue` property where set)
+- Filter: subcommands with `Command.Hidden = true` (System.CommandLine's built-in hide flag) are skipped; factory types or methods annotated `[EditorBrowsable(Never)]` are skipped at the group level
+- MDX escaping: applies Core Requirement 9 — type references render as inline code; prose from descriptions passes through `MdxEscape.Prose`
+- Trust boundary: the generator invokes product factory code; all CLI factories must be side-effect-free (construct Commands and return — no DI registration, no I/O). PPDS CLI factories adhere to this by construction
 
 #### Libraries Surface (`libs-reflect`)
 
@@ -170,6 +172,7 @@ Dry-run does not require the GitHub App token (no cross-repo writes). Used for C
 - Per-type fields: summary, namespace, assembly, kind (class/interface/record/struct), base type, implemented interfaces, public members with summaries and signatures
 - Cross-references: internal links to other types in the same package; external type references render as plain text
 - MDX escaping: applies Core Requirement 9 — all type references (including generics like `Task<T>`) render as inline code via `MdxEscape.InlineCode`; summary bodies pass through `MdxEscape.Prose`
+- **XML-doc feature support.** In scope for v1: `<summary>`, `<param>`, `<returns>`, `<remarks>`, `<see cref="..."/>` (rendered as bare inline code with the type-id prefix stripped — not a hyperlink), `<paramref>`, `<typeparamref>` (rendered as inline code), `<c>` / `<code>` (rendered as inline code), and `<inheritdoc />` / `<inheritdoc cref="..."/>` resolved against the inheritance chain (explicit cref → first documented interface → first documented base class). Out of scope for v1: cross-type hyperlinks from `<see cref>`, member overload disambiguation beyond declaration-order fallback, and generic-arity conversion from XML IDs back to C# source form (best-effort only). These were audited against PPDS.Auth (the only library with XML docs today) and none of the out-of-scope cases are exercised.
 
 #### MCP Surface (`mcp-reflect`)
 
@@ -227,21 +230,21 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-12 | PPDS016 fails build for a method `[McpServerTool]` with no `Description` argument | `PPDS.Analyzers.Tests/McpToolNeedsMetadataAnalyzerTests.FlagsMissingDescription` | 🔲 |
 | AC-13 | `lint-extension-contributions.js` exits non-zero when a `contributes.commands` entry lacks `title` | `PPDS.DocsGen.Extension.Tests/LintExtensionContributionsTests.FailsOnMissingTitle` | 🔲 |
 | AC-14 | `lint-extension-contributions.js` exits non-zero when a `contributes.commands` entry lacks `category` | `PPDS.DocsGen.Extension.Tests/LintExtensionContributionsTests.FailsOnMissingCategory` | 🔲 |
-| AC-15 | `cli-reflect` emits one markdown file per Spectre command group with signature, description, options, arguments, matching a golden-file fixture byte-for-byte | `PPDS.DocsGen.Cli.Tests/CliReflectTests.EmitsExpectedMarkdownForFixtureCommandTree` | 🔲 |
-| AC-16 | `libs-reflect` emits markdown per public type that has `/// <summary>`; excludes types marked `[EditorBrowsable(Never)]`; matches a golden-file fixture byte-for-byte | `PPDS.DocsGen.Libs.Tests/LibsReflectTests.EmitsOnlyDocumentedCustomerFacingTypes` | 🔲 |
-| AC-17 | `mcp-reflect` emits one markdown file per `[McpServerTool]` method with name, description, input schema, matching a golden-file fixture byte-for-byte | `PPDS.DocsGen.Mcp.Tests/McpReflectTests.EmitsExpectedMarkdownForFixtureToolSet` | 🔲 |
-| AC-18 | `ext-reflect` emits `commands.md` from a fixture `package.json` with one row per `contributes.commands` entry, matching a golden-file fixture byte-for-byte | `PPDS.DocsGen.Extension.Tests/ExtReflectTests.EmitsExpectedCommandsTable` | 🔲 |
-| AC-19 | All four generators are deterministic: running each twice on the same input produces byte-identical output | `PPDS.DocsGen.*.Tests/*.DeterministicOutputAcrossRuns` (one per generator) | 🔲 |
+| AC-15 | `cli-reflect` emits one markdown file per System.CommandLine leaf command plus per-group `_index.md`, with members ordered alphabetically within each kind (commands alphabetical within a group; arguments in declaration order; options alphabetical by long name), matching a golden-file fixture byte-for-byte under the .NET SDK pinned in `global.json` | `PPDS.DocsGen.Cli.Tests/CliReflectTests.EmitsExpectedMarkdownForFixtureCommandTree` | 🔲 |
+| AC-16 | `libs-reflect` emits markdown per public type that has `/// <summary>` (directly or via resolved `<inheritdoc />`); excludes types marked `[EditorBrowsable(Never)]`; members ordered alphabetically within each kind (types, methods, properties); matches a golden-file fixture byte-for-byte under the .NET SDK pinned in `global.json` | `PPDS.DocsGen.Libs.Tests/LibsReflectTests.EmitsOnlyDocumentedCustomerFacingTypes` | 🔲 |
+| AC-17 | `mcp-reflect` emits one markdown file per `[McpServerTool]` method with name, description, input schema; tools ordered alphabetically within category; matches a golden-file fixture byte-for-byte under the .NET SDK pinned in `global.json` | `PPDS.DocsGen.Mcp.Tests/McpReflectTests.EmitsExpectedMarkdownForFixtureToolSet` | 🔲 |
+| AC-18 | `ext-reflect` emits `commands.md` from a fixture `package.json` with one row per `contributes.commands` entry, ordered alphabetically by command ID, matching a golden-file fixture byte-for-byte | `PPDS.DocsGen.Extension.Tests/ExtReflectTests.EmitsExpectedCommandsTable` | 🔲 |
+| AC-19 | All four generators are deterministic: running each twice on the same input produces byte-identical output, under the .NET SDK pinned in `global.json` | `PPDS.DocsGen.*.Tests/*.DeterministicOutputAcrossRuns` (one per generator) | 🔲 |
 | AC-20 | `smoke` compiles a fenced `csharp` block extracted from a guide against current product assemblies and reports success | `PPDS.DocsGen.Smoke.Tests/SmokeTests.CompilesValidFencedBlock` | 🔲 |
 | AC-21 | `smoke` fails with file-and-line diagnostics when a fenced block references a nonexistent type | `PPDS.DocsGen.Smoke.Tests/SmokeTests.ReportsCompileErrorWithLocation` | 🔲 |
 | AC-22 | `smoke` honors `// ignore-smoke` marker on the opening fence line and excludes that block from compilation | `PPDS.DocsGen.Smoke.Tests/SmokeTests.HonorsIgnoreMarker` | 🔲 |
-| AC-23 | Generated markdown parses under Docusaurus strict MDX for fixture inputs covering generic types (`Task<T>`, `List<int>`, `Dictionary<K, V>`) — all four generators' outputs tested | `PPDS.DocsGen.Workflow.Tests/MdxParseTests.StrictMdxAcceptsGeneratedReference` | 🔲 |
+| AC-23 | Generated markdown parses under Docusaurus strict MDX for fixture inputs covering (a) simple generics (`Task<T>`, `List<int>`, `Dictionary<K, V>`), (b) deeply-nested generics (`List<Dictionary<string, Task<T>>>`), and (c) a `<see cref="..."/>` inside prose whose target is a generic type, rendered as inline code within a surrounding sentence — all four generators' outputs tested | `PPDS.DocsGen.Workflow.Tests/MdxParseTests.StrictMdxAcceptsGeneratedReference` | 🔲 |
 | AC-24 | Generated output does not contain the bare word "SDK" in prose or headings outside of quoted Microsoft references or code fences (enforces Core Requirement 10) | `PPDS.DocsGen.Workflow.Tests/TerminologyTests.NoSdkInProse` | 🔲 |
 | AC-25 | `docs-release.yml` in dry-run mode (workflow_dispatch with `dry_run=true`) produces the expected file tree, a PR body summary, and a baseline rollover diff — all visible as workflow artifacts, without opening any PR | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.DryRunProducesExpectedArtifacts` | 🔲 |
 | AC-26 | `docs-release.yml` rollover logic moves all entries from each library's `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt` (sorted, deduplicated) and clears Unshipped to empty | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.RolloverMovesUnshippedEntries` | 🔲 |
 | AC-27 | `docs-release.yml` aborts when an open rollover PR from a prior tag exists on `main` — exits non-zero with a diagnostic listing the open PR | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.AbortsOnOpenPriorRolloverPr` | 🔲 |
 | AC-28 | After Phase 0 completes, running `dotnet build` on each of the four library projects with `WarningsAsErrors` for PPDS014-016/RS0016-0017 produces zero errors | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.AllFourLibrariesBuildClean` | 🔲 |
-| AC-29 | Each of the four library projects has a non-empty `PublicAPI.Shipped.txt` file committed at its project root | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.ShippedBaselinesExist` | 🔲 |
+| AC-29 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` returns zero RS0016/RS0017 diagnostics against the committed source of each of the four library projects — gated by Phase 0 completion across all four libs (Phase 0 is currently pilot-only: PPDS.Auth has baselines; PPDS.Dataverse / PPDS.Migration / PPDS.Plugins baselines are pending). AC tracked at 🔲 until all four libs reach zero-diagnostic state. | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.RS0016ReturnsZeroDiagnostics` | 🔲 |
 | AC-30 | `docs-smoke.yml` runs as `workflow_call` from a caller repository, accepts the caller's docs path as input, and fails the check with stdout pointing at the offending block when compilation fails | `PPDS.DocsGen.Workflow.Tests/DocsSmokeWorkflowTests.FailsOnBadBlockViaWorkflowCall` | 🔲 |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
@@ -256,7 +259,7 @@ Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌
 | Fenced block using internal-only API | Guide references `internal class Helper` | Smoke test compile fails with CS0122 (inaccessible) — legitimate failure |
 | Fenced block with `// ignore-smoke` comment on opening fence | ` ```csharp // ignore-smoke ` as opening fence | Smoke test skips this block; generator emits metadata noting skipped count (AC-22) |
 | Library with zero currently-documented public types | Phase 0 incomplete state | `libs-reflect` emits empty `_index.md` with placeholder; not an error |
-| Spectre command declared via fluent API instead of subclass | `new Command<Settings>().WithDescription(...)` | PPDS015 scope limited to subclass and attributed types; fluent API instance out of scope (future rule) |
+| Command Description assigned on a separate statement after `new Command(name)` | `var c = new Command("foo"); c.Description = "...";` | PPDS015 inspects the creation expression only; separate-statement assignment is not tracked. The PPDS CLI convention is to pass Description in the 2-arg ctor or object initializer, and no current factory uses the separate-statement pattern. |
 | PR moves Unshipped entries to Shipped without tagging | Developer manually edits Shipped in a non-release PR | Not mechanically prevented — treated as a code-review concern. The release workflow is the conventional mover; manual moves are discouraged but legal. |
 
 ---
@@ -521,6 +524,37 @@ Library `.csproj` files add:
 <WarningsAsErrors>PPDS014;PPDS015;PPDS016;RS0016;RS0017</WarningsAsErrors>
 ```
 
+The .NET SDK version is pinned in `global.json` at the repository root with `rollForward: latestPatch`. Golden-fixture ACs (AC-15–AC-19) depend on this pin for reproducibility; feature-level SDK bumps (e.g. 10.0.x → 10.1.x) can change reflection member ordering and source-generator output, which would flake the goldens. Update the pin deliberately when intentionally moving to a new feature band.
+
+---
+
+## Operations
+
+### GitHub App (PPDS Docs Bot)
+
+| Property | Value |
+|----------|-------|
+| Owner | Josh Smith (repo admin) |
+| App installed on | `power-platform-developer-suite` and `ppds-docs` |
+| Scope | Pull-request write on `ppds-docs` only; nothing else |
+| App ID storage | GitHub Actions secret `PPDS_DOCS_APP_ID` in `power-platform-developer-suite` |
+| Private key storage | GitHub Actions secret `PPDS_DOCS_APP_PRIVATE_KEY` in `power-platform-developer-suite` |
+| Token lifetime | Installation tokens auto-rotate per workflow run (no long-lived secret material leaves the App) |
+| Rotation policy | Annual rotation; immediate rotation on any suspicion of compromise |
+| Revocation playbook | GitHub App settings page → Generate new private key → update `PPDS_DOCS_APP_PRIVATE_KEY` in Actions secrets → previous key invalidated immediately by GitHub (no workflow downtime because the new key starts being used on the next run) |
+| Audit trail | GitHub App installation's audit log + per-PR commit attribution (`ppds-docs-bot[bot]` author) |
+
+### Phase 0 Rollout Status (as of initial spec authoring)
+
+| Library | `PublicAPI.Shipped.txt` committed | PPDS014-clean |
+|---------|-----------------------------------|---------------|
+| PPDS.Auth | ✅ (pilot) | ✅ |
+| PPDS.Dataverse | ❌ | ❌ |
+| PPDS.Migration | ❌ | ❌ |
+| PPDS.Plugins | ❌ | ❌ |
+
+AC-28 and AC-29 stay ungated until all four libraries reach pass state. The phased rollout is tracked outside this spec; completion flips both ACs to ✅ simultaneously.
+
 ---
 
 ## Related Specs
@@ -537,6 +571,7 @@ Library `.csproj` files add:
 | Date | Change |
 |------|--------|
 | 2026-04-18 | Initial spec |
+| 2026-04-18 | Retarget PPDS015 + `cli-reflect` from Spectre to System.CommandLine; add Operations section (GitHub App runbook, Phase 0 status table); pin .NET SDK via `global.json` for reproducible goldens; strengthen AC-15–19 (alphabetical member ordering + SDK pin), AC-23 (nested generics + `<see cref>` in prose), AC-29 (RS0016 zero-diagnostic gate); add inheritdoc resolution to `libs-reflect` (in-scope) with explicit non-goals for cross-type hyperlinks, overload disambiguation, and generic-arity round-trip |
 
 ---
 

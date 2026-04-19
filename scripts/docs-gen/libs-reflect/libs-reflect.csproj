@@ -18,4 +18,8 @@
     <ProjectReference Include="..\PPDS.DocsGen.Common\PPDS.DocsGen.Common.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PPDS.DocsGen.Libs.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -7,6 +7,11 @@ namespace PPDS.DocsGen.Libs;
 /// <summary>
 /// Parsed representation of an XML doc file keyed by C# XML doc-comment member ID
 /// (e.g. <c>T:PPDS.Foo.Bar</c>, <c>M:PPDS.Foo.Bar.Baz(System.Int32)</c>).
+/// Supports <c>&lt;inheritdoc /&gt;</c> resolution: if a member's XML is
+/// <c>&lt;inheritdoc /&gt;</c> (or <c>&lt;inheritdoc cref="..." /&gt;</c>), callers
+/// of <see cref="ForType"/> / <see cref="ForMember"/> receive the resolved
+/// documentation from the first documented ancestor in the inheritance chain
+/// (explicit cref, interface match, base-class match, in that order).
 /// </summary>
 internal sealed class XmlDocIndex
 {
@@ -31,7 +36,8 @@ internal sealed class XmlDocIndex
             var name = (string?)member.Attribute("name");
             if (string.IsNullOrEmpty(name)) continue;
 
-            var summary = ReadText(member.Element("summary"));
+            var summaryEl = member.Element("summary");
+            var summary = ReadText(summaryEl);
             var returns = ReadText(member.Element("returns"));
             var parameters = member.Elements("param")
                 .Select(p => new ParamDoc(
@@ -39,18 +45,148 @@ internal sealed class XmlDocIndex
                     ReadText(p) ?? string.Empty))
                 .Where(p => !string.IsNullOrEmpty(p.Name))
                 .ToArray();
-            map[name] = new TypeDoc(summary, returns, parameters);
+
+            var inheritEl = member.Element("inheritdoc");
+            var isInheritDoc = inheritEl is not null && string.IsNullOrWhiteSpace(summary);
+            var inheritCref = inheritEl is null ? null : (string?)inheritEl.Attribute("cref");
+
+            map[name] = new TypeDoc(
+                Summary: summary,
+                Returns: returns,
+                Params: parameters,
+                IsInheritDoc: isInheritDoc,
+                InheritCref: NormalizeCref(inheritCref));
         }
         return new XmlDocIndex(map);
     }
 
-    public TypeDoc? ForType(Type type) =>
-        _entries.TryGetValue("T:" + TypeDocId(type), out var v) ? v : null;
+    public TypeDoc? ForType(Type type) => ResolveEntry("T:" + TypeDocId(type), resolver: () => ResolveTypeInheritance(type));
 
     public TypeDoc? ForMember(MemberInfo member)
     {
         var id = MemberDocId(member);
+        if (id is null) return null;
+        return ResolveEntry(id, resolver: () => ResolveMemberInheritance(member));
+    }
+
+    private TypeDoc? ResolveEntry(string id, Func<TypeDoc?> resolver)
+    {
+        if (!_entries.TryGetValue(id, out var direct)) return null;
+        if (!direct.IsInheritDoc) return direct;
+
+        // Explicit cref wins.
+        if (!string.IsNullOrEmpty(direct.InheritCref)
+            && _entries.TryGetValue(direct.InheritCref!, out var byCref)
+            && !byCref.IsInheritDoc
+            && !string.IsNullOrWhiteSpace(byCref.Summary))
+        {
+            return byCref;
+        }
+
+        // Implicit chain resolution (interface → base class).
+        return resolver() ?? direct;
+    }
+
+    private TypeDoc? ResolveTypeInheritance(Type type)
+    {
+        foreach (var iface in type.GetInterfaces())
+        {
+            var doc = LookupByTypeId(iface);
+            if (IsUsable(doc)) return doc;
+        }
+        for (var baseType = type.BaseType; baseType is not null; baseType = baseType.BaseType)
+        {
+            if (baseType.FullName == "System.Object") break;
+            var doc = LookupByTypeId(baseType);
+            if (IsUsable(doc)) return doc;
+        }
+        return null;
+    }
+
+    private TypeDoc? ResolveMemberInheritance(MemberInfo member)
+    {
+        var declaringType = member.DeclaringType;
+        if (declaringType is null) return null;
+
+        // Interface implementations first.
+        foreach (var iface in declaringType.GetInterfaces())
+        {
+            var candidate = FindMatchingMember(iface, member);
+            if (candidate is null) continue;
+            var doc = LookupByMemberId(candidate);
+            if (IsUsable(doc)) return doc;
+        }
+
+        // Base-class overrides.
+        for (var baseType = declaringType.BaseType; baseType is not null; baseType = baseType.BaseType)
+        {
+            if (baseType.FullName == "System.Object") break;
+            var candidate = FindMatchingMember(baseType, member);
+            if (candidate is null) continue;
+            var doc = LookupByMemberId(candidate);
+            if (IsUsable(doc)) return doc;
+        }
+
+        return null;
+    }
+
+    private static bool IsUsable(TypeDoc? doc) =>
+        doc is not null && !doc.IsInheritDoc && !string.IsNullOrWhiteSpace(doc.Summary);
+
+    private TypeDoc? LookupByTypeId(Type type) =>
+        _entries.TryGetValue("T:" + TypeDocId(type), out var v) ? v : null;
+
+    private TypeDoc? LookupByMemberId(MemberInfo member)
+    {
+        var id = MemberDocId(member);
         return id is not null && _entries.TryGetValue(id, out var v) ? v : null;
+    }
+
+    private static MemberInfo? FindMatchingMember(Type searchIn, MemberInfo target)
+    {
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
+
+        switch (target)
+        {
+            case MethodInfo m:
+                var targetParams = m.GetParameters().Select(p => p.ParameterType.FullName ?? p.ParameterType.Name).ToArray();
+                foreach (var candidate in searchIn.GetMethods(flags))
+                {
+                    if (candidate.Name != m.Name) continue;
+                    var cps = candidate.GetParameters();
+                    if (cps.Length != targetParams.Length) continue;
+                    var match = true;
+                    for (var i = 0; i < cps.Length; i++)
+                    {
+                        var cpName = cps[i].ParameterType.FullName ?? cps[i].ParameterType.Name;
+                        if (cpName != targetParams[i]) { match = false; break; }
+                    }
+                    if (match) return candidate;
+                }
+                return null;
+
+            case PropertyInfo p:
+                return searchIn.GetProperty(p.Name, flags);
+
+            case EventInfo e:
+                return searchIn.GetEvent(e.Name, flags);
+
+            case FieldInfo f:
+                return searchIn.GetField(f.Name, flags);
+
+            default:
+                return null;
+        }
+    }
+
+    private static string? NormalizeCref(string? cref)
+    {
+        if (string.IsNullOrWhiteSpace(cref)) return null;
+        // Docs ids already carry a "T:"/"M:"/... prefix in the XML. If the
+        // cref in source was written without an explicit prefix, the C#
+        // compiler emits it as "T:..." by default for types; for members it
+        // emits the appropriate prefix too. Treat the value as the full id.
+        return cref;
     }
 
     private static string? ReadText(XElement? el)
@@ -107,14 +243,12 @@ internal sealed class XmlDocIndex
     private static string Dedent(string raw)
     {
         var lines = raw.Replace("\r\n", "\n").Split('\n');
-        // Trim trivial leading/trailing blank lines
         var start = 0;
         var end = lines.Length;
         while (start < end && string.IsNullOrWhiteSpace(lines[start])) start++;
         while (end > start && string.IsNullOrWhiteSpace(lines[end - 1])) end--;
         if (start >= end) return string.Empty;
 
-        // Find minimum indent across non-empty lines.
         var minIndent = int.MaxValue;
         for (var i = start; i < end; i++)
         {
@@ -144,7 +278,6 @@ internal sealed class XmlDocIndex
     {
         if (type.IsGenericParameter)
         {
-            // Method-level generic parameter: "``N"; type-level: "`N".
             return (type.DeclaringMethod is not null ? "``" : "`") + type.GenericParameterPosition.ToString();
         }
 
@@ -173,7 +306,6 @@ internal sealed class XmlDocIndex
                 var args = type.GetGenericArguments();
                 return rawName + "{" + string.Join(",", args.Select(a => TypeDocIdForRef(a, true))) + "}";
             }
-            // Open generic: use the backtick form (e.g. System.Collections.Generic.IList`1).
             return string.IsNullOrEmpty(ns) ? defName : ns + "." + defName;
         }
 
@@ -227,5 +359,11 @@ internal sealed class XmlDocIndex
     }
 }
 
-internal sealed record TypeDoc(string? Summary, string? Returns, IReadOnlyList<ParamDoc> Params);
+internal sealed record TypeDoc(
+    string? Summary,
+    string? Returns,
+    IReadOnlyList<ParamDoc> Params,
+    bool IsInheritDoc = false,
+    string? InheritCref = null);
+
 internal sealed record ParamDoc(string Name, string Description);

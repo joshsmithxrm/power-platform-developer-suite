@@ -11,10 +11,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Reflection.MetadataLoadContext" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\PPDS.DocsGen.Common\PPDS.DocsGen.Common.csproj" />
   </ItemGroup>
 

@@ -1,51 +1,38 @@
-using System.Collections.Immutable;
+using System.Collections;
+using System.ComponentModel;
 using System.Reflection;
+using System.Runtime.Loader;
 using PPDS.DocsGen.Common;
 
 namespace PPDS.DocsGen.Cli;
 
 /// <summary>
-/// Reflects over a built <c>PPDS.Cli.dll</c> (or any assembly containing
-/// Spectre command classes) using <see cref="MetadataLoadContext"/>, groups
-/// commands by the last segment of their containing namespace, and emits
-/// deterministic markdown reference docs.
+/// Reflects over a built CLI assembly to produce markdown reference docs for
+/// its <c>System.CommandLine</c> command tree. Groups are discovered by
+/// invoking every <c>public static Command Create()</c> method on a public
+/// type whose name ends in <c>CommandGroup</c>; each returned <c>Command</c>
+/// is the root of a group whose direct subcommands become per-command
+/// markdown files.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <see cref="MetadataLoadContext"/> is used (mirroring <c>mcp-reflect</c>)
-/// so the generator never executes any code from the target assembly — it
-/// only reads metadata. This is robust against a target with broken
-/// dependencies or side-effecting static state.
-/// </para>
-/// <para>
-/// Limitation: <see cref="DiscoverDescription"/> supports the
-/// <c>[Description]</c> attribute form only. Descriptions supplied via a
-/// property initializer or a ctor-body assignment (the other two patterns
-/// mentioned in <c>specs/docs-generation.md</c> §Surface CLI) are not
-/// resolved here — reading those would require invoking code, which
-/// <see cref="MetadataLoadContext"/> does not permit. The attribute form
-/// covers 95% of the PPDS codebase; the <c>PPDS015</c> analyzer gates the
-/// remaining cases upstream.
-/// </para>
+/// Unlike <c>mcp-reflect</c>, this generator uses a full
+/// <see cref="AssemblyLoadContext"/> rather than <see cref="MetadataLoadContext"/>
+/// because System.CommandLine Command descriptions live on the runtime
+/// instance — they are set either in the 2-arg constructor or via an object
+/// initializer, so obtaining them requires invoking the factory method. The
+/// factory contract is "construct and return a Command; no side effects," and
+/// all target code in this repository adheres to it. Access to the resulting
+/// Command tree is done via <see cref="PropertyInfo.GetValue"/> rather than
+/// typed casts, so the generator is agnostic to which
+/// <c>System.CommandLine</c> version the target assembly bound against.
 /// </remarks>
 public sealed class CliReferenceGenerator : IReferenceGenerator
 {
     internal const string ToolName = "cli-reflect";
 
-    // Fully-qualified names of Spectre's base command types. Matching by
-    // original (unconstructed) definition lets us catch Command&lt;TSettings&gt;
-    // just like Command, and AsyncCommand&lt;TSettings&gt; just like AsyncCommand.
-    private static readonly ImmutableHashSet<string> SpectreBaseTypes = ImmutableHashSet.Create(
-        StringComparer.Ordinal,
-        "Spectre.Console.Cli.Command",
-        "Spectre.Console.Cli.AsyncCommand");
-
-    private const string DescriptionAttributeName = "DescriptionAttribute";
-    private const string EditorBrowsableAttributeName = "EditorBrowsableAttribute";
-    private const string CommandArgumentAttributeName = "Spectre.Console.Cli.CommandArgumentAttribute";
-    private const string CommandOptionAttributeName = "Spectre.Console.Cli.CommandOptionAttribute";
-    private const string SpectreDefaultValueAttributeName = "Spectre.Console.Cli.DefaultValueAttribute";
-    private const string BclDefaultValueAttributeName = "System.ComponentModel.DefaultValueAttribute";
+    private const string CommandTypeFullName = "System.CommandLine.Command";
+    private const string CommandGroupTypeSuffix = "CommandGroup";
+    private const string FactoryMethodName = "Create";
 
     public Task<GenerationResult> GenerateAsync(GenerationInput input, CancellationToken ct)
     {
@@ -59,43 +46,44 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
         }
 
         var diagnostics = new List<string>();
-        var commands = DiscoverCommands(input.SourceAssemblyPath, diagnostics);
+        var groups = DiscoverGroups(input.SourceAssemblyPath, diagnostics);
         var files = new List<GeneratedFile>();
 
-        var byGroup = commands
-            .GroupBy(c => c.GroupName, StringComparer.Ordinal)
-            .OrderBy(g => g.Key, StringComparer.Ordinal);
-
-        foreach (var group in byGroup)
+        foreach (var group in groups.OrderBy(g => g.Name, StringComparer.Ordinal))
         {
-            var ordered = group.OrderBy(c => c.CommandName, StringComparer.Ordinal).ToList();
+            var leafCommands = group.Leaves
+                .OrderBy(c => c.CommandName, StringComparer.Ordinal)
+                .ToList();
 
-            foreach (var cmd in ordered)
+            foreach (var cmd in leafCommands)
             {
                 files.Add(new GeneratedFile(
-                    RelativePath: $"{group.Key}/{cmd.CommandName}.md",
+                    RelativePath: $"{group.Name}/{cmd.CommandName}.md",
                     Contents: MarkdownRenderer.RenderCommand(cmd)));
             }
 
             files.Add(new GeneratedFile(
-                RelativePath: $"{group.Key}/_index.md",
-                Contents: MarkdownRenderer.RenderGroupIndex(group.Key, ordered)));
+                RelativePath: $"{group.Name}/_index.md",
+                Contents: MarkdownRenderer.RenderGroupIndex(group.Name, leafCommands)));
         }
 
         return Task.FromResult(new GenerationResult(files, diagnostics));
     }
 
-    /// <summary>
-    /// Walks the assembly under a fresh <see cref="MetadataLoadContext"/> and
-    /// returns every concrete Spectre command type, skipping abstract classes
-    /// and any type decorated <c>[EditorBrowsable(Never)]</c>.
-    /// </summary>
-    private static IReadOnlyList<DiscoveredCommand> DiscoverCommands(
+    private static IReadOnlyList<DiscoveredGroup> DiscoverGroups(
         string assemblyPath, List<string> diagnostics)
     {
-        var resolver = new FallbackAssemblyResolver(BuildRuntimeAssemblies(assemblyPath));
-        using var mlc = new MetadataLoadContext(resolver);
-        var assembly = mlc.LoadFromAssemblyPath(assemblyPath);
+        var loader = new FactoryLoadContext(assemblyPath);
+        Assembly assembly;
+        try
+        {
+            assembly = loader.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+        }
+        catch (Exception ex)
+        {
+            diagnostics.Add($"load: {ex.Message}");
+            return Array.Empty<DiscoveredGroup>();
+        }
 
         Type[] types;
         try
@@ -107,246 +95,221 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
             types = ex.Types.Where(t => t is not null).Cast<Type>().ToArray();
             foreach (var loaderEx in ex.LoaderExceptions)
             {
-                if (loaderEx is not null)
-                    diagnostics.Add("load: " + loaderEx.Message);
+                if (loaderEx is not null) diagnostics.Add($"load: {loaderEx.Message}");
             }
         }
 
-        var results = new List<DiscoveredCommand>();
+        var groups = new List<DiscoveredGroup>();
         foreach (var type in types)
         {
-            if (!type.IsClass || type.IsAbstract)
+            if (!type.IsClass || !type.IsPublic) continue;
+            if (!type.Name.EndsWith(CommandGroupTypeSuffix, StringComparison.Ordinal)) continue;
+            if (IsEditorBrowsableNever(type)) continue;
+
+            var factory = type.GetMethod(
+                FactoryMethodName,
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+
+            if (factory is null) continue;
+            if (!IsCommandType(factory.ReturnType)) continue;
+            if (IsEditorBrowsableNever(factory)) continue;
+
+            object? root;
+            try
             {
+                root = factory.Invoke(null, parameters: null);
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add($"factory {type.FullName}.Create() threw: {ex.InnerException?.Message ?? ex.Message}");
                 continue;
             }
 
-            if (!InheritsFromSpectreCommand(type) || IsEditorBrowsableNever(type))
+            if (root is null) continue;
+
+            var groupName = GetString(root, "Name") ?? DeriveGroupNameFromType(type);
+            var leaves = new List<DiscoveredCommand>();
+            foreach (var subcommand in EnumerateChildren(root, "Subcommands"))
             {
-                continue;
+                if (IsHidden(subcommand)) continue;
+                leaves.Add(BuildCommandRecord(groupName, subcommand));
             }
 
-            results.Add(BuildCommand(type));
+            groups.Add(new DiscoveredGroup(groupName, leaves));
         }
 
-        return results;
+        return groups;
     }
 
-    private static bool InheritsFromSpectreCommand(Type type)
+    private static DiscoveredCommand BuildCommandRecord(string groupName, object command)
     {
-        for (var current = type.BaseType; current is not null; current = current.BaseType)
+        var name = GetString(command, "Name") ?? string.Empty;
+        var description = GetString(command, "Description") ?? string.Empty;
+
+        var arguments = new List<CommandArgument>();
+        foreach (var arg in EnumerateChildren(command, "Arguments"))
         {
-            if (SpectreBaseTypes.Contains(NormalisedTypeName(current)))
-            {
-                return true;
-            }
+            if (IsHidden(arg)) continue;
+            arguments.Add(new CommandArgument(
+                Name: GetString(arg, "Name") ?? string.Empty,
+                Required: !HasDefaultValueFactory(arg),
+                Description: GetString(arg, "Description") ?? string.Empty,
+                TypeDisplay: DescribeValueType(arg.GetType(), openGenericBase: "Argument")));
         }
 
-        return false;
-    }
-
-    private static string NormalisedTypeName(Type type)
-    {
-        // MetadataLoadContext can refuse GetGenericTypeDefinition() for certain
-        // closed generics built from metadata; fall back to stripping the arity
-        // suffix from the closed-form FullName.
-        string fullName;
-        try
+        var options = new List<CommandOption>();
+        foreach (var opt in EnumerateChildren(command, "Options"))
         {
-            var def = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
-            fullName = def.FullName ?? string.Empty;
+            if (IsHidden(opt)) continue;
+            var (longName, shortName) = SplitOptionAliases(opt);
+            options.Add(new CommandOption(
+                LongName: longName,
+                ShortName: shortName,
+                TypeDisplay: DescribeValueType(opt.GetType(), openGenericBase: "Option"),
+                DefaultValue: ReadDefaultValue(opt),
+                Description: GetString(opt, "Description") ?? string.Empty));
         }
-        catch (NotSupportedException)
-        {
-            fullName = type.FullName ?? string.Empty;
-        }
-
-        var tick = fullName.IndexOf('`');
-        return tick >= 0 ? fullName.Substring(0, tick) : fullName;
-    }
-
-    private static bool IsEditorBrowsableNever(MemberInfo member)
-    {
-        // Attribute-data-only access under MetadataLoadContext (no runtime
-        // instance construction). EditorBrowsableState.Never == 1.
-        foreach (var attr in member.GetCustomAttributesData())
-        {
-            if (attr.AttributeType.Name != EditorBrowsableAttributeName)
-            {
-                continue;
-            }
-
-            if (attr.ConstructorArguments.Count == 0)
-            {
-                continue;
-            }
-
-            var raw = attr.ConstructorArguments[0].Value;
-            if (raw is int i && i == 1) return true;
-        }
-
-        return false;
-    }
-
-    private static DiscoveredCommand BuildCommand(Type type)
-    {
-        var settingsType = ResolveSettingsType(type);
-        var (args, opts) = settingsType is null
-            ? (Array.Empty<CommandArgument>(), Array.Empty<CommandOption>())
-            : ExtractArgsAndOptions(settingsType);
 
         return new DiscoveredCommand(
-            Type: type,
-            GroupName: DeriveGroupName(type),
-            CommandName: DeriveCommandName(type),
-            Description: DiscoverDescription(type),
-            Arguments: args,
-            Options: opts);
+            GroupName: groupName,
+            CommandName: name,
+            Description: description,
+            Arguments: arguments,
+            Options: options);
     }
 
-    /// <summary>
-    /// Group name is the last segment of the containing namespace
-    /// (e.g. <c>Foo.Cli.Commands.Auth.LoginCommand</c> → <c>auth</c>).
-    /// Namespaces ending in <c>Commands</c> (no sub-group) become <c>general</c>.
-    /// </summary>
-    private static string DeriveGroupName(Type type)
+    private static (string LongName, string? ShortName) SplitOptionAliases(object option)
     {
-        var ns = type.Namespace ?? string.Empty;
-        var lastDot = ns.LastIndexOf('.');
-        var last = lastDot < 0 ? ns : ns.Substring(lastDot + 1);
+        var name = GetString(option, "Name") ?? string.Empty;
+        var aliases = EnumerateStringCollection(option, "Aliases").ToList();
 
-        if (string.IsNullOrEmpty(last) || string.Equals(last, "Commands", StringComparison.Ordinal))
-        {
-            return "general";
-        }
+        // By System.CommandLine convention, Name is the long form ("--foo").
+        // Aliases contains short forms like "-f". Pick the first alias that
+        // looks like a short form (single-dash), for stability.
+        string? shortName = aliases
+            .Where(a => a.StartsWith('-') && !a.StartsWith("--", StringComparison.Ordinal))
+            .OrderBy(a => a, StringComparer.Ordinal)
+            .FirstOrDefault();
 
-        return last.ToLowerInvariant();
+        return (name, shortName);
     }
 
-    /// <summary>
-    /// Command name = type name with a trailing <c>Command</c> suffix trimmed
-    /// (if present), lower-cased.
-    /// </summary>
-    private static string DeriveCommandName(Type type)
+    private static string ReadDefaultValue(object option)
     {
-        var name = type.Name;
-        const string suffix = "Command";
-        if (name.EndsWith(suffix, StringComparison.Ordinal) && name.Length > suffix.Length)
+        // Only surface explicit constant defaults (from a DefaultValue property,
+        // when the option type exposes one). DefaultValueFactory-based defaults
+        // are intentionally rendered as empty — the factory requires a parse
+        // context to invoke, and the (factory) placeholder leaks an
+        // implementation detail into user-facing reference docs. Most PPDS
+        // options surface their defaults in the Description prose.
+        var defaultValueProp = option.GetType().GetProperty("DefaultValue");
+        if (defaultValueProp is not null)
         {
-            name = name.Substring(0, name.Length - suffix.Length);
-        }
-
-        return name.ToLowerInvariant();
-    }
-
-    /// <summary>
-    /// Walks the base-type chain to the first generic Spectre command and
-    /// returns its <c>TSettings</c> argument. Returns <c>null</c> for
-    /// non-generic bases (e.g. direct subclasses of <c>Command</c>).
-    /// </summary>
-    private static Type? ResolveSettingsType(Type type)
-    {
-        for (var current = type.BaseType; current is not null; current = current.BaseType)
-        {
-            if (current.IsGenericType
-                && current.GenericTypeArguments.Length == 1
-                && SpectreBaseTypes.Contains(NormalisedTypeName(current)))
-            {
-                return current.GenericTypeArguments[0];
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Discovers the command description from <c>[Description]</c> on the
-    /// type. Property-initializer and ctor-body assignments are not supported
-    /// under <see cref="MetadataLoadContext"/> (no code execution); see the
-    /// class remarks and the <c>PPDS015</c> analyzer which gates them
-    /// upstream.
-    /// </summary>
-    private static string DiscoverDescription(Type type) =>
-        ReadSystemComponentModelDescription(type.GetCustomAttributesData());
-
-    private static string DiscoverPropertyDescription(PropertyInfo prop) =>
-        ReadSystemComponentModelDescription(prop.GetCustomAttributesData());
-
-    private static string ReadSystemComponentModelDescription(IList<CustomAttributeData> attrs)
-    {
-        foreach (var attr in attrs)
-        {
-            if (attr.AttributeType.Name != DescriptionAttributeName)
-            {
-                continue;
-            }
-
-            if (attr.AttributeType.Namespace != "System.ComponentModel")
-            {
-                continue;
-            }
-
-            if (attr.ConstructorArguments.Count > 0
-                && attr.ConstructorArguments[0].Value is string s
-                && !string.IsNullOrWhiteSpace(s))
-            {
-                return s;
-            }
+            var raw = defaultValueProp.GetValue(option);
+            return FormatDefault(raw);
         }
 
         return string.Empty;
     }
 
-    private static (CommandArgument[] Args, CommandOption[] Opts) ExtractArgsAndOptions(Type settings)
+    private static string FormatDefault(object? value) => value switch
     {
-        var argList = new List<CommandArgument>();
-        var optList = new List<CommandOption>();
+        null => string.Empty,
+        string s => s,
+        bool b => b ? "true" : "false",
+        IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? string.Empty,
+    };
 
-        // MetadataToken is the stable declaration order — reflection's
-        // default property enumeration order is runtime-dependent.
-        var props = settings
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToList();
-
-        foreach (var prop in props)
+    private static bool IsCommandType(Type type)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
         {
-            if (IsEditorBrowsableNever(prop))
-            {
-                continue;
-            }
+            if (current.FullName == CommandTypeFullName) return true;
+        }
+        return false;
+    }
 
-            var argAttr = TryReadCommandArgument(prop);
-            if (argAttr is not null)
-            {
-                argList.Add(new CommandArgument(
-                    Name: argAttr.Name,
-                    Required: argAttr.Required,
-                    Description: DiscoverPropertyDescription(prop),
-                    TypeDisplay: TypeDisplay(prop.PropertyType)));
-                continue;
-            }
+    private static bool IsEditorBrowsableNever(MemberInfo member)
+    {
+        foreach (var attr in member.GetCustomAttributesData())
+        {
+            if (attr.AttributeType.FullName != typeof(EditorBrowsableAttribute).FullName) continue;
+            if (attr.ConstructorArguments.Count == 0) continue;
+            var raw = attr.ConstructorArguments[0].Value;
+            if (raw is int i && i == (int)EditorBrowsableState.Never) return true;
+        }
+        return false;
+    }
 
-            var optAttr = TryReadCommandOption(prop);
-            if (optAttr is not null)
-            {
-                optList.Add(new CommandOption(
-                    LongName: optAttr.LongName,
-                    ShortName: optAttr.ShortName,
-                    TypeDisplay: TypeDisplay(prop.PropertyType),
-                    DefaultValue: ReadDefaultValue(prop),
-                    Description: DiscoverPropertyDescription(prop)));
-            }
+    private static string DeriveGroupNameFromType(Type type)
+    {
+        var name = type.Name;
+        if (name.EndsWith(CommandGroupTypeSuffix, StringComparison.Ordinal))
+            name = name[..^CommandGroupTypeSuffix.Length];
+        return name.ToLowerInvariant();
+    }
+
+    private static bool IsHidden(object obj)
+    {
+        var prop = obj.GetType().GetProperty("Hidden", BindingFlags.Public | BindingFlags.Instance);
+        return prop?.GetValue(obj) is bool b && b;
+    }
+
+    private static string? GetString(object obj, string propName)
+    {
+        var prop = obj.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+        return prop?.GetValue(obj) as string;
+    }
+
+    private static bool HasDefaultValueFactory(object obj)
+    {
+        var prop = obj.GetType().GetProperty("DefaultValueFactory", BindingFlags.Public | BindingFlags.Instance);
+        return prop?.GetValue(obj) is not null;
+    }
+
+    private static IEnumerable<object> EnumerateChildren(object owner, string propName)
+    {
+        var prop = owner.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+        if (prop?.GetValue(owner) is not IEnumerable items) yield break;
+        foreach (var item in items)
+        {
+            if (item is not null) yield return item;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateStringCollection(object owner, string propName)
+    {
+        foreach (var item in EnumerateChildren(owner, propName))
+        {
+            if (item is string s) yield return s;
+        }
+    }
+
+    /// <summary>
+    /// Renders <c>Option&lt;T&gt;</c> as the short form of <c>T</c>, falling
+    /// back to a neutral token if the type is non-generic.
+    /// </summary>
+    private static string DescribeValueType(Type symbolType, string openGenericBase)
+    {
+        // Walk up until we find the generic Option`1 / Argument`1 form.
+        for (var current = symbolType; current is not null; current = current.BaseType)
+        {
+            if (!current.IsGenericType) continue;
+            var def = current.GetGenericTypeDefinition();
+            if (def.Name != openGenericBase + "`1") continue;
+            var arg = current.GenericTypeArguments[0];
+            return TypeDisplay(arg);
         }
 
-        return (argList.ToArray(), optList.ToArray());
+        return openGenericBase.ToLowerInvariant();
     }
 
     private static string TypeDisplay(Type t)
     {
-        // Unwrap Nullable<T> to T? for readability. Nullable.GetUnderlyingType
-        // works across runtime contexts by checking FullName equality against
-        // the known Nullable`1 definition; under MetadataLoadContext the Type
-        // it returns is still in the same MLC, which is what we want.
         if (t.IsGenericType && t.Name == "Nullable`1" && t.GenericTypeArguments.Length == 1)
         {
             return TypeDisplay(t.GenericTypeArguments[0]) + "?";
@@ -354,11 +317,9 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
 
         if (t.IsGenericType)
         {
-            // Avoid GetGenericTypeDefinition() — MetadataLoadContext rejects
-            // it for some closed generics. Strip the arity suffix instead.
             var defName = t.Name;
             var tick = defName.IndexOf('`');
-            var baseName = tick >= 0 ? defName.Substring(0, tick) : defName;
+            var baseName = tick >= 0 ? defName[..tick] : defName;
             var args = string.Join(", ", t.GenericTypeArguments.Select(TypeDisplay));
             return $"{baseName}<{args}>";
         }
@@ -377,260 +338,39 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
         };
     }
 
-    /// <summary>
-    /// Returns a parsed <see cref="ArgumentInfo"/> if the property carries
-    /// <c>[CommandArgument]</c>. The Spectre template string (e.g.
-    /// <c>&lt;name&gt;</c> for required, <c>[name]</c> for optional) is parsed
-    /// to a deterministic name + required flag.
-    /// </summary>
-    private static ArgumentInfo? TryReadCommandArgument(PropertyInfo prop)
+    private sealed class FactoryLoadContext : AssemblyLoadContext
     {
-        foreach (var attr in prop.GetCustomAttributesData())
+        private readonly AssemblyDependencyResolver _resolver;
+        private readonly string _targetDir;
+
+        public FactoryLoadContext(string targetAssemblyPath)
+            : base(isCollectible: false)
         {
-            if (attr.AttributeType.FullName != CommandArgumentAttributeName)
-            {
-                continue;
-            }
-
-            // Signature is [CommandArgument(int position, string template)].
-            if (attr.ConstructorArguments.Count < 2)
-            {
-                continue;
-            }
-
-            var template = attr.ConstructorArguments[1].Value as string ?? string.Empty;
-            return ParseArgumentTemplate(template);
+            var full = Path.GetFullPath(targetAssemblyPath);
+            _resolver = new AssemblyDependencyResolver(full);
+            _targetDir = Path.GetDirectoryName(full)!;
         }
 
-        return null;
-    }
-
-    /// <summary>
-    /// Returns a parsed <see cref="OptionInfo"/> if the property carries
-    /// <c>[CommandOption]</c>. Both short (<c>-n</c>) and long (<c>--name</c>)
-    /// forms are extracted from the template; missing parts are null.
-    /// </summary>
-    private static OptionInfo? TryReadCommandOption(PropertyInfo prop)
-    {
-        foreach (var attr in prop.GetCustomAttributesData())
+        protected override Assembly? Load(AssemblyName assemblyName)
         {
-            if (attr.AttributeType.FullName != CommandOptionAttributeName)
-            {
-                continue;
-            }
+            // Prefer dependency manifest (.deps.json) resolution first.
+            var resolved = _resolver.ResolveAssemblyToPath(assemblyName);
+            if (resolved is not null && File.Exists(resolved))
+                return LoadFromAssemblyPath(resolved);
 
-            if (attr.ConstructorArguments.Count < 1)
-            {
-                continue;
-            }
+            // Fallback: scan the target directory for a matching file.
+            var candidate = Path.Combine(_targetDir, assemblyName.Name + ".dll");
+            if (File.Exists(candidate))
+                return LoadFromAssemblyPath(candidate);
 
-            var template = attr.ConstructorArguments[0].Value as string ?? string.Empty;
-            return ParseOptionTemplate(template);
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Reads <c>[DefaultValue]</c> from either <c>System.ComponentModel</c> or
-    /// Spectre's own namespace, returning a stable string form (<c>true</c>,
-    /// <c>42</c>, empty for null).
-    /// </summary>
-    private static string ReadDefaultValue(PropertyInfo prop)
-    {
-        foreach (var attr in prop.GetCustomAttributesData())
-        {
-            var fullName = attr.AttributeType.FullName;
-            if (fullName != BclDefaultValueAttributeName
-                && fullName != SpectreDefaultValueAttributeName)
-            {
-                continue;
-            }
-
-            if (attr.ConstructorArguments.Count == 0)
-            {
-                continue;
-            }
-
-            var raw = attr.ConstructorArguments[0].Value;
-            return FormatDefault(raw);
-        }
-
-        return string.Empty;
-    }
-
-    private static string FormatDefault(object? value) => value switch
-    {
-        null => string.Empty,
-        string s => s,
-        bool b => b ? "true" : "false",
-        IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? string.Empty,
-    };
-
-    /// <summary>
-    /// Parses a Spectre argument template like <c>&lt;name&gt;</c> or
-    /// <c>[name]</c>. Angle-bracketed = required; square-bracketed = optional;
-    /// bare = required by convention.
-    /// </summary>
-    private static ArgumentInfo ParseArgumentTemplate(string template)
-    {
-        template = template.Trim();
-        if (template.Length >= 2 && template[0] == '<' && template[^1] == '>')
-        {
-            return new ArgumentInfo(template[1..^1], Required: true);
-        }
-
-        if (template.Length >= 2 && template[0] == '[' && template[^1] == ']')
-        {
-            return new ArgumentInfo(template[1..^1], Required: false);
-        }
-
-        return new ArgumentInfo(template, Required: true);
-    }
-
-    /// <summary>
-    /// Parses a Spectre option template like <c>-n|--name &lt;NAME&gt;</c>.
-    /// </summary>
-    private static OptionInfo ParseOptionTemplate(string template)
-    {
-        template = template.Trim();
-
-        // Drop the value placeholder (anything after the first space/tab) — it
-        // represents the argument name, which we don't surface here.
-        var firstSpace = template.IndexOf(' ');
-        if (firstSpace >= 0)
-        {
-            template = template.Substring(0, firstSpace);
-        }
-
-        string? shortName = null;
-        string longName = string.Empty;
-        foreach (var part in template.Split('|', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var trimmed = part.Trim();
-            if (trimmed.StartsWith("--", StringComparison.Ordinal))
-            {
-                longName = trimmed;
-            }
-            else if (trimmed.StartsWith('-'))
-            {
-                shortName = trimmed;
-            }
-        }
-
-        return new OptionInfo(longName, shortName);
-    }
-
-    private static string[] BuildRuntimeAssemblies(string targetAssemblyPath)
-    {
-        // MetadataLoadContext requires a resolver that can find every
-        // referenced assembly, including the BCL. Use the current runtime
-        // directory + the target's directory.
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-        var targetDir = Path.GetDirectoryName(Path.GetFullPath(targetAssemblyPath))!;
-
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dll in Directory.GetFiles(runtimeDir, "*.dll"))
-            paths.Add(dll);
-        if (Directory.Exists(targetDir))
-        {
-            foreach (var dll in Directory.GetFiles(targetDir, "*.dll"))
-                paths.Add(dll);
-        }
-        paths.Add(Path.GetFullPath(targetAssemblyPath));
-        return paths.ToArray();
-    }
-
-    /// <summary>
-    /// Resolver that first consults a seed list of absolute paths, then
-    /// falls back to scanning the user's NuGet global package cache when an
-    /// attribute references a transitively-loaded assembly that wasn't
-    /// copied to the target's bin dir. Mirrors the pattern in
-    /// <c>mcp-reflect</c>'s <c>McpReferenceGenerator</c>.
-    /// </summary>
-    private sealed class FallbackAssemblyResolver : MetadataAssemblyResolver
-    {
-        private readonly Dictionary<string, string> _byName;
-        private readonly List<string> _searchDirs;
-
-        public FallbackAssemblyResolver(string[] seedPaths)
-        {
-            _byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            _searchDirs = new List<string>();
-            foreach (var path in seedPaths)
-            {
-                var simple = Path.GetFileNameWithoutExtension(path);
-                _byName.TryAdd(simple, path);
-                var dir = Path.GetDirectoryName(path);
-                if (dir is not null && !_searchDirs.Contains(dir, StringComparer.OrdinalIgnoreCase))
-                    _searchDirs.Add(dir);
-            }
-
-            var nugetHome = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".nuget", "packages");
-            if (Directory.Exists(nugetHome))
-                _searchDirs.Add(nugetHome);
-        }
-
-        public override Assembly? Resolve(MetadataLoadContext context, AssemblyName assemblyName)
-        {
-            var name = assemblyName.Name;
-            if (string.IsNullOrEmpty(name)) return null;
-
-            if (_byName.TryGetValue(name, out var cached))
-                return context.LoadFromAssemblyPath(cached);
-
-            foreach (var dir in _searchDirs)
-            {
-                var direct = Path.Combine(dir, name + ".dll");
-                if (File.Exists(direct))
-                {
-                    _byName[name] = direct;
-                    return context.LoadFromAssemblyPath(direct);
-                }
-            }
-
-            var nugetHome = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".nuget", "packages");
-            if (Directory.Exists(nugetHome))
-            {
-                try
-                {
-                    var matches = Directory.EnumerateFiles(
-                        nugetHome, name + ".dll", SearchOption.AllDirectories)
-                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    string? best = matches.FirstOrDefault(p => p.Contains("net8.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault(p => p.Contains("net9.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault(p => p.Contains("netstandard2.0", StringComparison.Ordinal))
-                        ?? matches.FirstOrDefault();
-                    if (best is not null)
-                    {
-                        _byName[name] = best;
-                        return context.LoadFromAssemblyPath(best);
-                    }
-                }
-                catch
-                {
-                    // Swallow; return null and the caller decides.
-                }
-            }
-
+            // Delegate to the default context for BCL / runtime assemblies.
             return null;
         }
     }
 
-    private sealed record ArgumentInfo(string Name, bool Required);
-
-    private sealed record OptionInfo(string LongName, string? ShortName);
+    internal sealed record DiscoveredGroup(string Name, IReadOnlyList<DiscoveredCommand> Leaves);
 
     internal sealed record DiscoveredCommand(
-        Type Type,
         string GroupName,
         string CommandName,
         string Description,

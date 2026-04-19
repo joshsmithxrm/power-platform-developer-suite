@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Spectre.Console.Cli" />
+    <PackageReference Include="System.CommandLine" />
   </ItemGroup>
 
 </Project>
