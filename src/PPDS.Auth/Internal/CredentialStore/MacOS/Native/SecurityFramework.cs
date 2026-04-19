@@ -69,9 +69,9 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS.Native
         public static extern int SecKeychainAddGenericPassword(
             IntPtr keychain,
             uint serviceNameLength,
-            string serviceName,
+            byte[] serviceName,
             uint accountNameLength,
-            string accountName,
+            byte[] accountName,
             uint passwordLength,
             byte[] passwordData,
             out IntPtr itemRef);
@@ -80,9 +80,9 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS.Native
         public static extern int SecKeychainFindGenericPassword(
             IntPtr keychainOrArray,
             uint serviceNameLength,
-            string serviceName,
+            byte[] serviceName,
             uint accountNameLength,
-            string accountName,
+            byte[] accountName,
             out uint passwordLength,
             out IntPtr passwordData,
             out IntPtr itemRef);

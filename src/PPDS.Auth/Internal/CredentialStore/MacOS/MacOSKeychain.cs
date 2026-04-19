@@ -88,7 +88,7 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
                             return accounts.ToList();
                         }
 
-                        throw new InteropException($"Unknown keychain search result type CFTypeID: {typeId}.", -1);
+                        throw new InteropException($"Unknown keychain search result type CFTypeID: {typeId}.", int.MinValue);
 
                     case ErrorSecItemNotFound:
                         return Array.Empty<string>();
@@ -151,7 +151,7 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
                             return CreateCredentialFromAttributes(resultPtr);
                         }
 
-                        throw new InteropException($"Unknown keychain search result type CFTypeID: {typeId}.", -1);
+                        throw new InteropException($"Unknown keychain search result type CFTypeID: {typeId}.", int.MinValue);
 
                     case ErrorSecItemNotFound:
                         return null;
@@ -173,6 +173,7 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
         public void AddOrUpdate(string service, string account, string secret)
         {
             EnsureArgument.NotNullOrWhiteSpace(service, nameof(service));
+            EnsureArgument.NotNull(secret, nameof(secret));
 
             byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
 
@@ -181,14 +182,16 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
 
             string serviceName = CreateServiceName(service);
 
-            uint serviceNameLength = (uint) serviceName.Length;
-            uint accountLength = (uint) (account?.Length ?? 0);
+            byte[] serviceNameBytes = Encoding.UTF8.GetBytes(serviceName);
+            byte[] accountBytes = account != null ? Encoding.UTF8.GetBytes(account) : Array.Empty<byte>();
+            uint serviceNameLength = (uint) serviceNameBytes.Length;
+            uint accountLength = (uint) accountBytes.Length;
 
             try
             {
                 // Check if an entry already exists in the keychain
                 int findResult = SecKeychainFindGenericPassword(
-                    IntPtr.Zero, serviceNameLength, serviceName, accountLength, account!,
+                    IntPtr.Zero, serviceNameLength, serviceNameBytes, accountLength, accountBytes,
                     out uint passwordDataLength, out passwordData, out itemRef);
 
                 switch (findResult)
@@ -204,8 +207,8 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
                     // Create new entry
                     case ErrorSecItemNotFound:
                         ThrowIfError(
-                            SecKeychainAddGenericPassword(IntPtr.Zero, serviceNameLength, serviceName, accountLength,
-                                account!, (uint) secretBytes.Length, secretBytes, out itemRef),
+                            SecKeychainAddGenericPassword(IntPtr.Zero, serviceNameLength, serviceNameBytes, accountLength,
+                                accountBytes, (uint) secretBytes.Length, secretBytes, out itemRef),
                             "Could not create new item"
                         );
                         break;
@@ -324,7 +327,13 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS
                 {
                     int length = CFDataGetLength(value);
                     IntPtr ptr = CFDataGetBytePtr(value);
-                    return Marshal.PtrToStringAuto(ptr, length);
+                    if (ptr == IntPtr.Zero || length <= 0)
+                    {
+                        return string.Empty;
+                    }
+                    byte[] buf = new byte[length];
+                    Marshal.Copy(ptr, buf, 0, length);
+                    return Encoding.UTF8.GetString(buf);
                 }
             }
 

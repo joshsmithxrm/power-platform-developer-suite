@@ -7,6 +7,12 @@ using Xunit;
 
 namespace PPDS.Auth.IntegrationTests.Credentials;
 
+// Leaked entries from killed test runs (SIGKILL / ungraceful exit mid-test) can
+// accumulate in the OS credential store as `ppds-interop-test-<guid>`. Normal
+// test exit always cleans up via the finally block below. A manual sweep is not
+// possible without an enumerate API on ISecureCredentialStore, and we do not
+// invent one just for tests. If accumulation becomes a CI problem, the right
+// fix is to add enumeration to the public surface (tracked separately).
 [Trait("Category", "Integration")]
 public sealed class NativeCredentialStoreInteropTests
 {
@@ -49,7 +55,10 @@ public sealed class NativeCredentialStoreInteropTests
         }
         finally
         {
-            await store.RemoveAsync(appId);
+            // Best-effort cleanup: swallow removal errors (already-deleted is fine,
+            // and we never want finally to mask the original test failure).
+            try { await store.RemoveAsync(appId); }
+            catch { /* ignore */ }
         }
     }
 }

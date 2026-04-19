@@ -7,7 +7,6 @@
 // IFileSystem) dropped or replaced with direct System.* calls; visibility
 // lowered to `internal`; no behavioral change to OS storage semantics.
 using System;
-using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace PPDS.Auth.Internal.CredentialStore
@@ -21,6 +20,9 @@ namespace PPDS.Auth.Internal.CredentialStore
             return destination;
         }
 
+        // PPDS-Modification: compare byte-by-byte via Marshal.ReadByte rather than
+        // copying the unmanaged buffer into a managed byte[] (which would leave a
+        // plaintext copy of the secret in GC memory past the call). Constitution S3.
         public static bool AreEqual(byte[] bytes, IntPtr ptr, uint length)
         {
             if (bytes.Length == 0 && (ptr == IntPtr.Zero || length == 0))
@@ -33,8 +35,14 @@ namespace PPDS.Auth.Internal.CredentialStore
                 return false;
             }
 
-            byte[] ptrBytes = ToByteArray(ptr, length);
-            return bytes.SequenceEqual(ptrBytes);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                if (bytes[i] != Marshal.ReadByte(ptr, i))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }

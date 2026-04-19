@@ -128,16 +128,18 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS.Native
             }
 
             long length = CFStringGetLength(cfString);
-            IntPtr buffer = Marshal.AllocHGlobal((int)length + 1);
+            long bufferSize = length * 4 + 1;
+            IntPtr buffer = Marshal.AllocHGlobal((int)bufferSize);
 
             try
             {
-                if (!CFStringGetCString(cfString, buffer, length + 1, CFStringEncoding.kCFStringEncodingUTF8))
+                if (!CFStringGetCString(cfString, buffer, bufferSize, CFStringEncoding.kCFStringEncodingUTF8))
                 {
                     throw new InvalidOperationException("Failed to convert CFString to C string.");
                 }
 
-                return Marshal.PtrToStringAnsi(buffer) ?? string.Empty;
+                // UTF-8 null-terminated C string → managed UTF-8 decode
+                return Marshal.PtrToStringUTF8(buffer) ?? string.Empty;
             }
             finally
             {

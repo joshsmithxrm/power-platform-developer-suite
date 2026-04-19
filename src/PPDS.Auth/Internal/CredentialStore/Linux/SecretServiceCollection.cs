@@ -104,17 +104,28 @@ namespace PPDS.Auth.Internal.CredentialStore.Linux
                             prev = IntPtr.Zero
                         };
 
-                        int numUnlocked = secret_service_unlock_sync(
-                            secService,
-                            &toUnlockList,
-                            IntPtr.Zero,
-                            out _,
-                            out error
-                        );
-
-                        if (numUnlocked != 1)
+                        // PPDS-Modification: capture the `unlocked` out-list so we can free it
+                        // with g_list_free_full. The upstream code passed `out _` and leaked
+                        // the GList allocated by libsecret (docs require the caller to free it).
+                        GList* unlockedList = null;
+                        try
                         {
-                            throw new InteropException("Failed to unlock item", numUnlocked);
+                            int numUnlocked = secret_service_unlock_sync(
+                                secService,
+                                &toUnlockList,
+                                IntPtr.Zero,
+                                out unlockedList,
+                                out error
+                            );
+
+                            if (numUnlocked != 1)
+                            {
+                                throw new InteropException("Failed to unlock item", numUnlocked);
+                            }
+                        }
+                        finally
+                        {
+                            if (unlockedList != null) g_list_free_full(unlockedList, g_object_unref);
                         }
                     }
 
@@ -135,6 +146,9 @@ namespace PPDS.Auth.Internal.CredentialStore.Linux
 
         public unsafe void AddOrUpdate(string service, string account, string secret)
         {
+            EnsureArgument.NotNullOrWhiteSpace(service, nameof(service));
+            EnsureArgument.NotNull(secret, nameof(secret));
+
             GHashTable* attributes = null;
             SecretValue* secretValue = null;
             GError *error = null;

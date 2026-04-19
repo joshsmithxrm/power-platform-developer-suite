@@ -13,10 +13,16 @@ namespace PPDS.Auth.Internal.CredentialStore
         /// <summary>
         /// Creates an <see cref="ICredentialStore"/> appropriate for the current OS.
         /// Mirrors the public surface of Devlooped.CredentialManager's CredentialManager.Create(...).
-        /// Honors GCM_CREDENTIAL_STORE=plaintext on Linux for headless CI fallback.
+        /// On Linux, plaintext fallback requires BOTH <paramref name="allowPlaintextFallback"/>
+        /// to be <c>true</c> AND the <c>GCM_CREDENTIAL_STORE=plaintext</c> environment variable
+        /// to be set — this double-gate prevents accidental activation.
         /// </summary>
         /// <param name="namespace">Credential namespace (used as prefix for service names).</param>
-        public static ICredentialStore Create(string @namespace)
+        /// <param name="allowPlaintextFallback">
+        /// Caller opt-in for Linux plaintext fallback. Must be combined with the
+        /// <c>GCM_CREDENTIAL_STORE=plaintext</c> environment variable to take effect.
+        /// </param>
+        public static ICredentialStore Create(string @namespace, bool allowPlaintextFallback = false)
         {
             EnsureArgument.NotNullOrWhiteSpace(@namespace, nameof(@namespace));
 
@@ -33,7 +39,8 @@ namespace PPDS.Auth.Internal.CredentialStore
             if (PlatformUtils.IsLinux())
             {
                 var backend = Environment.GetEnvironmentVariable("GCM_CREDENTIAL_STORE");
-                if (string.Equals(backend, "plaintext", StringComparison.OrdinalIgnoreCase))
+                bool envRequests = string.Equals(backend, "plaintext", StringComparison.OrdinalIgnoreCase);
+                if (envRequests && allowPlaintextFallback)
                 {
                     return new PlaintextCredentialStore(@namespace);
                 }

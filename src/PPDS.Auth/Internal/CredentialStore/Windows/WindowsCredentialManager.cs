@@ -5,7 +5,10 @@
 // Modifications: namespace renamed to PPDS.Auth.Internal.CredentialStore.Windows;
 // internal GCM abstractions (ITrace/ITrace2, ISessionManager, IEnvironment,
 // IFileSystem) dropped or replaced with direct System.* calls; visibility
-// lowered to `internal`; no behavioral change to OS storage semantics.
+// lowered to `internal`; no behavioral change to OS storage semantics;
+// added `EnsureArgument.NotNull(secret, ...)` guard in AddOrUpdate to surface
+// a correct paramName on null input; removed unused `CanPersist()` helper
+// (dead code — no callers in PPDS).
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,6 +48,7 @@ namespace PPDS.Auth.Internal.CredentialStore.Windows
         public void AddOrUpdate(string service, string account, string secret)
         {
             EnsureArgument.NotNullOrWhiteSpace(service, nameof(service));
+            EnsureArgument.NotNull(secret, nameof(secret));
 
             IntPtr existingCredPtr = IntPtr.Zero;
             IntPtr credBlob = IntPtr.Zero;
@@ -143,29 +147,6 @@ namespace PPDS.Auth.Internal.CredentialStore.Windows
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Check if we can persist credentials to for the current process and logon session.
-        /// </summary>
-        /// <returns>True if persistence is possible, false otherwise.</returns>
-        public static bool CanPersist()
-        {
-            uint count = Advapi32.CRED_TYPE_MAXIMUM;
-            var arr = new CredentialPersist[count];
-
-            int result = Win32Error.GetLastError(
-                Advapi32.CredGetSessionTypes(count, arr)
-            );
-
-            CredentialPersist persist = CredentialPersist.None;
-            if (result == Win32Error.Success)
-            {
-                persist = arr[(int)CredentialType.Generic];
-            }
-
-            // If the maximum allowed is anything less than "local machine" then cannot persist credentials.
-            return persist >= CredentialPersist.LocalMachine;
         }
 
         private IEnumerable<WindowsCredential> Enumerate(string service, string? account)

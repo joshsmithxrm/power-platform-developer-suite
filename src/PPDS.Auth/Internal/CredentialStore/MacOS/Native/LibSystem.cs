@@ -24,6 +24,10 @@ namespace PPDS.Auth.Internal.CredentialStore.MacOS.Native
         public static IntPtr GetGlobal(IntPtr handle, string symbol)
         {
             IntPtr ptr = dlsym(handle, symbol);
+            if (ptr == IntPtr.Zero)
+            {
+                throw new DllNotFoundException($"Unable to resolve symbol '{symbol}' in loaded library.");
+            }
             return Marshal.PtrToStructure<IntPtr>(ptr);
         }
     }

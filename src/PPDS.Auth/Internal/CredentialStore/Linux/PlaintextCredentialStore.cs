@@ -52,12 +52,37 @@ namespace PPDS.Auth.Internal.CredentialStore.Linux
             EnsureArgument.NotNullOrWhiteSpace(service, nameof(service));
 
             Directory.CreateDirectory(_storeRoot);
+            ClampDirectoryPermissions(_storeRoot);
             string serviceDir = Path.Combine(_storeRoot, Slug(CreateServiceName(service)));
             Directory.CreateDirectory(serviceDir);
+            ClampDirectoryPermissions(serviceDir);
 
             string filePath = Path.Combine(serviceDir, $"{Slug(account ?? string.Empty)}{CredentialFileExtension}");
             // Two-line format: secret, then account identifier (for read-back).
             File.WriteAllText(filePath, secret + "\n" + (account ?? string.Empty) + "\n", Encoding.UTF8);
+            ClampFilePermissions(filePath);
+        }
+
+        /// <summary>
+        /// Clamp directory permissions to 0700 on Unix. No-op on Windows.
+        /// Defense-in-depth against inherited umask 0022 which would leave the
+        /// directory group/world-readable on shared hosts.
+        /// </summary>
+        private static void ClampDirectoryPermissions(string path)
+        {
+            if (OperatingSystem.IsWindows()) return;
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        /// <summary>
+        /// Clamp file permissions to 0600 on Unix. No-op on Windows.
+        /// </summary>
+        private static void ClampFilePermissions(string path)
+        {
+            if (OperatingSystem.IsWindows()) return;
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
 
         public bool Remove(string service, string account)
