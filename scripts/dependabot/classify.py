@@ -123,6 +123,56 @@ _BUMP_TITLE_RE = re.compile(
 # Regex for grouped bumps: "Bump the <group> group ..."
 _GROUP_TITLE_RE = re.compile(r"^[Bb]ump\s+the\s+(?P<group>[A-Za-z0-9_.-]+)\s+group", re.IGNORECASE)
 
+# Regex for individual member updates inside a grouped dependabot PR body.
+# Dependabot writes each member as "Updates `<pkg>` from <from> to <to>" (markdown
+# code-fenced package name) or "Updates <pkg> from <from> to <to>" (plain).
+_GROUP_MEMBER_RE = re.compile(
+    r"Updates\s+`?(?P<pkg>[@A-Za-z0-9._/-]+)`?\s+from\s+(?P<from>v?[0-9][^\s]*)\s+to\s+(?P<to>v?[0-9][^\s]*)",
+)
+
+
+def parse_group_members(body: str) -> list[tuple[str, str, str]]:
+    """Extract individual (package, from_version, to_version) tuples from a grouped PR body.
+
+    Dependabot grouped PR bodies enumerate member updates with lines like
+    ``Updates `foo` from 1.0.0 to 1.0.1``. Returns one tuple per member
+    bump found; deduplicated on (package, from, to). Empty list if none parsed.
+    """
+    if not body:
+        return []
+    seen: set[tuple[str, str, str]] = set()
+    out: list[tuple[str, str, str]] = []
+    for m in _GROUP_MEMBER_RE.finditer(body):
+        key = (m.group("pkg"), m.group("from"), m.group("to"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def most_conservative_group(member_types: Iterable[str]) -> Optional[str]:
+    """Return the most-conservative classification group ("A" / "B" / "C") for a list of member update types.
+
+    Per docs/MERGE-POLICY.md "Grouped Dependabot PRs":
+      - any 'major' -> C
+      - any 'minor' (no majors) -> B
+      - only 'patch' -> A
+      - any 'unknown' (and no major/minor) -> None (caller must decide)
+      - empty input -> None
+    """
+    types = list(member_types)
+    if not types:
+        return None
+    if "major" in types:
+        return "C"
+    if "minor" in types:
+        return "B"
+    if all(t == "patch" for t in types):
+        return "A"
+    # Mix of patch and unknown — caller decides
+    return None
+
 
 def parse_title(title: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Parse a dependabot PR title.
@@ -278,18 +328,56 @@ def classify_pr(pr: dict) -> Classification:
     ecosystem = detect_ecosystem(labels, head_ref)
     update_type = classify_update_type(from_v, to_v)
 
-    # Grouped bumps need conservative handling — defer to Group C if any member could be major.
+    # Grouped bumps — apply most-conservative-wins per docs/MERGE-POLICY.md
+    # "Grouped Dependabot PRs": any major -> C, any minor (no majors) -> B,
+    # only patch -> A. Members are parsed from the PR body.
     if pkg and pkg.startswith("group:"):
-        # Without per-member version info on stdin, the safe default is Group A only
-        # for groups that are explicitly tooling/test (named in the dependabot.yml as such)
-        # and patch/minor only. The skill SKILL.md documents how to escalate — here,
-        # default to Group B so the skill operator sees the group and decides.
+        members = parse_group_members(body)
+        if not members:
+            # No member info parseable — fall back to Group B so the operator
+            # inspects manually rather than auto-merging blind.
+            return Classification(
+                pr_number=number,
+                group="B",
+                reason=f"grouped bump '{pkg}' — could not parse members from body, defaulting to verify-then-merge",
+                ecosystem=ecosystem,
+                update_type="unknown",
+                package=pkg,
+                from_version=None,
+                to_version=None,
+            )
+
+        member_types = [classify_update_type(fv, tv) for (_p, fv, tv) in members]
+        chosen = most_conservative_group(member_types)
+        if chosen is None:
+            # Mixed patch/unknown — be conservative.
+            return Classification(
+                pr_number=number,
+                group="B",
+                reason=f"grouped bump '{pkg}' — {len(members)} members with unparseable versions, defaulting to verify-then-merge",
+                ecosystem=ecosystem,
+                update_type="unknown",
+                package=pkg,
+                from_version=None,
+                to_version=None,
+            )
+
+        # Determine which member triggered the chosen group, for the reason string.
+        type_to_label = {"A": "patch", "B": "minor", "C": "major"}
+        trigger_type = type_to_label[chosen]
+        trigger = next(
+            (m for m, t in zip(members, member_types) if t == trigger_type),
+            members[0],
+        )
         return Classification(
             pr_number=number,
-            group="B",
-            reason=f"grouped bump '{pkg}' — inspect members for highest update type",
+            group=chosen,
+            reason=(
+                f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
+                f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
+            ),
             ecosystem=ecosystem,
-            update_type="unknown",
+            update_type=trigger_type,
             package=pkg,
             from_version=None,
             to_version=None,

@@ -38,6 +38,20 @@ Do not use auto-merge when the diff requires human judgment beyond CI signal:
 
 When unsure, default to manual merge. The cost of waiting is low; the cost of an unwanted merge is high.
 
+## Grouped Dependabot PRs
+
+Dependabot can roll multiple updates into a single grouped PR (titled `Bump the <group> group ...`). Member updates may span multiple update types (e.g., a group containing both patch bumps and a minor bump).
+
+Classify a grouped PR by **most-conservative-wins** — the whole group inherits the most conservative classification of any member:
+
+- Group contains **any major bump** -> Group C (manual review required)
+- Group contains **any minor bump** (no majors) -> Group B (verify-then-merge)
+- Group contains **only patch bumps** -> Group A (auto-merge eligible)
+
+Reasoning: simplest to enforce, hardest to misinterpret, and consistent with the universal-exclusion-of-major-bumps decision from the v1-prelaunch retro. If a single risky member exists, the whole group gets the safer treatment — splitting the group to land safe members earlier is not worth the complexity.
+
+The classifier in `scripts/dependabot/classify.py` implements this rule by parsing the dependabot PR body (which lists each member bump as `Updates <pkg> from <a> to <b>`) and selecting the most-conservative type seen.
+
 ## Branch Protection
 
 `main` is protected. PRs must:

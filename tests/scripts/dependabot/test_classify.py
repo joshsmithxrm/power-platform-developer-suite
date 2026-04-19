@@ -261,7 +261,8 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "B")
         self.assertIn("auth-critical path", c.reason)
 
-    def test_grouped_bump_defaults_to_b(self):
+    def test_grouped_bump_no_body_defaults_to_b(self):
+        # No body to parse members from — fall back to Group B (verify-then-merge).
         pr = make_pr(
             number=844,
             title="Bump the npm_and_yarn group across 1 directory with 2 updates",
@@ -272,6 +273,68 @@ class TestClassifyPR(unittest.TestCase):
         c = classify.classify_pr(pr)
         self.assertEqual(c.group, "B")
         self.assertIn("grouped", c.reason)
+
+    # Grouped PR most-conservative-wins (issue #817) — three cases:
+    # all-patch -> A, any-minor (no major) -> B, any-major -> C.
+
+    def test_grouped_all_patch_is_group_a(self):
+        # All members are patch bumps -> Group A (auto-merge eligible).
+        pr = make_pr(
+            number=860,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n"
+                "Updates `baz` from 0.9.0 to 0.9.1\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("most-conservative=patch", c.reason)
+
+    def test_grouped_with_minor_is_group_b(self):
+        # Mix of patch + minor (no major) -> Group B (verify-then-merge).
+        pr = make_pr(
+            number=861,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.0 to 2.4.0\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("most-conservative=minor", c.reason)
+
+    def test_grouped_with_major_is_group_c(self):
+        # Any major bump in the group -> Group C (manual review).
+        pr = make_pr(
+            number=862,
+            title="Bump the npm_and_yarn group across 1 directory with 3 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 3 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.0 to 2.4.0\n"
+                "Updates `baz` from 3.0.0 to 4.0.0\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("most-conservative=major", c.reason)
 
     # Group C — manual review
 
