@@ -35,10 +35,19 @@ import json
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Iterator
+
+# Reuse the cross-platform locking primitives from inflight_common rather
+# than duplicating them: same OS-level fcntl/msvcrt strategy, single
+# source of truth for the lock implementation. The plan file lives next
+# to the in-flight registry and shares the same coordination needs
+# (cross-session, cross-worktree, read-modify-write windows during
+# Phase D of the dispatch flow).
+from inflight_common import _lock, _unlock  # noqa: E402
 
 PLAN_SCHEMA_VERSION = 1  # bump if file format changes
 
@@ -250,21 +259,41 @@ def _parse_issues(value: str) -> list[int]:
     return out
 
 
+def _write_plan_payload(path: Path, payload: str) -> None:
+    """Write-then-rename so a partial write never leaves a half-parsed file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
+
+
 def write_plan(plan: DispatchPlan, path: Path | None = None) -> Path:
     """Atomically (best-effort) write ``plan`` to ``path`` (default location).
 
     Uses a write-then-rename pattern so a partial write never leaves the
     file in a half-parsed state — important because the dispatcher edits
     the plan after every launch.
+
+    Holds an exclusive OS-level lock for the duration of the write so
+    that two concurrent dispatcher runs (or an operator hand-edit racing
+    with the dispatcher) cannot interleave and lose updates.
     """
     if path is None:
         path = plan_path()
     if not plan.generated:
         plan.generated = now_utc_iso()
     payload = plan.as_markdown()
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(payload, encoding="utf-8")
-    tmp.replace(path)
+
+    # Use a sidecar lock file: we cannot lock the plan file itself across
+    # the rename without losing the lock on the renamed inode. The lock
+    # file is durable next to the plan and never written to except as a
+    # lock target. Open in a+ so it gets created on first use.
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lockfp:
+        _lock(lockfp)
+        try:
+            _write_plan_payload(path, payload)
+        finally:
+            _unlock(lockfp)
     return path
 
 
@@ -274,12 +303,53 @@ def load_plan(path: Path | None = None) -> DispatchPlan:
     Returns an empty plan if the file does not exist — the caller can
     then populate ``entries`` and call :func:`write_plan` for the first
     time without special-casing missing-file logic.
+
+    Acquires the same sidecar lock as :func:`write_plan` so a concurrent
+    writer cannot have the file half-renamed when we read it.
     """
     if path is None:
         path = plan_path()
     if not path.exists():
         return DispatchPlan()
-    return parse_plan(path.read_text(encoding="utf-8"))
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lockfp:
+        _lock(lockfp)
+        try:
+            return parse_plan(path.read_text(encoding="utf-8"))
+        finally:
+            _unlock(lockfp)
+
+
+@contextmanager
+def locked_plan(path: Path | None = None) -> Iterator[DispatchPlan]:
+    """Read-modify-write helper that holds the plan lock across the window.
+
+    Yields the parsed :class:`DispatchPlan`; on context exit, the plan is
+    written back atomically. Use this from any caller that needs to load
+    the plan, mutate it, and persist the change without another process
+    racing in between (the typical Phase D pattern).
+
+    Example::
+
+        with locked_plan() as plan:
+            mark_launched(plan, "feat/foo", session_id="abc")
+    """
+    if path is None:
+        path = plan_path()
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lockfp:
+        _lock(lockfp)
+        try:
+            if path.exists():
+                plan = parse_plan(path.read_text(encoding="utf-8"))
+            else:
+                plan = DispatchPlan()
+            yield plan
+            if not plan.generated:
+                plan.generated = now_utc_iso()
+            _write_plan_payload(path, plan.as_markdown())
+        finally:
+            _unlock(lockfp)
 
 
 # ---------------------------------------------------------------------------
@@ -350,8 +420,12 @@ def run_conflict_check(
             continue
         # rc == 2 or anything else: treat as a hard failure rather than
         # a silent pass — the operator should know the gate could not run.
+        # Surface stderr in the error so the operator can diagnose without
+        # re-running the subprocess by hand (Gemini #3106679471).
+        stderr_msg = (_stderr or "").strip()
         raise RuntimeError(
             f"inflight-check.py exited with rc={rc} for cmd={cmd!r}"
+            + (f"; stderr: {stderr_msg}" if stderr_msg else "")
         )
     return (len(all_conflicts) == 0), all_conflicts
 
@@ -427,13 +501,18 @@ def build_plan_from_dicts(
     """
     plan = DispatchPlan(generator=generator, generated=generated or now_utc_iso())
     for raw in items:
+        # AI-generated JSON often emits explicit ``null`` for optional
+        # list/string fields; ``raw.get(k, default)`` returns ``None`` in
+        # that case, which would TypeError downstream. The ``or default``
+        # idiom collapses both missing and explicit-null to the safe
+        # default (Gemini #3106679474).
         plan.entries.append(
             PlanEntry(
                 worktree=str(raw["worktree"]),
-                issues=[int(i) for i in raw.get("issues", [])],
-                areas=[str(a) for a in raw.get("areas", [])],
-                intent=str(raw.get("intent", "")),
-                status=str(raw.get("status", STATUS_PLANNED)),
+                issues=[int(i) for i in (raw.get("issues") or [])],
+                areas=[str(a) for a in (raw.get("areas") or [])],
+                intent=str(raw.get("intent") or ""),
+                status=str(raw.get("status") or STATUS_PLANNED),
             )
         )
     return plan

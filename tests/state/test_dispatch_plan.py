@@ -12,6 +12,7 @@ Covers:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import sys
 from pathlib import Path
@@ -262,6 +263,36 @@ class TestRunConflictCheck:
         with pytest.raises(RuntimeError, match="rc=2"):
             dp.run_conflict_check(entry, runner=runner)
 
+    def test_inflight_failure_includes_stderr(self):
+        """Gemini #3106679471: stderr from inflight-check.py must surface in
+        the RuntimeError so the operator can diagnose without re-running.
+        """
+        entry = dp.PlanEntry(worktree="feat/x", issues=[1])
+
+        def runner(cmd):
+            return (
+                dp.INFLIGHT_BADARGS,
+                "",
+                "argparse: --issue must be a positive integer\n",
+            )
+
+        with pytest.raises(RuntimeError, match="argparse: --issue must be a positive integer"):
+            dp.run_conflict_check(entry, runner=runner)
+
+    def test_inflight_failure_without_stderr_still_raises(self):
+        """Empty stderr should still produce a sensible error (no trailing
+        ``stderr:`` suffix when nothing to add).
+        """
+        entry = dp.PlanEntry(worktree="feat/x", issues=[1])
+
+        def runner(cmd):
+            return (99, "", "")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            dp.run_conflict_check(entry, runner=runner)
+        assert "rc=99" in str(excinfo.value)
+        assert "stderr:" not in str(excinfo.value)
+
 
 class TestAnnotateWithConflicts:
     def test_planned_entry_with_conflict_flips_status(self, tmp_plan):
@@ -418,3 +449,119 @@ class TestDispatchSimulation:
         )
         # Conflict entry was NOT launched.
         assert final.find("feat/audit-capture").launched_by_session == ""
+
+
+# ---------------------------------------------------------------------------
+# Null-tolerance in build_plan_from_dicts (Gemini #3106679474)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPlanNullTolerance:
+    """AI-generated JSON often emits ``null`` for optional fields rather than
+    omitting them. ``build_plan_from_dicts`` must absorb explicit nulls
+    without TypeError.
+    """
+
+    def test_explicit_null_issues_treated_as_empty(self):
+        plan = dp.build_plan_from_dicts([
+            {"worktree": "feat/x", "issues": None, "areas": ["src/A/"]},
+        ])
+        assert plan.entries[0].issues == []
+        assert plan.entries[0].areas == ["src/A/"]
+
+    def test_explicit_null_areas_treated_as_empty(self):
+        plan = dp.build_plan_from_dicts([
+            {"worktree": "feat/x", "issues": [1], "areas": None},
+        ])
+        assert plan.entries[0].issues == [1]
+        assert plan.entries[0].areas == []
+
+    def test_explicit_null_intent_treated_as_empty_string(self):
+        plan = dp.build_plan_from_dicts([
+            {"worktree": "feat/x", "intent": None},
+        ])
+        assert plan.entries[0].intent == ""
+
+    def test_explicit_null_status_falls_back_to_planned(self):
+        plan = dp.build_plan_from_dicts([
+            {"worktree": "feat/x", "status": None},
+        ])
+        assert plan.entries[0].status == dp.STATUS_PLANNED
+
+    def test_all_optionals_null_does_not_raise(self):
+        plan = dp.build_plan_from_dicts([
+            {
+                "worktree": "feat/x",
+                "issues": None,
+                "areas": None,
+                "intent": None,
+                "status": None,
+            },
+        ])
+        e = plan.entries[0]
+        assert e.worktree == "feat/x"
+        assert e.issues == []
+        assert e.areas == []
+        assert e.intent == ""
+        assert e.status == dp.STATUS_PLANNED
+
+
+# ---------------------------------------------------------------------------
+# File locking concurrency (Gemini #3106679468)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanLocking:
+    """Mirror the inflight ThreadPoolExecutor concurrency check: spawn N
+    simultaneous read-modify-writes through ``locked_plan`` and verify
+    every update lands without corrupting the markdown file.
+    """
+
+    def test_concurrent_writes_no_corruption(self, tmp_plan):
+        # Seed an empty plan so locked_plan has something to start from.
+        dp.write_plan(dp.DispatchPlan(generator="seed"))
+
+        def add_entry(i: int) -> str:
+            with dp.locked_plan() as plan:
+                plan.entries.append(
+                    dp.PlanEntry(
+                        worktree=f"feat/parallel-{i}",
+                        issues=[1000 + i],
+                        areas=[f"src/Module{i}/"],
+                        intent=f"parallel work {i}",
+                    )
+                )
+            return f"feat/parallel-{i}"
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            results = list(pool.map(add_entry, range(5)))
+
+        assert sorted(results) == [f"feat/parallel-{i}" for i in range(5)]
+
+        # Reload from disk: every concurrent append must be present and
+        # the file must still parse cleanly (no half-written tmp files,
+        # no truncated markdown).
+        loaded = dp.load_plan()
+        worktrees = sorted(e.worktree for e in loaded.entries)
+        assert worktrees == [f"feat/parallel-{i}" for i in range(5)]
+
+        # No orphaned .tmp file left behind (atomic rename completed).
+        leftover = tmp_plan.with_suffix(tmp_plan.suffix + ".tmp")
+        assert not leftover.exists()
+
+    def test_locked_plan_persists_mutations(self, tmp_plan):
+        with dp.locked_plan() as plan:
+            plan.entries.append(dp.PlanEntry(worktree="feat/from-cm"))
+
+        loaded = dp.load_plan()
+        assert [e.worktree for e in loaded.entries] == ["feat/from-cm"]
+
+    def test_locked_plan_starts_empty_when_file_missing(self, tmp_plan):
+        assert not tmp_plan.exists()
+        with dp.locked_plan() as plan:
+            assert plan.entries == []
+            plan.entries.append(dp.PlanEntry(worktree="feat/first"))
+
+        assert tmp_plan.exists()
+        loaded = dp.load_plan()
+        assert [e.worktree for e in loaded.entries] == ["feat/first"]
