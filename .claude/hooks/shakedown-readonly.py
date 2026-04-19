@@ -50,14 +50,19 @@ def find_ppds_invocations(command: str) -> list:
     for match in _PPDS_PROGRAM_RE.finditer(command):
         prog = match.group(1)
         tail = command[match.end():]
-        cut_re = re.compile(r"[|;&]|&&|\|\||>|<|`")
-        cut_match = cut_re.search(tail)
-        if cut_match:
-            tail = tail[: cut_match.start()]
         try:
-            args = shlex.split(tail, posix=True)
+            # Use shlex to parse the rest of the command line.
+            # This correctly handles quoted operators.
+            tokens = shlex.split(tail, posix=True)
         except ValueError:
-            args = tail.split()
+            tokens = tail.split()
+
+        # Truncate tokens at the first shell operator.
+        args = []
+        for tok in tokens:
+            if tok in ("|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"):
+                break
+            args.append(tok)
         out.append([prog] + args)
     return out
 
@@ -101,7 +106,7 @@ _MUTATION_VERBS = {
 # the invocation should be blocked. Used for cases where ``--dry-run`` (or
 # similar) is an exemption.
 def _plugins_deploy_blocked(args: list) -> bool:
-    return "--dry-run" not in args and "-n" not in args
+    return not any(arg in ("--dry-run", "-n") or arg.startswith("--dry-run=") for arg in args)
 
 
 _NAMED_MUTATIONS = {
@@ -119,7 +124,7 @@ def is_mutation(argv: list) -> tuple[bool, str]:
     argv is ``[program, sub, verb, ...]`` style. ``sub`` is the surface
     (``plugins``, ``env``, ``data``, etc.) and ``verb`` is the action.
     """
-    if len(argv) < 2:
+    if not argv:
         return False, ""
 
     prog = os.path.basename(argv[0]).lower()
@@ -129,10 +134,14 @@ def is_mutation(argv: list) -> tuple[bool, str]:
         return False, ""
 
     if prog == "ppds-mcp-server":
-        # The MCP server itself is launched, not a one-shot command, so we
-        # can't reason about whether it will issue writes. Allow -- the
-        # dev-env-check hook still gates which env it talks to.
-        return False, ""
+        # The MCP server can issue arbitrary Dataverse writes via its tools.
+        # During shakedown it MUST be launched with ``--read-only`` so the
+        # write-block boundary is preserved end-to-end. (The mcp-verify
+        # skill documents this flag.)
+        # Enforce read-only mode for the MCP server during shakedown.
+        if any(arg == "--read-only" or arg.startswith("--read-only=") for arg in argv[1:]):
+            return False, ""
+        return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
 
     if len(argv) < 3:
         return False, ""
@@ -182,6 +191,7 @@ def _block_msg(argv: list, reason: str) -> str:
             "",
             "  For plugin deploys specifically, add --dry-run to validate",
             "  without writing.",
+            "  For ppds-mcp-server, add --read-only to the launch args.",
         ]
     )
 

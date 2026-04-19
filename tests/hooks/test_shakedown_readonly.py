@@ -148,6 +148,19 @@ class TestDryRunExempt:
         r = _run_hook("ppds plugins deploy --some-arg value", env_extra={"PPDS_SHAKEDOWN": "1"})
         assert r.returncode == 2
 
+    def test_dry_run_equals_true_treated_as_dry_run(self):
+        # --dry-run=true must be honored as a dry-run (not just bare --dry-run).
+        r = _run_hook(
+            "ppds plugins deploy --dry-run=true",
+            env_extra={"PPDS_SHAKEDOWN": "1"},
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
+    def test_short_dry_run_flag(self):
+        # The -n short form must be honored as a dry-run.
+        r = _run_hook("ppds plugins deploy -n", env_extra={"PPDS_SHAKEDOWN": "1"})
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
 
 # ---------------------------------------------------------------------------
 # Edge: malformed input handling
@@ -188,11 +201,34 @@ class TestEdgeCases:
         )
         assert r.returncode == 2
 
-    def test_mcp_server_launch_allowed(self):
-        # The MCP server is long-running; we can't reason about whether it
-        # will write. Allow -- dev-env-check still gates the env it talks to.
+    def test_mcp_server_blocked_without_read_only(self):
+        # The MCP server can issue writes via its tools. During shakedown it
+        # MUST be launched with --read-only so the write boundary holds.
         r = _run_hook("ppds-mcp-server", env_extra={"PPDS_SHAKEDOWN": "1"})
-        assert r.returncode == 0
+        assert r.returncode == 2, f"stderr={r.stderr!r}"
+        assert "BLOCKED [shakedown-readonly]" in r.stderr
+        assert "--read-only" in r.stderr
+
+    def test_mcp_server_allowed_with_read_only(self):
+        r = _run_hook("ppds-mcp-server --read-only", env_extra={"PPDS_SHAKEDOWN": "1"})
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
+    def test_mcp_server_allowed_with_read_only_equals_true(self):
+        r = _run_hook("ppds-mcp-server --read-only=true", env_extra={"PPDS_SHAKEDOWN": "1"})
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
+    def test_quoted_pipe_not_command_boundary(self):
+        # The | character inside a quoted string must not split the command;
+        # the previous regex-based parser treated it as a shell operator
+        # which truncated args and could mis-classify mutations.
+        r = _run_hook(
+            "ppds data create account --name 'foo|bar'",
+            env_extra={"PPDS_SHAKEDOWN": "1"},
+        )
+        # data create is a mutation -> must still block (i.e. parser must
+        # see "create" as the verb, not be truncated by the quoted '|').
+        assert r.returncode == 2, f"stderr={r.stderr!r}"
+        assert "create" in r.stderr
 
 
 # ---------------------------------------------------------------------------

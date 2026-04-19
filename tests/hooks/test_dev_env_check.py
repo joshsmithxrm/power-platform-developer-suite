@@ -390,6 +390,20 @@ class TestCommandParsing:
         # Should not raise; either allow or block, but exit cleanly (0 or 2).
         assert r.returncode in (0, 2)
 
+    def test_quoted_semicolon_not_command_boundary(self, fake_profile_dir):
+        # The previous regex-based truncation treated any ``;`` as a shell
+        # operator even when it sat inside a quoted SQL string. The shlex-
+        # based parser must keep the whole ppds invocation intact so the
+        # active-env gating still applies (and so unrelated quoted operators
+        # don't cause false positives or argv truncation).
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(
+            "ppds query \"SELECT FROM t WHERE n=';'\"",
+            env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir},
+        )
+        # Active env is in the allowlist -> command must pass cleanly.
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
 
 # ---------------------------------------------------------------------------
 # Module-level unit tests (no subprocess)

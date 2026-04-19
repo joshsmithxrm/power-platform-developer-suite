@@ -218,20 +218,21 @@ def find_ppds_invocations(command: str) -> list:
     out = []
     for match in _PPDS_PROGRAM_RE.finditer(command):
         prog = match.group(1)
-        # Slice the rest of the command after the program name. We split on
-        # shell operators to keep arg parsing local to this invocation.
+        # Slice the rest of the command after the program name.
         tail = command[match.end():]
-        # Cut at first unquoted shell operator (best-effort).
-        cut_re = re.compile(r"[|;&]|&&|\|\||>|<|`")
-        cut_match = cut_re.search(tail)
-        if cut_match:
-            tail = tail[: cut_match.start()]
         try:
-            args = shlex.split(tail, posix=True)
+            # Use shlex to parse the rest of the command line.
+            # This correctly handles quoted operators.
+            tokens = shlex.split(tail, posix=True)
         except ValueError:
-            # Unbalanced quotes -- fall back to whitespace split so we still
-            # match coarse patterns rather than silently allowing.
-            args = tail.split()
+            tokens = tail.split()
+
+        # Truncate tokens at the first shell operator.
+        args = []
+        for tok in tokens:
+            if tok in ("|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"):
+                break
+            args.append(tok)
         out.append([prog] + args)
     return out
 
