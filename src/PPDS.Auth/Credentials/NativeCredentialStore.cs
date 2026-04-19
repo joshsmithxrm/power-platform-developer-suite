@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
-using GitCredentialManager;
+using PPDS.Auth.Internal.CredentialStore;
 
 namespace PPDS.Auth.Credentials;
 
@@ -14,7 +14,8 @@ namespace PPDS.Auth.Credentials;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses platform-native security mechanisms via Git Credential Manager's credential store:
+/// Uses platform-native security mechanisms via a vendored subset of Microsoft's
+/// git-credential-manager (see <c>src/PPDS.Auth/Internal/CredentialStore/</c>):
 /// - Windows: Windows Credential Manager (DPAPI with CurrentUser scope)
 /// - macOS: Keychain Services
 /// - Linux: libsecret (GNOME Keyring/KWallet), with optional plaintext fallback for CI/CD
@@ -56,9 +57,11 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// Creates a new native credential store using the default settings.
     /// </summary>
     /// <param name="allowCleartextFallback">
-    /// On Linux, if true and libsecret is unavailable, uses plaintext file storage.
-    /// Has no effect on Windows or macOS where secure storage is always available.
-    /// This is intended for CI/CD environments without a keyring.
+    /// On Linux, opts the caller in to plaintext file storage when libsecret is unavailable.
+    /// Plaintext activation is double-gated: it requires BOTH this flag set to <c>true</c>
+    /// AND the <c>GCM_CREDENTIAL_STORE=plaintext</c> environment variable, preventing
+    /// accidental activation. Has no effect on Windows or macOS, where secure storage is
+    /// always available. This is intended for CI/CD environments without a keyring.
     /// </param>
     public NativeCredentialStore(bool allowCleartextFallback = false)
         : this(allowCleartextFallback, null)
@@ -86,12 +89,14 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
         {
             // Configure credential store backend based on platform
             ConfigureCredentialStoreBackend(allowCleartextFallback);
-            _store = CredentialManager.Create(ServiceName);
+            _store = CredentialManager.Create(ServiceName, allowCleartextFallback);
         }
     }
 
     /// <summary>
-    /// Configures the GCM credential store backend via environment variable.
+    /// Configures the vendored credential store backend (Linux plaintext fallback) via
+    /// environment variable. Name <c>GCM_CREDENTIAL_STORE</c> preserved for compatibility
+    /// with any ops runbook that already sets it.
     /// </summary>
     private static void ConfigureCredentialStoreBackend(bool allowCleartextFallback)
     {
@@ -120,7 +125,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
         var key = credential.ApplicationId.ToLowerInvariant();
         var json = SerializeCredential(credential);
 
-        _store.AddOrUpdate(ServiceName, key, json);
+        WrapStoreCall(() => _store.AddOrUpdate(ServiceName, key, json), "store");
         AddToManifest(key);
 
         return Task.CompletedTask;
@@ -133,7 +138,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
             return Task.FromResult<StoredCredential?>(null);
 
         var key = applicationId.ToLowerInvariant();
-        var cred = _store.Get(ServiceName, key);
+        var cred = WrapStoreCall(() => _store.Get(ServiceName, key), "read");
 
         if (cred == null)
             return Task.FromResult<StoredCredential?>(null);
@@ -148,7 +153,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
             return Task.FromResult(false);
 
         var key = applicationId.ToLowerInvariant();
-        var removed = _store.Remove(ServiceName, key);
+        var removed = WrapStoreCall(() => _store.Remove(ServiceName, key), "remove");
 
         if (removed)
         {
@@ -164,11 +169,11 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
         var manifest = GetManifest();
         foreach (var key in manifest)
         {
-            _store.Remove(ServiceName, key);
+            WrapStoreCall(() => _store.Remove(ServiceName, key), "remove");
         }
 
         // Clear the manifest itself
-        _store.Remove(ServiceName, ManifestKey);
+        WrapStoreCall(() => _store.Remove(ServiceName, ManifestKey), "remove");
 
         return Task.CompletedTask;
     }
@@ -180,7 +185,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
             return Task.FromResult(false);
 
         var key = applicationId.ToLowerInvariant();
-        return Task.FromResult(_store.Get(ServiceName, key) != null);
+        return Task.FromResult(WrapStoreCall(() => _store.Get(ServiceName, key), "read") != null);
     }
 
     /// <summary>
@@ -188,7 +193,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// </summary>
     private List<string> GetManifest()
     {
-        var cred = _store.Get(ServiceName, ManifestKey);
+        var cred = WrapStoreCall(() => _store.Get(ServiceName, ManifestKey), "read");
         if (cred == null)
             return new List<string>();
 
@@ -212,7 +217,9 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
         if (!manifest.Contains(key))
         {
             manifest.Add(key);
-            _store.AddOrUpdate(ServiceName, ManifestKey, JsonSerializer.Serialize(manifest, JsonOptions));
+            WrapStoreCall(
+                () => _store.AddOrUpdate(ServiceName, ManifestKey, JsonSerializer.Serialize(manifest, JsonOptions)),
+                "store");
         }
     }
 
@@ -226,14 +233,69 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
         {
             if (manifest.Count > 0)
             {
-                _store.AddOrUpdate(ServiceName, ManifestKey, JsonSerializer.Serialize(manifest, JsonOptions));
+                WrapStoreCall(
+                    () => _store.AddOrUpdate(ServiceName, ManifestKey, JsonSerializer.Serialize(manifest, JsonOptions)),
+                    "store");
             }
             else
             {
-                _store.Remove(ServiceName, ManifestKey);
+                WrapStoreCall(() => _store.Remove(ServiceName, ManifestKey), "remove");
             }
         }
     }
+
+    /// <summary>
+    /// Wraps a call to the underlying vendored <see cref="ICredentialStore"/> and converts the
+    /// internal <c>InteropException</c> into a PPDS-layer <see cref="AuthenticationException"/>
+    /// carrying an <c>Auth.CredentialStoreFailure</c> error code.
+    /// </summary>
+    /// <remarks>
+    /// Per Constitution D4, application-service exceptions must carry a PPDS error code.
+    /// <c>InteropException</c> is an <c>internal</c> type inside this assembly; external
+    /// callers only ever observe the wrapped <see cref="AuthenticationException"/>. We do
+    /// not swallow <see cref="ArgumentException"/>, <see cref="ArgumentNullException"/>, or
+    /// <see cref="PlatformNotSupportedException"/>; those propagate as-is (they indicate a
+    /// caller bug, not an OS store failure).
+    /// </remarks>
+    private static void WrapStoreCall(Action call, string operation)
+    {
+        try
+        {
+            call();
+        }
+        catch (InteropException ex)
+        {
+            throw new AuthenticationException(
+                $"Credential store {operation} failed: {SensitiveValueRedactor.Redact(ex.Message)}",
+                CredentialStoreFailureErrorCode,
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Typed variant of <see cref="WrapStoreCall(Action, string)"/> for calls that return a value.
+    /// </summary>
+    private static T WrapStoreCall<T>(Func<T> call, string operation)
+    {
+        try
+        {
+            return call();
+        }
+        catch (InteropException ex)
+        {
+            throw new AuthenticationException(
+                $"Credential store {operation} failed: {SensitiveValueRedactor.Redact(ex.Message)}",
+                CredentialStoreFailureErrorCode,
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Error code emitted when the underlying OS credential store (Windows Credential
+    /// Manager, macOS Keychain, libsecret) returns a native failure. Callers that need to
+    /// differentiate OS-store failures from other authentication problems can match on this.
+    /// </summary>
+    private const string CredentialStoreFailureErrorCode = "Auth.CredentialStoreFailure";
 
     /// <summary>
     /// Serializes a credential to a compact JSON string.
@@ -304,12 +366,14 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// Disposes resources used by this credential store.
     /// </summary>
     /// <remarks>
-    /// Currently a no-op. IDisposable is implemented for compatibility with
+    /// No-op. The vendored <c>ICredentialStore</c> implementations (Windows Credential
+    /// Manager, macOS Keychain, libsecret, plaintext fallback) hold no managed
+    /// resources requiring disposal. IDisposable is kept on the public surface for
     /// call sites that use <c>using</c> statements.
     /// </remarks>
     public void Dispose()
     {
-        // No-op: underlying ICredentialStore doesn't require disposal
+        // No-op: vendored ICredentialStore backends hold no disposable state.
     }
 
     /// <summary>

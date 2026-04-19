@@ -363,4 +363,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing to PPDS.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+PPDS is distributed under the MIT License — see [LICENSE](LICENSE) for the full text.
+
+Third-party components and vendored source (including a subset of `microsoft/git-credential-manager` for credential storage) are attributed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

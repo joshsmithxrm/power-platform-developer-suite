@@ -209,7 +209,7 @@ public interface ISecureCredentialStore
 }
 ```
 
-The implementation ([`NativeCredentialStore.cs:45-180`](../src/PPDS.Auth/Credentials/NativeCredentialStore.cs#L45-L180)) uses Git Credential Manager for cross-platform support.
+The implementation ([`NativeCredentialStore.cs`](../src/PPDS.Auth/Credentials/NativeCredentialStore.cs)) delegates to a vendored subset of Microsoft's [git-credential-manager](https://github.com/git-ecosystem/git-credential-manager) source (MIT) under [`src/PPDS.Auth/Internal/CredentialStore/`](../src/PPDS.Auth/Internal/CredentialStore/), which owns the platform-native backends (Windows Credential Manager, macOS Keychain, libsecret). See "Why Vendored git-credential-manager?" below.
 
 ### IGlobalDiscoveryService
 
@@ -349,6 +349,23 @@ var pool = new DataverseConnectionPool([source]);
 - Positive: Secrets survive profile file deletion
 - Negative: Cannot export/import profiles with secrets
 - Negative: Linux CI requires plaintext fallback flag
+
+### Why Vendored git-credential-manager?
+
+**Context:** The original implementation depended on the `Devlooped.CredentialManager` NuGet package for platform-native credential storage. Devlooped's source is MIT, but its binary distribution carries the **Open Source Maintenance Fee Agreement (OSMFEULA)** — an optional fee clause targeting revenue-generating users. For an MIT-licensed project adopted in enterprise contexts (Microsoft-ecosystem Dataverse work in particular), this atypical fee clause creates unnecessary friction in legal and OSS-compliance reviews.
+
+**Decision:** Vendor the minimal subset of Microsoft's upstream [git-credential-manager](https://github.com/git-ecosystem/git-credential-manager) source directly into `src/PPDS.Auth/Internal/CredentialStore/`, preserving original Microsoft copyright and MIT headers. Drop the `Devlooped.CredentialManager` PackageReference. `NativeCredentialStore` continues to target the same OS storage APIs (DPAPI, Keychain, libsecret) with the same service name and key format.
+
+**Alternatives considered:**
+- Keep `Devlooped.CredentialManager`: Fails the enterprise legal-review bar — OSMFEULA is atypical for OSS and gets flagged in rigorous reviews.
+- Write a fully custom P/Invoke implementation from scratch: Removes the vendored-file attribution surface but introduces ~500 lines of novel hand-rolled OS-boundary code. Enterprise reviewers must reason about correctness, Unicode edges, secret length limits, and libsecret error paths from first principles, rather than recognizing well-known Microsoft-MIT code. Net legal-review friction is not actually lower; implementation risk is strictly higher.
+
+**Consequences:**
+- Positive: Clean MIT licensing — the vendored files carry recognizable Microsoft copyright headers with preserved attribution in `THIRD_PARTY_NOTICES.md`.
+- Positive: No runtime behavior change intended — same OS backends, same service name (`https://ppds.credentials`), same key format. Because storage targets identical OS entries, secrets written by the prior `Devlooped` implementation should read back under the vendored implementation; this is dev-verified during implementation rather than guaranteed by an automated AC.
+- Positive: PPDS owns the vendored copy — free to evolve or trim independently of upstream.
+- Negative: Upstream patches (bug fixes, new platforms) do not propagate automatically; periodic manual review of the source is required.
+- Negative: ~5–10 vendored files carry Microsoft copyright headers in-tree; reviewers unfamiliar with vendoring may flag these (resolvable via pointer to NOTICES).
 
 ### Why HomeAccountId Persistence?
 
@@ -538,6 +555,10 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-10 | Env var auth takes precedence over `PPDS_PROFILE` and active profile | `EnvironmentVariableAuthTests.EnvVarAuth_TakesPrecedence` | 🔲 |
 | AC-11 | Synthetic profile produces working `ServiceClient` via `CredentialProviderFactory` | `EnvironmentVariableAuthTests.SyntheticProfile_CreatesProvider` | 🔲 |
 | AC-12 | No disk I/O: no profile written, no MSAL cache, no credential store access | `EnvironmentVariableAuthTests.NoSideEffects` | 🔲 |
+| AC-13 | `PPDS.Auth` assembly references no `Devlooped.*` assembly at runtime | `DependencyAuditTests.PpdsAuthAssembly_DoesNotReferenceDevlooped` | ✅ |
+| AC-14a | Vendored credential store round-trips a secret via Windows Credential Manager (DPAPI) | `NativeCredentialStoreInteropTests.Windows_RoundTripsSecret` (CI: `windows-latest`) | 🔲 (flips ✅ on green CI matrix) |
+| AC-14b | Vendored credential store round-trips a secret via macOS Keychain | `NativeCredentialStoreInteropTests.MacOS_RoundTripsSecret` (CI: `macos-latest`) | 🔲 (flips ✅ on green CI matrix) |
+| AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 (flips ✅ on green CI matrix) |
 
 ### Edge Cases
 
@@ -618,6 +639,7 @@ public void CloudEndpoints_ReturnsCorrectAuthority_ForEachCloud()
 
 | Date | Change |
 |------|--------|
+| 2026-04-18 | Vendored `microsoft/git-credential-manager` storage code into `src/PPDS.Auth/Internal/CredentialStore/`; removed `Devlooped.CredentialManager` dependency and its OSMFEULA-licensed binary distribution |
 | 2026-03-26 | Added environment variable authentication (stateless auth via PPDS_CLIENT_ID/SECRET/TENANT_ID/ENVIRONMENT_URL) |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
