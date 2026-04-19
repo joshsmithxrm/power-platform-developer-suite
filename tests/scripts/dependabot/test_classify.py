@@ -337,6 +337,49 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.update_type, "major")
         self.assertIn("most-conservative=major", c.reason)
 
+    def test_grouped_with_auth_critical_patch_is_group_b(self):
+        # All-patch group containing an auth-critical member must elevate to
+        # Group B per MERGE-POLICY.md "Auth-Critical Packages" override.
+        # Without the override this would incorrectly classify as Group A.
+        pr = make_pr(
+            number=863,
+            title="Bump the nuget group across 1 directory with 3 updates",
+            body=(
+                "Bumps the nuget group with 3 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Microsoft.Identity.Client` from 4.55.0 to 4.55.1\n"
+                "Updates `Bar` from 2.3.4 to 2.3.5\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical", c.reason)
+        self.assertIn("Microsoft.Identity.Client", c.reason)
+
+    def test_grouped_with_auth_critical_minor_is_group_b(self):
+        # Mix of patch + an auth-critical minor bump -> Group B.
+        # (Even without the auth-critical override this is B because of the
+        # minor; with the override the reason should still flag auth-critical.)
+        pr = make_pr(
+            number=864,
+            title="Bump the nuget group across 1 directory with 2 updates",
+            body=(
+                "Bumps the nuget group with 2 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Azure.Identity` from 1.12.0 to 1.13.0\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical", c.reason)
+        self.assertIn("Azure.Identity", c.reason)
+
     # Group C — manual review
 
     def test_major_npm_is_group_c(self):

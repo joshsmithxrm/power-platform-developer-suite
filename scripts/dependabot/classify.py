@@ -151,21 +151,34 @@ def parse_group_members(body: str) -> list[tuple[str, str, str]]:
     return out
 
 
-def most_conservative_group(member_types: Iterable[str]) -> Optional[str]:
+def most_conservative_group(
+    member_types: Iterable[str],
+    has_auth_critical: bool = False,
+) -> Optional[str]:
     """Return the most-conservative classification group ("A" / "B" / "C") for a list of member update types.
 
     Per docs/MERGE-POLICY.md "Grouped Dependabot PRs":
       - any 'major' -> C
-      - any 'minor' (no majors) -> B
-      - only 'patch' -> A
-      - any 'unknown' (and no major/minor) -> None (caller must decide)
+      - any auth-critical member at non-major -> B (regardless of patch/minor mix)
+      - any 'minor' (no majors, no auth-critical) -> B
+      - only 'patch' (no auth-critical) -> A
+      - any 'unknown' (and no major/minor/auth-critical) -> None (caller must decide)
       - empty input -> None
+
+    The ``has_auth_critical`` flag should be True when any group member's package
+    name returns True from ``is_auth_critical_package``. This implements the
+    auth-critical override: a group of all-patch bumps is normally Group A, but
+    if any member is auth-critical (e.g., Microsoft.Identity.Client patch), the
+    group is elevated to Group B per MERGE-POLICY.md "Auth-Critical Packages".
     """
     types = list(member_types)
     if not types:
         return None
     if "major" in types:
         return "C"
+    if has_auth_critical:
+        # Any non-major auth-critical bump elevates the whole group to B.
+        return "B"
     if "minor" in types:
         return "B"
     if all(t == "patch" for t in types):
@@ -348,7 +361,14 @@ def classify_pr(pr: dict) -> Classification:
             )
 
         member_types = [classify_update_type(fv, tv) for (_p, fv, tv) in members]
-        chosen = most_conservative_group(member_types)
+        # Auth-critical override: any non-major auth-critical member elevates
+        # the whole group to Group B per MERGE-POLICY.md.
+        auth_critical_member = next(
+            (m for m in members if is_auth_critical_package(m[0])),
+            None,
+        )
+        has_auth_critical = auth_critical_member is not None and "major" not in member_types
+        chosen = most_conservative_group(member_types, has_auth_critical=has_auth_critical)
         if chosen is None:
             # Mixed patch/unknown — be conservative.
             return Classification(
@@ -363,19 +383,36 @@ def classify_pr(pr: dict) -> Classification:
             )
 
         # Determine which member triggered the chosen group, for the reason string.
+        # Special case: Group B chosen via auth-critical override on an all-patch
+        # group has no "minor" trigger — pick the auth-critical member as the
+        # trigger and label its actual update type.
         type_to_label = {"A": "patch", "B": "minor", "C": "major"}
-        trigger_type = type_to_label[chosen]
-        trigger = next(
-            (m for m, t in zip(members, member_types) if t == trigger_type),
-            members[0],
+        if chosen == "B" and has_auth_critical and "minor" not in member_types:
+            trigger = auth_critical_member
+            trigger_type = classify_update_type(trigger[1], trigger[2])
+        else:
+            trigger_type = type_to_label[chosen]
+            trigger = next(
+                (m for m, t in zip(members, member_types) if t == trigger_type),
+                members[0],
+            )
+        reason = (
+            f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
+            f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
         )
+        # When an auth-critical member contributed to the Group B classification,
+        # name it explicitly in the reason so the operator knows why the override
+        # applied (per MERGE-POLICY.md "Auth-Critical Packages").
+        if chosen == "B" and has_auth_critical:
+            ac_type = classify_update_type(auth_critical_member[1], auth_critical_member[2])
+            reason += (
+                f"; auth-critical override "
+                f"({auth_critical_member[0]} {auth_critical_member[1]} -> {auth_critical_member[2]}, {ac_type})"
+            )
         return Classification(
             pr_number=number,
             group=chosen,
-            reason=(
-                f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
-                f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
-            ),
+            reason=reason,
             ecosystem=ecosystem,
             update_type=trigger_type,
             package=pkg,

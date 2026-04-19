@@ -47,6 +47,7 @@ Classify a grouped PR by **most-conservative-wins** — the whole group inherits
 - Group contains **any major bump** -> Group C (manual review required)
 - Group contains **any minor bump** (no majors) -> Group B (verify-then-merge)
 - Group contains **only patch bumps** -> Group A (auto-merge eligible)
+- If any member is an auth-critical package (per the Auth-Critical Packages list below), the group is Group B regardless of update type, unless any member is major (then Group C).
 
 Reasoning: simplest to enforce, hardest to misinterpret, and consistent with the universal-exclusion-of-major-bumps decision from the v1-prelaunch retro. If a single risky member exists, the whole group gets the safer treatment — splitting the group to land safe members earlier is not worth the complexity.
 
