@@ -17,15 +17,18 @@ internal static class AnalyzerTestHelper
     /// </summary>
     /// <param name="source">C# source code to analyze.</param>
     /// <param name="filePath">Optional file path for the syntax tree (used by path-scoped analyzers).</param>
+    /// <param name="assemblyName">Optional compilation assembly name (used by assembly-scoped analyzers). Defaults to "TestAssembly".</param>
     public static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync<TAnalyzer>(
         string source,
-        string? filePath = null)
+        string? filePath = null,
+        string? assemblyName = null)
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
-        var tree = CSharpSyntaxTree.ParseText(source, path: filePath ?? "Test.cs");
+        var parseOptions = new CSharpParseOptions(documentationMode: DocumentationMode.Parse);
+        var tree = CSharpSyntaxTree.ParseText(source, options: parseOptions, path: filePath ?? "Test.cs");
 
         var compilation = CSharpCompilation.Create(
-            "TestAssembly",
+            assemblyName ?? "TestAssembly",
             syntaxTrees: new[] { tree },
             references: SharedReferences,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -53,6 +56,9 @@ internal static class AnalyzerTestHelper
             typeof(System.Collections.Generic.List<>).Assembly,         // System.Collections
             typeof(Console).Assembly,                                   // System.Console
             typeof(IAsyncDisposable).Assembly,                          // System.Runtime (IAsyncDisposable)
+            typeof(System.ComponentModel.EditorBrowsableAttribute).Assembly, // System.ObjectModel / ComponentModel
+            typeof(System.ComponentModel.DescriptionAttribute).Assembly,     // System.ComponentModel.Primitives
+            typeof(System.CodeDom.Compiler.GeneratedCodeAttribute).Assembly, // System.Runtime / CodeDom
         };
 
         // Deduplicate assemblies that might resolve to the same location

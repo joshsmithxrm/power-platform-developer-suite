@@ -1,0 +1,84 @@
+{
+  "name": "ppds-fixture-ext-reflect",
+  "version": "0.0.1",
+  "private": true,
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "fixtureContainer",
+          "title": "Fixture Container",
+          "icon": "images/icon.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "fixturePanelContainer",
+          "title": "Fixture Panel"
+        }
+      ]
+    },
+    "views": {
+      "fixtureContainer": [
+        {
+          "id": "fixture.treeView",
+          "name": "Tree View"
+        },
+        {
+          "id": "fixture.listView",
+          "name": "List View"
+        }
+      ],
+      "fixturePanelContainer": [
+        {
+          "id": "fixture.panelOutput",
+          "name": "Output"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "fixture.zulu",
+        "title": "Run Zulu",
+        "category": "Fixture"
+      },
+      {
+        "command": "fixture.alpha",
+        "title": "Open Alpha"
+      },
+      {
+        "command": "fixture.mike",
+        "title": "Execute Mike Task",
+        "category": "Fixture",
+        "icon": "$(play)"
+      }
+    ],
+    "keybindings": [
+      {
+        "key": "ctrl+alt+m",
+        "command": "fixture.mike",
+        "when": "editorTextFocus && resourceExtname == .fx"
+      }
+    ],
+    "configuration": {
+      "title": "Fixture",
+      "properties": {
+        "fixture.maxItems": {
+          "type": "number",
+          "default": 50,
+          "description": "Maximum items to list before truncating."
+        },
+        "fixture.enableFoo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the <foo> subsystem."
+        },
+        "fixture.label": {
+          "type": "string",
+          "default": "",
+          "description": "Label used in Task<T> headers."
+        }
+      }
+    }
+  }
+}

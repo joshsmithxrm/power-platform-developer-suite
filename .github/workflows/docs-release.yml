@@ -1,0 +1,141 @@
+name: docs-release
+
+# Triggered on release tags (v*). Regenerates every surface's reference
+# markdown, computes a surface-change summary, and opens paired PRs — one in
+# ppds-docs carrying the generated markdown, and one here rolling
+# PublicAPI.Unshipped.txt entries into Shipped.
+#
+# Spec: specs/docs-generation.md — Primary Flows "Release tag ships docs" +
+# AC-25, AC-26, AC-27, AC-30.
+#
+# The live PR-creation steps are TODO — GitHub App installation is tracked as
+# a runbook item (Phase 5 §5.1). The dry-run path (workflow_dispatch with
+# dry_run=true) exercises every generator end-to-end and uploads artifacts.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Generate and print artifacts without opening PRs."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ppds
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for open prior rollover PR
+        id: check-open-rollover
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/docs-gen/check-open-rollover.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: |
+          dotnet build PPDS.sln -c Release -o artifacts/bin
+          ls artifacts/bin/PPDS.Cli.dll
+          ls artifacts/bin/PPDS.Mcp.dll
+
+      - name: Generate reference markdown
+        run: |
+          mkdir -p artifacts/docs
+          dotnet run --project scripts/docs-gen/cli-reflect -c Release -- \
+            --assembly artifacts/bin/PPDS.Cli.dll \
+            --output artifacts/docs/reference/cli
+          dotnet run --project scripts/docs-gen/libs-reflect -c Release -- \
+            --assemblies artifacts/bin \
+            --output artifacts/docs/reference/libraries
+          dotnet run --project scripts/docs-gen/mcp-reflect -c Release -- \
+            --assembly artifacts/bin/PPDS.Mcp.dll \
+            --output artifacts/docs/reference/mcp
+          node scripts/docs-gen/ext-reflect/generate.js \
+            --package-json src/PPDS.Extension/package.json \
+            --output artifacts/docs/reference/extension
+
+      - name: Compute surface-change summary
+        id: summary
+        run: bash scripts/docs-gen/compute-surface-summary.sh > artifacts/pr-body.md
+
+      - name: Dry-run print artifacts
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "=== FILE TREE ==="
+          find artifacts/docs -type f | sort
+          echo ""
+          echo "=== PR BODY ==="
+          cat artifacts/pr-body.md
+          echo ""
+          echo "=== ROLLOVER DIFF ==="
+          bash scripts/docs-gen/compute-rollover-diff.sh
+
+      - name: Upload dry-run artifacts
+        if: ${{ inputs.dry_run == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-release-dry-run
+          path: artifacts/
+
+      # ----------------------------------------------------------------
+      # Live PR creation — TODO: requires GitHub App installed on ppds +
+      # ppds-docs. Runbook: scripts/docs-gen/README.md (Phase 6).
+      # ----------------------------------------------------------------
+
+      - name: Get GitHub App token
+        if: ${{ inputs.dry_run != true }}
+        id: app-token
+        env:
+          APP_ID: ${{ secrets.PPDS_DOCS_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.PPDS_DOCS_APP_PRIVATE_KEY }}
+        run: |
+          # TODO: once the PPDS_DOCS_APP_ID / PPDS_DOCS_APP_PRIVATE_KEY
+          # secrets are configured on this repo, invoke the helper:
+          #   TOKEN=$(dotnet run --project scripts/docs-gen/app-token -c Release)
+          #   echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          # Until then, skip cleanly so the workflow remains valid without
+          # halting on a missing secret.
+          echo "app-token: GitHub App not configured; skipping live PR step" >&2
+          echo "token=" >> "$GITHUB_OUTPUT"
+
+      - name: Open ppds-docs PR
+        if: ${{ inputs.dry_run != true && steps.app-token.outputs.token != '' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG_REF: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          DOCS_REPO: ${{ vars.PPDS_DOCS_REPO }}
+        run: |
+          # TODO: write artifacts/docs/** into a fresh branch in ppds-docs,
+          # push, and open a PR with artifacts/pr-body.md as the body. Until
+          # the open-docs-pr.sh helper exists this is a no-op.
+          echo "open-docs-pr: TODO — would push to $DOCS_REPO on branch docs/release-$TAG_REF" >&2
+
+      - name: Open baseline rollover PR
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_REF: ${{ github.ref_name }}
+        run: |
+          # TODO: run compute-rollover-diff.sh, stage the modified
+          # PublicAPI.{Shipped,Unshipped}.txt files, push a branch, and open
+          # a PR titled "chore(release): $TAG_REF baseline rollover". Until
+          # the open-rollover-pr.sh helper exists this is a no-op.
+          echo "open-rollover-pr: TODO — would open rollover PR for $TAG_REF" >&2

@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PPDS.DocsGen.Libs.Tests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Fixtures/ contains a standalone class library compiled separately; exclude its sources
+       and obj/bin from this project's compilation. -->
+  <ItemGroup>
+    <Compile Remove="Fixtures\**\*.cs" />
+    <None Remove="Fixtures\bin\**" />
+    <None Remove="Fixtures\obj\**" />
+    <EmbeddedResource Remove="Fixtures\**" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Fixtures\bin\**;Fixtures\obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\scripts\docs-gen\libs-reflect\libs-reflect.csproj" />
+    <ProjectReference Include="..\..\scripts\docs-gen\PPDS.DocsGen.Common\PPDS.DocsGen.Common.csproj" />
+  </ItemGroup>
+
+  <!-- Build the fixture library first but do NOT reference its assembly (reflected at runtime). -->
+  <ItemGroup>
+    <ProjectReference Include="Fixtures\PPDS.DocsGen.Libs.Tests.FixtureLib.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      UndefineProperties="TargetFramework" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Fixtures\Expected\**\*.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    After the fixture library builds, copy its DLL + XML docs into a fixture-output folder
+    under the test's bin dir so tests can reflect over a real assembly+xml pair.
+  -->
+  <Target Name="CopyFixtureAssembly" AfterTargets="Build">
+    <ItemGroup>
+      <_FixtureArtifact Include="$(MSBuildThisFileDirectory)Fixtures\bin\$(Configuration)\net8.0\PPDS.DocsGen.Libs.Tests.FixtureLib.dll" />
+      <_FixtureArtifact Include="$(MSBuildThisFileDirectory)Fixtures\bin\$(Configuration)\net8.0\PPDS.DocsGen.Libs.Tests.FixtureLib.xml" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_FixtureArtifact)"
+          DestinationFolder="$(OutputPath)FixtureAssembly"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(Identity)')" />
+  </Target>
+
+</Project>

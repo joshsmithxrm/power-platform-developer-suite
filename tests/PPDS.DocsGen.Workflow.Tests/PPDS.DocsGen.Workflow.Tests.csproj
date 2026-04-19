@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PPDS.DocsGen.Workflow.Tests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- The Fixtures/ and mdx-fixture/ directories hold non-C# assets
+       (markdown, JSON, node scripts). Disable the default compile glob so
+       nothing under those trees accidentally becomes part of the test
+       assembly. -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**\*.cs"
+             Exclude="Fixtures\**\*.cs;mdx-fixture\**\*.cs;bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Reference the smoke tool so AC-30 can invoke the built smoke.dll
+       without a separate dotnet run/build step. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\scripts\docs-gen\smoke\smoke.csproj" />
+  </ItemGroup>
+
+  <!-- The mdx-fixture directory holds package.json + parse.mjs used at test
+       time. We copy them to the output directory and install node_modules on
+       demand inside the test (so CI without network can Skip the MDX test).
+       Everything else (generator fixtures) is read from source via a relative
+       path anchored on the test assembly location. -->
+  <ItemGroup>
+    <None Include="mdx-fixture\package.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="mdx-fixture\parse.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Ship fixture trees (dryrun + smoke scenarios) to bin/ so tests can
+       invoke the real shell scripts against an immutable snapshot. -->
+  <ItemGroup>
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
