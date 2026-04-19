@@ -81,6 +81,8 @@ internal static class ShellRunner
             WorkingDirectory = workingDir ?? RepoRoot.Find(),
         };
 
+        ScrubInheritedGitEnv(psi);
+
         psi.ArgumentList.Add(scriptPath);
         foreach (var a in args)
         {
@@ -127,6 +129,8 @@ internal static class ShellRunner
             WorkingDirectory = workingDir ?? RepoRoot.Find(),
         };
 
+        ScrubInheritedGitEnv(psi);
+
         psi.ArgumentList.Add(scriptPath);
         foreach (var a in args)
         {
@@ -148,6 +152,8 @@ internal static class ShellRunner
             WorkingDirectory = workingDir,
         };
 
+        ScrubInheritedGitEnv(psi);
+
         // Force a deterministic identity + no GPG signing inside temp repos.
         psi.Environment["GIT_AUTHOR_NAME"] = "Fixture";
         psi.Environment["GIT_AUTHOR_EMAIL"] = "fixture@example.invalid";
@@ -160,6 +166,40 @@ internal static class ShellRunner
         }
 
         return RunAndCollect(psi, 30_000);
+    }
+
+    /// <summary>
+    /// Drop git's path-discovery env vars from the child process. When this
+    /// test assembly runs under a git hook (e.g. pre-commit → dotnet test),
+    /// the hook child inherits GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE from
+    /// the parent. Those override WorkingDirectory for path resolution, so
+    /// <c>git add</c> / <c>git commit</c> issued from these tests against a
+    /// temp fakeRepo would silently land in the invoking repo's index. See
+    /// issue #794.
+    /// </summary>
+    private static void ScrubInheritedGitEnv(ProcessStartInfo psi)
+    {
+        string[] pathDiscoveryVars =
+        {
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_NAMESPACE",
+            "GIT_PREFIX",
+        };
+
+        foreach (var key in pathDiscoveryVars)
+        {
+            psi.Environment.Remove(key);
+        }
+
+        // Defense-in-depth: halt git's upward walk at the system temp root so
+        // it cannot escape into an enclosing worktree even if a new discovery
+        // var is added to git in the future.
+        psi.Environment["GIT_CEILING_DIRECTORIES"] = Path.GetTempPath();
     }
 
     /// <summary>
