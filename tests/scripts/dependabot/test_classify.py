@@ -8,6 +8,7 @@ branch. They are pure functions — no network, no gh CLI, no git.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -457,6 +458,54 @@ class TestClassifyPR(unittest.TestCase):
         c = classify.classify_pr(pr)
         self.assertEqual(c.update_type, "major")
         self.assertEqual(c.group, "C")
+
+
+class TestAuthCriticalDocCodeDrift(unittest.TestCase):
+    """Drift detection (issue #818).
+
+    docs/MERGE-POLICY.md is the single source of truth for the auth-critical
+    package list. This test parses the list from the doc (between
+    AUTH_CRITICAL_PACKAGES:BEGIN / :END markers) and compares it to the
+    AUTH_CRITICAL_PACKAGES set in scripts/dependabot/classify.py. They MUST
+    agree — if you add or remove a package, update both places.
+    """
+
+    DOC_PATH = REPO_ROOT / "docs" / "MERGE-POLICY.md"
+    BEGIN_MARKER = "<!-- AUTH_CRITICAL_PACKAGES:BEGIN -->"
+    END_MARKER = "<!-- AUTH_CRITICAL_PACKAGES:END -->"
+
+    def _parse_doc_list(self) -> set[str]:
+        text = self.DOC_PATH.read_text(encoding="utf-8")
+        try:
+            block = text.split(self.BEGIN_MARKER, 1)[1].split(self.END_MARKER, 1)[0]
+        except IndexError:
+            self.fail(
+                f"docs/MERGE-POLICY.md is missing the {self.BEGIN_MARKER} / "
+                f"{self.END_MARKER} markers around the auth-critical package list."
+            )
+        # Lines look like: "- `Microsoft.Identity.Client`"
+        item_re = re.compile(r"^\s*-\s*`([^`]+)`\s*$")
+        out: set[str] = set()
+        for line in block.splitlines():
+            m = item_re.match(line)
+            if m:
+                out.add(m.group(1).lower())
+        return out
+
+    def test_doc_list_matches_code_list(self):
+        doc_set = self._parse_doc_list()
+        code_set = set(classify.AUTH_CRITICAL_PACKAGES)
+        self.assertEqual(
+            doc_set,
+            code_set,
+            (
+                "Auth-critical package list drift between docs/MERGE-POLICY.md and "
+                "scripts/dependabot/classify.py.\n"
+                f"  Only in doc:  {sorted(doc_set - code_set)}\n"
+                f"  Only in code: {sorted(code_set - doc_set)}\n"
+                "Update both places to match (see issue #818)."
+            ),
+        )
 
 
 class TestCLIRoundTrip(unittest.TestCase):

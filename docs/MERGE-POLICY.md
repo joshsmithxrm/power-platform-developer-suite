@@ -52,6 +52,22 @@ Reasoning: simplest to enforce, hardest to misinterpret, and consistent with the
 
 The classifier in `scripts/dependabot/classify.py` implements this rule by parsing the dependabot PR body (which lists each member bump as `Updates <pkg> from <a> to <b>`) and selecting the most-conservative type seen.
 
+## Auth-Critical Packages
+
+The following packages are flagged as **auth-critical** — bumps to them at any non-major version go through Group B (verify-then-merge), and major bumps go through Group C (manual review). This list is the **single source of truth**; the classifier in `scripts/dependabot/classify.py` mirrors it as `AUTH_CRITICAL_PACKAGES`, and a unit test (`TestAuthCriticalDocCodeDrift.test_doc_list_matches_code_list`) fails if the two diverge.
+
+<!-- AUTH_CRITICAL_PACKAGES:BEGIN -->
+- `Microsoft.Identity.Client`
+- `Microsoft.Identity.Client.Extensions.Msal`
+- `Azure.Identity`
+- `Azure.Core`
+- `Microsoft.PowerPlatform.Dataverse.Client`
+- `System.Security.Cryptography.Xml`
+- `System.Security.Cryptography.Pkcs`
+<!-- AUTH_CRITICAL_PACKAGES:END -->
+
+To add or remove a package: edit the list above (between the `BEGIN`/`END` markers), update `AUTH_CRITICAL_PACKAGES` in `scripts/dependabot/classify.py`, and re-run `pytest tests/scripts/dependabot/`. The drift test will confirm the lists match.
+
 ## Branch Protection
 
 `main` is protected. PRs must:
