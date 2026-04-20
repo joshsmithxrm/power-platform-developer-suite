@@ -30,7 +30,9 @@ def test_all_marketplace_listing_acs_green() -> None:
     result = subprocess.run(
         cmd,
         cwd=TESTS_DIR.parents[1],
-        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
     assert result.returncode == 0, (
