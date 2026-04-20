@@ -42,9 +42,21 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass  # If git isn't available, don't block
 
+    # Dedup: if /gates already validated the current HEAD, skip build+test.
+    # /gates writes gates.commit_ref = HEAD after passing. If it still matches
+    # HEAD at commit time, the build+test we're about to run is redundant.
+    # Post-commit-state clears gates.commit_ref, so this only skips the FIRST
+    # commit after /gates — exactly the duplicate case.
+    if _gates_fresh(project_dir):
+        print(
+            "✅ Skipping build+test — /gates validated HEAD already (dedup).",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
     try:
         print("🔨 Running pre-commit validation...", file=sys.stderr)
-        
+
         # Run dotnet build
         build_result = subprocess.run(
             ["dotnet", "build", "-c", "Release", "--nologo", "-v", "q"],
@@ -133,6 +145,75 @@ def main():
     except subprocess.TimeoutExpired:
         print("⚠️ Build/test timed out. Skipping validation.", file=sys.stderr)
         sys.exit(0)
+
+
+def _gates_fresh(project_dir):
+    """Return True iff /gates validated exactly what's about to be committed.
+
+    Two conditions must both hold:
+
+    1. ``gates.passed`` is truthy and ``gates.commit_ref == git rev-parse HEAD``
+       — /gates ran against the current HEAD.
+    2. The index has no staged changes relative to HEAD
+       (``git diff --cached --quiet HEAD`` exits 0) — i.e., nothing new has
+       been staged since /gates ran. Without this check the skip-path would
+       wrongly suppress build+test for a commit that adds *new* staged
+       changes on top of the validated HEAD (Gemini PR #841).
+
+    Returns False on any error (state missing, JSON corrupt, git unavailable)
+    so the hook falls back to the full validation path — regressions must
+    never silently mask.
+    """
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
+    if not os.path.exists(state_path):
+        return False
+
+    try:
+        with open(state_path, "r") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    gates = state.get("gates") or {}
+    if not gates.get("passed"):
+        return False
+    gates_ref = gates.get("commit_ref")
+    if not gates_ref:
+        return False
+
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+    if head.returncode != 0:
+        return False
+
+    if head.stdout.strip() != gates_ref:
+        return False
+
+    # Index-drift guard: if anything is staged beyond the validated HEAD,
+    # we have un-validated content in the pending commit — fall through.
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+    # Exit 0 → index matches HEAD (nothing staged). Exit 1 → staged diff
+    # exists. Other non-zero codes → git error; be safe and fall through.
+    return staged.returncode == 0
 
 
 def _check_workflow_state(project_dir):
