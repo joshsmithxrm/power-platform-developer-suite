@@ -169,18 +169,69 @@ _FILTER_JS = """\
 
 # ----- Markdown → HTML (minimal, deterministic) -----------------------------
 
-_INLINE_CODE = re.compile(r"`([^`]+)`")
+# CommonMark-adaptive inline code: a run of N backticks opens a span that
+# closes at the next run of exactly N backticks. Allows embedded runs of
+# fewer than N backticks (e.g. ``a ` b`` renders <code>a ` b</code>).
+_INLINE_CODE = re.compile(r"(`+)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _ITALIC = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
+def _code_span_inner(content: str) -> str:
+    """CommonMark code-span normalisation: strip a single leading/trailing
+    space iff the content both starts and ends with a space and is not
+    entirely whitespace. Operates on already-html-escaped text."""
+    if (
+        len(content) >= 2
+        and content.startswith(" ")
+        and content.endswith(" ")
+        and content.strip() != ""
+    ):
+        return content[1:-1]
+    return content
+
+
+def _sanitize_url(url: str) -> str:
+    """Return *url* if it uses a safe scheme, else ``"#"``. Input is assumed
+    to have been html-escaped already (so ``&`` appears as ``&amp;``). Control
+    characters and whitespace are stripped before scheme inspection to defeat
+    obfuscated ``java\\tscript:`` variants."""
+    if not url:
+        return "#"
+    # Strip ASCII control chars + whitespace that browsers otherwise ignore
+    # when parsing the scheme (``java\tscript:foo`` is treated as javascript).
+    cleaned = "".join(ch for ch in url if ord(ch) > 0x20).lstrip()
+    lower = cleaned.lower()
+    # Relative / fragment / path URLs — allow.
+    if lower.startswith(("#", "/", "./", "../")):
+        return url
+    # Scheme-relative ``//host/...`` — allow (browser inherits page scheme).
+    if lower.startswith("//"):
+        return url
+    # Has an explicit scheme? Only allow the whitelist.
+    # Use the cleaned form for the scheme test so ``java\tscript:`` is caught.
+    colon = lower.find(":")
+    if colon == -1:
+        # No scheme and not anchored — treat as relative.
+        return url
+    scheme = lower[: colon + 1]
+    if scheme in ("http:", "https:", "mailto:"):
+        return url
+    return "#"
+
+
 def _inline_md(text: str) -> str:
     """Render inline Markdown to HTML. Assumes *text* is already html-escaped."""
-    text = _INLINE_CODE.sub(lambda m: "<code>" + m.group(1) + "</code>", text)
+    text = _INLINE_CODE.sub(
+        lambda m: "<code>" + _code_span_inner(m.group(2)) + "</code>", text
+    )
     text = _BOLD.sub(lambda m: "<strong>" + m.group(1) + "</strong>", text)
     text = _ITALIC.sub(lambda m: "<em>" + m.group(1) + "</em>", text)
-    text = _LINK.sub(lambda m: '<a href="' + m.group(2) + '">' + m.group(1) + "</a>", text)
+    text = _LINK.sub(
+        lambda m: '<a href="' + _sanitize_url(m.group(2)) + '">' + m.group(1) + "</a>",
+        text,
+    )
     return text
 
 

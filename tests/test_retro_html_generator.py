@@ -339,6 +339,124 @@ class TestCli:
 # ---------------- Integration-ish ----------------------------------------
 
 
+class TestInlineCodeSpans:
+    """CommonMark-adaptive inline code: N backticks open a span that closes
+    at the next run of exactly N backticks (allows embedded shorter runs).
+    Input to ``_inline_md`` is already html-escaped — tests feed escaped text.
+    """
+
+    def test_single_backtick(self):
+        assert gen._inline_md("see `foo` here") == "see <code>foo</code> here"
+
+    def test_double_backticks_allow_embedded_single(self):
+        # ``a ` b`` -> <code>a ` b</code>
+        out = gen._inline_md("``a ` b``")
+        assert out == "<code>a ` b</code>"
+
+    def test_code_span_strips_padding_when_both_sides_space(self):
+        # ``  foo  `` -> <code> foo </code> (one space stripped each side)
+        out = gen._inline_md("`` foo ``")
+        assert out == "<code>foo</code>"
+
+    def test_code_span_keeps_leading_space_only(self):
+        # `` foo`` -> <code> foo</code> (asymmetric padding preserved)
+        out = gen._inline_md("`` foo``")
+        assert out == "<code> foo</code>"
+
+    def test_triple_backticks(self):
+        out = gen._inline_md("```a `` b```")
+        assert out == "<code>a `` b</code>"
+
+    def test_unmatched_backtick_passes_through(self):
+        out = gen._inline_md("a `foo bar")
+        assert out == "a `foo bar"
+
+    def test_adjacent_spans(self):
+        out = gen._inline_md("`a` and `b`")
+        assert out == "<code>a</code> and <code>b</code>"
+
+
+class TestLinkSanitization:
+    """Markdown link URLs must be restricted to safe schemes to prevent
+    javascript:/data:/vbscript: XSS in retro HTML dashboards.
+    """
+
+    def test_https_url_passes(self):
+        out = gen._inline_md("[ok](https://example.com)")
+        assert out == '<a href="https://example.com">ok</a>'
+
+    def test_http_url_passes(self):
+        out = gen._inline_md("[ok](http://example.com)")
+        assert out == '<a href="http://example.com">ok</a>'
+
+    def test_mailto_passes(self):
+        out = gen._inline_md("[mail](mailto:a@b.c)")
+        assert out == '<a href="mailto:a@b.c">mail</a>'
+
+    def test_relative_path_passes(self):
+        out = gen._inline_md("[rel](./foo.html)")
+        assert out == '<a href="./foo.html">rel</a>'
+        out = gen._inline_md("[rel](/abs/path)")
+        assert out == '<a href="/abs/path">rel</a>'
+        out = gen._inline_md("[rel](foo.html)")
+        assert out == '<a href="foo.html">rel</a>'
+
+    def test_fragment_passes(self):
+        out = gen._inline_md("[anchor](#section)")
+        assert out == '<a href="#section">anchor</a>'
+
+    def test_javascript_scheme_blocked(self):
+        out = gen._inline_md("[x](javascript:alert(1))")
+        assert 'href="javascript:' not in out
+        assert 'href="#"' in out
+
+    def test_javascript_scheme_case_insensitive(self):
+        out = gen._inline_md("[x](JAVAscript:alert(1))")
+        assert 'href="#"' in out
+        assert "JAVAscript" not in out.split('href="')[1].split('"')[0]
+
+    def test_data_scheme_blocked(self):
+        out = gen._inline_md("[x](data:text/html,<script>alert(1)</script>)")
+        # Link pattern stops at first ``)`` — but even the truncated prefix
+        # must be rejected.
+        assert 'href="data:' not in out
+        assert 'href="#"' in out
+
+    def test_vbscript_scheme_blocked(self):
+        out = gen._inline_md("[x](vbscript:msgbox)")
+        assert 'href="#"' in out
+
+    def test_file_scheme_blocked(self):
+        out = gen._inline_md("[x](file:///etc/passwd)")
+        assert 'href="#"' in out
+
+    def test_control_char_obfuscation_blocked(self):
+        # Tab inside scheme must still be rejected (browsers ignore control
+        # chars when parsing the scheme).
+        out = gen._inline_md("[x](java\tscript:alert(1))")
+        assert 'href="#"' in out
+
+    def test_leading_whitespace_obfuscation_blocked(self):
+        out = gen._inline_md("[x]( javascript:alert(1))")
+        assert 'href="#"' in out
+
+    def test_full_render_sanitizes_user_supplied_link(self):
+        data = {
+            "session_date": "2026-04-19",
+            "findings": [
+                {
+                    "id": "R-01",
+                    "tier": "observation",
+                    "description": "click [here](javascript:alert(1)) now",
+                }
+            ],
+        }
+        html = gen.render_summary(data)
+        assert "javascript:alert" not in html
+        # The literal text of the link is preserved; only the href is neutralised.
+        assert 'href="javascript:' not in html
+
+
 class TestSmokeRoundtrip:
     def test_render_then_parse_doctype_and_wellformed_tags(self):
         """A weak invariant: output has matched tag counts for critical tags."""
