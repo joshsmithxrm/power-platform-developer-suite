@@ -89,7 +89,7 @@ PPDS provides the pipeline building blocks — stateless env-var authentication,
 
 - [Report an issue](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
 - [Documentation](https://joshsmithxrm.github.io/ppds-docs/)
-- Known limitations are tracked in the [CHANGELOG](CHANGELOG.md).
+- Known limitations are listed in [docs/whats-new-v1.md](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/whats-new-v1.md#known-limitations).
 
 ## License
 
