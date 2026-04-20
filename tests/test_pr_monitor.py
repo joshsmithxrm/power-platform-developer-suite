@@ -972,6 +972,224 @@ class TestReadyFlipGates:
         assert any("unreplied_comments" in r for r in reasons)
 
 
+class TestGeminiEffectivelyDone:
+    """Clean-approval / decline pattern detection for the ready-flip gate."""
+
+    def test_clean_approval_phrase_detected(self):
+        """Classic 'no feedback' body is treated as effectively done."""
+        body = (
+            "## Code Review\n\n"
+            "I have no feedback to provide on this pull request."
+        )
+        assert pr_monitor._gemini_effectively_done(body) is True
+
+    def test_decline_phrase_detected(self):
+        """'Unable to generate a review' body is treated as effectively done."""
+        body = (
+            "Gemini is unable to generate a review for this pull request "
+            "due to the file types involved not being currently supported."
+        )
+        assert pr_monitor._gemini_effectively_done(body) is True
+
+    def test_issues_present_body_not_matched(self):
+        """A body that flagged issues should NOT match the clean patterns."""
+        body = (
+            "## Code Review\n\n"
+            "I found a few issues with this pull request. See inline "
+            "comments for details."
+        )
+        assert pr_monitor._gemini_effectively_done(body) is False
+
+    def test_empty_body_not_matched(self):
+        """Empty string returns False (no patterns can match)."""
+        assert pr_monitor._gemini_effectively_done("") is False
+
+    def test_none_body_not_matched(self):
+        """None body is handled without raising and returns False."""
+        assert pr_monitor._gemini_effectively_done(None) is False
+
+    def test_patterns_are_module_constant(self):
+        """Patterns are exposed for external extension/inspection."""
+        assert isinstance(pr_monitor._GEMINI_CLEAN_PATTERNS, tuple)
+        assert "I have no feedback to provide" in pr_monitor._GEMINI_CLEAN_PATTERNS
+        assert "Gemini is unable to generate a review" \
+            in pr_monitor._GEMINI_CLEAN_PATTERNS
+
+
+class TestReadyFlipGeminiDimension:
+    """Ready-flip gate now accepts clean/declined reviews OR replied-issues."""
+
+    def _base_result(self, **overrides):
+        r = pr_monitor._empty_result()
+        r["ci_result"] = "pass"
+        r.update(overrides)
+        return r
+
+    def test_clean_approval_body_satisfies_gemini_gate(self, tmp_path):
+        """Clean-approval body flips the Gemini gate even when posted flag
+        was somehow missed (and even with no inline-comment replies)."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=False,
+            gemini_review_body="I have no feedback to provide on this PR.",
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is True
+        assert reasons == []
+
+    def test_declined_body_satisfies_gemini_gate(self, tmp_path):
+        """Decline phrasing satisfies the Gemini gate — ready to flip."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=False,
+            gemini_review_body=(
+                "Gemini is unable to generate a review for this pull "
+                "request due to the file types involved not being "
+                "currently supported."
+            ),
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is True
+        assert reasons == []
+
+    def test_issues_present_with_replies_satisfies_gate(self, tmp_path):
+        """Gemini flagged issues (non-clean body) + all replied → gate passes."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=True,
+            gemini_review_body="I found issues with this PR.",
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is True
+        assert reasons == []
+
+    def test_issues_present_without_replies_blocks_gate(self, tmp_path):
+        """Gemini flagged issues + unreplied comments → gate fails."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=True,
+            gemini_review_body="I found issues with this PR.",
+        )
+        unreplied = [{"id": 1, "user": "gemini-code-assist[bot]",
+                      "path": "a.py", "line": 1, "body": "fix this"}]
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=unreplied):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is False
+        assert any("unreplied_comments" in r for r in reasons)
+
+    def test_empty_body_without_posted_flag_blocks_gate(self, tmp_path):
+        """Empty body + no review posted → gate fails with posted reason."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=False,
+            gemini_review_body="",
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is False
+        assert "gemini_review_not_posted" in reasons
+
+    def test_none_body_without_posted_flag_blocks_gate(self, tmp_path):
+        """None body + no review posted → gate fails without raising."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=False,
+            gemini_review_body=None,
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is False
+        assert "gemini_review_not_posted" in reasons
+
+    def test_clean_gemini_with_other_unreplied_blocks_gate(self, tmp_path):
+        """Gemini clean-approval must NOT mask unreplied comments from
+        other reviewers (e.g. CodeQL). PR #846 review regression guard.
+        """
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=True,
+            gemini_review_body="I have no feedback to provide on this PR.",
+        )
+        # Simulate an unreplied CodeQL finding aggregated by
+        # get_unreplied_comments (which covers multiple bots).
+        unreplied = [{"id": 99, "user": "github-advanced-security[bot]",
+                      "path": "scripts/pr_monitor.py", "line": 1,
+                      "body": "Potential security issue"}]
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=unreplied):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is False
+        assert any("unreplied_comments" in r for r in reasons)
+
+    def test_declined_gemini_with_other_unreplied_blocks_gate(self, tmp_path):
+        """Gemini decline must NOT mask unreplied comments from other
+        reviewers — decline satisfies the Gemini dimension only.
+        """
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=True,
+            gemini_review_body=(
+                "Gemini is unable to generate a review for this pull "
+                "request due to the file types involved not being "
+                "currently supported."
+            ),
+        )
+        unreplied = [{"id": 77, "user": "github-advanced-security[bot]",
+                      "path": "scripts/pr_monitor.py", "line": 1,
+                      "body": "CodeQL finding"}]
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=unreplied):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is False
+        assert any("unreplied_comments" in r for r in reasons)
+
+    def test_declined_gemini_with_zero_unreplied_passes_gate(self, tmp_path):
+        """Gemini decline + zero unreplied comments (e.g. yml-only PR)
+        → gate passes. Complements the regression guards above.
+        """
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(
+            gemini_review_posted=False,
+            gemini_review_body=(
+                "Gemini is unable to generate a review for this pull "
+                "request due to the file types involved not being "
+                "currently supported."
+            ),
+        )
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+
+        assert ok is True
+        assert reasons == []
+
+
 class TestReplyDedupe:
     """Meta-retro finding #3: in-process dedupe prevents duplicate POSTs."""
 

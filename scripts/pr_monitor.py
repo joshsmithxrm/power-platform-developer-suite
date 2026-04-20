@@ -49,6 +49,30 @@ MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 SHAKEDOWN = os.environ.get("PPDS_SHAKEDOWN", "")
 
+# Substrings that indicate Gemini has "spoken" but has nothing for us to
+# address — either a clean approval (top-level review with no inline notes)
+# or an explicit decline (file types not currently supported).
+# Both are treated as ready-flip-eligible for the Gemini gate. Extend this
+# list as new Gemini phrasings are discovered. Matching is case-sensitive
+# substring to minimise false positives.
+_GEMINI_CLEAN_PATTERNS = (
+    "I have no feedback to provide",
+    "Gemini is unable to generate a review",
+    # Add future patterns here as discovered.
+)
+
+
+def _gemini_effectively_done(review_body):
+    """Return True if Gemini's latest review body indicates nothing to address.
+
+    Matches clean-approval phrasing OR explicit "unable to review" declines.
+    Does NOT match reviews that flagged issues (those have inline comments
+    and require per-comment triage separately).
+    """
+    if not review_body:
+        return False
+    return any(p in review_body for p in _GEMINI_CLEAN_PATTERNS)
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -128,6 +152,10 @@ def _empty_result():
         # Set to True by _step_gemini whenever a poll returns
         # status="review_received" (meta-retro finding #2 gate).
         "gemini_review_posted": False,
+        # Latest Gemini top-level review body (string). Captured so the
+        # ready-flip gate can distinguish clean-approval / declined reviews
+        # from reviews that flagged issues needing replies.
+        "gemini_review_body": "",
         "timestamp": _timestamp(),
     }
 
@@ -289,7 +317,52 @@ def poll_gemini_comments(worktree, pr_number, logger):
     # (Stashed on the logger instance to avoid changing the return shape —
     # _step_gemini reads and clears it before writing to result.)
     logger.last_gemini_status = status
+    # Capture the latest Gemini top-level review body for the ready-flip
+    # gate's clean/declined pattern detection. Best-effort — on any error
+    # we fall back to "" (which _gemini_effectively_done treats as "not done").
+    logger.last_gemini_review_body = (
+        _fetch_latest_gemini_review_body(worktree, pr_number)
+        if status == "review_received" else ""
+    )
     return comments
+
+
+def _fetch_latest_gemini_review_body(worktree, pr_number):
+    """Return the body of Gemini's most recent top-level review on the PR.
+
+    Returns "" on any error or if no Gemini review is found. Used only by
+    the ready-flip gate to detect clean-approval / declined review phrasing.
+    """
+    repo = get_repo_slug(worktree)
+    if not repo:
+        return ""
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews",
+             "--paginate", "--slurp"],
+            cwd=worktree, capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode != 0:
+            return ""
+        payload = json.loads(proc.stdout or "[]")
+        # --paginate --slurp returns a list of pages; flatten one level.
+        if isinstance(payload, list) and payload and isinstance(payload[0], list):
+            reviews = [r for page in payload for r in page]
+        else:
+            reviews = payload or []
+    except (subprocess.TimeoutExpired, FileNotFoundError,
+            json.JSONDecodeError, ValueError, OSError):
+        return ""
+
+    latest = None
+    for r in reviews:
+        if (r.get("user") or {}).get("login") != GEMINI_BOT_LOGIN:
+            continue
+        ts = r.get("submitted_at") or r.get("created_at") or ""
+        if latest is None or ts > (latest.get("submitted_at")
+                                   or latest.get("created_at") or ""):
+            latest = r
+    return (latest or {}).get("body") or ""
 
 
 def run_triage(worktree, pr_number, comments, logger):
@@ -993,6 +1066,11 @@ def _step_gemini(worktree, pr_number, logger, result, step_suffix=""):
         status = getattr(logger, "last_gemini_status", None)
         if status == "review_received":
             result["gemini_review_posted"] = True
+        # Persist the latest review body (may be empty string) so the
+        # ready-flip gate can detect clean/declined approval patterns.
+        body = getattr(logger, "last_gemini_review_body", "")
+        if body:
+            result["gemini_review_body"] = body
         mark_step(result, step_name, "done")
         write_result(worktree, result)
         return comments
@@ -1026,16 +1104,29 @@ def _step_triage(worktree, pr_number, comments, logger, result,
 
 
 def _ready_flip_gates(worktree, pr_number, result, logger):
-    """Evaluate the 3 gates for auto-ready-flip (meta-retro #2).
+    """Evaluate the gates for auto-ready-flip (meta-retro #2).
 
-    Returns (ok, failing_reasons). ok is True only when all three gates
-    pass: CI green, Gemini posted review, no unreplied bot comments.
+    Returns (ok, failing_reasons). ok is True only when all gates pass:
+      - CI green, AND
+      - Gemini dimension is satisfied — either the latest review body
+        matches a clean-approval / declined pattern
+        (see ``_gemini_effectively_done``), OR Gemini posted a review, AND
+      - no unreplied bot comments remain from ANY reviewer (Gemini,
+        CodeQL / github-advanced-security, or other aggregated sources
+        returned by ``get_unreplied_comments``). A Gemini clean/declined
+        review satisfies the "Gemini reviewed" dimension but does NOT
+        bypass unreplied comments from other reviewers — see PR #846
+        review (gemini-code-assist HIGH, 2026-04-20).
     """
     reasons = []
     if result.get("ci_result") != "pass":
         reasons.append(f"ci_result={result.get('ci_result')!r}")
-    if not result.get("gemini_review_posted"):
+
+    review_body = result.get("gemini_review_body") or ""
+    gemini_done_clean = _gemini_effectively_done(review_body)
+    if not gemini_done_clean and not result.get("gemini_review_posted"):
         reasons.append("gemini_review_not_posted")
+
     try:
         unreplied = get_unreplied_comments(
             worktree, pr_number, shakedown=bool(SHAKEDOWN),
@@ -1044,6 +1135,10 @@ def _ready_flip_gates(worktree, pr_number, result, logger):
         logger.log("ready", "UNREPLIED_CHECK_ERROR", error=str(e))
         unreplied = []
         reasons.append("unreplied_check_error")
+    # Always enforce the unreplied gate — regardless of Gemini's own
+    # state. ``get_unreplied_comments`` aggregates findings across
+    # multiple bots, and a clean Gemini review must not mask CodeQL or
+    # other unreplied bot findings.
     if unreplied:
         reasons.append(f"unreplied_comments={len(unreplied)}")
     return (not reasons), reasons
