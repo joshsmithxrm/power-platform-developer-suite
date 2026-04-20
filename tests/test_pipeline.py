@@ -2171,7 +2171,10 @@ class TestAllSkillsSetPhase:
         "review": "reviewing",
         "qa": "qa",
         "pr": "pr",
-        "shakedown-workflow": "shakedown",
+        # Bundle 4 (meta-retro #20): shakedown-workflow was folded into
+        # shakedown as "Workflow Mode"; the phase-setting call lives in
+        # shakedown/SKILL.md now.
+        "shakedown": "shakedown",
     }
 
     def test_all_skills_set_phase(self):
