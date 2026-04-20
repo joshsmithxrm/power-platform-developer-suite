@@ -190,7 +190,12 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 if (_isShowingDetail) return;
                 _isShowingDetail = true;
 
-                _detailDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _detailDialog;
+                _detailDialog = null;
+                prior?.Dispose();
 
                 var isReadOnly = variable.Type is "DataSource" or "Secret";
 
@@ -295,19 +300,23 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     Width = Dim.Percent(70),
                     Height = Dim.Percent(70)
                 };
-                _detailDialog = dialog;
+
+                Action closeHandler = () => Application.RequestStop();
+                Action? saveHandler = null;
+
                 try
                 {
+                    _detailDialog = dialog;
                     foreach (var view in detailViews)
                     {
                         dialog.Add(view);
                     }
 
-                    closeButton.Clicked += () => Application.RequestStop();
+                    closeButton.Clicked += closeHandler;
 
                     if (saveButton != null)
                     {
-                        saveButton.Clicked += () =>
+                        saveHandler = () =>
                         {
                             string? newValue = null;
 
@@ -356,15 +365,26 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                                     "EnvironmentVariables.Save");
                             }
                         };
+                        saveButton.Clicked += saveHandler;
                     }
 
                     Application.Run(dialog);
                 }
                 finally
                 {
-                    dialog.Dispose();
+                    // R3: explicitly unsubscribe before disposing.
+                    closeButton.Clicked -= closeHandler;
+                    if (saveButton != null && saveHandler != null)
+                    {
+                        saveButton.Clicked -= saveHandler;
+                    }
+
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _detailDialog;
                     _detailDialog = null;
                     _isShowingDetail = false;
+                    d?.Dispose();
                 }
             });
         }

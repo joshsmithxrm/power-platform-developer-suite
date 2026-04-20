@@ -198,7 +198,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             Application.MainLoop.Invoke(() =>
             {
-                _contentDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _contentDialog;
+                _contentDialog = null;
+                prior?.Dispose();
 
                 var textView = new TextView
                 {
@@ -217,16 +222,19 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _contentDialog = dialog;
                 try
                 {
+                    _contentDialog = dialog;
                     dialog.Add(textView);
                     Application.Run(dialog);
                 }
                 finally
                 {
-                    dialog.Dispose();
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _contentDialog;
                     _contentDialog = null;
+                    d?.Dispose();
                 }
             });
         }
@@ -363,27 +371,32 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(60)
                 };
+
+                Action<ListViewItemEventArgs> openHandler = (args) =>
+                {
+                    if (args.Item == 0)
+                    {
+                        _selectedSolutionId = null;
+                    }
+                    else
+                    {
+                        _selectedSolutionId = solutions[args.Item - 1].Id;
+                    }
+                    Application.RequestStop();
+                };
+
                 try
                 {
                     dialog.Add(listView);
 
-                    listView.OpenSelectedItem += (args) =>
-                    {
-                        if (args.Item == 0)
-                        {
-                            _selectedSolutionId = null;
-                        }
-                        else
-                        {
-                            _selectedSolutionId = solutions[args.Item - 1].Id;
-                        }
-                        Application.RequestStop();
-                    };
+                    listView.OpenSelectedItem += openHandler;
 
                     Application.Run(dialog);
                 }
                 finally
                 {
+                    // R3: explicitly unsubscribe before disposing.
+                    listView.OpenSelectedItem -= openHandler;
                     dialog.Dispose();
                 }
 

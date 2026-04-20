@@ -277,7 +277,12 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                 if (_isShowingDetail) return;
                 _isShowingDetail = true;
 
-                _detailDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _detailDialog;
+                _detailDialog = null;
+                prior?.Dispose();
 
                 var textView = new TextView
                 {
@@ -296,17 +301,20 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _detailDialog = dialog;
                 try
                 {
+                    _detailDialog = dialog;
                     dialog.Add(textView);
                     Application.Run(dialog);
                 }
                 finally
                 {
-                    dialog.Dispose();
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _detailDialog;
                     _detailDialog = null;
                     _isShowingDetail = false;
+                    d?.Dispose();
                 }
             });
         }
@@ -481,22 +489,27 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
                 };
+
+                var confirmed = false;
+                Action selectHandler = () =>
+                {
+                    confirmed = true;
+                    Application.RequestStop();
+                };
+                Action cancelHandler = () => Application.RequestStop();
+                Action<ListViewItemEventArgs> openHandler = _ =>
+                {
+                    confirmed = true;
+                    Application.RequestStop();
+                };
+
                 try
                 {
                     dialog.Add(listView);
 
-                    var confirmed = false;
-                    selectButton.Clicked += () =>
-                    {
-                        confirmed = true;
-                        Application.RequestStop();
-                    };
-                    cancelButton.Clicked += () => Application.RequestStop();
-                    listView.OpenSelectedItem += _ =>
-                    {
-                        confirmed = true;
-                        Application.RequestStop();
-                    };
+                    selectButton.Clicked += selectHandler;
+                    cancelButton.Clicked += cancelHandler;
+                    listView.OpenSelectedItem += openHandler;
 
                     Application.Run(dialog);
 
@@ -513,6 +526,10 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                 }
                 finally
                 {
+                    // R3: explicitly unsubscribe handlers before disposing dialog.
+                    selectButton.Clicked -= selectHandler;
+                    cancelButton.Clicked -= cancelHandler;
+                    listView.OpenSelectedItem -= openHandler;
                     dialog.Dispose();
                 }
             });

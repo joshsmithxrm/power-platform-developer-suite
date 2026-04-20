@@ -205,27 +205,35 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         var formatDialog = new Dialog("Export Format", 40, 8);
         var selectedFormat = "";
+        var csvBtn = new Button("CSV") { X = 4, Y = 1 };
+        var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
+        var cancelBtn = new Button("Cancel") { X = 25, Y = 1 };
+
+        Action csvHandler = () => { selectedFormat = "csv"; Application.RequestStop(); };
+        Action jsonHandler = () => { selectedFormat = "json"; Application.RequestStop(); };
+        Action cancelHandler = () => Application.RequestStop();
+
         try
         {
-            var csvBtn = new Button("CSV") { X = 4, Y = 1 };
-            var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
-            var cancelBtn = new Button("Cancel") { X = 25, Y = 1 };
-
-            csvBtn.Clicked += () => { selectedFormat = "csv"; Application.RequestStop(); };
-            jsonBtn.Clicked += () => { selectedFormat = "json"; Application.RequestStop(); };
-            cancelBtn.Clicked += () => Application.RequestStop();
+            csvBtn.Clicked += csvHandler;
+            jsonBtn.Clicked += jsonHandler;
+            cancelBtn.Clicked += cancelHandler;
 
             formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
             Application.Run(formatDialog);
         }
         finally
         {
+            // R3: explicitly unsubscribe before disposing.
+            csvBtn.Clicked -= csvHandler;
+            jsonBtn.Clicked -= jsonHandler;
+            cancelBtn.Clicked -= cancelHandler;
             formatDialog.Dispose();
         }
 
         if (string.IsNullOrEmpty(selectedFormat)) return;
 
-        string? filePath;
+        string? filePath = null;
         var saveDialog = new SaveDialog("Export Traces", $"traces.{selectedFormat}");
         try
         {
@@ -338,17 +346,27 @@ internal sealed class PluginTracesScreen : TuiScreenBase
                 if (_isShowingDialog) return;
                 _isShowingDialog = true;
 
-                _activeDialog?.Dispose();
-                _activeDialog = new PluginTraceDetailDialog(detail, Session);
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _activeDialog;
+                _activeDialog = null;
+                prior?.Dispose();
+
+                var dialog = new PluginTraceDetailDialog(detail, Session);
                 try
                 {
-                    Application.Run(_activeDialog);
+                    _activeDialog = dialog;
+                    Application.Run(dialog);
                 }
                 finally
                 {
-                    _activeDialog.Dispose();
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _activeDialog;
                     _activeDialog = null;
                     _isShowingDialog = false;
+                    d?.Dispose();
                 }
             });
         }
@@ -427,17 +445,27 @@ internal sealed class PluginTracesScreen : TuiScreenBase
                 if (_isShowingDialog) return;
                 _isShowingDialog = true;
 
-                _activeDialog?.Dispose();
-                _activeDialog = new TraceTimelineDialog(timeline, Session);
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _activeDialog;
+                _activeDialog = null;
+                prior?.Dispose();
+
+                var dialog = new TraceTimelineDialog(timeline, Session);
                 try
                 {
-                    Application.Run(_activeDialog);
+                    _activeDialog = dialog;
+                    Application.Run(dialog);
                 }
                 finally
                 {
-                    _activeDialog.Dispose();
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _activeDialog;
                     _activeDialog = null;
                     _isShowingDialog = false;
+                    d?.Dispose();
                 }
             });
         }
