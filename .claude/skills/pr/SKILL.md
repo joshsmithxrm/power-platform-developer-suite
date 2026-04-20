@@ -81,7 +81,10 @@ the diff is trivially small (rename, single-line fix, docs-only).
 Dispatch the subagent with:
 - The diff: `git diff origin/main...HEAD`
 - The Constitution: `specs/CONSTITUTION.md`
-- Any spec ACs linked from `.workflow/state.json` (`issues` list)
+- Acceptance criteria for each issue number in `.workflow/state.json`'s
+  `issues` array (read via `python scripts/workflow-state.py get issues`).
+  Fetch AC text with `gh issue view <N>` if not already in session context.
+  If `issues` is empty or absent, skip this input.
 
 The subagent returns findings classified as DEFECT / CONCERN / NIT. Present
 them to the user and ask which to address before the PR opens:
@@ -178,24 +181,31 @@ Monitor log: .workflow/pr-monitor.log
 
 Do NOT wait for the monitor to finish. Do NOT do inline Gemini polling. The monitor handles everything asynchronously.
 
-### 7. Post-Merge Auto-Cleanup
+### 7. Post-Merge Cleanup Surfacing
 
 After the PR merges, the worktree and local branch are no longer needed.
-The monitor is responsible for detecting merge completion and invoking
-`/cleanup`; this section documents the contract so both sides agree.
+Cleanup itself is user-initiated — `/cleanup` deletes worktrees and local
+branches, which is destructive and per interaction-patterns §5 must be
+confirmed by the user before execution. This skill does NOT auto-invoke
+`/cleanup`.
 
-Detection: poll `gh pr view <number> --json mergedAt,state` — the PR is
-merged when `mergedAt` is non-null and `state == "MERGED"`. Until then,
-do nothing (the cleanup must not run for closed-without-merge PRs).
+Current behavior (what the monitor does today): on terminal states
+(`MERGED`, `CLOSED`), the monitor writes the final status to
+`.workflow/pr-monitor.log` and its notification payload. It does not poll
+`mergedAt` on a schedule and does not invoke `/cleanup`.
 
-Action on merge detected: invoke the `/cleanup` skill
-(`.claude/skills/cleanup/SKILL.md`). Cleanup will prune this worktree,
-delete the local branch, and rebase remaining active worktrees onto main.
+Expected user flow after merge:
 
-If `/cleanup` cannot be invoked from the background monitor context, the
-fallback is to surface the merged state in the final notification and
-instruct the user to run `/cleanup` manually — do not leave merged
-worktrees around silently.
+1. User sees the merged notification (or runs `/status` and observes
+   `pr.state == MERGED`).
+2. User runs `/cleanup` manually. `/cleanup` presents the list of
+   prunable worktrees/branches for confirmation before deleting.
+
+Future enhancement (out of scope for this PR): add an opt-in flag on
+`/pr` (e.g. `--cleanup-on-merge`) that, combined with a monitor-side
+merge poller, surfaces a single confirmation prompt in the final
+notification rather than silently deleting state. Track via a separate
+issue + spec with numbered ACs before implementing.
 
 ## Error Handling
 
@@ -206,4 +216,4 @@ worktrees around silently.
 | PR creation fails | Check `gh auth status`, suggest `gh auth login` if needed |
 | Push rejected | Check if branch is behind, suggest rebase |
 | Monitor fails to launch | Fall back to inline triage (wait for comments, triage, convert to ready) |
-| Post-merge cleanup fails | Surface failure in notification; instruct user to run `/cleanup` manually |
+| Post-merge state surfaced but user forgot to run `/cleanup` | No automatic recovery — `/cleanup` is user-initiated by design; `/status` will keep reporting merged state until user runs it |
