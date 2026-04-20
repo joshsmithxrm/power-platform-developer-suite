@@ -39,9 +39,23 @@ the v1-prelaunch hook bug fixed by PR #816.
 rather than allows -- an unknown env is more dangerous than a false
 positive.
 
-**Bypass the write-block:** unset the configured env var (default
-``PPDS_SHAKEDOWN``). There is intentionally no softer bypass -- if a write
-is genuinely needed, that takes deliberate action.
+**Activation sources for the write-block (either is sufficient):**
+
+1. Env var ``$PPDS_SHAKEDOWN=1`` (or whichever name is configured under
+   ``safety.readonly_env_var``). Best for shell scripts and CI.
+2. Sentinel file ``.claude/state/shakedown-active.json`` containing at
+   least ``started_at`` (unix timestamp). Required when the activator is
+   a Claude Code session: the Bash tool spawns a fresh shell per
+   invocation, so inline ``PPDS_SHAKEDOWN=1 ppds ...`` prefixes and
+   ``export PPDS_SHAKEDOWN=1`` do not propagate to this hook process.
+   Sentinels older than 24h are silently deleted (self-heal) so a
+   crashed shakedown session cannot wedge the write-block for future
+   sessions.
+
+**Bypass the write-block:** unset the configured env var AND/OR delete
+the sentinel file -- whichever is active. There is intentionally no
+softer bypass -- if a write is genuinely needed, that takes deliberate
+action.
 """
 
 from __future__ import annotations
@@ -51,6 +65,7 @@ import os
 import re
 import shlex
 import sys
+import time
 from typing import Iterable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +78,8 @@ from _pathfix import normalize_msys_path  # noqa: E402
 
 
 _DEFAULT_READONLY_ENV_VAR = "PPDS_SHAKEDOWN"
+_SENTINEL_FILENAME = "shakedown-active.json"
+_SENTINEL_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
 def _project_dir() -> str:
@@ -77,6 +94,10 @@ def _settings_path() -> str:
 
 def _legacy_safe_envs_path() -> str:
     return os.path.join(_project_dir(), ".claude", "state", "safe-envs.json")
+
+
+def _sentinel_path() -> str:
+    return os.path.join(_project_dir(), ".claude", "state", _SENTINEL_FILENAME)
 
 
 def _read_json(path: str) -> Optional[dict]:
@@ -141,6 +162,46 @@ def load_allowlist(config: Optional[dict] = None) -> Optional[list]:
             return [str(name).strip() for name in legacy_safe if str(name).strip()]
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Sentinel file (per-session shakedown activation)
+# ---------------------------------------------------------------------------
+
+
+def _delete_sentinel_quiet() -> None:
+    try:
+        os.remove(_sentinel_path())
+    except OSError:
+        pass
+
+
+def check_sentinel_active() -> bool:
+    """True iff a fresh shakedown sentinel file is present.
+
+    Stale sentinels (older than 24h since ``started_at``) and malformed
+    sentinels are silently deleted -- a crashed session must not wedge
+    the write-block for future sessions.
+    """
+    path = _sentinel_path()
+    if not os.path.isfile(path):
+        return False
+
+    data = _read_json(path)
+    if not isinstance(data, dict):
+        _delete_sentinel_quiet()
+        return False
+
+    started_at = data.get("started_at")
+    if not isinstance(started_at, (int, float)):
+        _delete_sentinel_quiet()
+        return False
+
+    if time.time() - float(started_at) > _SENTINEL_MAX_AGE_SECONDS:
+        _delete_sentinel_quiet()
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -499,20 +560,39 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
     return "\n".join(lines)
 
 
-def _block_msg_mutation(argv: list, reason: str, env_var_name: str) -> str:
+def _block_msg_mutation(
+    argv: list,
+    reason: str,
+    env_var_name: str,
+    *,
+    env_active: bool,
+    sentinel_active: bool,
+) -> str:
+    sentinel_rel = os.path.join(".claude", "state", _SENTINEL_FILENAME)
+    sources = []
+    if env_active:
+        sources.append(f"{env_var_name}=1")
+    if sentinel_active:
+        sources.append(f"sentinel file {sentinel_rel}")
+    activation = " and ".join(sources) if sources else f"{env_var_name}=1"
+
+    bypass_lines = [f"    unset {env_var_name}"]
+    if sentinel_active:
+        bypass_lines.append(f"    rm {sentinel_rel}")
+
     return "\n".join(
         [
             "BLOCKED [shakedown-safety/readonly]: write/mutation command refused.",
             f"  Command: {' '.join(argv)}",
             f"  Pattern: {reason}",
             "",
-            f"  {env_var_name}=1 is set, which puts this session in read-only",
-            "  mode for ppds CLI operations. Mutating Dataverse during",
-            "  shakedown defeats the purpose -- shakedowns are observation,",
-            "  not modification.",
+            f"  Active: {activation} -- this session is in read-only mode for",
+            "  ppds CLI operations. Mutating Dataverse during shakedown",
+            "  defeats the purpose -- shakedowns are observation, not",
+            "  modification.",
             "",
             "  To bypass (deliberate action -- there is no softer marker):",
-            f"    unset {env_var_name}",
+            *bypass_lines,
             "",
             "  For plugin deploys specifically, add --dry-run to validate",
             "  without writing.",
@@ -543,14 +623,25 @@ def main() -> None:
 
     config = load_safety_config()
     env_var_name = config["readonly_env_var"]
-    shakedown_active = os.environ.get(env_var_name, "").strip() == "1"
+    env_active = os.environ.get(env_var_name, "").strip() == "1"
+    sentinel_active = check_sentinel_active()
+    shakedown_active = env_active or sentinel_active
 
     # Concern 2: write-block first -- it's the tighter gate when active.
     if shakedown_active:
         for argv in invocations:
             blocked, reason = is_mutation(argv)
             if blocked:
-                print(_block_msg_mutation(argv, reason, env_var_name), file=sys.stderr)
+                print(
+                    _block_msg_mutation(
+                        argv,
+                        reason,
+                        env_var_name,
+                        env_active=env_active,
+                        sentinel_active=sentinel_active,
+                    ),
+                    file=sys.stderr,
+                )
                 sys.exit(2)
 
     # Concern 1: env allowlist gating -- always on.

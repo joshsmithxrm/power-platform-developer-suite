@@ -8,7 +8,10 @@ Covers both concerns folded into the consolidated hook:
    gating, fail-safe behavior.
 2. Write-block during shakedown (was `shakedown-readonly.py`) -- no-op
    outside the configured env var, mutation verb table, `--dry-run`
-   carve-out, `--read-only` exemption for `ppds-mcp-server`.
+   carve-out, `--read-only` exemption for `ppds-mcp-server`. Also covers
+   sentinel-file activation (works around Claude Code's per-invocation
+   Bash-tool shells where inline `PPDS_SHAKEDOWN=1` does not propagate
+   to this hook subprocess) and the 24h staleness self-heal.
 
 Run: ``pytest tests/hooks/test_shakedown_safety.py -v``
 """
@@ -19,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -577,6 +581,139 @@ class TestMcpServerReadOnly:
         r = _run_hook(
             "ppds-mcp-server --read-only=true",
             env_extra=_shakedown_env(config_dir),
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
+
+class TestSentinelActivation:
+    """Sentinel-file activation: the reliable source from inside Claude Code,
+    where the Bash tool spawns a fresh shell per invocation and inline
+    ``PPDS_SHAKEDOWN=1`` prefixes do not propagate to this hook subprocess.
+    """
+
+    @staticmethod
+    def _sentinel(project: dict) -> Path:
+        return Path(project["path"]) / ".claude" / "state" / "shakedown-active.json"
+
+    def _write(self, project: dict, *, started_at: float | None = None) -> Path:
+        path = self._sentinel(project)
+        if started_at is None:
+            started_at = time.time()
+        path.write_text(
+            json.dumps({"started_at": int(started_at), "session_id": "test-session"}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_fresh_sentinel_blocks_mutation(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        self._write(project_dir)
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
+        )
+        assert r.returncode == 2, f"stderr={r.stderr!r}"
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+        # Block message should mention the sentinel as the active source.
+        assert "shakedown-active.json" in r.stderr
+
+    def test_no_sentinel_no_env_var_passes_through_to_env_gate(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        # No sentinel, no PPDS_SHAKEDOWN -> write-block is off, env gate allows.
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+
+    def test_stale_sentinel_self_heals(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        # 100 days ago -- well past the 24h threshold.
+        sentinel = self._write(project_dir, started_at=time.time() - 100 * 86400)
+        assert sentinel.exists()
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        assert not sentinel.exists(), "stale sentinel should self-heal on read"
+
+    def test_env_var_alone_still_blocks_when_no_sentinel(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        # Out-of-Claude path: env var is the only activation source.
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+                "PPDS_SHAKEDOWN": "1",
+            },
+        )
+        assert r.returncode == 2
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+        assert "PPDS_SHAKEDOWN=1" in r.stderr
+
+    def test_malformed_sentinel_self_heals(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        sentinel = self._sentinel(project_dir)
+        sentinel.write_text("{not json", encoding="utf-8")
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        assert not sentinel.exists()
+
+    def test_sentinel_missing_started_at_self_heals(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        sentinel = self._sentinel(project_dir)
+        sentinel.write_text(json.dumps({"session_id": "x"}), encoding="utf-8")
+        r = _run_hook(
+            "ppds plugins deploy",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
+        )
+        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        assert not sentinel.exists()
+
+    def test_sentinel_does_not_block_readonly_subcommand(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
+        self._write(project_dir)
+        r = _run_hook(
+            "ppds env list",
+            env_extra={
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": project_dir["path"],
+            },
         )
         assert r.returncode == 0, f"stderr={r.stderr!r}"
 
