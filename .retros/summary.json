@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-03-27",
-  "total_retros": 3,
+  "last_updated": "2026-04-20",
+  "total_retros": 4,
   "findings_by_category": {
     "external": [
       {
@@ -55,6 +55,16 @@
         "date": "2026-03-27",
         "branch": "feat/workflow-overhaul",
         "finding_id": "R-10"
+      },
+      {
+        "date": "2026-04-20",
+        "branch": "feat/shakedown-guard",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-20",
+        "branch": "feat/shakedown-guard",
+        "finding_id": "R-03"
       }
     ],
     "design": [
@@ -105,10 +115,17 @@
         "branch": "feat/workflow-overhaul",
         "finding_id": "R-10"
       }
+    ],
+    "process": [
+      {
+        "date": "2026-04-20",
+        "branch": "feat/shakedown-guard",
+        "finding_id": "R-02"
+      }
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.4666666666666666,
+    "avg_fix_ratio": 0.35,
     "pipeline_success_rate": 0.0,
     "avg_convergence_rounds": 2.6666666666666665
   }

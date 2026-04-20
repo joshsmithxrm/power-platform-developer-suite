@@ -1,5 +1,30 @@
 {
   "version": 1,
-  "updated": "2026-04-19T08:37:21Z",
-  "open_work": []
+  "updated": "2026-04-20T23:36:50Z",
+  "open_work": [
+    {
+      "session_id": "903eedac",
+      "started": "2026-04-20T18:48:32Z",
+      "branch": "feat/shakedown-guard",
+      "worktree": ".worktrees/shakedown-guard",
+      "issues": [],
+      "areas": [
+        "src/PPDS.Cli/Services",
+        ".claude/hooks",
+        ".claude/skills/shakedown"
+      ],
+      "intent": "service-layer IShakedownGuard to close safety triad findings #6/#23/#37"
+    },
+    {
+      "session_id": "468161f6",
+      "started": "2026-04-20T23:36:50Z",
+      "branch": "feat/pipeline-ceiling",
+      "worktree": ".worktrees/pipeline-ceiling",
+      "issues": [],
+      "areas": [
+        "pipeline"
+      ],
+      "intent": "Raise HARD_CEILING to 7200s and add --max-stage-seconds override flag"
+    }
+  ]
 }
