@@ -4,6 +4,7 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.DependencyInjection;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Export;
@@ -181,6 +182,12 @@ public static class ServiceRegistration
         // factory would capture whatever was installed at first resolution and miss
         // per-test swaps.
         services.AddTransient<IBrowserLauncher>(_ => BrowserHelper.Launcher);
+
+        // Shakedown guard infrastructure — singleton cache of activation state.
+        services.AddSingleton<IEnvironment, SystemEnvironment>();
+        services.AddSingleton<IFileSystem, SystemFileSystem>();
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<IShakedownGuard, ShakedownGuard>();
 
         return services;
     }
