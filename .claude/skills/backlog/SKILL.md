@@ -304,36 +304,91 @@ agree to.
 
 #### Phase D — Dispatch
 
+Two spawn mechanisms are supported. Pick **one per dispatch wave** based
+on the lane assignment in `.claude/interaction-patterns.md` §1:
+
+- **D.1 Agent-with-isolation** (recommended for Lane B work — small,
+  countable: ≤3 files, ≤200 LOC net, no new abstraction, clearly
+  correct fix). The dispatcher calls the `Agent` tool with
+  `isolation: "worktree"` per entry and collects returned PR URLs.
+  No manual terminals, no user babysitting. See meta-retro #11.
+- **D.2 Inline-prompt launch command** (for Lane C work, or when the
+  operator wants a live foreground session per worktree). The
+  dispatcher still creates the worktree + state, then emits a single
+  copy-pasteable `claude … -p "<prompt>"` command per entry. The
+  prompt MUST be inline — spawning without a prompt is what forced
+  the 5-terminal babysitting of session `cd0c578e` and is now
+  forbidden (meta-retro #11).
+
+Decide the lane **before** Phase D starts, encode it by suffixing
+each entry's intent with `[lane B]` or `[lane C]` (the `Intent`
+field is one of the keys the parser round-trips, so the lane tag
+survives subsequent `write_plan` calls), and surface which path this
+wave takes in the Phase C confirmation message so the operator knows
+whether autonomous dispatch or manual terminal paste is about to
+happen.
+
 For each entry whose status is `planned` (in plan-file order):
 
 1. Re-check conflicts immediately before launch — the in-flight state
    may have changed between Phase B and now (e.g. a sibling session
-   completed). If a new conflict appears, mark the entry `skipped` with
-   the new conflict detail and continue to the next entry.
-2. Invoke the `/start` skill for that worktree. The Skill tool is the
-   inter-skill calling mechanism; pass the entry's data inline so
-   `/start` can extract name + issues using its existing parser:
+   completed). If a new conflict appears, mark the entry `skipped`
+   with the new conflict detail and continue to the next entry.
+
+2. Create the worktree and initialize state (both paths share this):
+
+   ```bash
+   git worktree add .worktrees/<name> -b feat/<name>
+   python scripts/workflow-state.py init "feat/<name>"
+   python scripts/inflight-register.py --branch "feat/<name>" --issue <N> --intent "<intent>"
+   ```
+
+   `--issue` is repeatable — for a grouped entry with multiple issues,
+   repeat the flag (`--issue 660 --issue 661`). `--issues` is **not** a
+   valid argument and will fail with "unrecognized arguments".
+
+   Write `.plans/context.md` inside the new worktree with the issue
+   bodies + routing guidance (same content `/start` step 5b writes —
+   the launched session / isolated agent reads this file on entry).
+
+3. **D.1 path — Agent-with-isolation.** Call the `Agent` tool once
+   per entry with:
 
    ```
-   /start <intent>; issues <#N> <#M>; suggested branch feat/<name>
+   isolation: "worktree"
+   cwd: .worktrees/<name>
+   prompt: |
+     Read .plans/context.md. Invoke /implement → /verify → /pr for
+     issue #NNN (and #MMM if grouped). Return the PR URL when done.
    ```
 
-   `/start` already handles: worktree creation, workflow-state init,
-   in-flight registration via `inflight-register.py`, and the inline
-   prompt handoff to a new claude session. **Do not duplicate any of
-   that here.** This subverb's job is to invoke `/start` once per
-   entry, not to re-implement what it does.
+   The agent returns the PR URL inline. Pass it to `mark_launched`
+   via the `session_id` parameter (see step 5) — that is the only
+   launch-identifier slot the plan's data model exposes, and the
+   parser renders it as a `Session: <value>` line. A freeform
+   `PR: <url>` line would be dropped on the next `write_plan` round-
+   trip because the parser only recognizes the documented keys. No
+   manual terminal is opened.
 
-   If the inter-skill invocation mechanism is unavailable in the
-   current runtime (e.g. nested `Skill` tool calls are restricted),
-   fall back to printing the exact `/start` prompt the operator should
-   paste into a new session. The plan file already records intent so
-   the manual fallback is recoverable.
+4. **D.2 path — inline-prompt launch command.** Emit to chat (the
+   operator pastes it into a new terminal):
 
-3. Capture the session ID returned by `/start` (or the registered
-   session from `.claude/state/in-flight-issues.json` matching the
-   branch name).
-4. Mark the entry launched in the plan file:
+   ```
+   cd .worktrees/<name> && claude --dangerously-skip-permissions -p "Read .plans/context.md; invoke /implement → /verify → /pr for issue #NNN."
+   ```
+
+   The `-p "<prompt>"` is **mandatory** — a bare `claude` invocation
+   drops the operator into an empty session with no context, which
+   is the exact failure mode meta-retro #11 flagged. If the plan
+   entry has multiple issues, list them all in the prompt.
+
+5. Capture the launch identifier — the session ID for D.2 or the
+   agent-returned PR URL for D.1 — and mark the entry launched. The
+   `mark_launched` helper (in `scripts/dispatch_plan.py`) takes a
+   single `session_id` keyword argument; that slot carries the PR URL
+   for D.1 by convention because the plan's data model does not have a
+   separate PR field. The value round-trips through the markdown as a
+   `Session: <value>` line (see `PlanEntry.as_markdown`).
 
    ```bash
    python -c "
@@ -341,19 +396,22 @@ For each entry whose status is `planned` (in plan-file order):
    sys.path.insert(0, 'scripts')
    from dispatch_plan import load_plan, mark_launched, write_plan
    plan = load_plan()
-   mark_launched(plan, '<worktree>', session_id='<sid>')
+   # session_id carries the D.2 session ID or the D.1 PR URL
+   mark_launched(plan, '<worktree>', session_id='<sid-or-pr-url>')
    write_plan(plan)
    "
    ```
 
-5. Report progress in chat after each launch (`[N/M] launched
-   feat/<name> as session <sid>`).
+6. Report progress in chat after each launch (`[N/M] launched
+   feat/<name> via <D.1|D.2> → <sid-or-pr-url>`).
 
 Do not parallelize the launches — each worktree creation must register
 in the in-flight state before the next one's pre-launch re-check, or
-the second launch may not see the first as a conflict.
+the second launch may not see the first as a conflict. The D.1 Agent
+calls themselves run in parallel from the agent's own perspective,
+but the dispatcher initiates them sequentially.
 
-#### Phase E — Post-dispatch summary
+#### Phase E — Post-dispatch summary and async monitor hand-off
 
 After the loop completes:
 
@@ -365,16 +423,50 @@ After the loop completes:
    python scripts/dispatch_plan.py summary
    ```
 
-3. Surface to the operator:
+3. **Schedule an async wake-up to check PR state.** Do NOT enter a
+   synchronous `TaskUpdate` / `gh pr view` polling loop from the
+   dispatcher session — that burns prompt-cache on every tick and
+   forces the operator to keep the dispatcher session alive while
+   real work happens elsewhere (meta-retro #12, drift evidence
+   D2 §1.1–1.3). Use `ScheduleWakeup` instead:
+
+   ```
+   ScheduleWakeup(delay_seconds=1200, reason="dispatch plan check-in")
+   ```
+
+   1200 s (20 min) is the default; bump to 3600 s (1 h) for large
+   Lane C waves where D.2 sessions are unlikely to converge in the
+   first window. On wake, the dispatcher:
+   - re-reads `.claude/state/dispatch-plan.md`
+   - runs `gh pr list --search "head:feat/<name>" --json number,state,isDraft,statusCheckRollup`
+     for each launched entry
+   - marks entries `done` (PR merged) or leaves them `in-flight`
+     (still working — includes not-yet-merged PRs even when ready to
+     merge; the `parse_plan` status vocabulary is
+     `planned | conflict | in-flight | done | skipped` and an
+     intermediate `ready` would be coerced back to `planned`)
+   - if any entries remain `in-flight`, calls `ScheduleWakeup` again
+     with the same delay
+   - if all entries reached terminal state, exits with a
+     `PushNotification` summary
+
+   Why this beats `TaskUpdate` polling: each wake-up is a fresh
+   context tick rather than a live session holding tokens, and the
+   operator does not see a "Claude is thinking..." indicator for
+   20 minutes at a time. See `.claude/interaction-patterns.md`
+   monitor-coverage section for the canonical wait-for-PR-ready
+   until-condition that should back the `gh pr list` call.
+
+4. Surface to the operator:
 
    > "Dispatched **M** worktrees, skipped **K** due to conflicts.
-   > Plan file at `.claude/state/dispatch-plan.md`. Each launched
-   > session is now self-contained — this dispatcher session's job
-   > is done."
+   > Plan file at `.claude/state/dispatch-plan.md`. Scheduled a PR
+   > state check-in for <delay>; this session is now idle. Each
+   > launched worktree is self-contained."
 
-The dispatcher session **does not continue working** after Phase E.
-The launched sessions handle their own lifecycle (each one runs the
-existing `/gates` -> `/verify` -> `/pr` pipeline per `/start`'s routing).
+The dispatcher session **does not continue working synchronously**
+after Phase E. All subsequent work happens on `ScheduleWakeup` ticks
+or via the launched sessions' own `/pr` pipelines.
 
 ### Plan file schema
 
@@ -395,22 +487,28 @@ Status legend: planned | conflict | in-flight | done | skipped
 ### Worktree: feat/issue-660
 - Issues: #660
 - Areas: src/PPDS.Auth/
-- Intent: env var auth
+- Intent: env var auth [lane B]
 - Status: planned
 
 ### Worktree: feat/audit-capture
 - Issues: #101, #102
 - Areas: src/PPDS.Audit/
-- Intent: audit capture pipeline
+- Intent: audit capture pipeline [lane C]
 - Status: in-flight
 - Launched: 2026-04-19T01:32:14Z
-- Session: a1b2c3d4
+- Session: https://github.com/org/repo/pull/NNN
 ```
 
-Allowed status values: `planned`, `conflict`, `in-flight`, `done`,
-`skipped`. The parser is forgiving of human edits (unknown lines
-inside an entry are ignored) so the operator can leave inline notes
-without breaking subsequent dispatch waves.
+Allowed status values (exactly as enforced by `parse_plan`):
+`planned`, `conflict`, `in-flight`, `done`, `skipped`. Recognized
+keys per entry are `Issues`, `Areas`, `Intent`, `Status`, `Conflict`,
+`Launched`, `Session` — any other line (e.g. `Lane:`, `PR:`) is
+silently dropped on the next `write_plan` round-trip. Encode lane
+and PR URL through the supported keys: suffix the intent with
+`[lane B|C]`, and store the D.1 PR URL (or D.2 session ID) in the
+`Session` field via `mark_launched(..., session_id=...)`. The parser
+is forgiving of unrecognized lines so a human can leave ephemeral
+notes, but those notes will not survive the next dispatcher write.
 
 ### Rules
 
@@ -423,17 +521,29 @@ without breaking subsequent dispatch waves.
 3. **Never auto-resolve a conflict.** Halt, report, let the operator
    decide. Auto-resolution risks the exact duplicate-work pattern the
    in-flight registry was built to prevent (#802).
-4. **One `/start` invocation per entry.** This subverb does not create
-   worktrees, init workflow state, or write inline prompts directly —
-   `/start` owns all of that. Bypassing it would re-introduce the
-   duplication that caused B5 in the first place.
-5. **Sequential dispatch.** Do not parallelize Phase D launches. The
+4. **Prompt is mandatory.** Every spawn — D.1 Agent call or D.2
+   launch command — MUST carry an inline prompt referencing
+   `.plans/context.md` and the pipeline to run. A `TaskCreate` / bare
+   `claude` without a prompt is forbidden (meta-retro #11 root
+   cause: session `cd0c578e` spawned 6 worktrees with no prompt and
+   forced 5 terminals of manual paste).
+5. **Lane-driven path choice.** D.1 (Agent-with-isolation) is the
+   default for Lane B work per `.claude/interaction-patterns.md` §1.
+   D.2 (manual launch command) is reserved for Lane C or when the
+   operator explicitly wants a foreground session. Record the lane
+   on every plan entry.
+6. **Sequential dispatch.** Do not parallelize Phase D launches. The
    in-flight registry's race-acceptance contract (PR #813) is "last
    writer wins, both visible" — fine for two siblings, bad for a
    dispatcher launching N at once.
-6. **Dispatcher session exits after Phase E.** Do not continue work in
-   the dispatcher session after the launches complete. Each launched
-   session is autonomous.
+7. **Async monitor only.** Post-dispatch PR state checks use
+   `ScheduleWakeup` (Phase E). Synchronous `TaskUpdate` or `gh pr
+   view` polling loops from the dispatcher session are forbidden
+   (meta-retro #12).
+8. **Dispatcher session exits after Phase E.** The live session ends
+   with a scheduled wake-up; all subsequent work happens on ticks or
+   in the launched worktrees. Do not hold the dispatcher session
+   open waiting on PRs.
 
 ## Error Handling
 
