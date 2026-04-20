@@ -17,26 +17,6 @@ import pr_monitor
 
 
 # ---------------------------------------------------------------------------
-# Fixture: auto-mock _poll_codeql and detect_gemini_overload for run_monitor tests
-# These were added in v8.0 and most existing tests don't need to exercise them.
-# ---------------------------------------------------------------------------
-
-_real_poll_codeql = pr_monitor._poll_codeql
-_real_detect_gemini_overload = pr_monitor.detect_gemini_overload
-
-
-@pytest.fixture(autouse=True)
-def _mock_v8_helpers(monkeypatch):
-    """Prevent real git/gh calls from _poll_codeql and detect_gemini_overload.
-
-    Tests that exercise these functions directly should call the _real_*
-    module-level references instead of ``pr_monitor._poll_codeql``.
-    """
-    monkeypatch.setattr(pr_monitor, "_poll_codeql", lambda *a, **kw: None)
-    monkeypatch.setattr(pr_monitor, "detect_gemini_overload", lambda *a, **kw: False)
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -146,6 +126,60 @@ class TestCiTimeout:
             result = pr_monitor.poll_ci(wt, 5, logger)
 
         assert result == "timeout"
+
+
+class TestTerminalNotifications:
+    """Monitor fires run_notify on every terminal state (success + failures)."""
+
+    def test_notify_on_ci_timeout(self, tmp_path):
+        """CI timeout path calls run_notify with a descriptive message."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="timeout"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 99, resume=False)
+
+        assert exit_code == 1
+        mock_notify.assert_called_once()
+        assert "timed out" in mock_notify.call_args.kwargs["message"].lower()
+
+    def test_notify_on_monitor_exception(self, tmp_path):
+        """Uncaught exception in the monitor loop still fires notify."""
+        wt = _make_worktree(tmp_path)
+
+        # mark_step is called in the control-flow code outside step
+        # try/except wrappers (e.g., right after _step_ci returns), so
+        # raising from it triggers the outer ``except Exception`` path.
+        # Uses a one-shot raise so the outer handler's own write_result
+        # / run_notify calls still succeed.
+        raised = [False]
+
+        def raise_once(*a, **kw):
+            if not raised[0]:
+                raised[0] = True
+                raise RuntimeError("boom")
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.mark_step", side_effect=raise_once), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 1
+        mock_notify.assert_called_once()
+        msg = mock_notify.call_args.kwargs["message"]
+        assert "crashed" in msg.lower()
+        assert "RuntimeError" in msg
+
+    def test_notify_failure_does_not_cascade(self, tmp_path):
+        """A crash inside run_notify must not change the monitor's exit code."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="timeout"), \
+             patch("pr_monitor.run_notify", side_effect=RuntimeError("notify-down")):
+            exit_code = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        # Still exits 1 (timeout), not a different non-zero from notify failure.
+        assert exit_code == 1
 
 
 class TestResumeSkips:
@@ -591,173 +625,6 @@ class TestRetroTrigger:
         assert result["steps_completed"]["retro"]["status"] == "done"
 
 
-class TestGeminiRetryOnOverload:
-    """AC-142: When Gemini overload is detected, monitor posts /gemini review and re-polls."""
-
-    def test_gemini_retry_on_overload(self, tmp_path):
-        """AC-142: overload triggers /gemini review post and re-poll of comments."""
-        wt = _make_worktree(tmp_path)
-
-        retry_comments = [
-            {"id": 1, "user": "gemini", "path": "a.py", "line": 1, "body": "Fix this"},
-        ]
-
-        # poll_gemini_comments: first returns [] (overload), second returns comments
-        gemini_calls = [0]
-
-        def mock_poll_gemini(worktree, pr_number, logger):
-            gemini_calls[0] += 1
-            if gemini_calls[0] == 1:
-                return []  # First poll: no comments (overload)
-            return retry_comments  # Retry poll: comments appear
-
-        with patch("pr_monitor.poll_ci", return_value="pass"), \
-             patch("pr_monitor.poll_gemini_comments", side_effect=mock_poll_gemini), \
-             patch("pr_monitor.detect_gemini_overload", return_value=True) as mock_detect, \
-             patch("pr_monitor._post_gemini_retry") as mock_retry_post, \
-             patch("pr_monitor.run_triage", return_value=[
-                 {"id": 1, "action": "fixed", "description": "done", "commit": "abc"},
-             ]), \
-             patch("pr_monitor._reconcile_replies"), \
-             patch("pr_monitor._poll_codeql"), \
-             patch("pr_monitor.mark_pr_ready", return_value=True), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"):
-            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
-
-        assert exit_code == 0
-        # Overload was detected on the initial empty poll
-        mock_detect.assert_called_once()
-        # /gemini review was posted
-        mock_retry_post.assert_called_once()
-
-
-class TestGeminiDoubleFailureNotify:
-    """AC-143: After overload retry fails, monitor proceeds normally."""
-
-    def test_gemini_double_failure_proceeds(self, tmp_path):
-        """AC-143: overload retry fails, monitor still completes without triage."""
-        wt = _make_worktree(tmp_path)
-
-        # Both polls return empty
-        with patch("pr_monitor.poll_ci", return_value="pass"), \
-             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
-             patch("pr_monitor.detect_gemini_overload", return_value=True), \
-             patch("pr_monitor._post_gemini_retry") as mock_retry_post, \
-             patch("pr_monitor.run_triage") as mock_triage, \
-             patch("pr_monitor._poll_codeql"), \
-             patch("pr_monitor.mark_pr_ready", return_value=True), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"):
-            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
-
-        assert exit_code == 0
-        # Retry was posted but comments never appeared
-        mock_retry_post.assert_called_once()
-        # Triage was never invoked because no inline comments
-        mock_triage.assert_not_called()
-        # Monitor completed successfully
-        result = pr_monitor.read_result(wt)
-        assert result["status"] == "complete"
-
-
-class TestCodeqlCheckPolling:
-    """AC-144: _poll_codeql waits for CodeQL check to complete."""
-
-    def test_poll_codeql_completes_when_codeql_done(self, tmp_path):
-        """AC-144: _poll_codeql returns when CodeQL check state is COMPLETED."""
-        wt = _make_worktree(tmp_path)
-        logger = _make_logger(tmp_path)
-
-        checks = [
-            {"name": "CodeQL", "state": "COMPLETED", "conclusion": "SUCCESS"},
-            {"name": "build", "state": "COMPLETED", "conclusion": "SUCCESS"},
-        ]
-
-        with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks)) as mock_run:
-            _real_poll_codeql(wt, 42, logger)
-
-        # Should have called subprocess.run exactly once (no polling needed)
-        assert mock_run.call_count == 1, "Should return immediately when CodeQL is complete"
-
-    def test_poll_codeql_waits_for_in_progress(self, tmp_path):
-        """AC-144: _poll_codeql polls while CodeQL is IN_PROGRESS, returns on COMPLETED."""
-        wt = _make_worktree(tmp_path)
-        logger = _make_logger(tmp_path)
-
-        in_progress_checks = [
-            {"name": "CodeQL", "state": "IN_PROGRESS", "conclusion": None},
-        ]
-        completed_checks = [
-            {"name": "CodeQL", "state": "COMPLETED", "conclusion": "SUCCESS"},
-        ]
-
-        call_count = [0]
-
-        def mock_run(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] <= 2:
-                return _gh_checks_json(in_progress_checks)
-            return _gh_checks_json(completed_checks)
-
-        # Use advancing time to prevent actual 5 min wait
-        time_val = [0.0]
-
-        def advancing_time():
-            time_val[0] += 10.0
-            return time_val[0]
-
-        with patch("pr_monitor.subprocess.run", side_effect=mock_run), \
-             patch("pr_monitor.time.time", side_effect=advancing_time), \
-             patch("pr_monitor.time.sleep"):
-            _real_poll_codeql(wt, 42, logger)
-
-        # Should have polled multiple times
-        assert call_count[0] >= 3
-
-    def test_poll_codeql_times_out(self, tmp_path):
-        """AC-144: _poll_codeql returns after 5 min timeout even if CodeQL not done."""
-        wt = _make_worktree(tmp_path)
-        logger = _make_logger(tmp_path)
-
-        pending_checks = [
-            {"name": "CodeQL", "state": "IN_PROGRESS", "conclusion": None},
-        ]
-
-        # Use rapidly advancing time to simulate timeout
-        time_val = [0.0]
-
-        def advancing_time():
-            time_val[0] += 120.0  # Jump 2 min each call
-            return time_val[0]
-
-        with patch("pr_monitor.subprocess.run",
-                    return_value=_gh_checks_json(pending_checks)), \
-             patch("pr_monitor.time.time", side_effect=advancing_time), \
-             patch("pr_monitor.time.sleep"):
-            _real_poll_codeql(wt, 42, logger)
-
-        # Should return (timeout) without raising, and log the timeout
-        log_path = str(tmp_path / "test.log")
-        with open(log_path) as f:
-            log_content = f.read()
-        assert "TIMEOUT" in log_content, (
-            f"Expected TIMEOUT in log after CodeQL timeout, got: {log_content}"
-        )
-
-    def test_poll_codeql_skips_in_shakedown(self, tmp_path):
-        """AC-144: _poll_codeql returns immediately in shakedown mode."""
-        wt = _make_worktree(tmp_path)
-        logger = _make_logger(tmp_path)
-
-        with patch("pr_monitor.SHAKEDOWN", "1"), \
-             patch("pr_monitor.subprocess.run") as mock_run:
-            _real_poll_codeql(wt, 42, logger)
-
-        # Should not have called subprocess at all
-        mock_run.assert_not_called()
-
-
 class TestReconciliationLoop:
     """AC-140: _reconcile_replies re-triages unreplied comments up to 3 rounds."""
 
@@ -814,7 +681,6 @@ class TestUnifiedTriagePass:
                  {"id": 1, "action": "fixed", "description": "done", "commit": "abc"},
              ]) as mock_triage, \
              patch("pr_monitor._reconcile_replies"), \
-             patch("pr_monitor._poll_codeql"), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):

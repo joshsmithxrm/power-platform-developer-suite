@@ -1201,10 +1201,10 @@ After all skills in this spec are implemented:
 | AC-138 | PR gate computes triage completeness from PR comment/reply graph, not from `gemini_triaged` state flag | `test_pipeline.py::test_pr_gate_triage_from_pr` | 🔲 |
 | AC-139 | `triage_common.get_unreplied_comments()` returns Gemini + CodeQL comments with no threaded reply | `test_triage_common.py::test_get_unreplied_comments` | 🔲 |
 | AC-140 | Triage reconciliation loop re-triages only unreplied comments, up to 3 rounds | `test_triage_common.py::test_reconciliation_loop` | 🔲 |
-| AC-141 | pr_monitor detects Gemini overload message on `issues/{pr}/comments` endpoint | `test_pr_monitor.py::test_gemini_overload_detection` | 🔲 |
-| AC-142 | pr_monitor retries Gemini by posting `/gemini review` comment, polls for 5 more minutes | `test_pr_monitor.py::test_gemini_retry_on_overload` | 🔲 |
-| AC-143 | pr_monitor proceeds with notification after second Gemini failure/timeout | `test_pr_monitor.py::test_gemini_double_failure_notify` | 🔲 |
-| AC-144 | pr_monitor polls CodeQL check status via `gh pr checks`, fetches `github-advanced-security` comments after completion | `test_pr_monitor.py::test_codeql_check_polling` | 🔲 |
+| AC-141 | `triage_common.detect_gemini_overload` identifies Gemini "higher than usual traffic" / "unable to create" messages on `issues/{pr}/comments` | `test_triage_common.py::TestDetectGeminiOverload` | 🔲 |
+| AC-142 | ~~pr_monitor retries Gemini by posting `/gemini review` comment~~ — **retracted**: retry did not change outcome when Gemini was overloaded; monitor now relies on `_ready_flip_gates` to hold the PR in draft and notify | — | ✂️ |
+| AC-143 | ~~pr_monitor proceeds with notification after second Gemini failure/timeout~~ — **retracted**: superseded by AC-142 retraction; single-poll + `_ready_flip_gates` fallback covers this | — | ✂️ |
+| AC-144 | ~~pr_monitor polls CodeQL check status via `gh pr checks`~~ — **retracted**: `poll_ci` already waits for CodeQL to reach a terminal state; dedicated CodeQL poll was redundant. Latent risk (comment delivery lag after terminal status) is pre-existing and unchanged by the retraction | — | ✂️ |
 | AC-145 | pr_monitor triages CodeQL + Gemini comments in single triage pass | `test_pr_monitor.py::test_unified_triage_pass` | 🔲 |
 | AC-146 | Converge fix commits do not invalidate verify/qa (ancestor-of-HEAD check passes) | `test_pipeline.py::test_converge_preserves_verify_qa` | 🔲 |
 
