@@ -1,10 +1,12 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
 
+[Collection(nameof(CurrentDirectoryMutatingCollection))]
 public class CleanCommandTests : IDisposable
 {
     private readonly Command _command;

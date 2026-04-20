@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Tests.Infrastructure.Safety.Fakes;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Infrastructure.Safety;
@@ -16,6 +17,13 @@ namespace PPDS.Cli.Tests.Infrastructure.Safety;
 /// AC-02 through AC-13 for <see cref="ShakedownGuard"/>. See the spec at
 /// <c>specs/shakedown-guard.md</c> for the rationale behind each case.
 /// </summary>
+/// <remarks>
+/// Tagged with <see cref="CurrentDirectoryMutatingCollection"/> because
+/// AC-07 (<c>ProjectRoot_ResolvesInExpectedOrder</c>) mutates process-global
+/// <c>Directory.SetCurrentDirectory</c> and must not run concurrently with
+/// other CWD-mutating tests.
+/// </remarks>
+[Collection(nameof(CurrentDirectoryMutatingCollection))]
 public class ShakedownGuardTests
 {
     private const string SentinelRelPath = ".claude/state/shakedown-active.json";
