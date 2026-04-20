@@ -328,7 +328,7 @@ class TestRetroBeforeNotify:
             call_order.append("retro")
             return "done"
 
-        def track_notify(worktree, pr_number, logger):
+        def track_notify(worktree, pr_number, logger, message=None):
             call_order.append("notify")
 
         # Pass all finding-#2 gates so the ready-step does NOT emit its
@@ -526,7 +526,7 @@ class TestRetroTrigger:
             call_order.append(("retro", worktree))
             return "done"
 
-        def track_notify(worktree, pr_number, logger):
+        def track_notify(worktree, pr_number, logger, message=None):
             call_order.append(("notify", worktree))
 
         # Pass all finding-#2 gates so ready-step's skip-path does not
@@ -1018,25 +1018,32 @@ class TestRebaseBeforeReady:
     """Meta-retro finding #6: rebase source branch before flipping ready."""
 
     def test_rebase_clean_path_calls_all_three_git_commands(self, tmp_path):
-        """Clean rebase: fetch + rebase + push --force-with-lease all succeed."""
+        """Clean rebase: detect-base + fetch + rebase + push --force-with-lease all succeed."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
 
+        ok_base = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="main\n", stderr="")
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         call_log = []
 
         def fake_run(cmd, **kwargs):
             call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return ok_base
             return ok
 
         with patch("pr_monitor.subprocess.run", side_effect=fake_run):
-            result = pr_monitor._rebase_source_branch(wt, logger)
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
 
         assert result is True
-        assert call_log[0] == ["git", "fetch", "origin", "main"]
-        assert call_log[1] == ["git", "rebase", "origin/main"]
-        assert call_log[2] == ["git", "push", "--force-with-lease"]
-        assert len(call_log) == 3  # no abort path
+        # First call: gh pr view to detect base
+        assert call_log[0][:3] == ["gh", "pr", "view"]
+        # Then fetch + rebase + push (with -- separators on git fetch/rebase)
+        assert call_log[1] == ["git", "fetch", "origin", "--", "main"]
+        assert call_log[2] == ["git", "rebase", "--", "origin/main"]
+        assert call_log[3] == ["git", "push", "--force-with-lease"]
+        assert len(call_log) == 4  # no abort path
 
     def test_rebase_conflict_aborts_and_returns_false(self, tmp_path):
         """On rebase conflict: git rebase --abort is called; no push; returns False."""
@@ -1047,11 +1054,15 @@ class TestRebaseBeforeReady:
 
         def fake_run(cmd, **kwargs):
             call_log.append(cmd)
+            # base detect returns "main"
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
             # fetch succeeds; rebase conflicts; abort succeeds.
             if cmd[:3] == ["git", "fetch", "origin"]:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="", stderr="")
-            if cmd[:3] == ["git", "rebase", "origin/main"]:
+            if cmd[:2] == ["git", "rebase"] and "--abort" not in cmd:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=1, stdout="",
                     stderr="CONFLICT (content): Merge conflict in foo.py")
@@ -1062,7 +1073,7 @@ class TestRebaseBeforeReady:
                 args=cmd, returncode=0, stdout="", stderr="")
 
         with patch("pr_monitor.subprocess.run", side_effect=fake_run):
-            result = pr_monitor._rebase_source_branch(wt, logger)
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
 
         assert result is False
         # Must have attempted rebase --abort
@@ -1086,4 +1097,40 @@ class TestRebaseBeforeReady:
 
         mock_ready.assert_not_called()
         mock_notify.assert_called_once()
+        # Gemini review #3107696760: notify message must explain draft state.
+        notify_kwargs = mock_notify.call_args.kwargs
+        assert "message" in notify_kwargs
+        assert "still in draft" in notify_kwargs["message"]
         assert result["steps_completed"]["ready"]["status"] == "rebase_failed"
+
+    def test_rebase_uses_non_main_base_branch_from_gh_pr_view(self, tmp_path):
+        """Gemini #3107696762: base branch is detected via gh pr view, not hardcoded."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            # gh pr view returns a non-main base branch
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="develop\n", stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 88, logger)
+
+        assert result is True
+        # Must call gh pr view with PR number and -- separator
+        gh_calls = [c for c in call_log if c[:3] == ["gh", "pr", "view"]]
+        assert len(gh_calls) == 1
+        assert "--" in gh_calls[0]
+        assert "88" in gh_calls[0]
+        # Must fetch and rebase onto origin/develop (not origin/main)
+        assert ["git", "fetch", "origin", "--", "develop"] in call_log
+        assert ["git", "rebase", "--", "origin/develop"] in call_log
+        # Must NOT have used main
+        assert not any(
+            c == ["git", "fetch", "origin", "--", "main"] for c in call_log)

@@ -375,13 +375,37 @@ def run_triage(worktree, pr_number, comments, logger):
     return results
 
 
-def _rebase_source_branch(worktree, logger):
-    """Rebase source onto origin/main + force-with-lease (meta-retro #6).
+def _detect_base_branch(worktree, pr_number, logger):
+    """Detect the PR's base branch via ``gh pr view``. Falls back to 'main'."""
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", "--", str(pr_number),
+             "--json", "baseRefName", "--jq", ".baseRefName"],
+            cwd=worktree, capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "BASE_DETECT_ERROR", reason=str(e))
+        return "main"
+    if result.returncode != 0:
+        logger.log("rebase", "BASE_DETECT_ERROR",
+                   stderr=result.stderr.strip()[:200])
+        return "main"
+    base = result.stdout.strip()
+    if not base:
+        logger.log("rebase", "BASE_DETECT_EMPTY")
+        return "main"
+    return base
 
-    Runs ``git fetch origin main`` → ``git rebase origin/main`` →
+
+def _rebase_source_branch(worktree, pr_number, logger):
+    """Rebase source onto the PR's base branch + force-with-lease (meta-retro #6).
+
+    Detects the base branch via ``gh pr view`` (Gemini review #3107696762)
+    so PRs targeting non-main branches rebase correctly. Runs
+    ``git fetch origin <base>`` -> ``git rebase origin/<base>`` ->
     ``git push --force-with-lease``. On rebase conflict, aborts cleanly
-    and returns False (caller must NOT flip-to-ready). Returns True
-    only on clean rebase+push. SHAKEDOWN short-circuits True.
+    and returns False (caller must NOT flip-to-ready). Returns True only
+    on clean rebase+push. SHAKEDOWN short-circuits True.
     """
     if SHAKEDOWN:
         logger.log("rebase", "SHAKEDOWN_SKIPPED")
@@ -392,21 +416,26 @@ def _rebase_source_branch(worktree, logger):
             cmd, cwd=worktree, capture_output=True, text=True, timeout=timeout,
         )
 
-    # 1. Fetch origin/main
+    base = _detect_base_branch(worktree, pr_number, logger)
+    logger.log("rebase", "BASE", branch=base)
+
+    # 1. Fetch origin/<base>
     try:
-        fetch = _run(["git", "fetch", "origin", "main"])
+        fetch = _run(["git", "fetch", "origin", "--", base])
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.log("rebase", "FETCH_ERROR", reason=str(e))
+        logger.log("rebase", "FETCH_ERROR", reason=str(e), base=base)
         return False
     if fetch.returncode != 0:
-        logger.log("rebase", "FETCH_ERROR", stderr=fetch.stderr.strip()[:200])
+        logger.log("rebase", "FETCH_ERROR", base=base,
+                   stderr=fetch.stderr.strip()[:200])
         return False
 
-    # 2. Rebase onto origin/main
+    # 2. Rebase onto origin/<base>
+    rebase_ref = f"origin/{base}"
     try:
-        rebase = _run(["git", "rebase", "origin/main"], timeout=120)
+        rebase = _run(["git", "rebase", "--", rebase_ref], timeout=120)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.log("rebase", "REBASE_ERROR", reason=str(e))
+        logger.log("rebase", "REBASE_ERROR", reason=str(e), base=base)
         # Best-effort abort in case git is mid-rebase
         try:
             _run(["git", "rebase", "--abort"])
@@ -414,7 +443,7 @@ def _rebase_source_branch(worktree, logger):
             pass
         return False
     if rebase.returncode != 0:
-        logger.log("rebase", "CONFLICT",
+        logger.log("rebase", "CONFLICT", base=base,
                    stderr=rebase.stderr.strip()[:200])
         # Abort so the working tree is clean. Do NOT force through.
         try:
@@ -436,7 +465,7 @@ def _rebase_source_branch(worktree, logger):
         logger.log("rebase", "PUSH_ERROR", stderr=push.stderr.strip()[:200])
         return False
 
-    logger.log("rebase", "DONE")
+    logger.log("rebase", "DONE", base=base)
     return True
 
 
@@ -711,8 +740,14 @@ def run_retro(worktree, logger):
     return status
 
 
-def run_notify(worktree, pr_number, logger):
-    """Run the notify hook script."""
+def run_notify(worktree, pr_number, logger, message=None):
+    """Run the notify hook script.
+
+    When ``message`` is None (default), the notification says the PR is
+    ready. Callers on skip paths (CI red, Gemini missing, unreplied
+    comments, rebase failure) should pass a specific message so the user
+    understands why the PR is still in draft (Gemini review #3107696760).
+    """
     notify_script = os.path.join(worktree, ".claude", "hooks", "notify.py")
     if not os.path.exists(notify_script):
         logger.log("notify", "SKIPPED", reason="notify.py not found")
@@ -728,9 +763,10 @@ def run_notify(worktree, pr_number, logger):
     except (json.JSONDecodeError, OSError):
         pass
 
+    msg = message if message else f"PR #{pr_number} is ready"
     cmd = [sys.executable, notify_script,
            "--title", "PR Monitor Complete",
-           "--msg", f"PR #{pr_number} is ready"]
+           "--msg", msg]
     if pr_url:
         cmd.extend(["--url", pr_url])
 
@@ -1023,21 +1059,26 @@ def _step_ready(worktree, pr_number, logger, result):
             result["ready_skip_reasons"] = reasons
             write_result(worktree, result)
             # Notify the user so they know the PR is still in draft.
+            # (Gemini review #3107696760 — use a message that explains why.)
+            msg = (f"PR #{pr_number} still in draft: "
+                   + ", ".join(reasons))
             try:
-                run_notify(worktree, pr_number, logger)
+                run_notify(worktree, pr_number, logger, message=msg)
             except Exception as e:  # noqa: BLE001
                 logger.log("ready", "NOTIFY_ERROR", error=str(e))
             return
 
         # Finding #6: rebase source branch before flipping to ready.
-        rebased = _rebase_source_branch(worktree, logger)
+        rebased = _rebase_source_branch(worktree, pr_number, logger)
         if not rebased:
             logger.log("ready", "SKIPPED_REBASE_FAILED")
             mark_step(result, "ready", "rebase_failed")
             result["ready_skip_reasons"] = ["rebase_failed_or_conflict"]
             write_result(worktree, result)
+            msg = (f"PR #{pr_number} still in draft: "
+                   "rebase failed or conflict")
             try:
-                run_notify(worktree, pr_number, logger)
+                run_notify(worktree, pr_number, logger, message=msg)
             except Exception as e:  # noqa: BLE001
                 logger.log("ready", "NOTIFY_ERROR", error=str(e))
             return
