@@ -2,6 +2,12 @@
   "enabledPlugins": {
     "superpowers@claude-plugins-official": false
   },
+  "safety": {
+    "shakedown_safe_envs": [
+      "PPDS Demo - Dev"
+    ],
+    "readonly_env_var": "PPDS_SHAKEDOWN"
+  },
   "permissions": {
     "allow": [
       "Bash(ls:*)",
@@ -359,17 +365,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \".claude/hooks/dev-env-check.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \".claude/hooks/shakedown-readonly.py\"",
+            "command": "python \".claude/hooks/shakedown-safety.py\"",
             "timeout": 10
           }
         ]
