@@ -20,13 +20,11 @@ Human-initiated PR creation via `gh pr create` from a terminal is fine — this 
 
 ## Prerequisites
 
-Before running `/pr`, the following must be complete (enforced by the PR gate hook):
-- `/gates` passed against current HEAD
-- `/verify` completed for at least one surface
-- `/qa` completed for at least one surface
-- `/review` completed
-
-Run `/status` to check current workflow state.
+Prerequisite enforcement (`/gates`, `/verify`, `/qa`, `/review`) lives in
+`pr-gate.py` at `.claude/hooks/pr-gate.py`, which blocks `gh pr create`
+if any step is missing or stale. The hook is the single source of truth
+— this skill does not repeat that check. Run `/status` to inspect current
+workflow state before invoking `/pr`.
 
 ## Process
 
@@ -76,7 +74,49 @@ Parse the response as a comma-separated list of integers. Store them:
 python scripts/workflow-state.py append issues <N>
 ```
 
-### 3. Create PR (Draft)
+### 3. Pre-PR Self-Review
+
+Before opening the PR, dispatch the `code-reviewer` subagent (defined at
+`.claude/agents/code-reviewer.md`) against the diff `origin/main...HEAD` to
+catch issues a pre-open self-review would catch — instead of paying for them
+as Gemini comment churn post-open.
+
+Rationale: pattern-matching on PRs #825–#830 shows a 4-commit average for
+post-open rework. Running an impartial reviewer against the diff before
+opening the PR shifts that rework left.
+
+**Optional bypass:** if invoked with `--no-self-review`, skip this step
+entirely. Use the flag when self-review would block an urgent fix or when
+the diff is trivially small (rename, single-line fix, docs-only).
+
+Dispatch the subagent with:
+- The diff: `git diff origin/main...HEAD`
+- The Constitution: `specs/CONSTITUTION.md`
+- Acceptance criteria for each issue number in `.workflow/state.json`'s
+  `issues` array (read via `python scripts/workflow-state.py get issues`).
+  Fetch AC text with `gh issue view <N>` if not already in session context.
+  If `issues` is empty or absent, skip this input.
+
+The subagent returns findings classified as DEFECT / CONCERN / NIT. Present
+them to the user and ask which to address before the PR opens:
+
+```
+Pre-PR self-review findings:
+  DEFECTs: {N}   ← must fix before opening
+  CONCERNs: {N}  ← should fix
+  NITs: {N}      ← optional
+
+Reply with finding IDs to address (e.g., "F-1, F-3"), "all", "defects", or
+"skip" to open the PR as-is.
+```
+
+If the user elects to address findings, return to the implementation loop
+(edit → commit → re-run `/gates`/`/verify`/`/qa`/`/review`) and re-enter
+`/pr` when ready. The self-review runs again on the updated diff.
+
+If the user elects to skip or only NITs are reported, proceed to step 4.
+
+### 4. Create PR (Draft)
 
 Opens as draft. Monitor flips to ready via `pr_monitor.py` auto-ready-flip logic (added in #834) once CI green + Gemini reviewed + no unreplied comments.
 
@@ -111,7 +151,7 @@ python scripts/workflow-state.py set pr.url "{pr-url}"
 python scripts/workflow-state.py set pr.created now
 ```
 
-### 4. Launch Background Monitor (MANDATORY)
+### 5. Launch Background Monitor (MANDATORY)
 
 The pr-monitor handles the entire post-creation lifecycle: CI polling, Gemini review wait (with overload detection + retry), CodeQL check wait, triage dispatch, threaded replies, reconciliation, draft→ready conversion, retro, and notification. It runs as a detached background process that survives session exit.
 
@@ -134,7 +174,7 @@ cat .workflow/pr-monitor.pid
 
 If the monitor fails to launch (e.g., `claude` command not found), fall back to manual triage: wait inline, triage comments yourself, convert to ready. But this is the exception, not the norm.
 
-### 5. Present Summary and Return
+### 6. Present Summary and Return
 
 The monitor is now handling the lifecycle. Present status and return control to the user:
 
@@ -154,11 +194,39 @@ Monitor log: .workflow/pr-monitor.log
 
 Do NOT wait for the monitor to finish. Do NOT do inline Gemini polling. The monitor handles everything asynchronously.
 
+### 7. Post-Merge Cleanup Surfacing
+
+After the PR merges, the worktree and local branch are no longer needed.
+Cleanup itself is user-initiated — `/cleanup` deletes worktrees and local
+branches, which is destructive and per interaction-patterns §5 must be
+confirmed by the user before execution. This skill does NOT auto-invoke
+`/cleanup`.
+
+Current behavior (what the monitor does today): on terminal states
+(`MERGED`, `CLOSED`), the monitor writes the final status to
+`.workflow/pr-monitor.log` and its notification payload. It does not poll
+`mergedAt` on a schedule and does not invoke `/cleanup`.
+
+Expected user flow after merge:
+
+1. User sees the merged notification (or runs `/status` and observes
+   `pr.state == MERGED`).
+2. User runs `/cleanup` manually. `/cleanup` presents the list of
+   prunable worktrees/branches for confirmation before deleting.
+
+Future enhancement (out of scope for this PR): add an opt-in flag on
+`/pr` (e.g. `--cleanup-on-merge`) that, combined with a monitor-side
+merge poller, surfaces a single confirmation prompt in the final
+notification rather than silently deleting state. Track via a separate
+issue + spec with numbered ACs before implementing.
+
 ## Error Handling
 
 | Error | Recovery |
 |-------|----------|
 | Rebase conflicts | Present conflicts to user, do NOT auto-resolve |
+| Self-review subagent fails | Log the failure; ask user whether to proceed without self-review or abort |
 | PR creation fails | Check `gh auth status`, suggest `gh auth login` if needed |
 | Push rejected | Check if branch is behind, suggest rebase |
 | Monitor fails to launch | Fall back to inline triage (wait for comments, triage, convert to ready) |
+| Post-merge state surfaced but user forgot to run `/cleanup` | No automatic recovery — `/cleanup` is user-initiated by design; `/status` will keep reporting merged state until user runs it |
