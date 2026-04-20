@@ -1025,7 +1025,6 @@ Extend `AssemblyExtractor` to read additional metadata:
 
 ```json
 {
-  "$schema": "https://ppds.dev/schemas/registrations.json",
   "version": "1.0",
   "generatedAt": "2026-01-28T00:00:00Z",
   "assemblies": [

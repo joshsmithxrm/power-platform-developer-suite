@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
+import { DOCS_URL } from '../constants/docsUrls.js';
 
 const MAKER_BASE_URL = 'https://make.powerapps.com';
 
@@ -119,7 +120,7 @@ export function registerBrowserCommands(
     // ── Open Documentation ─────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.openDocumentation', () => {
-            void vscode.env.openExternal(vscode.Uri.parse('https://ppds.dev'));
+            void vscode.env.openExternal(vscode.Uri.parse(DOCS_URL));
         })
     );
 }

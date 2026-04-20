@@ -873,7 +873,6 @@ Custom APIs are added to the existing `registrations.json` schema (defined in [p
 
 ```json
 {
-    "$schema": "https://ppds.dev/schemas/registrations.json",
     "version": "1.0",
     "generatedAt": "2026-03-23T00:00:00Z",
     "assemblies": [ /* existing plugin assembly configs */ ],
