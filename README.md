@@ -115,8 +115,8 @@ ppds-mcp-server
 The VS Code extension provides IDE integration via JSON-RPC with the PPDS daemon:
 
 - Environment and profile management
-- Query execution with results view
-- Plugin deployment workflows
+- SQL/FetchXML notebooks and query results
+- Nine Dataverse panels (Data Explorer, Solutions, Plugin Traces, Plugin Registration, Metadata Browser, Connection References, Environment Variables, Web Resources, Import Jobs)
 
 Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite).
 
