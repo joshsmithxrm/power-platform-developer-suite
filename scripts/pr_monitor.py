@@ -870,8 +870,11 @@ def run_monitor(worktree, pr_number, resume=False):
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
         else:
-            # Resumed — read last known comment count
+            # Resumed — re-fetch comments so the triage loop can resume
+            # pending iterations (otherwise inline_count stays 0 and the
+            # loop is skipped entirely).
             logger.log("gemini", "RESUMED")
+            comments = poll_gemini_comments(worktree, pr_number, logger)
 
         # ---- Step 3: Triage loop (if inline comments) ----
         inline_count = len(comments)
