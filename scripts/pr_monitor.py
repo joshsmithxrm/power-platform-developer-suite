@@ -28,7 +28,6 @@ from pathlib import Path
 from triage_common import (
     GEMINI_BOT_LOGIN,
     build_triage_prompt,
-    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
     parse_triage_jsonl,
@@ -44,7 +43,6 @@ CI_POLL_INTERVAL = 30       # seconds between CI status checks
 CI_MAX_WAIT = 900           # 15 minutes max for CI
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
-GEMINI_STABLE_POLLS = 2     # consecutive polls with same count = stable
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 SHAKEDOWN = os.environ.get("PPDS_SHAKEDOWN", "")
@@ -209,7 +207,7 @@ def poll_ci(worktree, pr_number, logger):
             result = subprocess.run(
                 ["gh", "pr", "checks", str(pr_number),
                  "--json", "name,state,bucket"],
-                cwd=worktree, capture_output=True, text=True, timeout=30,
+                cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.log("ci", "POLL_ERROR", error=str(e))
@@ -275,7 +273,7 @@ def _get_pr_created_at(worktree, pr_number):
         result = subprocess.run(
             ["gh", "pr", "view", str(pr_number),
              "--json", "createdAt", "--jq", ".createdAt"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -340,7 +338,7 @@ def _fetch_latest_gemini_review_body(worktree, pr_number):
         proc = subprocess.run(
             ["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews",
              "--paginate", "--slurp"],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         if proc.returncode != 0:
             return ""
@@ -454,7 +452,7 @@ def _detect_base_branch(worktree, pr_number, logger):
         result = subprocess.run(
             ["gh", "pr", "view", "--", str(pr_number),
              "--json", "baseRefName", "--jq", ".baseRefName"],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "BASE_DETECT_ERROR", reason=str(e))
@@ -486,7 +484,7 @@ def _rebase_source_branch(worktree, pr_number, logger):
 
     def _run(cmd, timeout=60):
         return subprocess.run(
-            cmd, cwd=worktree, capture_output=True, text=True, timeout=timeout,
+            cmd, cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
 
     base = _detect_base_branch(worktree, pr_number, logger)
@@ -551,7 +549,7 @@ def mark_pr_ready(worktree, pr_number, logger):
     try:
         result = subprocess.run(
             ["gh", "pr", "ready", str(pr_number)],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         if result.returncode == 0:
             logger.log("ready", "DONE")
@@ -616,22 +614,6 @@ def post_replies(worktree, pr_number, triage_results, logger):
         worktree, pr_number, filtered, _log_fn,
         shakedown=bool(SHAKEDOWN),
     )
-
-
-def _post_gemini_retry(worktree, pr_number, logger):
-    """Post /gemini review comment to trigger a new review."""
-    repo = get_repo_slug(worktree)
-    if not repo:
-        return
-    try:
-        subprocess.run(
-            ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
-             "-f", "body=/gemini review"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
-        )
-        logger.log("gemini", "RETRY_POSTED")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        logger.log("gemini", "RETRY_FAILED")
 
 
 def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
@@ -706,46 +688,12 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                 subprocess.run(
                     ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
                      "-f", f"body={body}"],
-                    cwd=worktree, capture_output=True, text=True, timeout=15,
+                    cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
         mark_step(result, f"reconcile_{triage_iteration}", "manual_review")
         write_result(worktree, result)
-
-
-def _poll_codeql(worktree, pr_number, logger):
-    """Wait for CodeQL check to complete (5 min timeout)."""
-    if SHAKEDOWN:
-        logger.log("codeql", "SHAKEDOWN_SKIPPED")
-        return
-    start = time.time()
-    while time.time() - start < 300:  # 5 minutes
-        try:
-            proc_result = subprocess.run(
-                ["gh", "pr", "checks", str(pr_number),
-                 "--json", "name,state,bucket"],
-                cwd=worktree, capture_output=True, text=True, timeout=30,
-            )
-            if proc_result.returncode == 0:
-                checks = json.loads(proc_result.stdout)
-                codeql = [c for c in checks
-                          if "codeql" in c.get("name", "").lower()]
-                if codeql:
-                    all_done = all(
-                        c.get("state") in ("COMPLETED", "SUCCESS", "FAILURE")
-                        or c.get("bucket") in ("pass", "fail", "skipping", "cancel")
-                        for c in codeql
-                    )
-                    if all_done:
-                        logger.log("codeql", "COMPLETE")
-                        return
-        except (subprocess.TimeoutExpired, FileNotFoundError,
-                json.JSONDecodeError, OSError):
-            pass
-        logger.log("codeql", "POLL", elapsed=f"{int(time.time() - start)}s")
-        time.sleep(30)
-    logger.log("codeql", "TIMEOUT")
 
 
 def run_retro(worktree, logger):
@@ -845,7 +793,7 @@ def run_notify(worktree, pr_number, logger, message=None):
 
     try:
         result = subprocess.run(
-            cmd, cwd=worktree, capture_output=True, text=True, timeout=30,
+            cmd, cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         logger.log("notify", "DONE", exit=result.returncode)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
@@ -870,6 +818,21 @@ def mark_step(result, step_name, status):
         "status": status,
         "timestamp": _timestamp(),
     }
+
+
+def _notify_terminal(worktree, pr_number, logger, message):
+    """Best-effort notification on any terminal non-success state.
+
+    Wraps ``run_notify`` in a try/except so a notify failure cannot
+    cascade into the monitor's own error path. Keeps the user informed
+    when the monitor aborts (CI fail, CI timeout, exception) — previously
+    only the clean-success path fired a notification, so crashes were
+    invisible until the user happened to check the PR.
+    """
+    try:
+        run_notify(worktree, pr_number, logger, message=message)
+    except Exception as notify_err:  # noqa: BLE001 — best-effort
+        logger.log("notify", "TERMINAL_NOTIFY_ERROR", error=str(notify_err))
 
 
 def run_monitor(worktree, pr_number, resume=False):
@@ -913,6 +876,9 @@ def run_monitor(worktree, pr_number, resume=False):
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
                 write_result(worktree, result)
+                _notify_terminal(worktree, pr_number, logger,
+                                 f"PR #{pr_number} CI timed out after "
+                                 f"{CI_MAX_WAIT // 60} min")
                 logger.log("monitor", "ABORT", reason="CI timeout")
                 logger.close()
                 return 1
@@ -921,27 +887,12 @@ def run_monitor(worktree, pr_number, resume=False):
         comments = []
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
-
-            # Gemini overload detection + retry (AC-141, AC-142, AC-143)
-            if not comments:
-                if detect_gemini_overload(
-                    worktree, pr_number, shakedown=bool(SHAKEDOWN),
-                ):
-                    logger.log("gemini", "OVERLOAD_DETECTED")
-                    _post_gemini_retry(worktree, pr_number, logger)
-                    # Re-poll for 5 more minutes
-                    comments = _step_gemini(
-                        worktree, pr_number, logger, result,
-                        step_suffix="_retry",
-                    )
-                    if not comments:
-                        logger.log("gemini", "OVERLOAD_RETRY_FAILED")
         else:
-            # Resumed — read last known comment count
+            # Resumed — re-fetch comments so the triage loop can resume
+            # pending iterations (otherwise inline_count stays 0 and the
+            # loop is skipped entirely).
             logger.log("gemini", "RESUMED")
-
-        # ---- Step 2b: Wait for CodeQL before triage (AC-144) ----
-        _poll_codeql(worktree, pr_number, logger)
+            comments = poll_gemini_comments(worktree, pr_number, logger)
 
         # ---- Step 3: Triage loop (if inline comments) ----
         inline_count = len(comments)
@@ -993,6 +944,9 @@ def run_monitor(worktree, pr_number, resume=False):
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
                 write_result(worktree, result)
+                _notify_terminal(worktree, pr_number, logger,
+                                 f"PR #{pr_number} CI timed out after triage "
+                                 f"round {triage_iteration}")
                 logger.log("monitor", "ABORT",
                            reason=f"CI timeout after triage round {triage_iteration}")
                 logger.close()
@@ -1033,6 +987,9 @@ def run_monitor(worktree, pr_number, resume=False):
         result["error"] = str(e)
         write_result(worktree, result)
         logger.log("monitor", "ERROR", error=str(e))
+        _notify_terminal(worktree, pr_number, logger,
+                         f"PR #{pr_number} monitor crashed: "
+                         f"{type(e).__name__}: {str(e)[:120]}")
         logger.close()
         return 1
 
