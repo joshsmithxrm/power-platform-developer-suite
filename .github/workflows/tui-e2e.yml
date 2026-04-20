@@ -1,16 +1,21 @@
 name: TUI E2E Tests
 
+# TUI E2E is expensive (Playwright snapshot suite ≈ 6 min on windows-latest). Trigger only
+# when changes could reasonably affect rendered TUI output: the TUI source tree, the e2e
+# test project, or this workflow file itself.
 on:
   push:
     branches: [main]
     paths:
       - 'src/PPDS.Cli/Tui/**'
       - 'tests/PPDS.Tui.E2eTests/**'
+      - '.github/workflows/tui-e2e.yml'
   pull_request:
     branches: [main]
     paths:
       - 'src/PPDS.Cli/Tui/**'
       - 'tests/PPDS.Tui.E2eTests/**'
+      - '.github/workflows/tui-e2e.yml'
   workflow_dispatch:
 
 concurrency:
@@ -34,6 +39,16 @@ jobs:
           8.0.x
           9.0.x
           10.0.x
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.nuget/packages
+          ~/.local/share/NuGet/http-cache
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'nuget.config') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-
 
     - name: Setup Node.js
       uses: actions/setup-node@v6
