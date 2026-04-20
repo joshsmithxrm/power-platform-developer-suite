@@ -5,6 +5,7 @@ using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Services;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -117,7 +118,7 @@ public class ServiceEndpointServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(_mockClient.Object);
 
-        _sut = new ServiceEndpointService(_mockPool.Object, _mockLogger.Object);
+        _sut = new ServiceEndpointService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
     }
 
     #region ListAsync

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
+using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;

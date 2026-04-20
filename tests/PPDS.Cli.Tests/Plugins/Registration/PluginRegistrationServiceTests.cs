@@ -10,6 +10,7 @@ using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -96,7 +97,7 @@ public class PluginRegistrationServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(_mockPooledClient.Object);
 
-        _sut = new PluginRegistrationService(_mockPool.Object, _mockLogger.Object);
+        _sut = new PluginRegistrationService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
     }
 
     [Fact]

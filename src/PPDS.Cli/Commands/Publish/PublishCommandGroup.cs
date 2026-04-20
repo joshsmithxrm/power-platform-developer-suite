@@ -7,7 +7,8 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Dataverse.Pooling;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Solutions;
+using PPDS.Cli.Services.WebResources;
 
 namespace PPDS.Cli.Commands.Publish;
 

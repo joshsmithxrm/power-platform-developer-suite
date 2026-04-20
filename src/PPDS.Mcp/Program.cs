@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using PPDS.Auth.DependencyInjection;
+using PPDS.Cli.Services;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Mcp.Infrastructure;
 
@@ -42,8 +43,14 @@ builder.Services.AddSingleton<McpToolContext>();
 // Register auth services (ProfileStore, EnvironmentConfigStore, ISecureCredentialStore).
 builder.Services.AddAuthServices();
 
-// Register Dataverse services (IMetadataQueryService, IPluginTraceService, IQueryExecutor, etc.).
+// Register Dataverse infrastructure (pool-adjacent: IMetadataQueryService, IQueryExecutor,
+// IBulkOperationExecutor, ICachedMetadataProvider, SchemaValidator, IThrottleTracker).
 builder.Services.RegisterDataverseServices();
+
+// Register CLI application services (domain services: IPluginTraceService, ISolutionService,
+// IWebResourceService, etc., plus IShakedownGuard and friends). MCP reuses the single CLI
+// registration to guarantee the same wiring across CLI / TUI / MCP surfaces (per SL2).
+builder.Services.AddCliApplicationServices();
 
 var host = builder.Build();
 await host.RunAsync();

@@ -3,7 +3,7 @@ using PPDS.Cli.Services;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Solutions;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;

@@ -1,5 +1,5 @@
+using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Tui.Infrastructure;
-using PPDS.Dataverse.Services;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Dialogs;

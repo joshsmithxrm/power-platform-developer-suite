@@ -26,7 +26,15 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Security;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.ConnectionReferences;
+using PPDS.Cli.Services.DeploymentSettings;
+using PPDS.Cli.Services.EnvironmentVariables;
+using PPDS.Cli.Services.Flows;
+using PPDS.Cli.Services.ImportJobs;
+using PPDS.Cli.Services.Metadata.Authoring;
+using PPDS.Cli.Services.PluginTraces;
+using PPDS.Cli.Services.Solutions;
+using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
@@ -41,8 +49,8 @@ using PluginImageInfoModel = PPDS.Cli.Plugins.Registration.PluginImageInfo;
 using PluginAssemblyInfoModel = PPDS.Cli.Plugins.Registration.PluginAssemblyInfo;
 using PluginPackageInfoModel = PPDS.Cli.Plugins.Registration.PluginPackageInfo;
 using PluginStepInfoModel = PPDS.Cli.Plugins.Registration.PluginStepInfo;
-using ConnRefRelationshipType = PPDS.Dataverse.Services.RelationshipType;
-using WebResourceInfoModel = PPDS.Dataverse.Services.WebResourceInfo;
+using ConnRefRelationshipType = PPDS.Cli.Services.ConnectionReferences.RelationshipType;
+using WebResourceInfoModel = PPDS.Cli.Services.WebResources.WebResourceInfo;
 
 namespace PPDS.Cli.Commands.Serve.Handlers;
 
@@ -744,9 +752,7 @@ public class RpcMethodHandler : IDisposable
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
 
             // Create registration service with pool (use NullLogger for daemon context)
-            var registrationService = new PluginRegistrationService(
-                pool,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var response = new PluginsListResponse();
 
@@ -831,7 +837,7 @@ public class RpcMethodHandler : IDisposable
     }
 
     private static async Task PopulatePluginTypesAsync(
-        PluginRegistrationService registrationService,
+        IPluginRegistrationService registrationService,
         List<PluginTypeInfoModel> types,
         List<PluginTypeInfoDto> typeOutputs,
         CancellationToken cancellationToken)
@@ -922,9 +928,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var response = new PluginsGetResponse { Type = type };
 
@@ -986,9 +990,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
             var messages = await registrationService.ListMessagesAsync(filter, ct);
             return new PluginsMessagesResponse { Messages = messages };
         }, cancellationToken);
@@ -1009,9 +1011,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
             var attributes = await registrationService.ListEntityAttributesAsync(entityLogicalName, ct);
             return new PluginsEntityAttributesResponse
             {
@@ -1041,9 +1041,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             if (enabled)
                 await registrationService.EnableStepAsync(stepId, ct);
@@ -1073,9 +1071,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var bytes = Convert.FromBase64String(content);
             var assemblyId = await registrationService.UpsertAssemblyAsync(name, bytes, solutionName, ct);
@@ -1103,9 +1099,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var bytes = Convert.FromBase64String(content);
             var packageId = await registrationService.UpsertPackageAsync(name, bytes, solutionName, ct);
@@ -1154,9 +1148,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var messageId = await registrationService.GetSdkMessageIdAsync(message, ct)
                 ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"SDK message '{message}' not found");
@@ -1214,9 +1206,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             // Resolve message name from step if not provided
             string resolvedMessageName = messageName ?? "Create";
@@ -1264,9 +1254,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var request = new StepUpdateRequest(
                 Mode: mode,
@@ -1302,9 +1290,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var request = new ImageUpdateRequest(
                 Attributes: imageAttributes,
@@ -1336,9 +1322,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             UnregisterResult result = type.ToLowerInvariant() switch
             {
@@ -1383,9 +1367,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            var registrationService = new PluginRegistrationService(
-                pool,
-                NullLogger<PluginRegistrationService>.Instance);
+            var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             (byte[] bytes, string fileName) = type.ToLowerInvariant() switch
             {

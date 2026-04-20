@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query;
@@ -25,6 +26,7 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly ICachedMetadataProvider? _metadataProvider;
+    private readonly IShakedownGuard _guard;
     private readonly int _poolCapacity;
     private readonly ExecutionPlanBuilder _planBuilder;
     private readonly PlanExecutor _planExecutor;
@@ -65,19 +67,23 @@ public sealed class SqlQueryService : ISqlQueryService
     /// <param name="metadataProvider">Optional cached metadata provider. Required for DML type coercion
     /// (lookup → <c>EntityReference</c>, choice → <c>OptionSetValue</c>, etc.); when null, DML passes
     /// raw CLR values through to Dataverse, which rejects them for non-scalar columns.</param>
+    /// <param name="guard">Shakedown-session safety guard (refuses DML execution while active).
+    /// Required — production DI supplies the real guard; tests use a fake.</param>
     public SqlQueryService(
         IQueryExecutor queryExecutor,
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
         IMetadataQueryExecutor? metadataQueryExecutor = null,
         int poolCapacity = 1,
-        ICachedMetadataProvider? metadataProvider = null)
+        ICachedMetadataProvider? metadataProvider = null,
+        IShakedownGuard? guard = null)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         _tdsQueryExecutor = tdsQueryExecutor;
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
         _metadataProvider = metadataProvider;
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _poolCapacity = poolCapacity;
         _planBuilder = new ExecutionPlanBuilder(_fetchXmlGeneratorService);
         _planExecutor = new PlanExecutor();
@@ -155,6 +161,12 @@ public sealed class SqlQueryService : ISqlQueryService
                 Result = QueryResult.Empty("dry-run"),
                 DmlSafetyResult = safetyResult
             };
+        }
+
+        // Shakedown guard fires only when DML will actually execute (not dry-run, not SELECT).
+        if (safetyResult != null && !safetyResult.IsDryRun)
+        {
+            _guard.EnsureCanMutate("query.dml");
         }
 
         // Execute the plan

@@ -1,5 +1,5 @@
 using PPDS.Cli.Commands.WebResources;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.WebResources;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.WebResources;

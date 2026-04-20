@@ -9,7 +9,6 @@ using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Resilience;
-using PPDS.Dataverse.Services;
 
 namespace PPDS.Dataverse.DependencyInjection
 {
@@ -250,30 +249,18 @@ namespace PPDS.Dataverse.DependencyInjection
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
             services.AddTransient<IMetadataQueryService, DataverseMetadataQueryService>();
             services.AddTransient<SchemaValidator>();
-            services.AddTransient<IMetadataAuthoringService, DataverseMetadataAuthoringService>();
             services.AddTransient<IQueryExecutor, QueryExecutor>();
 
             // Cached metadata provider (singleton - per-session cache for IntelliSense)
             services.AddSingleton<ICachedMetadataProvider, CachedMetadataProvider>();
 
-            // Domain services (transient - CLI command support)
-            services.AddTransient<ISolutionService, SolutionService>();
-            services.AddTransient<IComponentNameResolver, ComponentNameResolver>();
-            services.AddTransient<IImportJobService, ImportJobService>();
-            services.AddTransient<IEnvironmentVariableService, EnvironmentVariableService>();
-            services.AddTransient<IUserService, UserService>();
-            services.AddTransient<IRoleService, RoleService>();
-
-            // Phase 2 services
-            services.AddTransient<IFlowService, FlowService>();
-            services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
-            services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
-
-            // Phase 3 services
-            services.AddTransient<IPluginTraceService, PluginTraceService>();
-
-            // Phase 2d services (Web Resources)
-            services.AddTransient<IWebResourceService, WebResourceService>();
+            // NOTE: Domain services (ISolutionService, IPluginTraceService, IWebResourceService,
+            // IEnvironmentVariableService, IImportJobService, IMetadataAuthoringService, IUserService,
+            // IRoleService, IFlowService, IConnectionReferenceService, IDeploymentSettingsService,
+            // IComponentNameResolver) are registered by PPDS.Cli.Services.ServiceRegistration
+            // (AddCliApplicationServices) — they have been relocated out of this library per
+            // Constitution A1 (layering: PPDS.Dataverse is the infrastructure port and must not
+            // hold domain/application services).
 
             return services;
         }

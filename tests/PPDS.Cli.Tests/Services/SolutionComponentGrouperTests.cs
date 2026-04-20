@@ -1,5 +1,5 @@
 using PPDS.Cli.Services;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Solutions;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services;

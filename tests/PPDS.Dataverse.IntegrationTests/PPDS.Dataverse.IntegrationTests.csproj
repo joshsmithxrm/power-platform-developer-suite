@@ -28,6 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- PPDS.Cli is referenced for tests against relocated domain services
+         (e.g., PluginTraceService). Per constitution A1 these services now
+         live in PPDS.Cli.Services.*; the test infrastructure (FakeConnectionPool
+         etc.) remains in this integration-test project. -->
+    <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
     <ProjectReference Include="..\..\src\PPDS.Dataverse\PPDS.Dataverse.csproj" />
   </ItemGroup>
 

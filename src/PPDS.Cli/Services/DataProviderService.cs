@@ -3,6 +3,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
@@ -17,6 +18,7 @@ namespace PPDS.Cli.Services;
 public sealed class DataProviderService : IDataProviderService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly IShakedownGuard _guard;
     private readonly ILogger<DataProviderService> _logger;
 
     // Entity logical names (entitydatasource is not in the generated entities)
@@ -29,9 +31,10 @@ public sealed class DataProviderService : IDataProviderService
     /// <summary>
     /// Creates a new instance of <see cref="DataProviderService"/>.
     /// </summary>
-    public DataProviderService(IDataverseConnectionPool pool, ILogger<DataProviderService> logger)
+    public DataProviderService(IDataverseConnectionPool pool, IShakedownGuard guard, ILogger<DataProviderService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -71,6 +74,7 @@ public sealed class DataProviderService : IDataProviderService
     /// <inheritdoc />
     public async Task<Guid> RegisterDataSourceAsync(DataSourceRegistration registration, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("dataproviders.dataSource.register");
         if (string.IsNullOrWhiteSpace(registration.Name))
         {
             throw new PpdsException(
@@ -95,6 +99,7 @@ public sealed class DataProviderService : IDataProviderService
     /// <inheritdoc />
     public async Task UnregisterDataSourceAsync(Guid id, bool force = false, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("dataproviders.dataSource.unregister");
         var existing = await GetDataSourceByIdInternalAsync(id, cancellationToken);
         if (existing is null)
         {
@@ -198,6 +203,7 @@ public sealed class DataProviderService : IDataProviderService
     /// <inheritdoc />
     public async Task<Guid> RegisterDataProviderAsync(DataProviderRegistration registration, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("dataproviders.provider.register");
         if (string.IsNullOrWhiteSpace(registration.Name))
         {
             throw new PpdsException(
@@ -247,6 +253,7 @@ public sealed class DataProviderService : IDataProviderService
     /// <inheritdoc />
     public async Task UpdateDataProviderAsync(Guid id, DataProviderUpdateRequest request, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("dataproviders.provider.update");
         var existing = await GetDataProviderByIdInternalAsync(id, cancellationToken);
         if (existing is null)
         {
@@ -301,6 +308,7 @@ public sealed class DataProviderService : IDataProviderService
     /// <inheritdoc />
     public async Task UnregisterDataProviderAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("dataproviders.provider.unregister");
         var existing = await GetDataProviderByIdInternalAsync(id, cancellationToken);
         if (existing is null)
         {

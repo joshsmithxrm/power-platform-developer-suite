@@ -1,4 +1,4 @@
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Solutions;
 
 namespace PPDS.Cli.Services;
 
