@@ -61,7 +61,7 @@ public class DmlValueCoercerNullabilityTests
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Case 1: Null assignment to a <b>required</b> lookup column.
+    /// Null assignment to a <b>required</b> typed column (Lookup / Picklist / Money).
     /// Verifies whatever behavior the current coercer has. The early-return branch
     /// <c>if (value is null || attribute is null) return value;</c> means null passes
     /// through unchanged regardless of RequiredLevel — this test locks that in and
@@ -69,96 +69,59 @@ public class DmlValueCoercerNullabilityTests
     /// note returned to caller). Dataverse will later reject the row for the
     /// required attribute, producing an opaque SDK error rather than the structured
     /// <c>QueryErrorCode.TypeMismatch</c> the rest of the coercer emits.
+    /// <para>
+    /// Locked in as [Theory] now so a future fix that makes the coercer throw for
+    /// required-null intentionally flips these rows red — that is the signal the
+    /// review expects. Do not weaken or delete without the corresponding behavior change.
+    /// </para>
     /// </summary>
-    [Fact]
-    public void Coerce_NullValue_RequiredLookup_ReturnsNull_DocumentsCurrentBehavior()
+    [Theory]
+    [InlineData("Lookup", "primarycontactid", "ApplicationRequired", "contact")]
+    [InlineData("Picklist", "statuscode", "SystemRequired", null)]
+    [InlineData("Money", "revenue", "ApplicationRequired", null)]
+    public void Coerce_NullValue_Required_ReturnsNull_DocumentsCurrentBehavior(
+        string attributeType,
+        string name,
+        string requiredLevel,
+        string? target)
     {
         var attr = Attr(
-            "Lookup",
-            "primarycontactid",
-            requiredLevel: "ApplicationRequired",
-            targets: new() { "contact" });
+            attributeType,
+            name,
+            requiredLevel: requiredLevel,
+            targets: target is null ? null : new() { target });
 
         var result = DmlValueCoercer.Coerce(null, attr);
 
-        // Current behavior: null passes through. No EntityReference is synthesized.
-        // No PpdsException / QueryExecutionException is raised.
+        // Current behavior: null passes through. No EntityReference / OptionSetValue / Money wrapper
+        // is synthesized, and no PpdsException / QueryExecutionException is raised.
         result.Should().BeNull(
             because: "the coercer short-circuits on null input regardless of RequiredLevel; " +
-            "Dataverse SDK later rejects the null for a required lookup with an opaque error");
-    }
-
-    /// <summary>
-    /// Case 2: Null assignment to a <b>required</b> choice (picklist) column.
-    /// Same short-circuit: null passes through; no structured error.
-    /// </summary>
-    [Fact]
-    public void Coerce_NullValue_RequiredPicklist_ReturnsNull_DocumentsCurrentBehavior()
-    {
-        var attr = Attr(
-            "Picklist",
-            "statuscode",
-            requiredLevel: "SystemRequired");
-
-        var result = DmlValueCoercer.Coerce(null, attr);
-
-        result.Should().BeNull(
-            because: "null short-circuits the coercer; required choice columns get a raw null");
-    }
-
-    /// <summary>
-    /// Case 3: Null assignment to a <b>required</b> currency (Money) column.
-    /// Same short-circuit: null passes through; no Money wrapper, no structured error.
-    /// </summary>
-    [Fact]
-    public void Coerce_NullValue_RequiredMoney_ReturnsNull_DocumentsCurrentBehavior()
-    {
-        var attr = Attr(
-            "Money",
-            "revenue",
-            requiredLevel: "ApplicationRequired");
-
-        var result = DmlValueCoercer.Coerce(null, attr);
-
-        result.Should().BeNull(
-            because: "null short-circuits before Money wrapping; required currency columns get a raw null");
+            "Dataverse SDK later rejects the null for a required attribute with an opaque error");
     }
 
     // ────────── Secondary cases: nullable column null = success ─────────
 
-    /// <summary>Case 5: Null on a nullable lookup column — should succeed (null passes through).</summary>
-    [Fact]
-    public void Coerce_NullValue_NullableLookup_ReturnsNull()
+    /// <summary>
+    /// Null on a nullable typed column (Lookup / Picklist / Money) — should succeed
+    /// (null passes through). Symmetric to the required-null theory above; required vs
+    /// nullable currently produce the same output, and future-flipping one without the
+    /// other should be caught by this pair.
+    /// </summary>
+    [Theory]
+    [InlineData("Lookup", "parentcustomerid", "account")]
+    [InlineData("Picklist", "industrycode", null)]
+    [InlineData("Money", "creditlimit", null)]
+    public void Coerce_NullValue_Nullable_ReturnsNull(
+        string attributeType,
+        string name,
+        string? target)
     {
         var attr = Attr(
-            "Lookup",
-            "parentcustomerid",
+            attributeType,
+            name,
             requiredLevel: "None",
-            targets: new() { "account" });
-
-        DmlValueCoercer.Coerce(null, attr).Should().BeNull();
-    }
-
-    /// <summary>Case 6: Null on a nullable choice column — should succeed (null passes through).</summary>
-    [Fact]
-    public void Coerce_NullValue_NullableChoice_ReturnsNull()
-    {
-        var attr = Attr(
-            "Picklist",
-            "industrycode",
-            requiredLevel: "None");
-
-        DmlValueCoercer.Coerce(null, attr).Should().BeNull();
-    }
-
-    /// <summary>Case 6b: Null on a nullable Money column — should succeed (null passes through).</summary>
-    [Fact]
-    public void Coerce_NullValue_NullableMoney_ReturnsNull()
-    {
-        var attr = Attr(
-            "Money",
-            "creditlimit",
-            requiredLevel: "None");
+            targets: target is null ? null : new() { target });
 
         DmlValueCoercer.Coerce(null, attr).Should().BeNull();
     }
@@ -349,6 +312,7 @@ public class DmlValueCoercerNullabilityTests
     {
         public List<Entity> Created { get; } = new();
         public List<Entity> Updated { get; } = new();
+        public List<Entity> Upserted { get; } = new();
         public List<Guid> Deleted { get; } = new();
 
         public Task<BulkOperationResult> CreateMultipleAsync(
@@ -359,8 +323,9 @@ public class DmlValueCoercerNullabilityTests
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            Created.AddRange(entities);
-            return Task.FromResult(new BulkOperationResult { SuccessCount = Created.Count });
+            var list = entities.ToList();
+            Created.AddRange(list);
+            return Task.FromResult(new BulkOperationResult { SuccessCount = list.Count });
         }
 
         public Task<BulkOperationResult> UpdateMultipleAsync(
@@ -371,8 +336,9 @@ public class DmlValueCoercerNullabilityTests
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            Updated.AddRange(entities);
-            return Task.FromResult(new BulkOperationResult { SuccessCount = Updated.Count });
+            var list = entities.ToList();
+            Updated.AddRange(list);
+            return Task.FromResult(new BulkOperationResult { SuccessCount = list.Count });
         }
 
         public Task<BulkOperationResult> UpsertMultipleAsync(
@@ -383,8 +349,9 @@ public class DmlValueCoercerNullabilityTests
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            Created.AddRange(entities);
-            return Task.FromResult(new BulkOperationResult { SuccessCount = Created.Count });
+            var list = entities.ToList();
+            Upserted.AddRange(list);
+            return Task.FromResult(new BulkOperationResult { SuccessCount = list.Count });
         }
 
         public Task<BulkOperationResult> DeleteMultipleAsync(
@@ -395,8 +362,9 @@ public class DmlValueCoercerNullabilityTests
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            Deleted.AddRange(ids);
-            return Task.FromResult(new BulkOperationResult { SuccessCount = Deleted.Count });
+            var list = ids.ToList();
+            Deleted.AddRange(list);
+            return Task.FromResult(new BulkOperationResult { SuccessCount = list.Count });
         }
     }
 

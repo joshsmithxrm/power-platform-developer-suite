@@ -57,6 +57,7 @@
     <!-- Override vulnerable transitive dependency from Dataverse.Client (GHSA-555c-2p6r-68mm) -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" />
+    <!-- Override Cryptography.Xml transitive (GHSA-37gx-xxp4-5rgx, GHSA-w3x6-4m5h-cxqf) -->
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
