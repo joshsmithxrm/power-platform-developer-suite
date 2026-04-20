@@ -10,6 +10,18 @@ Commit-aware validation (v8.0):
   - qa.{surface}_commit_ref is ancestor-of-HEAD (per non-workflow surface)
   - Workflow-only diffs skip QA requirement
   - Triage completeness when PR already exists in state
+
+Agent-entry-point enforcement (v9.0):
+  - Agent-context PR creation MUST go through the `/pr` skill.
+  - Agent context = cwd inside ``.claude/worktrees/agent-*`` OR one of the
+    Claude Code agent env vars (``CLAUDE_CODE_AGENT``, ``CLAUDE_AGENT_ID``,
+    ``CLAUDE_CODE_SUBAGENT``) set.
+  - Agent context requires ``pr.invoked_via_skill=true`` in workflow state;
+    the ``/pr`` skill sets this marker at entry.
+  - Human context (main checkout, no agent env vars) keeps the previous
+    behavior -- workflow-step validation only.
+  - Explicit override: ``PPDS_PR_GATE_HUMAN=1`` forces human context for
+    the rare case of a human running ``gh pr create`` from a worktree.
 """
 import json
 import os
@@ -21,6 +33,61 @@ from _pathfix import get_project_dir
 
 # Valid surface keys
 VALID_SURFACES = frozenset(("ext", "tui", "mcp", "cli", "workflow"))
+
+# Env vars that indicate we're running inside a Claude Code agent/subagent.
+# If Claude Code ever formalizes a canonical name, add it here.
+_AGENT_ENV_VARS = (
+    "CLAUDE_CODE_AGENT",
+    "CLAUDE_AGENT_ID",
+    "CLAUDE_CODE_SUBAGENT",
+)
+
+# Explicit override: humans running gh pr create from a worktree can set
+# PPDS_PR_GATE_HUMAN=1 to opt out of agent-context enforcement.
+_HUMAN_OVERRIDE_ENV = "PPDS_PR_GATE_HUMAN"
+
+
+def _is_agent_context(cwd=None, env=None):
+    """Return True if this invocation looks like a Claude Code agent.
+
+    Heuristics (any one triggers agent context):
+      1. cwd path contains ``.claude/worktrees/agent-`` segment
+      2. Any known Claude Code agent env var is set to a non-empty value
+
+    The explicit override ``PPDS_PR_GATE_HUMAN=1`` forces False regardless.
+    """
+    env = env if env is not None else os.environ
+    if env.get(_HUMAN_OVERRIDE_ENV, "").strip() == "1":
+        return False
+
+    # Env-var signal takes priority -- most reliable once Claude Code sets one.
+    for var in _AGENT_ENV_VARS:
+        if env.get(var, "").strip():
+            return True
+
+    # Fall back to path sniffing. Normalize to forward slashes.
+    cwd = cwd if cwd is not None else os.getcwd()
+    normalized = cwd.replace("\\", "/")
+    if "/.claude/worktrees/agent-" in normalized:
+        return True
+    return False
+
+
+def _has_pr_skill_marker(state):
+    """Return True if the ``/pr`` skill recorded its entry marker."""
+    pr_section = state.get("pr") or {}
+    return bool(pr_section.get("invoked_via_skill"))
+
+
+_AGENT_BYPASS_MESSAGE = (
+    "PR blocked. Agent PR creation must go through the `/pr` skill.\n"
+    "  Invoke `/pr` to create PRs. See `.claude/skills/pr/SKILL.md` "
+    "Canonical Entry Point.\n"
+    "  Raw `gh pr create` bypasses monitor spawn, draft-gating, and state "
+    "tracking.\n"
+    "  If you are a human running from a worktree, set "
+    "PPDS_PR_GATE_HUMAN=1 to override."
+)
 
 # Path prefix -> surface mapping (order matters: more specific first)
 _SURFACE_RULES = [
@@ -157,13 +224,19 @@ def main():
     state_path = os.path.join(project_dir, ".workflow", "state.json")
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
-    # No state file = no evidence of any workflow steps
+    agent_context = _is_agent_context()
+
+    # No state file = no evidence of any workflow steps (and, for agents,
+    # no /pr skill marker either -- block with the clearer agent message).
     if not os.path.exists(state_path):
-        print(
-            "PR blocked. No workflow state found.\n"
-            "  Run /gates, /verify, /qa, and /review before creating a PR.",
-            file=sys.stderr,
-        )
+        if agent_context:
+            print(_AGENT_BYPASS_MESSAGE, file=sys.stderr)
+        else:
+            print(
+                "PR blocked. No workflow state found.\n"
+                "  Run /gates, /verify, /qa, and /review before creating a PR.",
+                file=sys.stderr,
+            )
         sys.exit(2)
 
     try:
@@ -175,6 +248,16 @@ def main():
             "  Delete .workflow/state.json and re-run workflow steps.",
             file=sys.stderr,
         )
+        sys.exit(2)
+
+    # -----------------------------------------------------------------
+    # Agent-entry-point enforcement (runs before commit-ref checks)
+    # Agents MUST invoke via the `/pr` skill, which sets
+    # pr.invoked_via_skill=true. Raw `gh pr create` from an agent
+    # bypasses monitor spawn, draft-gating, and state tracking.
+    # -----------------------------------------------------------------
+    if agent_context and not _has_pr_skill_marker(state):
+        print(_AGENT_BYPASS_MESSAGE, file=sys.stderr)
         sys.exit(2)
 
     # Get current HEAD
