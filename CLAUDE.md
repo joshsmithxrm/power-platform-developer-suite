@@ -5,6 +5,7 @@ All business logic lives in **Application Services** — never in UI code.
 
 Read **`specs/CONSTITUTION.md`** before any work (Spec Laws SL1–SL5 are non-negotiable).
 Governance for THIS file: **`docs/CLAUDE-MD-GOVERNANCE.md`** (4-question test, line cap, marker).
+Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md`** (read before `/retro`, `/backlog dispatch`, or any N-decision triage).
 
 ## NEVER
 
