@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using PPDS.Auth.Credentials;
 using Xunit;
@@ -51,7 +52,7 @@ public class MsalClientBuilderTests
 
         if (!File.Exists(srcPath))
         {
-            return;
+            Assert.Fail($"Source file not found at {srcPath} — test layout changed.");
         }
 
         var source = File.ReadAllText(srcPath);
@@ -61,9 +62,11 @@ public class MsalClientBuilderTests
         source.Should().Contain(
             "OperatingSystem.IsLinux()",
             "SetUnixFileMode must be guarded on Linux — throws on Windows");
-        source.Should().Contain(
-            "UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite",
-            "Fallback clamp must be exactly 0600 (UserRead | UserWrite), not 0700");
+        // Match either fully-qualified `System.IO.UnixFileMode.UserWrite` or the
+        // unqualified form (if a future `using System.IO;` drops the prefix).
+        Regex.IsMatch(source, @"UserRead\s*\|\s*(System\.IO\.)?UnixFileMode\.UserWrite")
+            .Should().BeTrue(
+                "Fallback clamp must be exactly 0600 (UserRead | UserWrite), not 0700");
     }
 
     [Fact]
@@ -79,9 +82,7 @@ public class MsalClientBuilderTests
 
         if (!File.Exists(srcPath))
         {
-            // When tests are run from NuGet packaged form, source file may
-            // not be available. Skip rather than fail spuriously.
-            return;
+            Assert.Fail($"Source file not found at {srcPath} — test layout changed.");
         }
 
         var source = File.ReadAllText(srcPath);

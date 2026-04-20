@@ -165,8 +165,7 @@ internal static class MsalClientBuilder
                 // tokens to disk. Clamp mode to 0600 so only the owning user
                 // can read the cache file. Guarded for Linux — SetUnixFileMode
                 // throws on Windows.
-                ClampLinuxFallbackFileMode(System.IO.Path.Combine(
-                    ProfilePaths.DataDirectory, ProfilePaths.TokenCacheFileName));
+                ClampLinuxFallbackFileMode(ProfilePaths.TokenCacheFile);
                 return fallbackHelper;
             }
         }
@@ -189,6 +188,8 @@ internal static class MsalClientBuilder
     /// <param name="path">The unprotected cache file path.</param>
     private static void ClampLinuxFallbackFileMode(string path)
     {
+        // Belt-and-braces: caller already gates on Linux, but keep guard so this
+        // helper is safe if reused elsewhere.
         if (!OperatingSystem.IsLinux())
         {
             return;
