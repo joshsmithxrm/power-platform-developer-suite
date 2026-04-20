@@ -1,13 +1,15 @@
 """Tests for .claude/hooks/stop-hook-watchdog.py (meta-retro #17).
 
 Covers: under-threshold allow, over-threshold deny (message + exit 2),
-corrupt-state graceful fallback, cross-session isolation.
+corrupt-state graceful fallback, cross-session isolation, concurrent-write
+race safety (atomic rename + sidecar lock).
 """
 import json
 import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 HOOK_PATH = os.path.normpath(os.path.join(
     os.path.dirname(__file__), os.pardir, ".claude", "hooks", "stop-hook-watchdog.py"
@@ -106,3 +108,32 @@ def test_session_a_high_count_does_not_affect_session_b(tmp_path):
     assert r.returncode == 0
     data = _counts(str(tmp_path))
     assert "sess-A" in data and len(data["sess-B"]["Stop"]) == 1
+
+
+# --- Concurrency: atomic write + sidecar lock prevent lost updates ---
+
+def test_concurrent_invocations_do_not_lose_updates(tmp_path):
+    """N concurrent Stop hooks across distinct sessions must persist all N
+    timestamps — the lock + atomic rename eliminate read-modify-write races.
+    """
+    project_dir = str(tmp_path)
+    n = 10
+
+    def fire(i):
+        return _run(
+            {"session_id": f"sess-{i}", "hook_event_name": "Stop"}, project_dir
+        ).returncode
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        results = list(pool.map(fire, range(n)))
+
+    assert all(rc == 0 for rc in results)
+    data = _counts(project_dir)
+    # Every distinct session must be present — no lost updates.
+    assert len(data) == n
+    for i in range(n):
+        assert len(data[f"sess-{i}"]["Stop"]) == 1
+    # No stray lock or temp file left behind.
+    state_dir = os.path.join(project_dir, ".claude", "state")
+    assert not os.path.exists(os.path.join(state_dir, "hook-counts.json.lock"))
+    assert not os.path.exists(os.path.join(state_dir, "hook-counts.json.tmp"))
