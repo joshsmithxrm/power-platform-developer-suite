@@ -214,8 +214,23 @@ internal static class MsalClientBuilder
             }
             if (!System.IO.File.Exists(path))
             {
-                using (System.IO.File.Create(path)) { }
+                // Atomic create-with-mode: FileStreamOptions.UnixCreateMode
+                // (NET 7+) sets the inode permissions at creation time, so
+                // there is no window where the file exists at the system
+                // umask before being clamped. Closes the File.Create →
+                // SetUnixFileMode race that an earlier version of this
+                // code had (Gemini review #3107844xxx).
+                var options = new System.IO.FileStreamOptions
+                {
+                    Mode = System.IO.FileMode.CreateNew,
+                    Access = System.IO.FileAccess.Write,
+                    UnixCreateMode = System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite,
+                };
+                using (System.IO.File.Open(path, options)) { }
             }
+            // Belt-and-braces clamp in case the file existed at a wider mode
+            // (e.g. carried over from a previous version that used the
+            // racy File.Create pattern).
             System.IO.File.SetUnixFileMode(
                 path,
                 System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite);
