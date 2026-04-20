@@ -7,6 +7,17 @@ description: Create PR, wait for Gemini review, triage every comment, and presen
 
 End-to-end PR lifecycle: rebase, create, wait for Gemini review, triage comments, and present a summary to the user.
 
+## Canonical Entry Point
+
+This skill is the ONLY sanctioned path for automated PR creation in this repo. Agents and automations MUST invoke `/pr` — directly calling `gh pr create`, `hub pull-request`, or the GitHub API outside of this skill is forbidden for agent-spawned PRs. (The skill itself calls `gh pr create` internally in Step 3 — that is the sanctioned invocation.) Rationale:
+
+- Direct invocation bypasses draft-open (defeating #834's ready-flip gate)
+- Direct invocation bypasses `pr_monitor.py` spawn (no polling, no Gemini wait, no triage)
+- Direct invocation bypasses state tracking (`.workflow/state.json` records for `/gates`, `/verify`, etc.)
+- Direct invocation bypasses prerequisite enforcement (the PR gate hook described in Prerequisites below)
+
+Human-initiated PR creation via `gh pr create` from a terminal is fine — this rule applies to automated/agent PR creation only.
+
 ## Prerequisites
 
 Prerequisite enforcement (`/gates`, `/verify`, `/qa`, `/review`) lives in
@@ -106,6 +117,8 @@ If the user elects to address findings, return to the implementation loop
 If the user elects to skip or only NITs are reported, proceed to step 4.
 
 ### 4. Create PR (Draft)
+
+Opens as draft. Monitor flips to ready via `pr_monitor.py` auto-ready-flip logic (added in #834) once CI green + Gemini reviewed + no unreplied comments.
 
 ```bash
 gh pr create --draft --title "<title>" --body "$(cat <<'EOF'
