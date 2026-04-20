@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.0.0] - 2026-04-18
 
+> Enjoying PPDS v1.0? Please [leave a review on the Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite&ssr=false#review-details) — reviews are the single biggest conversion signal for new users.
+
 First stable release. Per the odd/even minor convention, `1.0.0` is a stable-channel release on the VS Code Marketplace. Consolidates `0.5.0` (daemon-backed ground-up rebuild) and `0.7.0` (pre-release feature pass) into a single stable baseline.
 
 ### Added
