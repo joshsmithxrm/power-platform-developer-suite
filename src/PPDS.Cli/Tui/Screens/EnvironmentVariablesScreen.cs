@@ -190,7 +190,12 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 if (_isShowingDetail) return;
                 _isShowingDetail = true;
 
-                _detailDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _detailDialog;
+                _detailDialog = null;
+                prior?.Dispose();
 
                 var isReadOnly = variable.Type is "DataSource" or "Secret";
 
@@ -288,7 +293,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 var closeButton = new Button("Close", is_default: isReadOnly);
                 buttons.Add(closeButton);
 
-                _detailDialog = new Dialog(
+                var dialog = new Dialog(
                     $"Environment Variable: {variable.DisplayName ?? variable.SchemaName}",
                     buttons.ToArray())
                 {
@@ -296,70 +301,91 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     Height = Dim.Percent(70)
                 };
 
-                foreach (var view in detailViews)
-                {
-                    _detailDialog.Add(view);
-                }
+                Action closeHandler = () => Application.RequestStop();
+                Action? saveHandler = null;
 
-                closeButton.Clicked += () => Application.RequestStop();
-
-                if (saveButton != null)
+                try
                 {
-                    saveButton.Clicked += () =>
+                    _detailDialog = dialog;
+                    foreach (var view in detailViews)
                     {
-                        string? newValue = null;
+                        dialog.Add(view);
+                    }
 
-                        if (variable.Type == "Boolean" && boolGroup != null)
-                        {
-                            newValue = boolGroup.SelectedItem == 0 ? "true" : "false";
-                        }
-                        else if (variable.Type == "JSON" && valueEditor is TextView tv)
-                        {
-                            newValue = tv.Text?.ToString();
+                    closeButton.Clicked += closeHandler;
 
-                            // Validate JSON syntax
-                            if (!string.IsNullOrEmpty(newValue))
+                    if (saveButton != null)
+                    {
+                        saveHandler = () =>
+                        {
+                            string? newValue = null;
+
+                            if (variable.Type == "Boolean" && boolGroup != null)
                             {
-                                try
+                                newValue = boolGroup.SelectedItem == 0 ? "true" : "false";
+                            }
+                            else if (variable.Type == "JSON" && valueEditor is TextView tv)
+                            {
+                                newValue = tv.Text?.ToString();
+
+                                // Validate JSON syntax
+                                if (!string.IsNullOrEmpty(newValue))
                                 {
-                                    System.Text.Json.JsonDocument.Parse(newValue);
-                                }
-                                catch (System.Text.Json.JsonException)
-                                {
-                                    MessageBox.ErrorQuery("Validation Error", "Value must be valid JSON.", "OK");
-                                    return;
+                                    try
+                                    {
+                                        System.Text.Json.JsonDocument.Parse(newValue);
+                                    }
+                                    catch (System.Text.Json.JsonException)
+                                    {
+                                        MessageBox.ErrorQuery("Validation Error", "Value must be valid JSON.", "OK");
+                                        return;
+                                    }
                                 }
                             }
-                        }
-                        else if (valueEditor is TextField tf)
-                        {
-                            newValue = tf.Text?.ToString();
-
-                            // Validate numeric input
-                            if (variable.Type == "Number" && !string.IsNullOrEmpty(newValue))
+                            else if (valueEditor is TextField tf)
                             {
-                                if (!decimal.TryParse(newValue, out _))
+                                newValue = tf.Text?.ToString();
+
+                                // Validate numeric input
+                                if (variable.Type == "Number" && !string.IsNullOrEmpty(newValue))
                                 {
-                                    MessageBox.ErrorQuery("Validation Error", "Value must be a valid number.", "OK");
-                                    return;
+                                    if (!decimal.TryParse(newValue, out _))
+                                    {
+                                        MessageBox.ErrorQuery("Validation Error", "Value must be a valid number.", "OK");
+                                        return;
+                                    }
                                 }
                             }
-                        }
 
-                        if (newValue != null)
-                        {
-                            Application.RequestStop();
-                            ErrorService.FireAndForget(
-                                SaveValueAsync(variable.SchemaName, newValue),
-                                "EnvironmentVariables.Save");
-                        }
-                    };
+                            if (newValue != null)
+                            {
+                                Application.RequestStop();
+                                ErrorService.FireAndForget(
+                                    SaveValueAsync(variable.SchemaName, newValue),
+                                    "EnvironmentVariables.Save");
+                            }
+                        };
+                        saveButton.Clicked += saveHandler;
+                    }
+
+                    Application.Run(dialog);
                 }
+                finally
+                {
+                    // R3: explicitly unsubscribe before disposing.
+                    closeButton.Clicked -= closeHandler;
+                    if (saveButton != null && saveHandler != null)
+                    {
+                        saveButton.Clicked -= saveHandler;
+                    }
 
-                Application.Run(_detailDialog);
-                _detailDialog.Dispose();
-                _detailDialog = null;
-                _isShowingDetail = false;
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _detailDialog;
+                    _detailDialog = null;
+                    _isShowingDetail = false;
+                    d?.Dispose();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -455,28 +481,34 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                dialog.Add(textView);
-
-                var filePath = System.IO.Path.Combine(Environment.CurrentDirectory, fileName);
-
-                copyButton.Clicked += () =>
+                try
                 {
-                    try
-                    {
-                        System.IO.File.WriteAllText(filePath, json);
-                        _statusLabel.Text = $"Exported to {filePath}";
-                    }
-                    catch (Exception ex)
-                    {
-                        ErrorService.ReportError("Failed to write export file", ex, "EnvironmentVariables.ExportWrite");
-                    }
-                    Application.RequestStop();
-                };
+                    dialog.Add(textView);
 
-                closeButton.Clicked += () => Application.RequestStop();
+                    var filePath = System.IO.Path.Combine(Environment.CurrentDirectory, fileName);
 
-                Application.Run(dialog);
-                dialog.Dispose();
+                    copyButton.Clicked += () =>
+                    {
+                        try
+                        {
+                            System.IO.File.WriteAllText(filePath, json);
+                            _statusLabel.Text = $"Exported to {filePath}";
+                        }
+                        catch (Exception ex)
+                        {
+                            ErrorService.ReportError("Failed to write export file", ex, "EnvironmentVariables.ExportWrite");
+                        }
+                        Application.RequestStop();
+                    };
+
+                    closeButton.Clicked += () => Application.RequestStop();
+
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                }
 
                 // Restore status
                 var overridden = _variables.Count(v => v.CurrentValue != null);
@@ -541,36 +573,42 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
                 };
-                dialog.Add(listView);
-
-                var confirmed = false;
-                selectButton.Clicked += () =>
+                try
                 {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
-                cancelButton.Clicked += () => Application.RequestStop();
-                listView.OpenSelectedItem += _ =>
+                    dialog.Add(listView);
+
+                    var confirmed = false;
+                    selectButton.Clicked += () =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
+                    cancelButton.Clicked += () => Application.RequestStop();
+                    listView.OpenSelectedItem += _ =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
+
+                    Application.Run(dialog);
+
+                    if (confirmed)
+                    {
+                        var idx = listView.SelectedItem;
+                        _solutionFilter = idx == 0 ? null : names[idx];
+
+                        // Persist updated filter state
+                        ErrorService.FireAndForget(
+                            Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
+                                new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                            "EnvironmentVariables.SaveState");
+
+                        ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
+                    }
+                }
+                finally
                 {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
-
-                Application.Run(dialog);
-                dialog.Dispose();
-
-                if (confirmed)
-                {
-                    var idx = listView.SelectedItem;
-                    _solutionFilter = idx == 0 ? null : names[idx];
-
-                    // Persist updated filter state
-                    ErrorService.FireAndForget(
-                        Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
-                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
-                        "EnvironmentVariables.SaveState");
-
-                    ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
+                    dialog.Dispose();
                 }
             });
         }
@@ -596,10 +634,16 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             Width = 60,
             Height = 7
         };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/environmentvariables" });
-        Application.Run(dialog);
-        dialog.Dispose();
+        try
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/environmentvariables" });
+            Application.Run(dialog);
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     protected override void OnDispose()

@@ -277,7 +277,12 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                 if (_isShowingDetail) return;
                 _isShowingDetail = true;
 
-                _detailDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _detailDialog;
+                _detailDialog = null;
+                prior?.Dispose();
 
                 var textView = new TextView
                 {
@@ -289,18 +294,28 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Text = text
                 };
 
-                _detailDialog = new Dialog(
+                var dialog = new Dialog(
                     $"Connection Reference: {cr.DisplayName ?? cr.LogicalName}",
                     new Button("Close", is_default: true))
                 {
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _detailDialog.Add(textView);
-                Application.Run(_detailDialog);
-                _detailDialog.Dispose();
-                _detailDialog = null;
-                _isShowingDetail = false;
+                try
+                {
+                    _detailDialog = dialog;
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _detailDialog;
+                    _detailDialog = null;
+                    _isShowingDetail = false;
+                    d?.Dispose();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -412,9 +427,15 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                dialog.Add(textView);
-                Application.Run(dialog);
-                dialog.Dispose();
+                try
+                {
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -468,33 +489,48 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
                 };
-                dialog.Add(listView);
 
                 var confirmed = false;
-                selectButton.Clicked += () =>
+                Action selectHandler = () =>
                 {
                     confirmed = true;
                     Application.RequestStop();
                 };
-                cancelButton.Clicked += () => Application.RequestStop();
-                listView.OpenSelectedItem += _ =>
+                Action cancelHandler = () => Application.RequestStop();
+                Action<ListViewItemEventArgs> openHandler = _ =>
                 {
                     confirmed = true;
                     Application.RequestStop();
                 };
 
-                Application.Run(dialog);
-                dialog.Dispose();
-
-                if (confirmed)
+                try
                 {
-                    var idx = listView.SelectedItem;
-                    _solutionFilter = idx == 0 ? null : names[idx];
-                    ErrorService.FireAndForget(
-                        Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
-                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
-                        "ConnectionReferences.SaveState");
-                    ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.FilterApply");
+                    dialog.Add(listView);
+
+                    selectButton.Clicked += selectHandler;
+                    cancelButton.Clicked += cancelHandler;
+                    listView.OpenSelectedItem += openHandler;
+
+                    Application.Run(dialog);
+
+                    if (confirmed)
+                    {
+                        var idx = listView.SelectedItem;
+                        _solutionFilter = idx == 0 ? null : names[idx];
+                        ErrorService.FireAndForget(
+                            Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
+                                new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                            "ConnectionReferences.SaveState");
+                        ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.FilterApply");
+                    }
+                }
+                finally
+                {
+                    // R3: explicitly unsubscribe handlers before disposing dialog.
+                    selectButton.Clicked -= selectHandler;
+                    cancelButton.Clicked -= cancelHandler;
+                    listView.OpenSelectedItem -= openHandler;
+                    dialog.Dispose();
                 }
             });
         }
@@ -520,10 +556,16 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             Width = 60,
             Height = 7
         };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/connectors" });
-        Application.Run(dialog);
-        dialog.Dispose();
+        try
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/connectors" });
+            Application.Run(dialog);
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     protected override void OnDispose()

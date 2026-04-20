@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using PPDS.Auth.Credentials;
 using Xunit;
@@ -38,6 +39,44 @@ public class MsalClientBuilderTests
     }
 
     [Fact]
+    public void MsalClientBuilder_Source_ClampsLinuxFallbackFileMode()
+    {
+        // Linux fallback writes plaintext tokens to disk. The source must
+        // clamp the file to 0600 (UserRead | UserWrite) after creation,
+        // guarded by OperatingSystem.IsLinux() so Windows doesn't throw.
+        var thisAssembly = typeof(MsalClientBuilderTests).Assembly;
+        var srcPath = Path.Combine(
+            Path.GetDirectoryName(thisAssembly.Location)!,
+            "..", "..", "..", "..", "..",
+            "src", "PPDS.Auth", "Credentials", "MsalClientBuilder.cs");
+
+        if (!File.Exists(srcPath))
+        {
+            Assert.Fail($"Source file not found at {srcPath} — test layout changed.");
+        }
+
+        var source = File.ReadAllText(srcPath);
+        source.Should().Contain(
+            "SetUnixFileMode",
+            "Linux unprotected fallback must clamp to owner-only mode");
+        source.Should().Contain(
+            "OperatingSystem.IsLinux()",
+            "SetUnixFileMode must be guarded on Linux — throws on Windows");
+        // Match either fully-qualified `System.IO.UnixFileMode.UserWrite` or the
+        // unqualified form (if a future `using System.IO;` drops the prefix).
+        Regex.IsMatch(source, @"UserRead\s*\|\s*(System\.IO\.)?UnixFileMode\.UserWrite")
+            .Should().BeTrue(
+                "Fallback clamp must be exactly 0600 (UserRead | UserWrite), not 0700");
+        // The clamp helper is a no-op when the file doesn't exist yet, so a
+        // pre-create helper must run before MsalCacheHelper.CreateAsync to
+        // materialize the file at 0600 on fresh installs. Without this, the
+        // first-auth token write would land at the system umask (often 0644).
+        source.Should().Contain(
+            "EnsureLinuxFallbackFileAtTightMode",
+            "Fallback file must be pre-created at 0600 before MSAL writes tokens");
+    }
+
+    [Fact]
     public void MsalClientBuilder_Source_PrefersLinuxKeyringOverUnprotectedFile()
     {
         // A3 regression guard — fails if someone re-introduces an unconditional
@@ -50,9 +89,7 @@ public class MsalClientBuilderTests
 
         if (!File.Exists(srcPath))
         {
-            // When tests are run from NuGet packaged form, source file may
-            // not be available. Skip rather than fail spuriously.
-            return;
+            Assert.Fail($"Source file not found at {srcPath} — test layout changed.");
         }
 
         var source = File.ReadAllText(srcPath);

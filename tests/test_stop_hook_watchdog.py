@@ -1,5 +1,10 @@
 """Tests for .claude/hooks/stop-hook-watchdog.py (meta-retro #17).
 
+Scope: the watchdog rate-limits Stop-hook firings — it does NOT terminate
+runaway Agents. These tests verify the rate-limiter's behaviour (allow
+under threshold, deny over, message content) and its on-disk invariants
+(cross-session isolation, corrupt-state fallback, atomic concurrent writes).
+
 Covers: under-threshold allow, over-threshold deny (message + exit 2),
 corrupt-state graceful fallback, cross-session isolation, concurrent-write
 race safety (atomic rename + sidecar lock).

@@ -363,12 +363,11 @@ For each entry whose status is `planned` (in plan-file order):
    ```
 
    The agent returns the PR URL inline. Pass it to `mark_launched`
-   via the `session_id` parameter (see step 5) — that is the only
-   launch-identifier slot the plan's data model exposes, and the
-   parser renders it as a `Session: <value>` line. A freeform
-   `PR: <url>` line would be dropped on the next `write_plan` round-
-   trip because the parser only recognizes the documented keys. No
-   manual terminal is opened.
+   via the `pr_url` parameter (see step 5) — schema v2 exposes
+   `pr_url` as a first-class field rendered as a dedicated `PR:` line
+   (before v2, the PR URL was packed into the `session_id` slot and
+   emitted as a misleading `Session:` line). No manual terminal is
+   opened.
 
 4. **D.2 path — inline-prompt launch command.** Emit to chat (the
    operator pastes it into a new terminal):
@@ -384,11 +383,18 @@ For each entry whose status is `planned` (in plan-file order):
 
 5. Capture the launch identifier — the session ID for D.2 or the
    agent-returned PR URL for D.1 — and mark the entry launched. The
-   `mark_launched` helper (in `scripts/dispatch_plan.py`) takes a
-   single `session_id` keyword argument; that slot carries the PR URL
-   for D.1 by convention because the plan's data model does not have a
-   separate PR field. The value round-trips through the markdown as a
-   `Session: <value>` line (see `PlanEntry.as_markdown`).
+   `mark_launched` helper (in `scripts/dispatch_plan.py`) takes
+   `session_id=` and `pr_url=` keyword arguments separately (schema v2);
+   pass whichever you have. They round-trip through the markdown as
+   `SessionId:` and `PR:` lines respectively (see
+   `PlanEntry.as_markdown`). Partial calls preserve existing metadata:
+   if the entry already has a `session_id`, calling with only
+   `pr_url=...` will NOT clobber it (and vice versa), so you can
+   stamp the PR URL later without re-passing the session_id.
+
+   Pick the pattern that matches the launch path:
+
+   **D.1 (background agent returned a PR)** — use `pr_url=` only:
 
    ```bash
    python -c "
@@ -396,8 +402,35 @@ For each entry whose status is `planned` (in plan-file order):
    sys.path.insert(0, 'scripts')
    from dispatch_plan import load_plan, mark_launched, write_plan
    plan = load_plan()
-   # session_id carries the D.2 session ID or the D.1 PR URL
-   mark_launched(plan, '<worktree>', session_id='<sid-or-pr-url>')
+   mark_launched(plan, '<worktree>', pr_url='<pr-url>')
+   write_plan(plan)
+   "
+   ```
+
+   **D.2 (foreground dispatcher launching a D.2 session inline)** —
+   use `session_id=` only:
+
+   ```bash
+   python -c "
+   import sys
+   sys.path.insert(0, 'scripts')
+   from dispatch_plan import load_plan, mark_launched, write_plan
+   plan = load_plan()
+   mark_launched(plan, '<worktree>', session_id='<sid>')
+   write_plan(plan)
+   "
+   ```
+
+   **Both at once** (rare — only if the background agent returned a
+   PR AND you also know its session ID):
+
+   ```bash
+   python -c "
+   import sys
+   sys.path.insert(0, 'scripts')
+   from dispatch_plan import load_plan, mark_launched, write_plan
+   plan = load_plan()
+   mark_launched(plan, '<worktree>', session_id='<sid>', pr_url='<pr-url>')
    write_plan(plan)
    "
    ```
@@ -476,7 +509,7 @@ or via the launched sessions' own `/pr` pipelines.
 ```markdown
 # Dispatch Plan
 
-Schema: 1
+Schema: 2
 Generated: 2026-04-19T01:30:00Z
 Generator: session-<id>
 
@@ -496,19 +529,21 @@ Status legend: planned | conflict | in-flight | done | skipped
 - Intent: audit capture pipeline [lane C]
 - Status: in-flight
 - Launched: 2026-04-19T01:32:14Z
-- Session: https://github.com/org/repo/pull/NNN
+- SessionId: session-abc12345
+- PR: https://github.com/org/repo/pull/NNN
 ```
 
 Allowed status values (exactly as enforced by `parse_plan`):
 `planned`, `conflict`, `in-flight`, `done`, `skipped`. Recognized
-keys per entry are `Issues`, `Areas`, `Intent`, `Status`, `Conflict`,
-`Launched`, `Session` — any other line (e.g. `Lane:`, `PR:`) is
-silently dropped on the next `write_plan` round-trip. Encode lane
-and PR URL through the supported keys: suffix the intent with
-`[lane B|C]`, and store the D.1 PR URL (or D.2 session ID) in the
-`Session` field via `mark_launched(..., session_id=...)`. The parser
-is forgiving of unrecognized lines so a human can leave ephemeral
-notes, but those notes will not survive the next dispatcher write.
+keys per entry (schema v2) are `Issues`, `Areas`, `Intent`, `Status`,
+`Conflict`, `Launched`, `SessionId`, `PR`. The legacy v1 `Session:`
+key is still accepted on read and maps to `session_id` (for one
+release), but new plans emit `SessionId:` and `PR:` as separate
+lines. Any other line (e.g. `Lane:`) is silently dropped on the
+next `write_plan` round-trip — encode lane through a suffix on
+`Intent` (`[lane B|C]`). The parser is forgiving of unrecognized
+lines so a human can leave ephemeral notes, but those notes will
+not survive the next dispatcher write.
 
 ### Rules
 

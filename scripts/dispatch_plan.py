@@ -49,7 +49,14 @@ from typing import Callable, Iterable, Iterator
 # Phase D of the dispatch flow).
 from inflight_common import _lock, _unlock  # noqa: E402
 
-PLAN_SCHEMA_VERSION = 1  # bump if file format changes
+PLAN_SCHEMA_VERSION = 2  # bump if file format changes
+#
+# Schema v2 (current): splits the v1 ``Session:`` slot — which was
+# overloaded to carry branch name / session ID / PR URL depending on
+# caller — into two semantic fields, ``SessionId:`` (Claude session
+# identifier) and ``PR:`` (PR URL, optional). The parser still accepts
+# v1 plans (``Session:`` maps to ``session_id``) for one release so that
+# an existing on-disk plan file survives the upgrade.
 
 # Status vocabulary. Kept narrow so the parser can validate; downstream
 # tooling (status reports, future TUI surface) reads the same set.
@@ -110,6 +117,17 @@ class PlanEntry:
     status: str = STATUS_PLANNED
     conflict_detail: str = ""
     launched_at: str = ""
+    # Schema v2 fields. ``session_id`` is the Claude session identifier
+    # of the launched worker (D.2 path) or the agent-isolation session
+    # that ran the work (D.1 path). ``pr_url`` is the pull request URL
+    # once one has been opened — optional, populated by the dispatcher
+    # or by the async PR-state wake-up in Phase E.
+    session_id: str = ""
+    pr_url: str = ""
+    # DEPRECATED: use ``session_id``; kept for one release for schema v1
+    # compat with any callers / cached dataclass instances that still
+    # reference the old field name. Populated by ``parse_plan`` from the
+    # legacy v1 ``Session:`` key but never emitted by ``as_markdown``.
     launched_by_session: str = ""
 
     def as_markdown(self) -> str:
@@ -126,8 +144,13 @@ class PlanEntry:
             lines.append(f"- Conflict: {self.conflict_detail}")
         if self.launched_at:
             lines.append(f"- Launched: {self.launched_at}")
-        if self.launched_by_session:
-            lines.append(f"- Session: {self.launched_by_session}")
+        # Schema v2: emit SessionId / PR as separate lines. Empty values
+        # are omitted so hand-readable plans stay compact. The legacy
+        # ``Session:`` line is NOT emitted — new plans are v2-native.
+        if self.session_id:
+            lines.append(f"- SessionId: {self.session_id}")
+        if self.pr_url:
+            lines.append(f"- PR: {self.pr_url}")
         return "\n".join(lines)
 
 
@@ -178,7 +201,16 @@ class DispatchPlan:
 
 
 _ENTRY_HEADER_RE = re.compile(r"^###\s+Worktree:\s+(.+)$")
-_KV_RE = re.compile(r"^-\s+(?P<key>[A-Za-z][A-Za-z\- ]*?):\s*(?P<value>.*)$")
+# Key class is ASCII letters and hyphens only — NO space. A stray
+# space in the key (e.g. ``- Session Id: foo``) was previously
+# matched with key="Session Id", lowercased to "session id", and
+# silently dropped because no handler matched. Tightening here makes
+# such a line a plain non-match (treated as an unstructured note the
+# parser skips), which is the same user-visible outcome but avoids
+# the fragile "parse then silently discard" step. All legitimate
+# keys (Issues, Areas, Intent, Status, Conflict, Launched, Session,
+# SessionId, PR) are single-word or hyphenated.
+_KV_RE = re.compile(r"^-\s+(?P<key>[A-Za-z][A-Za-z\-]*?):\s*(?P<value>.*)$")
 
 
 def parse_plan(text: str) -> DispatchPlan:
@@ -242,8 +274,25 @@ def parse_plan(text: str) -> DispatchPlan:
             current.conflict_detail = value
         elif key == "launched":
             current.launched_at = value
+        elif key == "sessionid":
+            # Schema v2 primary key. If a malformed plan has BOTH
+            # ``Session:`` and ``SessionId:`` lines in one entry,
+            # ``SessionId:`` wins regardless of line order — we
+            # overwrite whatever the legacy ``session`` branch might
+            # have set earlier or later in the block.
+            current.session_id = value
+            current.launched_by_session = value  # back-compat mirror
+        elif key == "pr":
+            current.pr_url = value
         elif key == "session":
-            current.launched_by_session = value
+            # Schema v1 legacy key. Map to ``session_id`` unless the v2
+            # ``SessionId:`` key has already claimed the slot (line
+            # order: SessionId seen first → skip). Keep mirroring to
+            # the deprecated ``launched_by_session`` field so any code
+            # path that still reads it sees the same value.
+            if not current.session_id:
+                current.session_id = value
+                current.launched_by_session = value
     commit()
     return plan
 
@@ -281,6 +330,15 @@ def write_plan(plan: DispatchPlan, path: Path | None = None) -> Path:
         path = plan_path()
     if not plan.generated:
         plan.generated = now_utc_iso()
+    # Stamp the current schema version on every write: ``parse_plan``
+    # preserves the on-disk ``Schema:`` header verbatim (so a v1 file
+    # loads with ``plan.version == 1``), but ``as_markdown`` emits v2
+    # shape unconditionally. Without this line, a v1→v2 write-back
+    # would ship v2 body with a stale ``Schema: 1`` header, which a
+    # future v3 parser would then mis-route through the v1 migration
+    # path. Bumping the in-memory version right before payload render
+    # keeps the header honest.
+    plan.version = PLAN_SCHEMA_VERSION
     payload = plan.as_markdown()
 
     # Use a sidecar lock file: we cannot lock the plan file itself across
@@ -332,7 +390,8 @@ def locked_plan(path: Path | None = None) -> Iterator[DispatchPlan]:
     Example::
 
         with locked_plan() as plan:
-            mark_launched(plan, "feat/foo", session_id="abc")
+            mark_launched(plan, "feat/foo", session_id="session-abc",
+                          pr_url="https://github.com/x/y/pull/1")
     """
     if path is None:
         path = plan_path()
@@ -347,6 +406,10 @@ def locked_plan(path: Path | None = None) -> Iterator[DispatchPlan]:
             yield plan
             if not plan.generated:
                 plan.generated = now_utc_iso()
+            # See ``write_plan``: bump the in-memory schema version so
+            # a v1 plan loaded, mutated, and persisted here ships with
+            # a v2 header matching its v2 body shape.
+            plan.version = PLAN_SCHEMA_VERSION
             _write_plan_payload(path, plan.as_markdown())
         finally:
             _unlock(lockfp)
@@ -468,9 +531,26 @@ def mark_launched(
     worktree: str,
     *,
     session_id: str = "",
+    pr_url: str = "",
     when: str | None = None,
 ) -> PlanEntry:
     """Flip an entry to ``in-flight`` and stamp launch metadata.
+
+    Schema v2 takes ``session_id`` and ``pr_url`` as separate arguments.
+    D.2 callers supply ``session_id`` (the Claude session identifier);
+    D.1 callers supply ``pr_url`` (the PR URL the isolated agent
+    returned) and may optionally also supply ``session_id``. Passing
+    neither is legal — the entry is still marked in-flight so the
+    dispatcher can record the launch even when the identifier is not
+    yet known.
+
+    Partial calls preserve existing metadata: supplying only
+    ``pr_url=...`` will NOT clobber a previously-recorded
+    ``session_id`` (e.g. a D.2 session already stamped), and supplying
+    only ``session_id=...`` will NOT clobber a previously-recorded
+    ``pr_url``. Each field is only written when its argument is
+    truthy, so a second call can append the PR URL once it becomes
+    known without touching the session_id slot.
 
     Raises ``KeyError`` if no entry matches ``worktree`` — defensive
     against a typo in the SKILL.md prompt that would otherwise silently
@@ -481,7 +561,14 @@ def mark_launched(
         raise KeyError(f"no plan entry for worktree {worktree!r}")
     entry.status = STATUS_IN_FLIGHT
     entry.launched_at = when or now_utc_iso()
-    entry.launched_by_session = session_id
+    if session_id:
+        entry.session_id = session_id
+        # Mirror to the deprecated v1 field so any caller still reading
+        # it (e.g. cached dataclass pickles) sees the same value. Safe
+        # to remove after one release.
+        entry.launched_by_session = session_id
+    if pr_url:
+        entry.pr_url = pr_url
     return entry
 
 

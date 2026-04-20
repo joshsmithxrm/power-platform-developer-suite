@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Stop-hook watchdog (circuit breaker).
+"""Stop-hook rate-limiter.
+
+Gates Stop-hook firings by rate-limiting them in a rolling 5-minute window.
+Does NOT terminate runaway Agents — that's out of scope. This watchdog only
+sees Stop-hook invocations and can refuse further firings; the Agent loop
+itself is bounded elsewhere (harness-level turn caps and the Stop-hook
+contract with Claude Code).
 
 Meta-retro #17 (2026-04-19): PR #830 ran 509 turns with 553 errors because a
-Stop hook fired repeatedly in a loop. No circuit breaker existed. This hook
-tracks per-(session, hook_name) Stop firings in a rolling 5-minute window and
-denies (exit 2) when any single hook exceeds 20 firings in that window.
+Stop hook fired repeatedly in a loop. Nothing rate-limited the hook. This
+script tracks per-(session, hook_name) Stop firings in a rolling 5-minute
+window and denies (exit 2) when any single hook exceeds 20 firings in that
+window — breaking the tight fire/deny/fire loop without pretending to
+terminate the agent itself.
 
 State file: .claude/state/hook-counts.json
     { "<session_id>": { "<hook_name>": [epoch_ts, epoch_ts, ...], ... }, ... }
@@ -159,9 +167,13 @@ def main():
         _release_lock(lock_fd, lock_path)
 
     if len(ts_list) > THRESHOLD:
+        # Rate-limit further firings of this Stop hook. This does NOT stop a
+        # runaway Agent — it only refuses to fire this specific hook again in
+        # the current 5-minute window, breaking the fire/deny/fire loop.
         msg = (
             f"Stop hook '{hook_name}' fired >{THRESHOLD}x in 5min — "
-            "circuit breaker engaged. Investigate `.workflow/state.json` "
+            "circuit breaker engaged (Stop-hook rate-limiter — does NOT "
+            "terminate the Agent). Investigate `.workflow/state.json` "
             "phase and hook registration in settings.json."
         )
         print(json.dumps({"decision": "block", "reason": msg}))

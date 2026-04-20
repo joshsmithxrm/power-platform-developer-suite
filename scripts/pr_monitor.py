@@ -51,12 +51,13 @@ SHAKEDOWN = os.environ.get("PPDS_SHAKEDOWN", "")
 # address — either a clean approval (top-level review with no inline notes)
 # or an explicit decline (file types not currently supported).
 # Both are treated as ready-flip-eligible for the Gemini gate. Extend this
-# list as new Gemini phrasings are discovered. Matching is case-sensitive
-# substring to minimise false positives.
+# list as new Gemini phrasings are discovered. Stored lower-case; matched
+# case-insensitively in ``_gemini_effectively_done`` so capitalisation
+# drift in Gemini's output doesn't regress the gate.
 _GEMINI_CLEAN_PATTERNS = (
-    "I have no feedback to provide",
-    "Gemini is unable to generate a review",
-    # Add future patterns here as discovered.
+    "i have no feedback to provide",
+    "gemini is unable to generate a review",
+    # Add future patterns here as discovered (lower-case).
 )
 
 
@@ -66,10 +67,15 @@ def _gemini_effectively_done(review_body):
     Matches clean-approval phrasing OR explicit "unable to review" declines.
     Does NOT match reviews that flagged issues (those have inline comments
     and require per-comment triage separately).
+
+    Matching is case-insensitive — Gemini's phrasing has historically varied
+    in capitalisation (``Gemini is unable...`` vs ``GEMINI is unable...``)
+    and we don't want trivial drift to regress the ready-flip gate.
     """
     if not review_body:
         return False
-    return any(p in review_body for p in _GEMINI_CLEAN_PATTERNS)
+    body_lower = review_body.lower()
+    return any(p in body_lower for p in _GEMINI_CLEAN_PATTERNS)
 
 # ---------------------------------------------------------------------------
 # Logging

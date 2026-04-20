@@ -475,17 +475,67 @@ public sealed class UpdateCheckService : IUpdateCheckService
             RedirectStandardError = false
         };
 
+        // Write placeholder lock BEFORE Process.Start so a failure between
+        // Start and PID-write does not leave an orphaned updater process
+        // running without any lock reference. If Start throws, we clean up
+        // the placeholder. If the PID rewrite throws, we still have the
+        // placeholder which will be treated as a stale lock by the next run
+        // (non-numeric PID triggers the corrupt-lock branch in UpdateAsync).
+        var lockDir = Path.GetDirectoryName(_lockPath);
+        if (!string.IsNullOrEmpty(lockDir) && !Directory.Exists(lockDir))
+        {
+            try { Directory.CreateDirectory(lockDir); } catch { /* best effort */ }
+        }
+
         try
         {
-            var process = Process.Start(psi);
+            File.WriteAllText(_lockPath, "starting");
+        }
+        catch
+        {
+            // If we can't even write the placeholder, fall through and let
+            // Start proceed — a write failure here should not block updates.
+        }
+
+        Process? process = null;
+        try
+        {
+            process = Process.Start(psi);
             if (process is not null)
             {
-                File.WriteAllText(_lockPath, process.Id.ToString());
-                process.Dispose(); // R1: don't hold the process handle
+                try
+                {
+                    File.WriteAllText(_lockPath, process.Id.ToString());
+                }
+                finally
+                {
+                    process.Dispose(); // R1: don't hold the process handle
+                }
+            }
+            else
+            {
+                // Start returned null — no process spawned; clean up placeholder.
+                try { File.Delete(_lockPath); } catch { /* best effort */ }
             }
         }
         catch (Exception ex)
         {
+            // Best-effort cleanup: remove the placeholder lock so a stale
+            // entry doesn't block the next update attempt.
+            try { File.Delete(_lockPath); } catch { /* best effort */ }
+
+            // If the process was spawned but PID-write failed, try to stop it
+            // so we don't leak a detached updater.
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                }
+                catch { /* best effort */ }
+                try { process.Dispose(); } catch { /* best effort */ }
+            }
+
             throw new PpdsException(
                 ErrorCodes.UpdateCheck.UpdateFailed,
                 $"Failed to start update process: {ex.Message}");

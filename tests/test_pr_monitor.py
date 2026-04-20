@@ -875,11 +875,26 @@ class TestGeminiEffectivelyDone:
         assert pr_monitor._gemini_effectively_done(None) is False
 
     def test_patterns_are_module_constant(self):
-        """Patterns are exposed for external extension/inspection."""
+        """Patterns are exposed for external extension/inspection.
+
+        Stored lower-case — matching is case-insensitive (see
+        ``_gemini_effectively_done``).
+        """
         assert isinstance(pr_monitor._GEMINI_CLEAN_PATTERNS, tuple)
-        assert "I have no feedback to provide" in pr_monitor._GEMINI_CLEAN_PATTERNS
-        assert "Gemini is unable to generate a review" \
+        assert all(p == p.lower() for p in pr_monitor._GEMINI_CLEAN_PATTERNS), \
+            "patterns must be stored lower-case for case-insensitive match"
+        assert "i have no feedback to provide" in pr_monitor._GEMINI_CLEAN_PATTERNS
+        assert "gemini is unable to generate a review" \
             in pr_monitor._GEMINI_CLEAN_PATTERNS
+
+    def test_case_insensitive_match(self):
+        """Uppercase / mixed-case Gemini output still matches the gate."""
+        assert pr_monitor._gemini_effectively_done(
+            "GEMINI IS UNABLE TO GENERATE A REVIEW for this PR."
+        ) is True
+        assert pr_monitor._gemini_effectively_done(
+            "I Have No Feedback To Provide."
+        ) is True
 
 
 class TestReadyFlipGeminiDimension:

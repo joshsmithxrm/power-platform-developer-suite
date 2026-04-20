@@ -198,7 +198,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             Application.MainLoop.Invoke(() =>
             {
-                _contentDialog?.Dispose();
+                // Safely dispose any prior dialog: null the field FIRST so
+                // OnDispose() can't re-enter a partially disposed instance if
+                // Dispose() throws.
+                var prior = _contentDialog;
+                _contentDialog = null;
+                prior?.Dispose();
 
                 var textView = new TextView
                 {
@@ -210,17 +215,27 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Text = content?.Content ?? "(No content available)"
                 };
 
-                _contentDialog = new Dialog(
+                var dialog = new Dialog(
                     $"{resource.Name} ({resource.TypeName})",
                     new Button("Close", is_default: true))
                 {
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _contentDialog.Add(textView);
-                Application.Run(_contentDialog);
-                _contentDialog.Dispose();
-                _contentDialog = null;
+                try
+                {
+                    _contentDialog = dialog;
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    // Null-before-dispose: if Dispose throws, OnDispose() won't
+                    // see a stale reference to this instance.
+                    var d = _contentDialog;
+                    _contentDialog = null;
+                    d?.Dispose();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -356,9 +371,8 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(60)
                 };
-                dialog.Add(listView);
 
-                listView.OpenSelectedItem += (args) =>
+                Action<ListViewItemEventArgs> openHandler = (args) =>
                 {
                     if (args.Item == 0)
                     {
@@ -371,8 +385,20 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Application.RequestStop();
                 };
 
-                Application.Run(dialog);
-                dialog.Dispose();
+                try
+                {
+                    dialog.Add(listView);
+
+                    listView.OpenSelectedItem += openHandler;
+
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    // R3: explicitly unsubscribe before disposing.
+                    listView.OpenSelectedItem -= openHandler;
+                    dialog.Dispose();
+                }
 
                 // Persist updated filter state
                 ErrorService.FireAndForget(
@@ -422,10 +448,16 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             Width = 60,
             Height = 7
         };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
-        Application.Run(dialog);
-        dialog.Dispose();
+        try
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
+            Application.Run(dialog);
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     protected override void OnDispose()
