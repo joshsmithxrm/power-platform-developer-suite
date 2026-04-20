@@ -112,6 +112,9 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 __pycache__/
 *.pyc
 
+# Stop-hook watchdog counters (transient runtime state)
+.claude/state/hook-counts.json
+
 # Shakedown scenarios (synthetic test data)
 .shakedown/
 
