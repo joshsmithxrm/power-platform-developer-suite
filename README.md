@@ -1,13 +1,11 @@
 # Power Platform Developer Suite
 
 [![Build](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml/badge.svg)](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml)
-[![codecov](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite/graph/badge.svg)](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite)
-[![Docs](https://img.shields.io/badge/docs-ppds--docs-blue)](https://joshsmithxrm.github.io/ppds-docs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8.0%2B-512BD4)](https://dotnet.microsoft.com/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Docs](https://img.shields.io/badge/docs-ppds--docs-blue)](https://joshsmithxrm.github.io/ppds-docs/)
 
-Pro-grade tooling for Power Platform developers. CLI, TUI, MCP server, VS Code extension, and NuGet libraries.
+Developer platform for Microsoft Power Platform and Dataverse. PPDS ships a CLI, TUI, MCP server, VS Code extension, and NuGet libraries — each piece independently consumable; install only what you need. The VS Code extension is available on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite).
 
 ## Quick Start
 
