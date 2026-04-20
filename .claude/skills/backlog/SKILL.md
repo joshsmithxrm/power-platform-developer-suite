@@ -387,7 +387,14 @@ For each entry whose status is `planned` (in plan-file order):
    `session_id=` and `pr_url=` keyword arguments separately (schema v2);
    pass whichever you have. They round-trip through the markdown as
    `SessionId:` and `PR:` lines respectively (see
-   `PlanEntry.as_markdown`).
+   `PlanEntry.as_markdown`). Partial calls preserve existing metadata:
+   if the entry already has a `session_id`, calling with only
+   `pr_url=...` will NOT clobber it (and vice versa), so you can
+   stamp the PR URL later without re-passing the session_id.
+
+   Pick the pattern that matches the launch path:
+
+   **D.1 (background agent returned a PR)** — use `pr_url=` only:
 
    ```bash
    python -c "
@@ -395,7 +402,34 @@ For each entry whose status is `planned` (in plan-file order):
    sys.path.insert(0, 'scripts')
    from dispatch_plan import load_plan, mark_launched, write_plan
    plan = load_plan()
-   # D.2: session_id=<claude session id>. D.1: pr_url=<PR URL>.
+   mark_launched(plan, '<worktree>', pr_url='<pr-url>')
+   write_plan(plan)
+   "
+   ```
+
+   **D.2 (foreground dispatcher launching a D.2 session inline)** —
+   use `session_id=` only:
+
+   ```bash
+   python -c "
+   import sys
+   sys.path.insert(0, 'scripts')
+   from dispatch_plan import load_plan, mark_launched, write_plan
+   plan = load_plan()
+   mark_launched(plan, '<worktree>', session_id='<sid>')
+   write_plan(plan)
+   "
+   ```
+
+   **Both at once** (rare — only if the background agent returned a
+   PR AND you also know its session ID):
+
+   ```bash
+   python -c "
+   import sys
+   sys.path.insert(0, 'scripts')
+   from dispatch_plan import load_plan, mark_launched, write_plan
+   plan = load_plan()
    mark_launched(plan, '<worktree>', session_id='<sid>', pr_url='<pr-url>')
    write_plan(plan)
    "

@@ -201,7 +201,16 @@ class DispatchPlan:
 
 
 _ENTRY_HEADER_RE = re.compile(r"^###\s+Worktree:\s+(.+)$")
-_KV_RE = re.compile(r"^-\s+(?P<key>[A-Za-z][A-Za-z\- ]*?):\s*(?P<value>.*)$")
+# Key class is ASCII letters and hyphens only — NO space. A stray
+# space in the key (e.g. ``- Session Id: foo``) was previously
+# matched with key="Session Id", lowercased to "session id", and
+# silently dropped because no handler matched. Tightening here makes
+# such a line a plain non-match (treated as an unstructured note the
+# parser skips), which is the same user-visible outcome but avoids
+# the fragile "parse then silently discard" step. All legitimate
+# keys (Issues, Areas, Intent, Status, Conflict, Launched, Session,
+# SessionId, PR) are single-word or hyphenated.
+_KV_RE = re.compile(r"^-\s+(?P<key>[A-Za-z][A-Za-z\-]*?):\s*(?P<value>.*)$")
 
 
 def parse_plan(text: str) -> DispatchPlan:
@@ -321,6 +330,15 @@ def write_plan(plan: DispatchPlan, path: Path | None = None) -> Path:
         path = plan_path()
     if not plan.generated:
         plan.generated = now_utc_iso()
+    # Stamp the current schema version on every write: ``parse_plan``
+    # preserves the on-disk ``Schema:`` header verbatim (so a v1 file
+    # loads with ``plan.version == 1``), but ``as_markdown`` emits v2
+    # shape unconditionally. Without this line, a v1→v2 write-back
+    # would ship v2 body with a stale ``Schema: 1`` header, which a
+    # future v3 parser would then mis-route through the v1 migration
+    # path. Bumping the in-memory version right before payload render
+    # keeps the header honest.
+    plan.version = PLAN_SCHEMA_VERSION
     payload = plan.as_markdown()
 
     # Use a sidecar lock file: we cannot lock the plan file itself across
@@ -388,6 +406,10 @@ def locked_plan(path: Path | None = None) -> Iterator[DispatchPlan]:
             yield plan
             if not plan.generated:
                 plan.generated = now_utc_iso()
+            # See ``write_plan``: bump the in-memory schema version so
+            # a v1 plan loaded, mutated, and persisted here ships with
+            # a v2 header matching its v2 body shape.
+            plan.version = PLAN_SCHEMA_VERSION
             _write_plan_payload(path, plan.as_markdown())
         finally:
             _unlock(lockfp)
@@ -522,6 +544,14 @@ def mark_launched(
     dispatcher can record the launch even when the identifier is not
     yet known.
 
+    Partial calls preserve existing metadata: supplying only
+    ``pr_url=...`` will NOT clobber a previously-recorded
+    ``session_id`` (e.g. a D.2 session already stamped), and supplying
+    only ``session_id=...`` will NOT clobber a previously-recorded
+    ``pr_url``. Each field is only written when its argument is
+    truthy, so a second call can append the PR URL once it becomes
+    known without touching the session_id slot.
+
     Raises ``KeyError`` if no entry matches ``worktree`` — defensive
     against a typo in the SKILL.md prompt that would otherwise silently
     drop the launch from the plan.
@@ -531,11 +561,12 @@ def mark_launched(
         raise KeyError(f"no plan entry for worktree {worktree!r}")
     entry.status = STATUS_IN_FLIGHT
     entry.launched_at = when or now_utc_iso()
-    entry.session_id = session_id
-    # Mirror to the deprecated v1 field so any caller still reading it
-    # (e.g. cached dataclass pickles) sees the same value. Safe to
-    # remove after one release.
-    entry.launched_by_session = session_id
+    if session_id:
+        entry.session_id = session_id
+        # Mirror to the deprecated v1 field so any caller still reading
+        # it (e.g. cached dataclass pickles) sees the same value. Safe
+        # to remove after one release.
+        entry.launched_by_session = session_id
     if pr_url:
         entry.pr_url = pr_url
     return entry

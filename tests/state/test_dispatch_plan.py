@@ -490,6 +490,110 @@ class TestSchemaV2:
         plan = dp.parse_plan(text_before)
         assert plan.find("feat/x").session_id == "v2-value"
 
+    def test_schema_99_still_parses_with_default_version(self):
+        """Parser is forgiving: a ``Schema: 99`` header is preserved
+        verbatim (``plan.version == 99``). A future v3 migration can
+        dispatch on the observed version without the current parser
+        having to validate or reject forward-looking headers.
+        """
+        text = (
+            "# Dispatch Plan\n\n"
+            "Schema: 99\n"
+            "Generated: 2026-04-19T00:00:00Z\n"
+            "Generator: future\n\n"
+            "## Planned\n\n"
+            "### Worktree: feat/future\n"
+            "- Issues: #1\n"
+            "- Areas: src/X/\n"
+            "- Intent: future\n"
+            "- Status: planned\n"
+        )
+        plan = dp.parse_plan(text)
+        assert plan.version == 99
+        assert plan.find("feat/future") is not None
+
+    def test_non_integer_schema_falls_back_to_1(self):
+        """A malformed ``Schema:`` header (non-integer value) must NOT
+        crash the parser — it simply keeps the default ``version`` that
+        ``DispatchPlan()`` initialized with. Guards against a hand
+        edit that accidentally quotes or glosses the schema number.
+        """
+        text = (
+            "# Dispatch Plan\n\n"
+            "Schema: banana\n"
+            "Generated: 2026-04-19T00:00:00Z\n"
+            "Generator: typo\n\n"
+            "## Planned\n\n"
+            "### Worktree: feat/typo\n"
+            "- Status: planned\n"
+        )
+        # Must not raise.
+        plan = dp.parse_plan(text)
+        # Default DispatchPlan() starts at PLAN_SCHEMA_VERSION; malformed
+        # header leaves that default in place.
+        assert plan.version == dp.PLAN_SCHEMA_VERSION
+        assert plan.find("feat/typo") is not None
+
+    def test_malformed_entry_block_skipped_cleanly(self):
+        """An entry header with no body keys must still produce a
+        PlanEntry (worktree set, all other fields at default), and the
+        next well-formed entry must still parse. This is the "human
+        dropped a stub and moved on" case.
+        """
+        text = (
+            "# Dispatch Plan\n\n"
+            "Schema: 2\n"
+            "Generated: 2026-04-19T00:00:00Z\n"
+            "Generator: t\n\n"
+            "## Planned\n\n"
+            "### Worktree: feat/stub\n"
+            "\n"
+            "### Worktree: feat/normal\n"
+            "- Issues: #5\n"
+            "- Areas: src/X/\n"
+            "- Intent: real work\n"
+            "- Status: planned\n"
+        )
+        plan = dp.parse_plan(text)
+        stub = plan.find("feat/stub")
+        assert stub is not None
+        assert stub.worktree == "feat/stub"
+        # All other fields at dataclass defaults.
+        assert stub.issues == []
+        assert stub.areas == []
+        assert stub.intent == ""
+        assert stub.status == dp.STATUS_PLANNED
+        assert stub.session_id == ""
+        assert stub.pr_url == ""
+        # Next valid entry still parses.
+        normal = plan.find("feat/normal")
+        assert normal is not None
+        assert normal.issues == [5]
+        assert normal.intent == "real work"
+
+    def test_space_in_key_line_is_dropped_not_guessed(self):
+        """A key with an embedded space (``- Session Id: foo``) must NOT
+        be auto-corrected to ``session_id`` — the tightened ``_KV_RE``
+        makes the whole line a non-match so the parser silently skips
+        it rather than misassigning the value. Prevents the subtle bug
+        where a typo in a hand-edited plan would look like it worked
+        but actually dropped the data.
+        """
+        text = (
+            "### Worktree: feat/x\n"
+            "- Issues: #1\n"
+            "- Areas: src/A/\n"
+            "- Intent: test\n"
+            "- Status: planned\n"
+            "- Session Id: would-be-session\n"
+        )
+        plan = dp.parse_plan(text)
+        entry = plan.find("feat/x")
+        assert entry is not None
+        # Typo line was dropped, not misassigned.
+        assert entry.session_id == ""
+        assert entry.launched_by_session == ""
+
     def test_empty_pr_omitted_from_markdown(self):
         """``PR:`` (and ``SessionId:``) lines must be omitted entirely
         when the underlying value is empty — the dispatcher populates
