@@ -450,7 +450,7 @@ def _detect_base_branch(worktree, pr_number, logger):
     """Detect the PR's base branch via ``gh pr view``. Falls back to 'main'."""
     try:
         result = subprocess.run(
-            ["gh", "pr", "view", "--", str(pr_number),
+            ["gh", "pr", "view", str(pr_number),
              "--json", "baseRefName", "--jq", ".baseRefName"],
             cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
