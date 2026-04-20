@@ -64,18 +64,34 @@ def _run_gh(args: list[str]) -> str:
 
 
 def fetch_pr_metadata(pr_number: int) -> dict:
-    """Return PR title, body, and changed workflow files."""
+    """Return PR title, body, and changed workflow files.
+
+    Deleted workflow files are excluded: they no longer exist on disk, so
+    there's nothing to scan for secret-refs, and retaining them causes the
+    rule to fail with ENOENT when the checked-out PR tree doesn't contain
+    the file (the exact failure mode hit by PRs that remove dead workflows).
+    A deleted file is detected by ``additions == 0 and deletions > 0`` in
+    the ``gh pr view`` file-list payload.
+    """
     raw = _run_gh([
         "pr", "view", str(pr_number),
         "--json", "title,body,files",
     ])
     data = json.loads(raw)
-    files = [f.get("path") or "" for f in (data.get("files") or [])]
-    workflow_files = [
-        f for f in files
-        if f.startswith(".github/workflows/")
-        and (f.endswith(".yml") or f.endswith(".yaml"))
-    ]
+    raw_files = data.get("files") or []
+    workflow_files = []
+    for f in raw_files:
+        path = f.get("path") or ""
+        if not path.startswith(".github/workflows/"):
+            continue
+        if not (path.endswith(".yml") or path.endswith(".yaml")):
+            continue
+        additions = f.get("additions", 0) or 0
+        deletions = f.get("deletions", 0) or 0
+        # Pure deletion: nothing left on disk to scan.
+        if additions == 0 and deletions > 0:
+            continue
+        workflow_files.append(path)
     return {
         "title": data.get("title", "") or "",
         "body": data.get("body", "") or "",

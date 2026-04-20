@@ -407,6 +407,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/shakedown-readonly-guard.py\"",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
