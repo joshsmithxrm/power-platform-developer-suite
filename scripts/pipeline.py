@@ -35,7 +35,6 @@ from pathlib import Path
 from triage_common import (
     GEMINI_BOT_LOGIN,
     build_triage_prompt,
-    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
     parse_triage_stage_log,

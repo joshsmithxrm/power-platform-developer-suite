@@ -28,7 +28,6 @@ from pathlib import Path
 from triage_common import (
     GEMINI_BOT_LOGIN,
     build_triage_prompt,
-    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
     parse_triage_jsonl,
@@ -618,22 +617,6 @@ def post_replies(worktree, pr_number, triage_results, logger):
     )
 
 
-def _post_gemini_retry(worktree, pr_number, logger):
-    """Post /gemini review comment to trigger a new review."""
-    repo = get_repo_slug(worktree)
-    if not repo:
-        return
-    try:
-        subprocess.run(
-            ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
-             "-f", "body=/gemini review"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
-        )
-        logger.log("gemini", "RETRY_POSTED")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        logger.log("gemini", "RETRY_FAILED")
-
-
 def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                        triage_iteration):
     """Post replies then reconcile unreplied comments (up to 3 rounds).
@@ -712,40 +695,6 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                 pass
         mark_step(result, f"reconcile_{triage_iteration}", "manual_review")
         write_result(worktree, result)
-
-
-def _poll_codeql(worktree, pr_number, logger):
-    """Wait for CodeQL check to complete (5 min timeout)."""
-    if SHAKEDOWN:
-        logger.log("codeql", "SHAKEDOWN_SKIPPED")
-        return
-    start = time.time()
-    while time.time() - start < 300:  # 5 minutes
-        try:
-            proc_result = subprocess.run(
-                ["gh", "pr", "checks", str(pr_number),
-                 "--json", "name,state,bucket"],
-                cwd=worktree, capture_output=True, text=True, timeout=30,
-            )
-            if proc_result.returncode == 0:
-                checks = json.loads(proc_result.stdout)
-                codeql = [c for c in checks
-                          if "codeql" in c.get("name", "").lower()]
-                if codeql:
-                    all_done = all(
-                        c.get("state") in ("COMPLETED", "SUCCESS", "FAILURE")
-                        or c.get("bucket") in ("pass", "fail", "skipping", "cancel")
-                        for c in codeql
-                    )
-                    if all_done:
-                        logger.log("codeql", "COMPLETE")
-                        return
-        except (subprocess.TimeoutExpired, FileNotFoundError,
-                json.JSONDecodeError, OSError):
-            pass
-        logger.log("codeql", "POLL", elapsed=f"{int(time.time() - start)}s")
-        time.sleep(30)
-    logger.log("codeql", "TIMEOUT")
 
 
 def run_retro(worktree, logger):
@@ -921,27 +870,9 @@ def run_monitor(worktree, pr_number, resume=False):
         comments = []
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
-
-            # Gemini overload detection + retry (AC-141, AC-142, AC-143)
-            if not comments:
-                if detect_gemini_overload(
-                    worktree, pr_number, shakedown=bool(SHAKEDOWN),
-                ):
-                    logger.log("gemini", "OVERLOAD_DETECTED")
-                    _post_gemini_retry(worktree, pr_number, logger)
-                    # Re-poll for 5 more minutes
-                    comments = _step_gemini(
-                        worktree, pr_number, logger, result,
-                        step_suffix="_retry",
-                    )
-                    if not comments:
-                        logger.log("gemini", "OVERLOAD_RETRY_FAILED")
         else:
             # Resumed — read last known comment count
             logger.log("gemini", "RESUMED")
-
-        # ---- Step 2b: Wait for CodeQL before triage (AC-144) ----
-        _poll_codeql(worktree, pr_number, logger)
 
         # ---- Step 3: Triage loop (if inline comments) ----
         inline_count = len(comments)
