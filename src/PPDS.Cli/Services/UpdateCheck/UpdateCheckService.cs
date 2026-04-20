@@ -480,8 +480,14 @@ public sealed class UpdateCheckService : IUpdateCheckService
             var process = Process.Start(psi);
             if (process is not null)
             {
-                File.WriteAllText(_lockPath, process.Id.ToString());
-                process.Dispose(); // R1: don't hold the process handle
+                try
+                {
+                    File.WriteAllText(_lockPath, process.Id.ToString());
+                }
+                finally
+                {
+                    process.Dispose(); // R1: don't hold the process handle
+                }
             }
         }
         catch (Exception ex)

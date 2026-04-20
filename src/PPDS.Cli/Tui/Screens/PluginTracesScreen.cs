@@ -204,25 +204,38 @@ internal sealed class PluginTracesScreen : TuiScreenBase
         }
 
         var formatDialog = new Dialog("Export Format", 40, 8);
-        var csvBtn = new Button("CSV") { X = 4, Y = 1 };
-        var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
-        var cancelBtn = new Button("Cancel") { X = 25, Y = 1 };
-
         var selectedFormat = "";
-        csvBtn.Clicked += () => { selectedFormat = "csv"; Application.RequestStop(); };
-        jsonBtn.Clicked += () => { selectedFormat = "json"; Application.RequestStop(); };
-        cancelBtn.Clicked += () => Application.RequestStop();
+        try
+        {
+            var csvBtn = new Button("CSV") { X = 4, Y = 1 };
+            var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
+            var cancelBtn = new Button("Cancel") { X = 25, Y = 1 };
 
-        formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
-        Application.Run(formatDialog);
-        formatDialog.Dispose();
+            csvBtn.Clicked += () => { selectedFormat = "csv"; Application.RequestStop(); };
+            jsonBtn.Clicked += () => { selectedFormat = "json"; Application.RequestStop(); };
+            cancelBtn.Clicked += () => Application.RequestStop();
+
+            formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
+            Application.Run(formatDialog);
+        }
+        finally
+        {
+            formatDialog.Dispose();
+        }
 
         if (string.IsNullOrEmpty(selectedFormat)) return;
 
+        string? filePath;
         var saveDialog = new SaveDialog("Export Traces", $"traces.{selectedFormat}");
-        Application.Run(saveDialog);
-        var filePath = saveDialog.FilePath?.ToString();
-        saveDialog.Dispose();
+        try
+        {
+            Application.Run(saveDialog);
+            filePath = saveDialog.FilePath?.ToString();
+        }
+        finally
+        {
+            saveDialog.Dispose();
+        }
 
         if (string.IsNullOrEmpty(filePath)) return;
 

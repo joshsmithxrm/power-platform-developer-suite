@@ -210,17 +210,24 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Text = content?.Content ?? "(No content available)"
                 };
 
-                _contentDialog = new Dialog(
+                var dialog = new Dialog(
                     $"{resource.Name} ({resource.TypeName})",
                     new Button("Close", is_default: true))
                 {
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _contentDialog.Add(textView);
-                Application.Run(_contentDialog);
-                _contentDialog.Dispose();
-                _contentDialog = null;
+                _contentDialog = dialog;
+                try
+                {
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                    _contentDialog = null;
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -356,23 +363,29 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(60)
                 };
-                dialog.Add(listView);
-
-                listView.OpenSelectedItem += (args) =>
+                try
                 {
-                    if (args.Item == 0)
-                    {
-                        _selectedSolutionId = null;
-                    }
-                    else
-                    {
-                        _selectedSolutionId = solutions[args.Item - 1].Id;
-                    }
-                    Application.RequestStop();
-                };
+                    dialog.Add(listView);
 
-                Application.Run(dialog);
-                dialog.Dispose();
+                    listView.OpenSelectedItem += (args) =>
+                    {
+                        if (args.Item == 0)
+                        {
+                            _selectedSolutionId = null;
+                        }
+                        else
+                        {
+                            _selectedSolutionId = solutions[args.Item - 1].Id;
+                        }
+                        Application.RequestStop();
+                    };
+
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                }
 
                 // Persist updated filter state
                 ErrorService.FireAndForget(
@@ -422,10 +435,16 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             Width = 60,
             Height = 7
         };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
-        Application.Run(dialog);
-        dialog.Dispose();
+        try
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
+            Application.Run(dialog);
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     protected override void OnDispose()

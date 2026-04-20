@@ -289,18 +289,25 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Text = text
                 };
 
-                _detailDialog = new Dialog(
+                var dialog = new Dialog(
                     $"Connection Reference: {cr.DisplayName ?? cr.LogicalName}",
                     new Button("Close", is_default: true))
                 {
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                _detailDialog.Add(textView);
-                Application.Run(_detailDialog);
-                _detailDialog.Dispose();
-                _detailDialog = null;
-                _isShowingDetail = false;
+                _detailDialog = dialog;
+                try
+                {
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                    _detailDialog = null;
+                    _isShowingDetail = false;
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -412,9 +419,15 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
                 };
-                dialog.Add(textView);
-                Application.Run(dialog);
-                dialog.Dispose();
+                try
+                {
+                    dialog.Add(textView);
+                    Application.Run(dialog);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -468,33 +481,39 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
                 };
-                dialog.Add(listView);
-
-                var confirmed = false;
-                selectButton.Clicked += () =>
+                try
                 {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
-                cancelButton.Clicked += () => Application.RequestStop();
-                listView.OpenSelectedItem += _ =>
-                {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
+                    dialog.Add(listView);
 
-                Application.Run(dialog);
-                dialog.Dispose();
+                    var confirmed = false;
+                    selectButton.Clicked += () =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
+                    cancelButton.Clicked += () => Application.RequestStop();
+                    listView.OpenSelectedItem += _ =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
 
-                if (confirmed)
+                    Application.Run(dialog);
+
+                    if (confirmed)
+                    {
+                        var idx = listView.SelectedItem;
+                        _solutionFilter = idx == 0 ? null : names[idx];
+                        ErrorService.FireAndForget(
+                            Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
+                                new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                            "ConnectionReferences.SaveState");
+                        ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.FilterApply");
+                    }
+                }
+                finally
                 {
-                    var idx = listView.SelectedItem;
-                    _solutionFilter = idx == 0 ? null : names[idx];
-                    ErrorService.FireAndForget(
-                        Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
-                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
-                        "ConnectionReferences.SaveState");
-                    ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.FilterApply");
+                    dialog.Dispose();
                 }
             });
         }
@@ -520,10 +539,16 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             Width = 60,
             Height = 7
         };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/connectors" });
-        Application.Run(dialog);
-        dialog.Dispose();
+        try
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/connectors" });
+            Application.Run(dialog);
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     protected override void OnDispose()
