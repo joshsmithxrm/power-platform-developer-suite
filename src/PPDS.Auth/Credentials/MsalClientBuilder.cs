@@ -160,11 +160,20 @@ internal static class MsalClientBuilder
                         ProfilePaths.DataDirectory)
                     .WithUnprotectedFile()
                     .Build();
+
+                // Pre-create the fallback file at 0600 BEFORE MSAL writes any
+                // tokens to it. MsalCacheHelper.CreateAsync does not touch
+                // disk — the first write happens on the first auth cycle.
+                // Without pre-creation, the ClampLinuxFallbackFileMode call
+                // below would find no file and skip, leaving first-run
+                // tokens exposed at the system umask (often 0644) until a
+                // second launch triggered another chmod attempt.
+                EnsureLinuxFallbackFileAtTightMode(ProfilePaths.TokenCacheFile);
+
                 var fallbackHelper = await MsalCacheHelper.CreateAsync(fallbackProps).ConfigureAwait(false);
-                // Defence-in-depth: the unprotected fallback writes plaintext
-                // tokens to disk. Clamp mode to 0600 so only the owning user
-                // can read the cache file. Guarded for Linux — SetUnixFileMode
-                // throws on Windows.
+                // Belt-and-braces: re-clamp after helper init in case MSAL
+                // touched the file during initialization. No-op if mode is
+                // already 0600.
                 ClampLinuxFallbackFileMode(ProfilePaths.TokenCacheFile);
                 return fallbackHelper;
             }
@@ -178,6 +187,44 @@ internal static class MsalClientBuilder
                 ProfilePaths.DataDirectory)
             .Build();
         return await MsalCacheHelper.CreateAsync(defaultProps).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ensures the Linux fallback token-cache file exists at mode 0600 BEFORE
+    /// MSAL writes any tokens to it. Creates an empty file if missing, then
+    /// applies the mode. POSIX preserves file mode across truncate-writes,
+    /// so MSAL's subsequent token writes inherit owner-only visibility.
+    /// Best-effort — failures logged but never thrown so cache creation never
+    /// fails solely due to a filesystem hiccup.
+    /// </summary>
+    /// <param name="path">The unprotected cache file path.</param>
+    private static void EnsureLinuxFallbackFileAtTightMode(string path)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        try
+        {
+            var dir = System.IO.Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            if (!System.IO.File.Exists(path))
+            {
+                using (System.IO.File.Create(path)) { }
+            }
+            System.IO.File.SetUnixFileMode(
+                path,
+                System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite);
+            AuthDebugLog.WriteLine($"[MsalCache] Ensured fallback file at 0600: {path}");
+        }
+        catch (Exception ex)
+        {
+            AuthDebugLog.WriteLine($"[MsalCache] Failed to ensure fallback file mode ({ex.GetType().Name}): {ex.Message}");
+        }
     }
 
     /// <summary>

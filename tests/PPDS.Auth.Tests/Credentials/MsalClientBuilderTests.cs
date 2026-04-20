@@ -67,6 +67,13 @@ public class MsalClientBuilderTests
         Regex.IsMatch(source, @"UserRead\s*\|\s*(System\.IO\.)?UnixFileMode\.UserWrite")
             .Should().BeTrue(
                 "Fallback clamp must be exactly 0600 (UserRead | UserWrite), not 0700");
+        // The clamp helper is a no-op when the file doesn't exist yet, so a
+        // pre-create helper must run before MsalCacheHelper.CreateAsync to
+        // materialize the file at 0600 on fresh installs. Without this, the
+        // first-auth token write would land at the system umask (often 0644).
+        source.Should().Contain(
+            "EnsureLinuxFallbackFileAtTightMode",
+            "Fallback file must be pre-created at 0600 before MSAL writes tokens");
     }
 
     [Fact]
