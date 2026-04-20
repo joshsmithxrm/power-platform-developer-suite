@@ -357,7 +357,7 @@ Each skill writes its own entry to `.workflow/state.json` upon successful comple
 | `/pr` | Rebase → draft PR → Gemini triage → mark ready → notify. | **Interactive mode:** Rebases on main. Creates draft PR. Polls for Gemini reviews (30s interval, 90s min wait, 5 min max). Triages each comment (fix valid, dismiss invalid with rationale). Replies to EACH comment individually. Converts draft → ready (`gh pr ready`). Notifies user. Writes `pr.url`, `pr.created`, `pr.gemini_triaged` to workflow state. **Pipeline mode:** Orchestration is scripted in `pipeline.py` (see PR Stage Orchestration). Only the triage step invokes AI via the `gemini-triage` agent profile (Sonnet). |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
-| `/shakedown-workflow` | Behavioral integration test for workflow changes. | Creates throwaway worktrees from current branch, runs synthetic scenarios (feature, bug fix, resume) through the full pipeline with `PPDS_SHAKEDOWN=1`, collects transcripts, runs comprehensive retro, produces shakedown report. Iterates until clean. See Workflow Shakedown section. |
+| `/shakedown workflow` | Behavioral integration test for workflow changes (Workflow Mode of `/shakedown`). | Creates throwaway worktrees from current branch, runs synthetic scenarios (feature, bug fix, resume) through the full pipeline with `PPDS_SHAKEDOWN=1`, collects transcripts, runs comprehensive retro, produces shakedown report. Iterates until clean. See Workflow Shakedown section. Folded into the single `/shakedown` skill in meta-retro #20 (PR #842). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
 | `/status` | Display current workflow state with live pipeline monitoring. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. When a pipeline is running (`.workflow/pipeline.lock` exists with live PID): parses `.workflow/pipeline.log` for stage progress and last heartbeat; parses the active stage's `.jsonl` file to show current tool call in progress, files created/modified this stage, commits made, elapsed time, and last activity timestamp. When no pipeline is running: reads `.workflow/stages/{stage}.log` for completed stage summaries. No state writes. |
@@ -792,11 +792,11 @@ On `--resume`, the monitor reads `steps_completed` and skips any step marked `tr
 
 #### Workflow Shakedown
 
-**New skill:** `/shakedown-workflow`
+**Skill entrypoint:** `/shakedown workflow` (Workflow Mode of the `/shakedown` skill — PR #842 folded the former standalone `/shakedown-workflow` into `/shakedown`).
 
 **Purpose:** Behavioral integration test for workflow infrastructure changes. Runs real tasks through the modified workflow in throwaway worktrees to verify hooks, skills, pipeline, and retro work end-to-end before shipping workflow changes.
 
-**Distinct from `/shakedown`:** The existing `/shakedown` tests product code across surfaces (extension, TUI, CLI). `/shakedown-workflow` tests the workflow process itself.
+**Distinct from `/shakedown` product mode:** The default `/shakedown` mode tests product code across surfaces (extension, TUI, CLI). `/shakedown workflow` tests the workflow process itself.
 
 **Synthetic test scenarios:** Canned prompts in `.shakedown/` (gitignored):
 
@@ -809,7 +809,7 @@ On `--resume`, the monitor reads `steps_completed` and skips any step marked `tr
 **Flow:**
 
 ```
-/shakedown-workflow [--paths feature,bug,resume] [--parallel]
+/shakedown workflow [--paths feature,bug,resume] [--parallel]
 │
 ├─ 1. Verify current branch has workflow changes
 │     (git diff --name-only origin/main...HEAD | grep -E '^\.(claude|shakedown)/|^scripts/')
@@ -865,7 +865,7 @@ On `--resume`, the monitor reads `steps_completed` and skips any step marked `tr
 - `notify.py` — suppresses desktop notifications
 - Stop hook — exits 0 immediately (same as pipeline mode)
 
-**Iterative loop:** After shakedown identifies issues, the developer fixes them on the workflow branch and re-runs `/shakedown-workflow`. The cycle repeats until the shakedown report shows zero workflow findings. Only then is the workflow branch PR'd.
+**Iterative loop:** After shakedown identifies issues, the developer fixes them on the workflow branch and re-runs `/shakedown workflow`. The cycle repeats until the shakedown report shows zero workflow findings. Only then is the workflow branch PR'd.
 
 **Resume path testing:** The resume scenario is special — it doesn't run a full pipeline. Instead:
 1. Write a partial `.workflow/state.json` (gates passed, verify done, no QA/review)
@@ -1164,7 +1164,7 @@ After all skills in this spec are implemented:
 | AC-102 | Stop hook enforces workflow for `implementing` phase and null/missing phase (safe default) | `test_pipeline.py::test_stop_hook_enforces_implementing_phase` | 🔲 |
 | AC-103 | Stop hook exits 0 immediately when `PPDS_SHAKEDOWN=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_shakedown_mode` | 🔲 |
 | AC-104 | Stop hook writes `stop_hook_blocked: true`, `stop_hook_count: N`, `stop_hook_last: <timestamp>` to state file on block — retro can detect repeated ignored blocks | `test_pipeline.py::test_stop_hook_enforcement_logging` | 🔲 |
-| AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `qa`, `/shakedown-workflow` → `shakedown`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
+| AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `qa`, `/shakedown workflow` → `shakedown`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
 | AC-106 | `pr_monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
 | AC-107 | `pr_monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
 | AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends notification with failure details, exits 1 | `test_pr_monitor.py::test_ci_failure_notify_and_exit` | 🔲 |
@@ -1174,14 +1174,14 @@ After all skills in this spec are implemented:
 | AC-112 | `pr_monitor.py` runs `claude -p "/retro"` as penultimate step before notification | `test_pr_monitor.py::test_retro_runs_before_notify` | 🔲 |
 | AC-113 | `pr_monitor.py` converts draft → ready via `gh pr ready` after all checks pass | `test_pr_monitor.py::test_draft_to_ready` | 🔲 |
 | AC-114 | `pr_monitor.py` writes `.workflow/pr-monitor-result.json` with status, ci result, comment counts, triage summary, retro status | `test_pr_monitor.py::test_result_json_schema` | 🔲 |
-| AC-115 | `/shakedown-workflow` creates throwaway worktrees branched from current branch (not main) — worktrees inherit modified `.claude/`, `scripts/`, `specs/` | Manual: run `/shakedown-workflow`, verify worktree branch parent | 🔲 |
-| AC-116 | `/shakedown-workflow` sets `PPDS_SHAKEDOWN=1` in pipeline subprocess environment | `test_pipeline.py::test_shakedown_env_var` | 🔲 |
+| AC-115 | `/shakedown workflow` creates throwaway worktrees branched from current branch (not main) — worktrees inherit modified `.claude/`, `scripts/`, `specs/` | Manual: run `/shakedown workflow`, verify worktree branch parent | 🔲 |
+| AC-116 | `/shakedown workflow` sets `PPDS_SHAKEDOWN=1` in pipeline subprocess environment | `test_pipeline.py::test_shakedown_env_var` | 🔲 |
 | AC-117 | `PPDS_SHAKEDOWN=1` suppresses `gh issue create` in `process_retro_findings()` | `test_pipeline.py::test_shakedown_suppresses_issue_filing` | 🔲 |
 | AC-118 | `PPDS_SHAKEDOWN=1` suppresses `gh pr create` entirely — PR stage logs `PR_SKIPPED_SHAKEDOWN` and exits 0 | `test_pipeline.py::test_shakedown_skips_pr_creation` | 🔲 |
 | AC-119 | `PPDS_SHAKEDOWN=1` suppresses desktop notifications — `notify.py` exits 0 without sending when env var is set | `test_pipeline.py::test_shakedown_suppresses_notify` | 🔲 |
-| AC-120 | `/shakedown-workflow` collects results from all test worktrees and produces `.workflow/shakedown-report.json` | Manual: run `/shakedown-workflow`, verify report file | 🔲 |
-| AC-121 | `/shakedown-workflow` runs comprehensive retro across all shakedown session transcripts | Manual: verify retro covers all worktree transcripts | 🔲 |
-| AC-122 | `/shakedown-workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
+| AC-120 | `/shakedown workflow` collects results from all test worktrees and produces `.workflow/shakedown-report.json` | Manual: run `/shakedown workflow`, verify report file | 🔲 |
+| AC-121 | `/shakedown workflow` runs comprehensive retro across all shakedown session transcripts | Manual: verify retro covers all worktree transcripts | 🔲 |
+| AC-122 | `/shakedown workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
 | AC-123 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
 | AC-124 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
 | AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
@@ -1468,7 +1468,7 @@ After all skills in this spec are implemented:
 
 **Evidence:** 0% pipeline success rate across 4 retros. Each failure was a behavioral issue (QA doesn't commit, review stalls, converge skipped) — not a code bug. All Python scripts parsed and ran; they just did the wrong thing in context.
 
-**Decision:** `/shakedown-workflow` creates throwaway worktrees from the current branch and runs synthetic scenarios through the full pipeline. Tests the PROCESS, not the CODE.
+**Decision:** `/shakedown workflow` creates throwaway worktrees from the current branch and runs synthetic scenarios through the full pipeline. Tests the PROCESS, not the CODE.
 
 **Alternatives considered:**
 - **More unit tests:** Necessary but not sufficient. Can't test "does the stop hook fire during design?" without running a real design session.

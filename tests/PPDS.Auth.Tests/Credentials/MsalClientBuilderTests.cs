@@ -38,6 +38,35 @@ public class MsalClientBuilderTests
     }
 
     [Fact]
+    public void MsalClientBuilder_Source_ClampsLinuxFallbackFileMode()
+    {
+        // Linux fallback writes plaintext tokens to disk. The source must
+        // clamp the file to 0600 (UserRead | UserWrite) after creation,
+        // guarded by OperatingSystem.IsLinux() so Windows doesn't throw.
+        var thisAssembly = typeof(MsalClientBuilderTests).Assembly;
+        var srcPath = Path.Combine(
+            Path.GetDirectoryName(thisAssembly.Location)!,
+            "..", "..", "..", "..", "..",
+            "src", "PPDS.Auth", "Credentials", "MsalClientBuilder.cs");
+
+        if (!File.Exists(srcPath))
+        {
+            return;
+        }
+
+        var source = File.ReadAllText(srcPath);
+        source.Should().Contain(
+            "SetUnixFileMode",
+            "Linux unprotected fallback must clamp to owner-only mode");
+        source.Should().Contain(
+            "OperatingSystem.IsLinux()",
+            "SetUnixFileMode must be guarded on Linux — throws on Windows");
+        source.Should().Contain(
+            "UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite",
+            "Fallback clamp must be exactly 0600 (UserRead | UserWrite), not 0700");
+    }
+
+    [Fact]
     public void MsalClientBuilder_Source_PrefersLinuxKeyringOverUnprotectedFile()
     {
         // A3 regression guard — fails if someone re-introduces an unconditional

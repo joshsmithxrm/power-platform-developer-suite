@@ -160,7 +160,14 @@ internal static class MsalClientBuilder
                         ProfilePaths.DataDirectory)
                     .WithUnprotectedFile()
                     .Build();
-                return await MsalCacheHelper.CreateAsync(fallbackProps).ConfigureAwait(false);
+                var fallbackHelper = await MsalCacheHelper.CreateAsync(fallbackProps).ConfigureAwait(false);
+                // Defence-in-depth: the unprotected fallback writes plaintext
+                // tokens to disk. Clamp mode to 0600 so only the owning user
+                // can read the cache file. Guarded for Linux — SetUnixFileMode
+                // throws on Windows.
+                ClampLinuxFallbackFileMode(System.IO.Path.Combine(
+                    ProfilePaths.DataDirectory, ProfilePaths.TokenCacheFileName));
+                return fallbackHelper;
             }
         }
 
@@ -172,6 +179,35 @@ internal static class MsalClientBuilder
                 ProfilePaths.DataDirectory)
             .Build();
         return await MsalCacheHelper.CreateAsync(defaultProps).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Clamps the Linux unprotected-file fallback to mode 0600 (owner read/write
+    /// only). Best-effort — swallows exceptions so cache creation never fails
+    /// solely due to a chmod hiccup, but logs the failure for diagnosis.
+    /// </summary>
+    /// <param name="path">The unprotected cache file path.</param>
+    private static void ClampLinuxFallbackFileMode(string path)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        try
+        {
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.SetUnixFileMode(
+                    path,
+                    System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite);
+                AuthDebugLog.WriteLine($"[MsalCache] Clamped fallback file mode to 0600: {path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            AuthDebugLog.WriteLine($"[MsalCache] Failed to clamp fallback file mode ({ex.GetType().Name}): {ex.Message}");
+        }
     }
 
     /// <summary>
