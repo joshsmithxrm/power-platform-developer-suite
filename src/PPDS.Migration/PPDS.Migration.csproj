@@ -53,6 +53,7 @@ dependency-aware tiered import, and CMT format compatibility for automated pipel
   <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <!-- Suppress known vulnerability in transitive dependency until upstream fix -->
