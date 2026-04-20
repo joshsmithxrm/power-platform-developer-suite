@@ -20,7 +20,34 @@ on:
           - stable
 
 jobs:
+  preflight:
+    name: marketplace-listing-preflight
+    runs-on: ubuntu-latest
+    # Prong B of the AC-29 gate: re-run the listing AC tests before any
+    # package or publish step, so a release triggered by direct tag push
+    # (no PR) still fails fast on drift.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/Extension-v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest + pyyaml
+        run: pip install pytest pyyaml
+
+      - name: Run marketplace-listing AC tests
+        run: pytest tests/extension_listing/ -v
+
   publish:
+    needs: preflight
     runs-on: ubuntu-latest
     # Only run on Extension-v* tags or manual dispatch
     if: |
@@ -42,6 +69,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Resolve release tag SHA
+        id: resolve-tag
+        run: |
+          if [[ "${{ github.ref }}" != refs/tags/Extension-v* ]]; then
+            echo "::error::Publish requires a refs/tags/Extension-v* ref. Got: ${{ github.ref }}"
+            exit 1
+          fi
+          sha="$(git rev-list -n 1 ${{ github.ref }})"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Failed to resolve a 40-char commit SHA for ${{ github.ref }}. Got: '$sha'"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -111,7 +154,7 @@ jobs:
           steps.channel.outputs.is_prerelease == 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} --pre-release -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        run: npx vsce publish --target ${{ matrix.target }} --pre-release --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
 
@@ -120,6 +163,6 @@ jobs:
           steps.channel.outputs.is_prerelease != 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}

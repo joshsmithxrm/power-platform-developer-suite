@@ -1207,14 +1207,60 @@ class TestRebaseBeforeReady:
             result = pr_monitor._rebase_source_branch(wt, 88, logger)
 
         assert result is True
-        # Must call gh pr view with PR number and -- separator
+        # Must call gh pr view with PR number as a positional arg.
+        # NOTE: no ``--`` separator before the PR number — gh treats everything
+        # after ``--`` as positional, which makes ``--json``/``--jq`` fail with
+        # "accepts at most 1 arg(s), received 5".
         gh_calls = [c for c in call_log if c[:3] == ["gh", "pr", "view"]]
         assert len(gh_calls) == 1
-        assert "--" in gh_calls[0]
         assert "88" in gh_calls[0]
+        assert "--" not in gh_calls[0]
         # Must fetch and rebase onto origin/develop (not origin/main)
         assert ["git", "fetch", "origin", "--", "develop"] in call_log
         assert ["git", "rebase", "--", "origin/develop"] in call_log
         # Must NOT have used main
         assert not any(
             c == ["git", "fetch", "origin", "--", "main"] for c in call_log)
+
+
+class TestDetectBaseBranch:
+    """Regression: gh pr view argv must not include ``--`` before the PR number.
+
+    Cobra treats everything after ``--`` as positional, so ``--json`` and
+    ``--jq`` become positional args and gh fails with
+    ``accepts at most 1 arg(s), received 5`` — logged as BASE_DETECT_ERROR.
+    """
+
+    def test_detect_base_branch_argv_has_no_separator_before_pr_number(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="main\n", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            base = pr_monitor._detect_base_branch(wt, 856, logger)
+
+        assert base == "main"
+        cmd = captured["cmd"]
+        assert cmd[:3] == ["gh", "pr", "view"]
+        # PR number must come immediately after "view" as the sole positional.
+        assert cmd[3] == "856"
+        assert "--" not in cmd
+        # JSON flags must remain flags, not positionals.
+        assert "--json" in cmd and "--jq" in cmd
+
+    def test_detect_base_branch_falls_back_to_main_on_gh_failure(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        def fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout="",
+                stderr="accepts at most 1 arg(s), received 5")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            assert pr_monitor._detect_base_branch(wt, 856, logger) == "main"
