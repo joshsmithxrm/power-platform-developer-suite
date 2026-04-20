@@ -18,6 +18,10 @@ Options:
     --resume            Auto-resume from last completed stage in pipeline.log
     --no-retro          Skip the post-PR retro step
     --max-converge <n>  Max converge rounds (default: 3)
+    --max-stage-seconds N
+                        Override HARD_CEILING for this run (default: 7200s).
+                        Positive integer. Applies to the claude heartbeat
+                        loop, the pr stage, and the pr_monitor subprocess.
     --worktree <path>   Use existing worktree instead of creating one
     --issue <N>         GitHub issue number(s) this work closes (repeatable)
     --dry-run           Run orchestration logic without invoking claude -p
@@ -71,7 +75,7 @@ STAGE_OUTCOMES = {
 }
 
 STALL_LIMIT = 5    # consecutive idle heartbeats before kill (5 min at 60s interval)
-HARD_CEILING = 3600  # absolute maximum stage duration in seconds (60 min)
+HARD_CEILING = 7200  # absolute maximum stage duration in seconds (120 min, overridable via --max-stage-seconds)
 
 
 class PipelineFailure(Exception):
@@ -353,11 +357,17 @@ def extract_text_from_jsonl(jsonl_path):
 
 
 def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
-               agent=None):
-    """Run `claude -p` in the worktree directory. Returns (exit_code, logger)."""
+               agent=None, ceiling=None):
+    """Run `claude -p` in the worktree directory. Returns (exit_code, logger).
+
+    ``ceiling`` overrides ``HARD_CEILING`` for this invocation; ``None`` means
+    use the module-level default. The effective ceiling is recorded on the
+    stage START log so operators can confirm which value is in effect.
+    """
     full_prompt = HEADLESS_PREAMBLE + prompt
 
-    log(logger, stage, "START")
+    effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
+    log(logger, stage, "START", ceiling=f"{effective_ceiling}s")
 
     if dry_run:
         time.sleep(0.1)  # Simulate
@@ -421,10 +431,10 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
             elapsed = time.time() - start
 
             # Hard ceiling check — absolute maximum regardless of activity
-            if elapsed > HARD_CEILING:
+            if elapsed > effective_ceiling:
                 log(logger, stage, "HARD_TIMEOUT",
                     elapsed=f"{int(elapsed)}s",
-                    ceiling=f"{HARD_CEILING}s",
+                    ceiling=f"{effective_ceiling}s",
                     activity=activity)
                 proc.terminate()
                 try:
@@ -928,9 +938,15 @@ def _poll_codeql_check(worktree_path, pr_number, logger):
     log(logger, "pr", "CODEQL_TIMEOUT")
 
 
-def run_pr_stage(worktree_path, logger, dry_run=False):
-    """Scripted PR stage: draft → poll Gemini → triage → ready → notify."""
-    log(logger, "pr", "START")
+def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
+    """Scripted PR stage: draft → poll Gemini → triage → ready → notify.
+
+    ``ceiling`` overrides ``HARD_CEILING`` for the stage's internal timeout
+    checks and the PR monitor subprocess timeout; ``None`` means use the
+    module-level default.
+    """
+    effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
+    log(logger, "pr", "START", ceiling=f"{effective_ceiling}s")
     start = time.time()
 
     # PPDS_SHAKEDOWN: skip PR creation entirely
@@ -941,10 +957,10 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
 
     def _check_timeout():
         """Check if stage hard ceiling exceeded. Logs and returns True if timed out."""
-        if (time.time() - start) > HARD_CEILING:
+        if (time.time() - start) > effective_ceiling:
             log(logger, "pr", "HARD_TIMEOUT",
                 elapsed=f"{int(time.time() - start)}s",
-                ceiling=f"{HARD_CEILING}s")
+                ceiling=f"{effective_ceiling}s")
             return True
         return False
 
@@ -1006,7 +1022,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     )
     exit_code, logger = run_claude(
         worktree_path, summary_prompt, logger, "pr-summary",
-        dry_run=dry_run,
+        dry_run=dry_run, ceiling=ceiling,
     )
 
     # Read the generated summary
@@ -1080,7 +1096,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     # PR creation, wait); pr_monitor.py owns the *polling loop*. Single
     # canonical implementation.
     monitor_exit = _delegate_to_pr_monitor(
-        worktree_path, pr_number, logger, dry_run=dry_run)
+        worktree_path, pr_number, logger, dry_run=dry_run, ceiling=ceiling)
     if monitor_exit not in (0,):
         # pr_monitor failed (CI failure, timeout, etc.); pipeline still
         # records the PR URL but reports stage failure so the orchestrator
@@ -1096,7 +1112,8 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     return 0, logger
 
 
-def _delegate_to_pr_monitor(worktree_path, pr_number, logger, dry_run=False):
+def _delegate_to_pr_monitor(worktree_path, pr_number, logger, dry_run=False,
+                            ceiling=None):
     """Invoke ``scripts/pr_monitor.py`` as a subprocess for the polling loop.
 
     v1-prelaunch retro item #4: the previous pipeline.run_pr_stage embedded a
@@ -1111,10 +1128,13 @@ def _delegate_to_pr_monitor(worktree_path, pr_number, logger, dry_run=False):
         pr_number: PR number (str or int)
         logger: pipeline log handle
         dry_run: if True, log the planned invocation but skip exec
+        ceiling: override HARD_CEILING for the subprocess timeout; ``None``
+            means use the module-level default.
 
     Returns:
         Exit code: 0 on success, non-zero on failure.
     """
+    effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
     script_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "pr_monitor.py")
     cmd = [
@@ -1141,10 +1161,10 @@ def _delegate_to_pr_monitor(worktree_path, pr_number, logger, dry_run=False):
             env=env,
             capture_output=True,
             text=True,
-            timeout=HARD_CEILING,
+            timeout=effective_ceiling,
         )
     except subprocess.TimeoutExpired:
-        log(logger, "pr", "MONITOR_TIMEOUT", ceiling=f"{HARD_CEILING}s")
+        log(logger, "pr", "MONITOR_TIMEOUT", ceiling=f"{effective_ceiling}s")
         return -1
     except (FileNotFoundError, OSError) as e:
         log(logger, "pr", "MONITOR_ERROR", error=str(e))
@@ -1236,10 +1256,26 @@ def main():
     parser.add_argument("--name", help="Override worktree name (default: derived from plan/spec)")
     parser.add_argument("--no-retro", action="store_true", help="Skip the post-PR retro step")
     parser.add_argument("--max-converge", type=int, default=3, help="Max converge rounds (default: 3)")
+    parser.add_argument(
+        "--max-stage-seconds",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override the per-stage hard ceiling for this run "
+            f"(default: {HARD_CEILING}s). Must be a positive integer. "
+            "Applies to the claude heartbeat loop, the pr stage, and the "
+            "pr_monitor subprocess timeout."
+        ),
+    )
     parser.add_argument("--worktree", help="Use existing worktree instead of creating one")
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
     args = parser.parse_args()
+
+    if args.max_stage_seconds is not None and args.max_stage_seconds <= 0:
+        parser.error("--max-stage-seconds must be a positive integer")
+    stage_ceiling = args.max_stage_seconds  # None → use HARD_CEILING default
 
     # Handle backward compat: positional plan arg
     plan_path = args.plan or args.plan_positional
@@ -1416,7 +1452,7 @@ def main():
                     prompt = f"/implement {plan_rel}"
                 else:
                     prompt = "/implement"  # Will generate plan from spec
-                exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run)
+                exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run, ceiling=stage_ceiling)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="implement")
                     _pipeline_fail("implement")
@@ -1424,7 +1460,7 @@ def main():
                 # P4: Outcome verification + retry
                 if not verify_outcome(worktree_path, "implement", pre_commits) and not args.dry_run:
                     log(logger, "implement", "OUTCOME_MISS", reason="no new commits, retrying")
-                    exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0 or not verify_outcome(worktree_path, "implement", pre_commits):
                         log(logger, "pipeline", "FAILED", failed_stage="implement", reason="outcome verification failed")
                         _pipeline_fail("implement", "outcome verification failed")
@@ -1434,7 +1470,7 @@ def main():
 
             elif stage in ("gates", "verify", "qa", "review"):
                 prompt = f"/{stage}"
-                exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run)
+                exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run, ceiling=stage_ceiling)
                 if exit_code != 0:
                     # Review FAIL must advance to converge, not abort (AC-20)
                     if stage == "review":
@@ -1447,7 +1483,7 @@ def main():
                 # P4: Outcome verification + retry (skip for review — converge handles it)
                 if stage != "review" and not verify_outcome(worktree_path, stage, 0) and not args.dry_run:
                     log(logger, stage, "OUTCOME_MISS", reason="expected state not set, retrying")
-                    exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage=stage)
                         _pipeline_fail(stage)
@@ -1465,31 +1501,31 @@ def main():
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
 
                     converge_log = f"converge-r{round_num + 1}"
-                    exit_code, logger = run_claude(worktree_path, "/converge", logger, converge_log, args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/converge", logger, converge_log, args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="converge")
                         _pipeline_fail("converge", log_stage=converge_log)
 
                     gates_log = f"gates-r{round_num + 1}"
-                    exit_code, logger = run_claude(worktree_path, "/gates", logger, gates_log, args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/gates", logger, gates_log, args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="gates-reconverge")
                         _pipeline_fail("gates-reconverge", log_stage=gates_log)
 
                     verify_log = f"verify-r{round_num + 1}"
-                    exit_code, logger = run_claude(worktree_path, "/verify", logger, verify_log, args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/verify", logger, verify_log, args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
                         _pipeline_fail("verify-reconverge", log_stage=verify_log)
 
                     qa_log = f"qa-r{round_num + 1}"
-                    exit_code, logger = run_claude(worktree_path, "/qa", logger, qa_log, args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/qa", logger, qa_log, args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="qa-reconverge")
                         _pipeline_fail("qa-reconverge", log_stage=qa_log)
 
                     review_log = f"review-r{round_num + 1}"
-                    exit_code, logger = run_claude(worktree_path, "/review", logger, review_log, args.dry_run)
+                    exit_code, logger = run_claude(worktree_path, "/review", logger, review_log, args.dry_run, ceiling=stage_ceiling)
                     if exit_code != 0:
                         log(logger, "pipeline", "FAILED", failed_stage="review-reconverge")
                         _pipeline_fail("review-reconverge", log_stage=review_log)
@@ -1506,14 +1542,15 @@ def main():
 
             elif stage == "pr":
                 exit_code, logger = run_pr_stage(
-                    worktree_path, logger, dry_run=args.dry_run)
+                    worktree_path, logger, dry_run=args.dry_run,
+                    ceiling=stage_ceiling)
                 if exit_code != 0:
                     log(logger, "pipeline", "FAILED", failed_stage="pr")
                     _pipeline_fail("pr")
                 pr_url = check_pr_created(worktree_path)
 
             elif stage == "retro":
-                exit_code, logger = run_claude(worktree_path, "/retro", logger, "retro", args.dry_run)
+                exit_code, logger = run_claude(worktree_path, "/retro", logger, "retro", args.dry_run, ceiling=stage_ceiling)
                 if exit_code != 0:
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:
@@ -1574,7 +1611,8 @@ def main():
             log(logger, "retro", "START", mode="failure-retro")
             try:
                 exit_code, logger = run_claude(
-                    worktree_path, "/retro", logger, "retro", args.dry_run)
+                    worktree_path, "/retro", logger, "retro", args.dry_run,
+                    ceiling=stage_ceiling)
                 if exit_code != 0:
                     log(logger, "retro", "FAILED_NON_BLOCKING")
                 else:

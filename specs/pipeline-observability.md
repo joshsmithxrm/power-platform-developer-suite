@@ -13,7 +13,7 @@ Pipeline runs are black boxes once launched. Two failed pipelines (cmt-parity, v
 
 ### Goals
 
-- **Smarter timeouts**: Kill stuck stages fast (5 min stall), let active stages run (up to 60 min ceiling). Fixed timeouts are the wrong tool.
+- **Smarter timeouts**: Kill stuck stages fast (5 min stall), let active stages run (up to 120 min ceiling, overridable per run via `--max-stage-seconds N`). Fixed timeouts are the wrong tool.
 - **Survive timeout**: When a stage is killed, extract whatever assistant text exists in the JSONL. Don't lose 20 minutes of work.
 - **Failed pipeline retro**: Run a lightweight retro even when a stage fails. "QA timed out at Phase 2 after completing Phase 1" is actionable.
 - **Partial QA persistence**: QA writes results per-phase as they complete, not only on clean exit.
@@ -256,7 +256,7 @@ except PipelineFailure:
 **Fix**: Replace fixed timeouts with a hybrid model — stall timeout + hard ceiling:
 
 - **Stall timeout**: Kill the stage after 5 consecutive idle heartbeats (5 minutes of no activity across all signals). Stuck processes die fast.
-- **Hard ceiling**: Kill the stage after 3600s (60 min) regardless of activity. Safety net so nothing runs forever.
+- **Hard ceiling**: Kill the stage after 7200s (120 min) regardless of activity. Safety net so nothing runs forever. Overridable per-run via the `--max-stage-seconds N` CLI flag on `scripts/pipeline.py` when a specific run needs more (or less) budget — e.g., cross-cutting architectural refactors where 17+ parallel agents are legitimately working for longer than the default.
 
 **Current timeout check** (pipeline.py:352-361):
 ```python
@@ -269,7 +269,7 @@ if timeout is not None and elapsed > timeout:
 **New timeout check:**
 ```python
 STALL_LIMIT = 5       # consecutive idle heartbeats (5 min at 60s interval)
-HARD_CEILING = 3600   # 60 min absolute maximum
+HARD_CEILING = 7200   # 120 min absolute maximum (override with --max-stage-seconds N)
 
 # In heartbeat block (after consecutive_idle is updated):
 if consecutive_idle >= STALL_LIMIT:
@@ -310,11 +310,17 @@ if elapsed > HARD_CEILING:
 |----------|--------|-------|
 | QA actively working, hits 20 min | Killed (timeout) | Keeps running (active) |
 | QA stuck, 0 bytes for 5 min | Waits 20 min to kill | Killed at 5 min (stall) |
-| QA active for 55 min | N/A (killed at 20 min) | Killed at 60 min (hard ceiling) |
+| QA active for 55 min | N/A (killed at 20 min) | Keeps running (well under 120 min ceiling) |
+| Active stage for 130 min | N/A | Killed at 120 min (hard ceiling) |
+| Active stage for 130 min, `--max-stage-seconds 10800` | N/A | Keeps running (override raised ceiling to 180 min) |
 | Implement actively coding for 40 min | Keeps running (45 min timeout) | Keeps running (active) |
 | Gates stuck on build error | Waits 15 min | Killed at 5 min (stall) |
 
 **Log event differentiation**: `STALL_TIMEOUT` vs `HARD_TIMEOUT` in pipeline.log makes it clear why the stage was killed. The existing `TIMEOUT` event is replaced by these two specific events.
+
+**Effective ceiling logged on stage start**: Each stage's `START` event records the effective ceiling (default or override) as `ceiling=<N>s`. Operators inspecting `pipeline.log` can see which value is in effect for a given run without re-deriving it from the CLI invocation.
+
+**Override flag — `--max-stage-seconds N`**: `scripts/pipeline.py` accepts `--max-stage-seconds N` where `N` is a positive integer number of seconds. When present, `N` replaces `HARD_CEILING` for every stage in that pipeline run (including `run_claude` heartbeat comparisons, the `pr` stage's internal checks, and the `pr_monitor.py` subprocess timeout). The flag is intended for one-off runs where the caller knows the work will exceed the default — cross-cutting architectural refactors, large-batch QA rounds, multi-domain features. The default is deliberately generous enough that most runs will never need it; if a whole class of work consistently hits the ceiling, raise the default rather than normalizing the override.
 
 **What counts as activity** (unchanged, already implemented in heartbeat):
 - `output_bytes` grew (JSONL file size increased — AI is producing text)
@@ -659,7 +665,7 @@ else:
 | AC-10 | tui-verify daemon self-terminates after 30 minutes of no HTTP requests | `test_daemon_self_terminates_after_idle_timeout` (Node.js test) | 🔲 |
 | AC-11 | Cleanup skill sends `/shutdown` to daemons found via `*-session.json` before worktree removal | Manual — skill behavior, verified via `/cleanup` with active daemon | 🔲 |
 | AC-12 | Stage is killed after 5 consecutive idle heartbeats (5 min no activity) with `STALL_TIMEOUT` log event | `test_stall_timeout_kills_after_consecutive_idle` | 🔲 |
-| AC-13 | Stage is killed after 3600s regardless of activity with `HARD_TIMEOUT` log event | `test_hard_timeout_kills_at_ceiling` | 🔲 |
+| AC-13 | Stage is killed after the effective hard ceiling (default 7200s, overridable via `--max-stage-seconds N`) regardless of activity, with `HARD_TIMEOUT` log event | `test_hard_timeout_kills_at_ceiling` | 🔲 |
 | AC-14 | Active stage (output_bytes growing) is NOT killed by stall timeout — idle counter resets on activity | `test_active_stage_not_killed_by_stall_timeout` | 🔲 |
 | AC-15 | `STAGE_TIMEOUTS` dict is removed; all stages use stall-based + hard ceiling logic | `test_no_per_stage_fixed_timeouts` | 🔲 |
 | AC-16 | QA skill commits each fix immediately after applying it (`git add` + `git commit`) — fixes survive timeout | `test_qa_commits_fixes` (integration: run QA skill on fixture with known issue, verify git log contains QA fix commit) | 🔲 |
@@ -672,6 +678,9 @@ else:
 | AC-23 | QA writes findings to `qa_findings` array in workflow state (id, surface, description, file, severity, fixed, fix_commit) | Manual — run QA, read state file, verify `qa_findings` entries | 🔲 |
 | AC-24 | Review reads `qa_findings` from state and passes to subagents as "already found by QA" context | Manual — run QA then review, observe review skipping duplicate findings | 🔲 |
 | AC-25 | Review does not re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem | Manual — verify dedup in review output | 🔲 |
+| AC-26 | `HARD_CEILING` default is 7200 seconds (120 min) | `test_hard_ceiling_default_is_7200` | 🔲 |
+| AC-27 | `scripts/pipeline.py --max-stage-seconds N` parses as a positive integer and replaces `HARD_CEILING` for the run; the effective ceiling is threaded into `run_claude`, `run_pr_stage`, and the PR monitor subprocess timeout | `test_max_stage_seconds_flag_overrides_ceiling` | 🔲 |
+| AC-28 | `run_claude` records the effective ceiling on stage start (`START` log entry includes `ceiling=<N>s`) so operators can see which value is in effect | `test_run_claude_logs_effective_ceiling_on_start` | 🔲 |
 
 ### Edge Cases
 
