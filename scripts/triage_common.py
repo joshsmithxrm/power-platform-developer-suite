@@ -23,7 +23,7 @@ def get_repo_slug(worktree, shakedown=False):
         result = subprocess.run(
             ["gh", "repo", "view", "--json", "nameWithOwner",
              "--jq", ".nameWithOwner"],
-            cwd=worktree, capture_output=True, text=True, timeout=10,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -119,7 +119,7 @@ def poll_gemini_review(worktree, pr_number, pr_created_at,
             try:
                 proc = subprocess.run(
                     ["gh", "api", path, "--paginate", "--slurp"],
-                    cwd=worktree, capture_output=True, text=True, timeout=30,
+                    cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
                 _log("POLL_ERROR", endpoint=key, error=str(e))
@@ -195,7 +195,7 @@ def get_unreplied_comments(worktree, pr_number, shakedown=False):
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
              "--paginate", "--slurp"],
-            cwd=worktree, capture_output=True, text=True, timeout=60,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         if result.returncode != 0:
             return []
@@ -259,7 +259,7 @@ def detect_gemini_overload(worktree, pr_number, shakedown=False):
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
              "--paginate", "--slurp"],
-            cwd=worktree, capture_output=True, text=True, timeout=60,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         if result.returncode != 0:
             return False
@@ -416,7 +416,7 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
             result = subprocess.run(
                 ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments",
                  "-F", f"in_reply_to={comment_id}", "-f", f"body={body}"],
-                cwd=worktree, capture_output=True, text=True, timeout=15,
+                cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
             )
             if result.returncode != 0:
                 log_fn("FAILED", comment_id=comment_id,
