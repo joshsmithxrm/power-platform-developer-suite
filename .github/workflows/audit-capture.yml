@@ -33,7 +33,6 @@ jobs:
     timeout-minutes: 45
 
     env:
-      AUDIT_OUT: ${{ runner.temp }}\audit-out
       # Git metadata written into manifest.json
       AUDIT_SOURCE_REPO: ${{ github.repository }}
       AUDIT_SOURCE_REF: ${{ github.ref }}
@@ -47,6 +46,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Compute AUDIT_OUT
+        shell: bash
+        run: echo "AUDIT_OUT=$RUNNER_TEMP/audit-out" >> "$GITHUB_ENV"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
