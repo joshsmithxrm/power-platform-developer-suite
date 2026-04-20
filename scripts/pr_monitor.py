@@ -43,7 +43,6 @@ CI_POLL_INTERVAL = 30       # seconds between CI status checks
 CI_MAX_WAIT = 900           # 15 minutes max for CI
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
-GEMINI_STABLE_POLLS = 2     # consecutive polls with same count = stable
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 SHAKEDOWN = os.environ.get("PPDS_SHAKEDOWN", "")
