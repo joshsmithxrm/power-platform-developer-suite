@@ -9,21 +9,22 @@ paths-ignore:
   - tests/**
   - '**/*Tests/**'
   - '**/*.Tests/**'
-  # Vendored git-credential-manager P/Invoke wrappers for platform-native
-  # secret stores (Windows Credential Manager / advapi32, macOS Keychain /
-  # CoreFoundation / SecurityFramework, Linux libsecret / Glib / Gobject).
-  # Every file under src/PPDS.Auth/Internal/CredentialStore/ carries a
-  # vendoring header from git-ecosystem/git-credential-manager v2.7.3.
-  # cs/call-to-unmanaged-code + cs/unmanaged-code merely inventory unmanaged
-  # code use — not actionable for an OS secret-store binding.
-  # See docs/qa/codeql-triage-2026-04-20.md.
-  - src/PPDS.Auth/Internal/CredentialStore/**
 
 queries:
   - uses: security-and-quality
 
 # Disable style rules that conflict with project conventions
-# See .github/CODE_SCANNING.md for rationale
+# See .github/CODE_SCANNING.md for rationale.
+#
+# Preference: rule-level excludes rather than path-ignore of the vendored
+# credential-store subtree. A paths-ignore entry would silence every CodeQL
+# rule on src/PPDS.Auth/Internal/CredentialStore/** (including a hypothetical
+# future SQL-injection or XSS rule if someone hand-edits the vendored code).
+# Globally excluding the two P/Invoke inventory rules
+# (cs/call-to-unmanaged-code + cs/unmanaged-code) keeps every other CodeQL
+# check running on that subtree. This is safe today because no PPDS
+# first-party code outside that subtree does P/Invoke.
+# See docs/qa/codeql-triage-2026-04-20.md.
 query-filters:
   - exclude:
       id:
@@ -45,3 +46,14 @@ query-filters:
         - cs/empty-collection
         # Test methods have multi-step scenarios by design
         - cs/complex-block
+        # Vendored git-credential-manager P/Invoke wrappers for platform-native
+        # secret stores (Windows Credential Manager / advapi32, macOS Keychain /
+        # CoreFoundation / SecurityFramework, Linux libsecret / Glib / Gobject).
+        # Every file under src/PPDS.Auth/Internal/CredentialStore/ carries a
+        # vendoring header from git-ecosystem/git-credential-manager v2.7.3.
+        # Both rules merely inventory unmanaged-code use — they do not detect
+        # bugs — and are not actionable for an OS secret-store binding.
+        # Rule-level exclusion (not paths-ignore) so every other CodeQL rule
+        # continues to run against the vendored subtree.
+        - cs/call-to-unmanaged-code
+        - cs/unmanaged-code

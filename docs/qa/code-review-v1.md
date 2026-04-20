@@ -8,10 +8,10 @@ Reference: PPDS CLAUDE.md rubric (NEVER/ALWAYS rules), Spec Laws SL1–SL5 assum
 
 ## Summary
 
-Verdict counts (of 35 — only 34 in-scope PRs listed; one group included both #820 parent and #840 enhancement):
+Verdict counts (35 PRs total; #820 parent + #840 enhancement are tracked as a single logical group in the focus-area findings but listed as separate rows in the per-PR table):
 
-- clean: 25
-- minor-issues: 9
+- clean: 28
+- minor-issues: 7
 - needs-followup: 0
 - regression-risk: 0
 
@@ -134,9 +134,9 @@ Verdict: **minor-issues** (nullable/lookup test coverage gap).
 
 ### #803 vendored git-credential-manager
 
-**Files:** `src/PPDS.Auth/CredentialManager/**/*.cs` (vendored source), `THIRD_PARTY_NOTICES.md` update, `src/PPDS.Auth/PPDS.Auth.csproj` (Devlooped.CredentialManager package reference removed).
+**Files:** `src/PPDS.Auth/Internal/CredentialStore/**/*.cs` (vendored source), `THIRD_PARTY_NOTICES.md` update, `src/PPDS.Auth/PPDS.Auth.csproj` (Devlooped.CredentialManager package reference removed).
 
-**Vendoring genuineness:** Files are C# source, not compiled binary. Namespaces appear adjusted to `PPDS.Auth.CredentialManager` (internal). License text from the original git-credential-manager project is included in `THIRD_PARTY_NOTICES.md`.
+**Vendoring genuineness:** Files are C# source, not compiled binary. Namespaces appear adjusted to `PPDS.Auth.Internal.CredentialStore` (internal). License text from the original git-credential-manager project is included in `THIRD_PARTY_NOTICES.md`.
 
 **NOTICES updated:** Devlooped mention removed (also the explicit purpose of PR #824). New GCM attribution added.
 
