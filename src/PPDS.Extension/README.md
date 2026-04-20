@@ -73,7 +73,6 @@ PPDS ships a companion MCP server — `ppds-mcp-server` — that exposes more th
 |---------|---------|-------------|
 | `ppds.queryDefaultTop` | 100 | Default TOP value for SQL queries when none is specified. |
 | `ppds.autoStartDaemon` | true | Start `ppds serve` automatically when the extension activates. |
-| `ppds.showEnvironmentInStatusBar` | true | Show the active environment name in the status bar. |
 
 ## Part of PPDS — a developer platform
 
