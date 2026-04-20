@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/joshsmithxrm/power-platform-developer-suite)](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/LICENSE)
 [![Build](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml/badge.svg)](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml)
 
-**Power Platform Developer Suite (PPDS)** is a developer platform for Microsoft Power Platform and Dataverse. This extension puts SQL/FetchXML notebooks, plugin registration, metadata browsing, and 8 other panels into VS Code — self-contained, with the `ppds` CLI daemon bundled — and an MCP server that makes your environments queryable by AI agents.
+**Power Platform Developer Suite (PPDS)** is a developer platform for Microsoft Power Platform and Dataverse. This extension puts SQL/FetchXML notebooks, plugin registration, metadata browsing, and 7 other panels into VS Code — self-contained, with the `ppds` CLI daemon bundled — and an MCP server that makes your environments queryable by AI agents.
 
 ![Notebook mid-execution](media/notebook-hero.png)
 
