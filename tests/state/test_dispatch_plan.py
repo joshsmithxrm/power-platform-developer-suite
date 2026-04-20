@@ -348,6 +348,8 @@ class TestMarkLaunched:
 
         entry = plan.find("feat/issue-660")
         assert entry.status == dp.STATUS_IN_FLIGHT
+        assert entry.session_id == "abc12345"
+        # Legacy mirror kept for one release (schema v1 compat).
         assert entry.launched_by_session == "abc12345"
         assert entry.launched_at  # auto-stamped
 
@@ -362,6 +364,155 @@ class TestMarkLaunched:
             plan, "feat/issue-660", session_id="x", when="2026-04-19T12:00:00Z",
         )
         assert plan.find("feat/issue-660").launched_at == "2026-04-19T12:00:00Z"
+
+    def test_pr_url_captured_when_supplied(self, sample_items):
+        """Schema v2: ``mark_launched`` takes ``pr_url`` as a first-class
+        kwarg so the D.1 path doesn't have to pack the PR URL into the
+        session_id slot (that was the v1 hack the migration eliminates).
+        """
+        plan = dp.build_plan_from_dicts(sample_items)
+        dp.mark_launched(
+            plan, "feat/issue-660",
+            session_id="session-abc",
+            pr_url="https://github.com/x/y/pull/42",
+        )
+        entry = plan.find("feat/issue-660")
+        assert entry.session_id == "session-abc"
+        assert entry.pr_url == "https://github.com/x/y/pull/42"
+
+
+# ---------------------------------------------------------------------------
+# Schema v2 migration — round-trip, legacy parse, coexistence, empty-PR
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaV2:
+    """Targeted coverage for the v1 -> v2 ``Session:`` split. v2 separates
+    the overloaded ``Session:`` field into ``SessionId:`` (Claude session
+    identifier) and ``PR:`` (PR URL, optional). The parser must keep
+    accepting v1 plans for one release so existing on-disk plans survive
+    the upgrade without a manual migration step.
+    """
+
+    def test_v2_round_trip(self):
+        """Build a v2 plan with session_id + pr_url, serialize, parse,
+        compare — all schema-v2 fields preserved through the round trip.
+        """
+        plan = dp.DispatchPlan(generator="session-test")
+        plan.entries.append(
+            dp.PlanEntry(
+                worktree="feat/v2-roundtrip",
+                issues=[660],
+                areas=["src/PPDS.Auth/"],
+                intent="env var auth",
+                status=dp.STATUS_IN_FLIGHT,
+                launched_at="2026-04-20T12:00:00Z",
+                session_id="session-abc12345",
+                pr_url="https://github.com/org/repo/pull/660",
+            )
+        )
+        text = plan.as_markdown()
+        # New plans are v2-native and never emit the legacy Session: line.
+        assert "SessionId: session-abc12345" in text
+        assert "PR: https://github.com/org/repo/pull/660" in text
+        assert "- Session: " not in text
+
+        reparsed = dp.parse_plan(text)
+        assert reparsed.version == 2
+        entry = reparsed.find("feat/v2-roundtrip")
+        assert entry is not None
+        assert entry.session_id == "session-abc12345"
+        assert entry.pr_url == "https://github.com/org/repo/pull/660"
+        assert entry.status == dp.STATUS_IN_FLIGHT
+        assert entry.launched_at == "2026-04-20T12:00:00Z"
+
+    def test_v1_legacy_parse(self):
+        """A hand-written v1 plan (Schema: 1, ``Session:`` line) must
+        parse cleanly: ``session_id`` populated from ``Session:``,
+        ``pr_url`` empty. Required so the existing on-disk plan file is
+        readable the first time a v2 binary runs.
+        """
+        v1_text = (
+            "# Dispatch Plan\n"
+            "\n"
+            "Schema: 1\n"
+            "Generated: 2026-04-19T00:00:00Z\n"
+            "Generator: session-legacy\n"
+            "\n"
+            "## Planned\n"
+            "\n"
+            "### Worktree: feat/legacy\n"
+            "- Issues: #42\n"
+            "- Areas: src/Legacy/\n"
+            "- Intent: legacy thing\n"
+            "- Status: in-flight\n"
+            "- Launched: 2026-04-19T00:00:30Z\n"
+            "- Session: session-legacy-worker\n"
+        )
+        plan = dp.parse_plan(v1_text)
+        assert plan.version == 1  # header still reports v1
+        entry = plan.find("feat/legacy")
+        assert entry is not None
+        assert entry.session_id == "session-legacy-worker"
+        assert entry.pr_url == ""
+        # Deprecated mirror is also populated so v1-era callers work.
+        assert entry.launched_by_session == "session-legacy-worker"
+
+    def test_v2_parse_both_keys_prefers_sessionid(self):
+        """Defensive: if a plan somehow ends up with both ``Session:`` and
+        ``SessionId:`` lines in one entry (hand edit, merge artifact),
+        ``SessionId:`` wins regardless of line order.
+        """
+        # Case 1: SessionId appears AFTER Session. SessionId must overwrite.
+        text_after = (
+            "### Worktree: feat/x\n"
+            "- Issues: #1\n"
+            "- Areas: src/A/\n"
+            "- Intent: test\n"
+            "- Status: planned\n"
+            "- Session: legacy-value\n"
+            "- SessionId: v2-value\n"
+        )
+        plan = dp.parse_plan(text_after)
+        assert plan.find("feat/x").session_id == "v2-value"
+
+        # Case 2: SessionId appears BEFORE Session. SessionId must still win
+        # (the v1 handler skips when session_id is already populated).
+        text_before = (
+            "### Worktree: feat/x\n"
+            "- Issues: #1\n"
+            "- Areas: src/A/\n"
+            "- Intent: test\n"
+            "- Status: planned\n"
+            "- SessionId: v2-value\n"
+            "- Session: legacy-value\n"
+        )
+        plan = dp.parse_plan(text_before)
+        assert plan.find("feat/x").session_id == "v2-value"
+
+    def test_empty_pr_omitted_from_markdown(self):
+        """``PR:`` (and ``SessionId:``) lines must be omitted entirely
+        when the underlying value is empty — the dispatcher populates
+        pr_url lazily (some launches have no PR yet) and trailing empty
+        lines would corrupt the compact human-skimmable format.
+        """
+        plan = dp.DispatchPlan(generator="session-test")
+        plan.entries.append(
+            dp.PlanEntry(
+                worktree="feat/no-pr-yet",
+                issues=[1],
+                areas=["src/A/"],
+                intent="still running",
+                status=dp.STATUS_IN_FLIGHT,
+                launched_at="2026-04-20T12:00:00Z",
+                session_id="session-worker",
+                pr_url="",  # no PR yet
+            )
+        )
+        text = plan.as_markdown()
+        assert "SessionId: session-worker" in text
+        assert "- PR:" not in text
+        assert "- PR: " not in text
 
 
 # ---------------------------------------------------------------------------
@@ -442,13 +593,13 @@ class TestDispatchSimulation:
         assert counts[dp.STATUS_PLANNED] == 0
         # Launched entries got a session ID.
         assert (
-            final.find("feat/issue-660").launched_by_session == "sid-issue-660"
+            final.find("feat/issue-660").session_id == "sid-issue-660"
         )
         assert (
-            final.find("feat/cli-help").launched_by_session == "sid-cli-help"
+            final.find("feat/cli-help").session_id == "sid-cli-help"
         )
         # Conflict entry was NOT launched.
-        assert final.find("feat/audit-capture").launched_by_session == ""
+        assert final.find("feat/audit-capture").session_id == ""
 
 
 # ---------------------------------------------------------------------------
