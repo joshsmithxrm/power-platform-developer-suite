@@ -128,6 +128,60 @@ class TestCiTimeout:
         assert result == "timeout"
 
 
+class TestTerminalNotifications:
+    """Monitor fires run_notify on every terminal state (success + failures)."""
+
+    def test_notify_on_ci_timeout(self, tmp_path):
+        """CI timeout path calls run_notify with a descriptive message."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="timeout"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 99, resume=False)
+
+        assert exit_code == 1
+        mock_notify.assert_called_once()
+        assert "timed out" in mock_notify.call_args.kwargs["message"].lower()
+
+    def test_notify_on_monitor_exception(self, tmp_path):
+        """Uncaught exception in the monitor loop still fires notify."""
+        wt = _make_worktree(tmp_path)
+
+        # mark_step is called in the control-flow code outside step
+        # try/except wrappers (e.g., right after _step_ci returns), so
+        # raising from it triggers the outer ``except Exception`` path.
+        # Uses a one-shot raise so the outer handler's own write_result
+        # / run_notify calls still succeed.
+        raised = [False]
+
+        def raise_once(*a, **kw):
+            if not raised[0]:
+                raised[0] = True
+                raise RuntimeError("boom")
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.mark_step", side_effect=raise_once), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 1
+        mock_notify.assert_called_once()
+        msg = mock_notify.call_args.kwargs["message"]
+        assert "crashed" in msg.lower()
+        assert "RuntimeError" in msg
+
+    def test_notify_failure_does_not_cascade(self, tmp_path):
+        """A crash inside run_notify must not change the monitor's exit code."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="timeout"), \
+             patch("pr_monitor.run_notify", side_effect=RuntimeError("notify-down")):
+            exit_code = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        # Still exits 1 (timeout), not a different non-zero from notify failure.
+        assert exit_code == 1
+
+
 class TestResumeSkips:
     """AC-109: --resume reads result file and skips completed steps."""
 

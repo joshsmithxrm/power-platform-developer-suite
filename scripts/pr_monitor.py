@@ -207,7 +207,7 @@ def poll_ci(worktree, pr_number, logger):
             result = subprocess.run(
                 ["gh", "pr", "checks", str(pr_number),
                  "--json", "name,state,bucket"],
-                cwd=worktree, capture_output=True, text=True, timeout=30,
+                cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.log("ci", "POLL_ERROR", error=str(e))
@@ -273,7 +273,7 @@ def _get_pr_created_at(worktree, pr_number):
         result = subprocess.run(
             ["gh", "pr", "view", str(pr_number),
              "--json", "createdAt", "--jq", ".createdAt"],
-            cwd=worktree, capture_output=True, text=True, timeout=15,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -338,7 +338,7 @@ def _fetch_latest_gemini_review_body(worktree, pr_number):
         proc = subprocess.run(
             ["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews",
              "--paginate", "--slurp"],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         if proc.returncode != 0:
             return ""
@@ -452,7 +452,7 @@ def _detect_base_branch(worktree, pr_number, logger):
         result = subprocess.run(
             ["gh", "pr", "view", "--", str(pr_number),
              "--json", "baseRefName", "--jq", ".baseRefName"],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "BASE_DETECT_ERROR", reason=str(e))
@@ -484,7 +484,7 @@ def _rebase_source_branch(worktree, pr_number, logger):
 
     def _run(cmd, timeout=60):
         return subprocess.run(
-            cmd, cwd=worktree, capture_output=True, text=True, timeout=timeout,
+            cmd, cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
 
     base = _detect_base_branch(worktree, pr_number, logger)
@@ -549,7 +549,7 @@ def mark_pr_ready(worktree, pr_number, logger):
     try:
         result = subprocess.run(
             ["gh", "pr", "ready", str(pr_number)],
-            cwd=worktree, capture_output=True, text=True, timeout=30,
+            cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         if result.returncode == 0:
             logger.log("ready", "DONE")
@@ -688,7 +688,7 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                 subprocess.run(
                     ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
                      "-f", f"body={body}"],
-                    cwd=worktree, capture_output=True, text=True, timeout=15,
+                    cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
@@ -793,7 +793,7 @@ def run_notify(worktree, pr_number, logger, message=None):
 
     try:
         result = subprocess.run(
-            cmd, cwd=worktree, capture_output=True, text=True, timeout=30,
+            cmd, cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         logger.log("notify", "DONE", exit=result.returncode)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
@@ -818,6 +818,21 @@ def mark_step(result, step_name, status):
         "status": status,
         "timestamp": _timestamp(),
     }
+
+
+def _notify_terminal(worktree, pr_number, logger, message):
+    """Best-effort notification on any terminal non-success state.
+
+    Wraps ``run_notify`` in a try/except so a notify failure cannot
+    cascade into the monitor's own error path. Keeps the user informed
+    when the monitor aborts (CI fail, CI timeout, exception) — previously
+    only the clean-success path fired a notification, so crashes were
+    invisible until the user happened to check the PR.
+    """
+    try:
+        run_notify(worktree, pr_number, logger, message=message)
+    except Exception as notify_err:  # noqa: BLE001 — best-effort
+        logger.log("notify", "TERMINAL_NOTIFY_ERROR", error=str(notify_err))
 
 
 def run_monitor(worktree, pr_number, resume=False):
@@ -861,6 +876,9 @@ def run_monitor(worktree, pr_number, resume=False):
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
                 write_result(worktree, result)
+                _notify_terminal(worktree, pr_number, logger,
+                                 f"PR #{pr_number} CI timed out after "
+                                 f"{CI_MAX_WAIT // 60} min")
                 logger.log("monitor", "ABORT", reason="CI timeout")
                 logger.close()
                 return 1
@@ -926,6 +944,9 @@ def run_monitor(worktree, pr_number, resume=False):
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
                 write_result(worktree, result)
+                _notify_terminal(worktree, pr_number, logger,
+                                 f"PR #{pr_number} CI timed out after triage "
+                                 f"round {triage_iteration}")
                 logger.log("monitor", "ABORT",
                            reason=f"CI timeout after triage round {triage_iteration}")
                 logger.close()
@@ -966,6 +987,9 @@ def run_monitor(worktree, pr_number, resume=False):
         result["error"] = str(e)
         write_result(worktree, result)
         logger.log("monitor", "ERROR", error=str(e))
+        _notify_terminal(worktree, pr_number, logger,
+                         f"PR #{pr_number} monitor crashed: "
+                         f"{type(e).__name__}: {str(e)[:120]}")
         logger.close()
         return 1
 
