@@ -16,7 +16,9 @@ This skill is the ONLY sanctioned path for automated PR creation in this repo. A
 - Direct invocation bypasses state tracking (`.workflow/state.json` records for `/gates`, `/verify`, etc.)
 - Direct invocation bypasses prerequisite enforcement (the PR gate hook described in Prerequisites below)
 
-Human-initiated PR creation via `gh pr create` from a terminal is fine — this rule applies to automated/agent PR creation only.
+Human-initiated PR creation via `gh pr create` from a terminal on a non-worktree checkout is fine — this rule applies to automated/agent PR creation only.
+
+This rule is hook-enforced: `.claude/hooks/pr-gate.py` detects agent context (cwd in `.claude/worktrees/agent-*` or Claude Code agent env vars) and blocks `gh pr create` unless the `/pr` skill has set `pr.invoked_via_skill=true` in workflow state. Humans running from a worktree can set `PPDS_PR_GATE_HUMAN=1` to override.
 
 ## Prerequisites
 
@@ -28,10 +30,13 @@ workflow state before invoking `/pr`.
 
 ## Process
 
-Set the PR phase at entry:
+Set the PR phase and skill-entry marker at entry:
 
 ```bash
 python scripts/workflow-state.py set phase pr
+# Required: tells `.claude/hooks/pr-gate.py` this PR went through the skill.
+# Without this marker, an agent-context `gh pr create` is blocked.
+python scripts/workflow-state.py set pr.invoked_via_skill true
 ```
 
 ### 1. Rebase on Main and Push
