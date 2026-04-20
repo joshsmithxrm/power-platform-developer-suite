@@ -9,6 +9,15 @@ paths-ignore:
   - tests/**
   - '**/*Tests/**'
   - '**/*.Tests/**'
+  # Vendored git-credential-manager P/Invoke wrappers for platform-native
+  # secret stores (Windows Credential Manager / advapi32, macOS Keychain /
+  # CoreFoundation / SecurityFramework, Linux libsecret / Glib / Gobject).
+  # Every file under src/PPDS.Auth/Internal/CredentialStore/ carries a
+  # vendoring header from git-ecosystem/git-credential-manager v2.7.3.
+  # cs/call-to-unmanaged-code + cs/unmanaged-code merely inventory unmanaged
+  # code use — not actionable for an OS secret-store binding.
+  # See docs/qa/codeql-triage-2026-04-20.md.
+  - src/PPDS.Auth/Internal/CredentialStore/**
 
 queries:
   - uses: security-and-quality
