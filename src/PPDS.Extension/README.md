@@ -49,7 +49,7 @@ Uniform grid of every v1.0 panel — each opens directly on an environment from 
 
 ### Profile and environment management
 
-Sidebar tree groups every authentication profile and its discovered environments. Click to switch; the status-bar indicator shows the active profile and offers a quick-pick switcher. Environment color theming applies a 4-pixel top border by type — Dev, Test, Prod — so a stray production query is hard to miss.
+Sidebar tree groups every authentication profile and its discovered environments. Click to switch; the status-bar indicator shows the active profile and offers a quick-pick switcher. Environment color theming applies a 3-pixel top border by type — Dev, Test, Prod — so a stray production query is hard to miss.
 
 ## The `ppds` CLI daemon
 
