@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   integration-tests:
-    name: Integration Tests
+    name: Integration (${{ matrix.shard }})
     runs-on: windows-latest
     # Only run on PRs from the same repo (not forks) or on main branch
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
@@ -34,6 +34,29 @@ jobs:
     permissions:
       contents: read
       id-token: write  # Required for GitHub OIDC federated authentication
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Split PPDS.LiveTests by domain folder (namespace), plus daemon tests.
+          # Each shard runs in parallel; legs are sized to balance total runtime.
+          # Global excludes: SecureStorage (needs OS secure storage), SlowIntegration (100s+ queries).
+          - shard: daemon
+            project: tests/PPDS.Cli.DaemonTests/PPDS.Cli.DaemonTests.csproj
+            filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration
+          - shard: auth
+            project: tests/PPDS.LiveTests/PPDS.LiveTests.csproj
+            filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration&FullyQualifiedName~PPDS.LiveTests.Authentication
+          - shard: pooling
+            project: tests/PPDS.LiveTests/PPDS.LiveTests.csproj
+            filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration&FullyQualifiedName~PPDS.LiveTests.Pooling
+          - shard: bulk-resilience
+            project: tests/PPDS.LiveTests/PPDS.LiveTests.csproj
+            filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration&(FullyQualifiedName~PPDS.LiveTests.BulkOperations|FullyQualifiedName~PPDS.LiveTests.Resilience)
+          - shard: cli-smoke
+            project: tests/PPDS.LiveTests/PPDS.LiveTests.csproj
+            filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration&(FullyQualifiedName~PPDS.LiveTests.Cli|FullyQualifiedName~PPDS.LiveTests.LiveDataverseSmokeTests)
 
     steps:
     - uses: actions/checkout@v6
@@ -48,13 +71,23 @@ jobs:
           9.0.x
           10.0.x
 
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.nuget/packages
+          ~/.local/share/NuGet/http-cache
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'nuget.config') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-
+
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Run Integration Tests
+    - name: Run Integration Tests (${{ matrix.shard }})
       env:
         # Repository variables (non-sensitive)
         DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
@@ -64,7 +97,23 @@ jobs:
         PPDS_TEST_CLIENT_SECRET: ${{ secrets.PPDS_TEST_CLIENT_SECRET }}
         PPDS_TEST_CERT_BASE64: ${{ secrets.PPDS_TEST_CERT_BASE64 }}
         PPDS_TEST_CERT_PASSWORD: ${{ secrets.PPDS_TEST_CERT_PASSWORD }}
-      # Run integration tests, excluding:
-      # - SecureStorage: requires OS-level secure storage (DPAPI/Keychain) unavailable in CI
-      # - SlowIntegration: queries that take 100+ seconds (e.g., listing 60k stock Dataverse plugins)
-      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category=Integration&Category!=SecureStorage&Category!=SlowIntegration"
+      run: dotnet test ${{ matrix.project }} --configuration Release --no-build --verbosity normal --filter "${{ matrix.filter }}"
+
+  # Gate job for branch protection — aggregates matrix legs into a single status check.
+  # Preserves the pre-matrix "Integration Tests" status check name so branch protection
+  # rules keep working without modification.
+  integration-tests-status:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: always()
+    steps:
+      - name: Check matrix results
+        run: |
+          if [[ "${{ needs.integration-tests.result }}" == "success" || "${{ needs.integration-tests.result }}" == "skipped" ]]; then
+            echo "Integration tests passed (or skipped)"
+            exit 0
+          else
+            echo "Integration tests failed: ${{ needs.integration-tests.result }}"
+            exit 1
+          fi
