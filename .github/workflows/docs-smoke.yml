@@ -27,19 +27,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout ppds
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ppds_ref }}
 
       - name: Checkout docs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.docs_repo }}
           ref: ${{ inputs.docs_ref }}
           path: .docs-repo
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
