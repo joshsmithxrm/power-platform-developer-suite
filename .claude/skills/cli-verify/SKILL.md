@@ -9,15 +9,17 @@ Supporting knowledge for `/verify cli` and `/qa cli`. Documents how to build, ru
 
 ## Safety pre-check
 
-These verification flows talk to live Dataverse. Two PreToolUse hooks gate
-`ppds *` invocations to keep an agent from writing to a non-dev env:
+These verification flows talk to live Dataverse. The `shakedown-safety`
+PreToolUse hook gates `ppds *` invocations to keep an agent from writing
+to a non-dev env, with two concerns in one gate:
 
-- `dev-env-check.py` -- always on. Blocks `ppds *` unless the active env is
-  in the allowlist (`$PPDS_SAFE_ENVS` or `.claude/state/safe-envs.json`).
-- `shakedown-readonly.py` -- active when `PPDS_SHAKEDOWN=1` is set (the
-  shakedown skill exports this in its Phase 0). Blocks write verbs
-  (`create`, `update`, `delete`, `plugins deploy` without `--dry-run`,
-  `solutions import`, etc.).
+- **Env allowlist (always on).** Blocks `ppds *` unless the active env
+  is in the allowlist (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs`
+  in `.claude/settings.json`).
+- **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
+  Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
+  without `--dry-run`, `solutions import`, etc.). The shakedown skill
+  exports `PPDS_SHAKEDOWN=1` in its Phase 0.
 
 Before running any of the patterns below:
 
