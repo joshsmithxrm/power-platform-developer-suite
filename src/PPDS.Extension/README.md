@@ -31,7 +31,7 @@ Five-tab entity explorer with split-pane layout: entity list on the left, detail
 
 ![Plugin Traces](media/plugin-traces.png)
 
-Timeline waterfall over the plugin-trace log with trace-level management built in. A volume-warning banner flags when a run generated enough traces to trip the retention limit, filter bar narrows by entity, message, or status, and the age-based cleanup action clears the backlog in one click. Deep links jump straight to the Maker Portal when you need to pivot.
+Timeline waterfall over the plugin-trace log with trace-level management built in. A volume-warning banner flags when a run generated enough traces to trip the retention limit. The filter bar narrows by entity, message, or status, and the age-based cleanup action clears the backlog in one click. Deep links jump straight to the Maker Portal when you need to pivot.
 
 ### All nine panels
 
@@ -83,7 +83,7 @@ This extension is one surface of a broader platform. The whole thing is open sou
 - **PPDS.\* NuGet libraries** — `PPDS.Dataverse`, `PPDS.Migration`, `PPDS.Query`, `PPDS.Plugins` — embed pooled connections, SQL→FetchXML transpilation, bulk data movement, and declarative plugin registration directly in your .NET apps.
 - **`ppds-docs`** — platform documentation, architecture notes, and migration guides.
 
-PPDS provides the pipeline building blocks — stateless env-var authentication, PAC-compatible deployment settings, multi-profile bulk data — complements `pac solution` for packaging, does not replace it.
+PPDS provides the pipeline building blocks — stateless env-var authentication, PAC-compatible deployment settings, and multi-profile bulk data — and complements `pac solution` for packaging rather than replacing it.
 
 ## Support
 

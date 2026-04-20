@@ -79,7 +79,12 @@ jobs:
             echo "::error::Publish requires a refs/tags/Extension-v* ref. Got: ${{ github.ref }}"
             exit 1
           fi
-          echo "sha=$(git rev-list -n 1 ${{ github.ref }})" >> "$GITHUB_OUTPUT"
+          sha="$(git rev-list -n 1 ${{ github.ref }})"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Failed to resolve a 40-char commit SHA for ${{ github.ref }}. Got: '$sha'"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -149,7 +154,7 @@ jobs:
           steps.channel.outputs.is_prerelease == 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} --pre-release --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/ -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        run: npx vsce publish --target ${{ matrix.target }} --pre-release --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
 
@@ -158,6 +163,6 @@ jobs:
           steps.channel.outputs.is_prerelease != 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/ -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}

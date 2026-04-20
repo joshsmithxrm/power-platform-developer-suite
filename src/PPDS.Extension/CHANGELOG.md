@@ -15,7 +15,7 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 ### Added
 
 - **Daemon-backed architecture** — Thin VS Code UI layer delegates all operations to the `ppds serve` daemon via JSON-RPC. Authentication managed by the CLI profile store.
-- **Profile and environment management** — Create, delete, rename, select profiles from the sidebar. Browse and select Dataverse environments. Status-bar profile indicator with click-to-switch quick pick. Environment color theming (4 px left border on panel toolbars by environment type with per-panel persistence).
+- **Profile and environment management** — Create, delete, rename, select profiles from the sidebar. Browse and select Dataverse environments. Status-bar profile indicator with click-to-switch quick pick. Environment color theming — a 3-pixel top border on panel toolbars driven by environment type (Dev / Test / Prod) and a 4-pixel left border driven by per-environment color, with per-panel persistence.
 - **Notebooks (`.ppdsnb`)** — SSMS-like query experience with SQL and FetchXML cells, IntelliSense (autocomplete for tables, columns, FetchXML elements/attributes), FetchXML syntax highlighting, query history, CSV/JSON export per cell, notebook-environment selection.
 - **Data Explorer panel** — Webview for quick ad-hoc queries with virtual scrolling for large result sets.
 - **Solutions panel** — Expandable component groups with managed/visible toggles and Maker Portal buttons.
@@ -64,7 +64,7 @@ Major feature pass restoring most legacy v0.3.4 panels and adding cross-cutting 
 - **Import Jobs panel** — Search bar, Operation Context column, record count with filtered-status display.
 - **Shared `SolutionFilter` component** — Reused across multiple panels.
 - **Session persistence for panel state** — Solution-filter selections restored across sessions via `globalState`.
-- **Environment color theming** — 4 px left border on panel toolbars by environment type (Dev / Test / Prod) with per-panel persistence.
+- **Environment color theming** — a 3-pixel top border on panel toolbars driven by environment type (Dev / Test / Prod) and a 4-pixel left border driven by per-environment color, with per-panel persistence.
 - **Status-bar profile indicator** — Shows the active profile name and supports click-to-switch via a quick pick; hidden when the daemon is not ready.
 - **Environment Details command** — Org and connection info for the active environment (guarded against non-active selection).
 - **`ListResult<T>` and `DataTable` upgrades** — Virtual scrolling for large result sets, three-state column sorting with `sortValue` support for dates/numbers, cell selection plus `Ctrl+A`/`Ctrl+C` TSV copy via `SelectionManager`, header styling, row striping, cell tooltips, full-row search matching. All eight panels gain `findWidget` and `retainContextWhenHidden`.

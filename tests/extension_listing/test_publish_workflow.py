@@ -30,8 +30,14 @@ def _load_workflow() -> dict:
     return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
-def _publish_run_strings() -> list[str]:
-    """Return the `run:` strings for both publish steps."""
+@pytest.fixture(scope="module")
+def publish_run_strings() -> list[str]:
+    """Return the `run:` strings for both publish steps.
+
+    Deferred to a fixture (not module-level helper) so a YAML parse error
+    or shape change produces a test failure instead of a collection-time
+    import error that masks every test in the file.
+    """
     workflow = _load_workflow()
     steps = workflow["jobs"]["publish"]["steps"]
     publish_steps = [s for s in steps if "name" in s and "Publish to VS Code Marketplace" in s["name"]]
@@ -41,12 +47,15 @@ def _publish_run_strings() -> list[str]:
     return [s["run"] for s in publish_steps]
 
 
-@pytest.mark.parametrize("run_string", _publish_run_strings())
-def test_publish_step_has_base_images_url_templated(run_string: str) -> None:
+@pytest.mark.parametrize("index", [0, 1])
+def test_publish_step_has_base_images_url_templated(
+    publish_run_strings: list[str], index: int
+) -> None:
     """AC-24: each publish step's run command uses --baseImagesUrl with a
     templated SHA expression. The SHA must be resolved at runtime, not
     hard-coded in the workflow source.
     """
+    run_string = publish_run_strings[index]
     assert "--baseImagesUrl" in run_string, (
         f"Publish step is missing --baseImagesUrl flag:\n{run_string}"
     )
