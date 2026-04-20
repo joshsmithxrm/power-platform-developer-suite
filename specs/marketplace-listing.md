@@ -228,7 +228,7 @@ MIT
 
 **Hero sentence (frozen verbatim):**
 
-> **Power Platform Developer Suite (PPDS)** is a developer platform for Microsoft Power Platform and Dataverse. This extension puts SQL/FetchXML notebooks, plugin registration, metadata browsing, and 8 other panels into VS Code — self-contained, with the `ppds` CLI daemon bundled — and an MCP server that makes your environments queryable by AI agents.
+> **Power Platform Developer Suite (PPDS)** is a developer platform for Microsoft Power Platform and Dataverse. This extension puts SQL/FetchXML notebooks, plugin registration, metadata browsing, and 7 other panels into VS Code — self-contained, with the `ppds` CLI daemon bundled — and an MCP server that makes your environments queryable by AI agents.
 
 **Badges (4 only):**
 
