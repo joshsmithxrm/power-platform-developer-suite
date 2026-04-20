@@ -52,7 +52,7 @@ Shipped inside the CLI binary — run `ppds` with no arguments, `ppds interactiv
 Published to the VS Code Marketplace stable channel. Thin UI layer that delegates all operations to the `ppds serve` daemon via JSON-RPC; authentication is managed through the CLI profile store.
 
 - **Profile management** — Create, delete, rename, select profiles from the sidebar.
-- **Environment management** — Browse and select Dataverse environments with color theming (4 px left border by environment type, per-panel persistence); status-bar profile indicator with click-to-switch.
+- **Environment management** — Browse and select Dataverse environments with color theming (3-pixel top border by environment type, 4-pixel left border by per-environment color, per-panel persistence); status-bar profile indicator with click-to-switch.
 - **Notebooks (`.ppdsnb`)** — SSMS-like SQL + FetchXML experience with IntelliSense, FetchXML syntax highlighting, query history, CSV/JSON export per cell, notebook-environment selection.
 - **Data Explorer panel** — Ad-hoc queries with virtual scrolling, three-state column sorting, cell selection, `Ctrl+A`/`Ctrl+C` TSV copy, row striping, cell tooltips.
 - **Panels** — Solutions, Plugin Traces, Metadata Browser, Connection References, Environment Variables, Web Resources, Import Jobs, Plugin Registration. All eight panels include `findWidget` and `retainContextWhenHidden`.

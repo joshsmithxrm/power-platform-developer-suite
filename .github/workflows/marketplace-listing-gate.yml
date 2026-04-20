@@ -1,0 +1,49 @@
+name: Marketplace Listing Gate
+
+# Prong A of the AC-29 release-validation gate. Runs on PRs touching any
+# in-scope listing path and on main pushes so branch protection can require
+# this check. Prong B lives in extension-publish.yml as a preflight job.
+
+on:
+  pull_request:
+    paths:
+      - 'src/PPDS.Extension/README.md'
+      - 'src/PPDS.Extension/package.json'
+      - 'src/PPDS.Extension/CHANGELOG.md'
+      - 'src/PPDS.Extension/media/**'
+      - 'README.md'
+      - '.github/workflows/extension-publish.yml'
+      - '.github/workflows/marketplace-listing-gate.yml'
+      - 'tests/extension_listing/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/PPDS.Extension/README.md'
+      - 'src/PPDS.Extension/package.json'
+      - 'src/PPDS.Extension/CHANGELOG.md'
+      - 'src/PPDS.Extension/media/**'
+      - 'README.md'
+      - '.github/workflows/extension-publish.yml'
+      - '.github/workflows/marketplace-listing-gate.yml'
+      - 'tests/extension_listing/**'
+  workflow_dispatch: {}
+
+jobs:
+  gate:
+    name: marketplace-listing-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest + pyyaml
+        run: pip install pytest pyyaml
+
+      - name: Run marketplace-listing AC tests
+        run: pytest tests/extension_listing/ -v
