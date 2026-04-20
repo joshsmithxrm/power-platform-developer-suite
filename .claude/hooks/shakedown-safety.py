@@ -1,36 +1,47 @@
-"""PreToolUse hook: enforce dev-env allowlist for ppds CLI invocations.
+"""PreToolUse hook: shakedown safety boundary (env allowlist + write-block).
 
-Prevents an agent from accidentally connecting to a non-dev/test environment
-(e.g. production) when running ppds CLI commands during shakedown / verify
-flows. Reads the active environment from the PPDS profile store directly so
-the hook stays fast and avoids invoking ppds itself (which would be circular
-for a PreToolUse on Bash and would itself trip this same hook).
+Consolidates the two prior hooks (``dev-env-check.py`` and
+``shakedown-readonly.py``) into a single PreToolUse gate. They share ~80% of
+their parsing logic (find ``ppds`` invocations in a Bash command, walk argv
+against subcommand/verb tables); splitting that across two files made the
+safety surface harder to review and invited drift.
 
-Allowlist sources (checked in order):
-1. Env var ``PPDS_SAFE_ENVS`` -- comma-separated list of env names.
-2. File ``.claude/state/safe-envs.json`` -- ``{"safe_envs": ["ppds-dev", ...]}``.
-3. Neither set -- BLOCK with an instructive message.
+Two concerns, one hook:
 
-Trigger patterns (block when active env not in allowlist):
-- ``ppds env list`` / ``ppds env current`` / ``ppds env who`` -- always allowed
-  (read-only diagnostics; ``who`` does connect but is treated as effectively
-  read-only because it only issues a WhoAmI request).
-- ``ppds env switch <name>`` / ``ppds env select <name>`` -- allowed only when
-  the *target* name is in the allowlist.
-- Any other ``ppds *`` invocation -- allowed only when the *active* env is in
-  the allowlist.
-- ``ppds-mcp-server`` -- verify the active env at startup; same rule as
-  ``ppds *``.
+1. **Env allowlist gating (always on).** Every Bash invocation that mentions
+   ``ppds`` / ``ppds-mcp-server`` is gated against a configured allowlist of
+   dev/test env names. The active env is read directly from the PPDS profile
+   store (``profiles.json``). Read-only subcommands (``env list``,
+   ``env who``, ...) are always allowed; switching INTO a safe env is
+   allowed even when currently on an unsafe one.
 
-Envelope contract: Claude Code wraps tool input as
+2. **Write-block during shakedown.** When ``PPDS_SHAKEDOWN=1`` (or whichever
+   name is configured under ``safety.readonly_env_var``), write/mutation
+   verbs (``create``, ``update``, ``delete``, ``plugins deploy`` without
+   ``--dry-run``, ``solutions import``, etc.) are refused outright. This
+   provides a mechanical boundary that the shakedown / verify skills rely on.
+
+**Allowlist sources (checked in order):**
+
+1. Env var ``$PPDS_SAFE_ENVS`` -- comma-separated list of env names.
+2. ``.claude/settings.json`` top-level ``safety.shakedown_safe_envs`` array.
+3. ``.claude/state/safe-envs.json`` -- legacy fallback, kept for a single
+   release so in-flight branches don't break during migration. Will be
+   removed once all trees have re-landed the settings.json form.
+4. Neither set -- BLOCK with an instructive message.
+
+**Envelope contract:** Claude Code wraps tool input as
 ``{"tool_name": "...", "tool_input": {"command": "..."}}``. Always read the
 command from the nested ``tool_input`` dict -- reading at the top level was
 the v1-prelaunch hook bug fixed by PR #816.
 
-Failure mode: prints a message to stderr explaining the block + how to fix,
-then exits 2 (the standard PreToolUse block code). Hook is fail-safe -- when
-the active env can't be determined it BLOCKS rather than allows, on the
-theory that an unknown env is more dangerous than a false positive.
+**Fail-safe:** when the active env cannot be determined the hook BLOCKS
+rather than allows -- an unknown env is more dangerous than a false
+positive.
+
+**Bypass the write-block:** unset the configured env var (default
+``PPDS_SHAKEDOWN``). There is intentionally no softer bypass -- if a write
+is genuinely needed, that takes deliberate action.
 """
 
 from __future__ import annotations
@@ -47,44 +58,89 @@ from _pathfix import normalize_msys_path  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Allowlist resolution
+# Settings loader (new home for the allowlist + env var name)
 # ---------------------------------------------------------------------------
 
 
-def _safe_envs_file() -> str:
-    """Resolve the path to safe-envs.json relative to CLAUDE_PROJECT_DIR."""
-    project_dir = normalize_msys_path(
+_DEFAULT_READONLY_ENV_VAR = "PPDS_SHAKEDOWN"
+
+
+def _project_dir() -> str:
+    return normalize_msys_path(
         os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     )
-    return os.path.join(project_dir, ".claude", "state", "safe-envs.json")
 
 
-def load_allowlist() -> Optional[list]:
+def _settings_path() -> str:
+    return os.path.join(_project_dir(), ".claude", "settings.json")
+
+
+def _legacy_safe_envs_path() -> str:
+    return os.path.join(_project_dir(), ".claude", "state", "safe-envs.json")
+
+
+def _read_json(path: str) -> Optional[dict]:
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def load_safety_config() -> dict:
+    """Return a dict with ``shakedown_safe_envs`` and ``readonly_env_var``.
+
+    Reads from ``.claude/settings.json`` under the ``safety`` top-level key.
+    Falls back to sensible defaults when missing. Never raises.
+    """
+    settings = _read_json(_settings_path()) or {}
+    safety = settings.get("safety") if isinstance(settings, dict) else None
+    if not isinstance(safety, dict):
+        safety = {}
+
+    safe_envs = safety.get("shakedown_safe_envs")
+    if not isinstance(safe_envs, list):
+        safe_envs = None
+
+    env_var = safety.get("readonly_env_var")
+    if not isinstance(env_var, str) or not env_var.strip():
+        env_var = _DEFAULT_READONLY_ENV_VAR
+
+    return {
+        "shakedown_safe_envs": safe_envs,
+        "readonly_env_var": env_var.strip(),
+    }
+
+
+def load_allowlist(config: Optional[dict] = None) -> Optional[list]:
     """Return the list of safe env names, or None when no allowlist configured.
 
-    None means "no allowlist source provided" -- caller treats this as a hard
-    block with a configuration-help message. An empty list means "allowlist
-    is configured but empty" -- same effect (everything blocked) but the
-    distinction lets the message be specific.
+    Resolution order:
+    1. ``$PPDS_SAFE_ENVS`` env var (comma-separated).
+    2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``.
+    3. ``.claude/state/safe-envs.json`` (legacy fallback -- migration aid).
+    4. None -> caller treats as a hard block with a config-help message.
     """
     env_var = os.environ.get("PPDS_SAFE_ENVS", "").strip()
     if env_var:
         return [name.strip() for name in env_var.split(",") if name.strip()]
 
-    path = _safe_envs_file()
-    if not os.path.isfile(path):
-        return None
+    if config is None:
+        config = load_safety_config()
+    safe = config.get("shakedown_safe_envs")
+    if isinstance(safe, list):
+        return [str(name).strip() for name in safe if str(name).strip()]
 
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return None
+    # Legacy fallback -- keep for one release so mid-migration trees still work.
+    legacy = _read_json(_legacy_safe_envs_path())
+    if isinstance(legacy, dict):
+        legacy_safe = legacy.get("safe_envs")
+        if isinstance(legacy_safe, list):
+            return [str(name).strip() for name in legacy_safe if str(name).strip()]
 
-    safe = data.get("safe_envs")
-    if not isinstance(safe, list):
-        return None
-    return [str(name).strip() for name in safe if str(name).strip()]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -116,19 +172,11 @@ def _profile_store_path() -> str:
 def get_active_env_names() -> list:
     """Return candidate identifiers for the active env.
 
-    Returns a list because callers want to match against any of:
-    DisplayName, UniqueName, or the host portion of the URL. Empty list
-    means no active env (or store missing/malformed) -- caller must treat
-    that as a fail-safe BLOCK.
+    Empty list means no active env (or store missing/malformed) -- caller
+    must treat that as a fail-safe BLOCK.
     """
-    path = _profile_store_path()
-    if not os.path.isfile(path):
-        return []
-
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    data = _read_json(_profile_store_path())
+    if not isinstance(data, dict):
         return []
 
     profiles = data.get("profiles") or []
@@ -169,8 +217,6 @@ def get_active_env_names() -> list:
             candidates.append(val.strip())
     url = env.get("url")
     if isinstance(url, str) and url.strip():
-        # Use the host portion (e.g. orgcabef92d.crm.dynamics.com) and the
-        # leftmost label (e.g. orgcabef92d) as additional match targets.
         m = re.match(r"https?://([^/]+)", url.strip(), re.IGNORECASE)
         if m:
             host = m.group(1)
@@ -189,28 +235,28 @@ def env_matches_allowlist(candidates: Iterable, allowlist: Iterable) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Bash command parsing
+# Bash command parsing (shared by both concerns)
 # ---------------------------------------------------------------------------
 
 
 _PPDS_PROGRAM_RE = re.compile(
     r"""
-    (?:^|[\s|;&(`])         # start of command position
-    (?:[^\s|;&()`]*[\\/])?  # optional path prefix
+    (?:^|[\s|;&(`])
+    (?:[^\s|;&()`]*[\\/])?
     (ppds(?:\.exe)?|ppds-mcp-server(?:\.exe)?)
     (?=$|[\s|;&)`])
     """,
     re.IGNORECASE | re.VERBOSE,
 )
 
+_SHELL_OPERATORS = {"|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"}
+
 
 def find_ppds_invocations(command: str) -> list:
     """Return a list of argv-style token lists for each ppds invocation.
 
-    Handles compound bash like ``cd foo && ppds env list`` and pipes like
-    ``ppds env list | jq``. The CLI argv tokens stop at the first shell
-    operator after the program name; this is a heuristic but is sufficient
-    for the patterns we care about (the first few subcommand tokens).
+    Handles compound bash (``cd foo && ppds env list``) and pipes. The CLI
+    argv tokens stop at the first shell operator after the program name.
     """
     if not command:
         return []
@@ -218,19 +264,15 @@ def find_ppds_invocations(command: str) -> list:
     out = []
     for match in _PPDS_PROGRAM_RE.finditer(command):
         prog = match.group(1)
-        # Slice the rest of the command after the program name.
         tail = command[match.end():]
         try:
-            # Use shlex to parse the rest of the command line.
-            # This correctly handles quoted operators.
             tokens = shlex.split(tail, posix=True)
         except ValueError:
             tokens = tail.split()
 
-        # Truncate tokens at the first shell operator.
         args = []
         for tok in tokens:
-            if tok in ("|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"):
+            if tok in _SHELL_OPERATORS:
                 break
             args.append(tok)
         out.append([prog] + args)
@@ -238,23 +280,15 @@ def find_ppds_invocations(command: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Decision logic
+# Concern 1: env allowlist decision logic
 # ---------------------------------------------------------------------------
 
 
-# Subcommands of ``ppds env`` that are read-only / always-allowed regardless
-# of allowlist state. Includes both the canonical names from the spec
-# (current/switch) and the actual CLI names used by EnvCommandGroup
-# (who/select). 'config'/'type'/'show' don't talk to Dataverse.
 _ENV_READONLY_SUBCOMMANDS = {"list", "current", "who", "config", "type", "show"}
-
-# Subcommands of ``ppds env`` that change the active env. When the *target*
-# is in the allowlist we let it through (so users can switch INTO a safe env
-# even when currently on an unsafe one).
 _ENV_SWITCH_SUBCOMMANDS = {"switch", "select", "use"}
 
 
-def decide(argv, allowlist, active):
+def decide_env(argv, allowlist, active):
     """Return (allow, reason). reason is empty on allow, a message on block."""
     if not argv:
         return True, ""
@@ -263,7 +297,6 @@ def decide(argv, allowlist, active):
     if prog.endswith(".exe"):
         prog = prog[:-4]
 
-    # ppds-mcp-server verifies env at startup -- same rule as ``ppds *``
     if prog == "ppds-mcp-server":
         if env_matches_allowlist(active, allowlist):
             return True, ""
@@ -272,16 +305,13 @@ def decide(argv, allowlist, active):
     if prog != "ppds":
         return True, ""
 
-    # No further args -> top-level help, allow.
     if len(argv) < 2:
         return True, ""
 
     sub = argv[1].lower()
 
-    # ``ppds env <subcommand>`` -- special handling for read-only and switch.
     if sub == "env" or sub == "org":
         if len(argv) < 3:
-            # ``ppds env`` alone prints help -- allow.
             return True, ""
         env_sub = argv[2].lower()
         if env_sub in _ENV_READONLY_SUBCOMMANDS:
@@ -289,28 +319,21 @@ def decide(argv, allowlist, active):
         if env_sub in _ENV_SWITCH_SUBCOMMANDS:
             target = _extract_switch_target(argv[3:])
             if not target:
-                # No target name -- treat as a help/usage invocation; allow.
                 return True, ""
             if env_matches_allowlist([target], allowlist):
                 return True, ""
             return False, _block_msg_target_not_allowed(target, allowlist, argv)
-        # Other env subcommands (delete, update, etc.) -- gate on active env.
         if env_matches_allowlist(active, allowlist):
             return True, ""
         return False, _block_msg_active_not_allowed(active, allowlist, argv)
 
-    # All other ppds subcommands gate on active env.
     if env_matches_allowlist(active, allowlist):
         return True, ""
     return False, _block_msg_active_not_allowed(active, allowlist, argv)
 
 
 def _extract_switch_target(args):
-    """Pull the target env name from a ``switch``/``select`` argv tail.
-
-    Handles bare positional (``ppds env select my-dev``) and the
-    ``--environment``/``-env`` flag form used by EnvCommandGroup.
-    """
+    """Pull the target env name from a ``switch``/``select`` argv tail."""
     for i, tok in enumerate(args):
         if tok in ("--environment", "-env", "--env", "-e"):
             if i + 1 < len(args):
@@ -324,6 +347,90 @@ def _extract_switch_target(args):
             continue
         return tok
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Concern 2: write/mutation decision logic
+# ---------------------------------------------------------------------------
+
+
+_READONLY_SUBCOMMANDS = {
+    "env": {"list", "current", "who", "config", "type", "show", "switch", "select", "use", "test"},
+    "logs": {"*"},
+    "auth": {"list", "show"},
+    "version": {"*"},
+    "help": {"*"},
+}
+
+_MUTATION_VERBS = {
+    "create",
+    "update",
+    "delete",
+    "remove",
+    "import",
+    "apply",
+    "register",
+    "unregister",
+    "publish",
+    "truncate",
+    "drop",
+    "reset",
+    "set",
+}
+
+
+def _plugins_deploy_blocked(args: list) -> bool:
+    return not any(
+        arg in ("--dry-run", "-n") or arg.startswith("--dry-run=")
+        for arg in args
+    )
+
+
+_NAMED_MUTATIONS = {
+    ("plugins", "deploy"): _plugins_deploy_blocked,
+}
+
+
+def is_mutation(argv: list) -> tuple:
+    """Return (is_mutation, reason). reason is empty when not a mutation."""
+    if not argv:
+        return False, ""
+
+    prog = os.path.basename(argv[0]).lower()
+    if prog.endswith(".exe"):
+        prog = prog[:-4]
+    if prog not in ("ppds", "ppds-mcp-server"):
+        return False, ""
+
+    if prog == "ppds-mcp-server":
+        if any(
+            arg == "--read-only" or arg.startswith("--read-only=")
+            for arg in argv[1:]
+        ):
+            return False, ""
+        return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
+
+    if len(argv) < 3:
+        return False, ""
+
+    sub = argv[1].lower()
+    verb = argv[2].lower()
+    rest = argv[3:]
+
+    allowed = _READONLY_SUBCOMMANDS.get(sub)
+    if allowed and ("*" in allowed or verb in allowed):
+        return False, ""
+
+    named = _NAMED_MUTATIONS.get((sub, verb))
+    if named is not None:
+        if named(rest):
+            return True, f"{sub} {verb} (no --dry-run flag present)"
+        return False, ""
+
+    if verb in _MUTATION_VERBS:
+        return True, f"{sub} {verb}"
+
+    return False, ""
 
 
 # ---------------------------------------------------------------------------
@@ -347,14 +454,14 @@ def _config_help_lines():
     return [
         "  Configure the allowlist via either:",
         "    1. Env var: export PPDS_SAFE_ENVS=ppds-dev,ppds-test",
-        "    2. File:    .claude/state/safe-envs.json",
-        '       {"safe_envs": ["ppds-dev", "ppds-test"]}',
+        "    2. File:    .claude/settings.json",
+        '       { "safety": { "shakedown_safe_envs": ["ppds-dev", "ppds-test"] } }',
     ]
 
 
 def _block_msg_no_allowlist(argv):
     lines = [
-        "BLOCKED [dev-env-check]: no safe-env allowlist configured.",
+        "BLOCKED [shakedown-safety/env]: no safe-env allowlist configured.",
         f"  Command: {' '.join(argv)}",
         "  ppds CLI commands are gated against an allowlist of dev/test envs",
         "  to prevent accidental writes against production environments.",
@@ -366,7 +473,7 @@ def _block_msg_no_allowlist(argv):
 
 def _block_msg_active_not_allowed(active, allowlist, argv):
     lines = [
-        "BLOCKED [dev-env-check]: active env is not in the safe-env allowlist.",
+        "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
         f"  Command:    {' '.join(argv)}",
         f"  Active env: {_format_active(active)}",
         f"  Allowlist:  {_format_allowlist(allowlist)}",
@@ -382,7 +489,7 @@ def _block_msg_active_not_allowed(active, allowlist, argv):
 
 def _block_msg_target_not_allowed(target, allowlist, argv):
     lines = [
-        "BLOCKED [dev-env-check]: switch target is not in the safe-env allowlist.",
+        "BLOCKED [shakedown-safety/env]: switch target is not in the safe-env allowlist.",
         f"  Command:   {' '.join(argv)}",
         f"  Target:    {target}",
         f"  Allowlist: {_format_allowlist(allowlist)}",
@@ -392,16 +499,37 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
     return "\n".join(lines)
 
 
+def _block_msg_mutation(argv: list, reason: str, env_var_name: str) -> str:
+    return "\n".join(
+        [
+            "BLOCKED [shakedown-safety/readonly]: write/mutation command refused.",
+            f"  Command: {' '.join(argv)}",
+            f"  Pattern: {reason}",
+            "",
+            f"  {env_var_name}=1 is set, which puts this session in read-only",
+            "  mode for ppds CLI operations. Mutating Dataverse during",
+            "  shakedown defeats the purpose -- shakedowns are observation,",
+            "  not modification.",
+            "",
+            "  To bypass (deliberate action -- there is no softer marker):",
+            f"    unset {env_var_name}",
+            "",
+            "  For plugin deploys specifically, add --dry-run to validate",
+            "  without writing.",
+            "  For ppds-mcp-server, add --read-only to the launch args.",
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
-        # Empty/garbled stdin -- allow rather than block unrelated tools.
         sys.exit(0)
 
     tool_input = payload.get("tool_input") or {}
@@ -413,18 +541,28 @@ def main():
     if not invocations:
         sys.exit(0)
 
-    allowlist = load_allowlist()
+    config = load_safety_config()
+    env_var_name = config["readonly_env_var"]
+    shakedown_active = os.environ.get(env_var_name, "").strip() == "1"
+
+    # Concern 2: write-block first -- it's the tighter gate when active.
+    if shakedown_active:
+        for argv in invocations:
+            blocked, reason = is_mutation(argv)
+            if blocked:
+                print(_block_msg_mutation(argv, reason, env_var_name), file=sys.stderr)
+                sys.exit(2)
+
+    # Concern 1: env allowlist gating -- always on.
+    allowlist = load_allowlist(config)
     if allowlist is None:
-        # No allowlist source at all -- block with config help.
         print(_block_msg_no_allowlist(invocations[0]), file=sys.stderr)
         sys.exit(2)
 
     active = get_active_env_names()
 
-    # Each invocation must independently pass. First failure wins so the
-    # user sees a single, focused message.
     for argv in invocations:
-        allow, reason = decide(argv, allowlist, active)
+        allow, reason = decide_env(argv, allowlist, active)
         if not allow:
             print(reason, file=sys.stderr)
             sys.exit(2)
