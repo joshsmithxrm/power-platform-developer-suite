@@ -14,7 +14,8 @@ Commit-aware validation (v8.0):
 Agent-entry-point enforcement (v9.0):
   - Agent-context PR creation MUST go through the `/pr` skill.
   - Agent context = cwd inside ``.claude/worktrees/agent-*`` OR one of the
-    Claude Code agent env vars (``CLAUDE_CODE_AGENT``, ``CLAUDE_AGENT_ID``) set.
+    Claude Code agent env vars (``CLAUDE_CODE_AGENT``, ``CLAUDE_AGENT_ID``,
+    ``CLAUDE_CODE_SUBAGENT``) set.
   - Agent context requires ``pr.invoked_via_skill=true`` in workflow state;
     the ``/pr`` skill sets this marker at entry.
   - Human context (main checkout, no agent env vars) keeps the previous
