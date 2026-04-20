@@ -325,6 +325,39 @@ class TestInventoryFetchers:
             meta = cws.fetch_pr_metadata(1)
         assert meta["workflow_files"] == [".github/workflows/a.yml"]
 
+    def test_fetch_pr_metadata_excludes_deleted_workflows(self):
+        # A pure deletion (additions=0, deletions>0) has no file on disk to
+        # scan — retaining it breaks the rule with ENOENT. Regression guard
+        # for the PR #841 failure mode.
+        with patch.object(
+            cws, "_run_gh",
+            return_value=(
+                '{"title": "t", "body": "b", "files": ['
+                '{"path": ".github/workflows/deleted.yml", "additions": 0, "deletions": 52},'
+                '{"path": ".github/workflows/kept.yml", "additions": 3, "deletions": 1},'
+                '{"path": ".github/workflows/added.yml", "additions": 10, "deletions": 0}'
+                "]}"
+            ),
+        ):
+            meta = cws.fetch_pr_metadata(1)
+        assert meta["workflow_files"] == [
+            ".github/workflows/kept.yml",
+            ".github/workflows/added.yml",
+        ]
+
+    def test_fetch_pr_metadata_keeps_modified_workflows(self):
+        # A modification (additions>0 and deletions>0) still exists on disk.
+        with patch.object(
+            cws, "_run_gh",
+            return_value=(
+                '{"title": "t", "body": "b", "files": ['
+                '{"path": ".github/workflows/modified.yml", "additions": 5, "deletions": 5}'
+                "]}"
+            ),
+        ):
+            meta = cws.fetch_pr_metadata(1)
+        assert meta["workflow_files"] == [".github/workflows/modified.yml"]
+
 
 # ---------------------------------------------------------------------------
 # Main entry point

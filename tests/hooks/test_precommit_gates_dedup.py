@@ -71,6 +71,38 @@ class TestGatesFresh:
         with mock.patch.object(hook.subprocess, "run", return_value=_mock_git("new222")):
             assert hook._gates_fresh(str(tmp_path)) is False
 
+    def test_staged_changes_returns_false(self, tmp_path):
+        # gates ran against HEAD, but new changes have been staged since —
+        # those changes are un-validated, so skip-path must not fire.
+        # Regression guard for Gemini #3107805851 (PR #841).
+        _write_state(tmp_path, {"gates": {"passed": "now", "commit_ref": "deadbeef"}})
+        # rev-parse HEAD → deadbeef (match); diff --cached --quiet HEAD → rc=1 (staged diff)
+        calls = [_mock_git("deadbeef"), _mock_git("", returncode=1)]
+        with mock.patch.object(hook.subprocess, "run", side_effect=calls):
+            assert hook._gates_fresh(str(tmp_path)) is False
+
+    def test_no_staged_changes_returns_true(self, tmp_path):
+        # gates match AND index is clean relative to HEAD — skip fires.
+        _write_state(tmp_path, {"gates": {"passed": "now", "commit_ref": "deadbeef"}})
+        calls = [_mock_git("deadbeef"), _mock_git("", returncode=0)]
+        with mock.patch.object(hook.subprocess, "run", side_effect=calls):
+            assert hook._gates_fresh(str(tmp_path)) is True
+
+    def test_staged_diff_git_error_returns_false(self, tmp_path):
+        # If the index-drift check itself errors (rc != 0, != 1), be safe
+        # and fall through rather than assume clean.
+        _write_state(tmp_path, {"gates": {"passed": "now", "commit_ref": "deadbeef"}})
+        calls = [_mock_git("deadbeef"), _mock_git("", returncode=128)]
+        with mock.patch.object(hook.subprocess, "run", side_effect=calls):
+            assert hook._gates_fresh(str(tmp_path)) is False
+
+    def test_staged_diff_git_unavailable_returns_false(self, tmp_path):
+        # rev-parse succeeds, diff subprocess raises → fall through.
+        _write_state(tmp_path, {"gates": {"passed": "now", "commit_ref": "deadbeef"}})
+        calls = [_mock_git("deadbeef"), FileNotFoundError()]
+        with mock.patch.object(hook.subprocess, "run", side_effect=calls):
+            assert hook._gates_fresh(str(tmp_path)) is False
+
 
 class TestFailSafety:
     """On any error, return False so full validation still runs."""

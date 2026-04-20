@@ -148,12 +148,21 @@ def main():
 
 
 def _gates_fresh(project_dir):
-    """Return True if .workflow/state.json shows gates.commit_ref == HEAD.
+    """Return True iff /gates validated exactly what's about to be committed.
 
-    Used to skip redundant build+test in the pre-commit hook when /gates
-    already validated the current HEAD. Returns False on any error (state
-    missing, JSON corrupt, git unavailable) so the hook falls back to the
-    full validation path.
+    Two conditions must both hold:
+
+    1. ``gates.passed`` is truthy and ``gates.commit_ref == git rev-parse HEAD``
+       — /gates ran against the current HEAD.
+    2. The index has no staged changes relative to HEAD
+       (``git diff --cached --quiet HEAD`` exits 0) — i.e., nothing new has
+       been staged since /gates ran. Without this check the skip-path would
+       wrongly suppress build+test for a commit that adds *new* staged
+       changes on top of the validated HEAD (Gemini PR #841).
+
+    Returns False on any error (state missing, JSON corrupt, git unavailable)
+    so the hook falls back to the full validation path — regressions must
+    never silently mask.
     """
     state_path = os.path.join(project_dir, ".workflow", "state.json")
     if not os.path.exists(state_path):
@@ -186,7 +195,25 @@ def _gates_fresh(project_dir):
     if head.returncode != 0:
         return False
 
-    return head.stdout.strip() == gates_ref
+    if head.stdout.strip() != gates_ref:
+        return False
+
+    # Index-drift guard: if anything is staged beyond the validated HEAD,
+    # we have un-validated content in the pending commit — fall through.
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+    # Exit 0 → index matches HEAD (nothing staged). Exit 1 → staged diff
+    # exists. Other non-zero codes → git error; be safe and fall through.
+    return staged.returncode == 0
 
 
 def _check_workflow_state(project_dir):

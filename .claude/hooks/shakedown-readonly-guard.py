@@ -41,36 +41,50 @@ def _read_state(project_dir: str) -> dict:
 
 
 def _changed_src_files(project_dir: str) -> list[str]:
-    """Return tracked src/ files that differ from origin/main (staged or not).
+    """Return local src/ files that are modified, staged, or untracked.
 
-    Falls back to working-tree diff if origin/main isn't resolvable — a
-    stricter-than-necessary check is fine; a silently-missed mutation is not.
+    Scope is deliberately the *working-tree + index* state, not a branch
+    comparison: shakedown is a session-level read-only claim, so we only
+    care about changes introduced during this session, not commits that
+    predate it on the feature branch. Using a branch-range would falsely
+    block sessions on branches that legitimately already contain committed
+    src/ changes.
+
+    Implemented with a single ``git status --porcelain -- src/`` call —
+    one subprocess (staged + unstaged + untracked in one shot) instead of
+    four. The ``--`` separator ensures ``src/`` is parsed as a pathspec,
+    not an option, even if the repo layout ever gains a file starting
+    with ``-``.
     """
-    commands = [
-        ["git", "diff", "--name-only", "origin/main...HEAD"],
-        ["git", "diff", "--name-only", "HEAD"],
-        ["git", "diff", "--name-only", "--cached"],
-        # Untracked files (e.g., newly added src/ not yet staged) — also a violation.
-        ["git", "ls-files", "--others", "--exclude-standard"],
-    ]
+    try:
+        r = subprocess.run(
+            # --untracked-files=all expands new untracked directories into
+            # individual file entries (default "normal" collapses them to
+            # the dir name, which would under-report the violation set).
+            ["git", "status", "--porcelain", "--untracked-files=all", "--", "src/"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    if r.returncode != 0:
+        return []
     changed: set[str] = set()
-    for cmd in commands:
-        try:
-            r = subprocess.run(
-                cmd,
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+    for line in r.stdout.splitlines():
+        # Porcelain v1 format: XY<space>path — X=index, Y=worktree status,
+        # then a single space, then the path. Rename entries are "R  a -> b"
+        # — we keep the destination path (after "-> ") since that's the
+        # current src/ file.
+        if len(line) < 4:
             continue
-        if r.returncode != 0:
-            continue
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("src/"):
-                changed.add(line)
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if path.startswith("src/"):
+            changed.add(path)
     return sorted(changed)
 
 
