@@ -35,7 +35,6 @@ from pathlib import Path
 from triage_common import (
     GEMINI_BOT_LOGIN,
     build_triage_prompt,
-    detect_gemini_overload,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
     parse_triage_stage_log,
@@ -291,7 +290,7 @@ def get_git_activity(worktree_path):
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain"],
-            cwd=worktree_path, capture_output=True, text=True, timeout=5,
+            cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode == 0:
             changes = len([l for l in result.stdout.strip().splitlines() if l])
@@ -300,7 +299,7 @@ def get_git_activity(worktree_path):
     try:
         result = subprocess.run(
             ["git", "rev-list", "--count", "origin/main..HEAD"],
-            cwd=worktree_path, capture_output=True, text=True, timeout=5,
+            cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode == 0:
             commits = int(result.stdout.strip())
@@ -616,7 +615,7 @@ def _find_duplicate_issue(title, repo_root):
         result = subprocess.run(
             ["gh", "issue", "list", "--search", prefix, "--state", "open",
              "--json", "number,title", "--limit", "5"],
-            cwd=repo_root, capture_output=True, text=True, timeout=15,
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode != 0:
             return None
@@ -656,7 +655,7 @@ def _handle_duplicate(finding, existing_issue_number, repo_root, logger, worktre
         result = subprocess.run(
             ["gh", "issue", "comment", str(existing_issue_number),
              "--body", comment_body],
-            cwd=repo_root, capture_output=True, text=True, timeout=30,
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             env=gh_env,
         )
         if result.returncode == 0:
@@ -734,7 +733,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
         try:
             subprocess.run(
                 ["gh", "issue", "create", "--title", title, "--body", body],
-                cwd=repo_root, capture_output=True, text=True, timeout=30, check=True,
+                cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=True,
                 env=gh_env,
             )
             log(logger, "retro", "ISSUE_CREATED", finding=finding_id)
@@ -836,7 +835,7 @@ def _get_pr_created_at(worktree_path, pr_number):
         result = subprocess.run(
             ["gh", "pr", "view", str(pr_number),
              "--json", "createdAt", "--jq", ".createdAt"],
-            cwd=worktree_path, capture_output=True, text=True, timeout=15,
+            cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -912,7 +911,7 @@ def _poll_codeql_check(worktree_path, pr_number, logger):
             result = subprocess.run(
                 ["gh", "pr", "checks", str(pr_number),
                  "--json", "name,state,conclusion"],
-                cwd=worktree_path, capture_output=True, text=True, timeout=30,
+                cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             if result.returncode == 0:
                 checks = json.loads(result.stdout)
@@ -956,14 +955,14 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     # 1. Rebase on main
     fetch = subprocess.run(
         ["git", "fetch", "origin", "main"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     if fetch.returncode != 0:
         log(logger, "pr", "FETCH_FAILED", error=fetch.stderr[:200] if fetch.stderr else "unknown")
         # Continue anyway — rebase will use whatever origin/main we have
     result = subprocess.run(
         ["git", "rebase", "origin/main"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=60,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
     )
     if result.returncode != 0:
         log(logger, "pr", "REBASE_CONFLICT", error=result.stderr.strip()[:200])
@@ -973,11 +972,11 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     # 2. Push branch
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     ).stdout.strip()
     push_result = subprocess.run(
         ["git", "push", "-u", "origin", branch, "--force-with-lease"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=60,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
     )
     if push_result.returncode != 0:
         log(logger, "pr", "PUSH_FAILED", error=push_result.stderr.strip()[:200])
@@ -987,7 +986,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     # 3. Read issues from state
     issues_result = subprocess.run(
         ["python", "scripts/workflow-state.py", "get", "issues"],
-        cwd=worktree_path, capture_output=True, text=True, timeout=10,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     issues = []
     try:
@@ -1042,7 +1041,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
 
     result = subprocess.run(
         ["gh", "pr", "create", "--draft", "--title", pr_title, "--body", pr_body],
-        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     if result.returncode != 0:
         log(logger, "pr", "CREATE_FAILED", error=result.stderr.strip()[:200])
@@ -1066,7 +1065,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False):
     ]:
         subprocess.run(
             ["python", "scripts/workflow-state.py"] + cmd_args,
-            cwd=worktree_path, capture_output=True, text=True, timeout=10,
+            cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
 
     # Check timeout before polling
@@ -1346,7 +1345,7 @@ def main():
         if worktree_path and os.path.exists(worktree_path):
             subprocess.run(
                 ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
-                cwd=worktree_path, capture_output=True, text=True, timeout=10,
+                cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
 
         def _pipeline_fail(stage_name, reason=None, log_stage=None):
@@ -1402,7 +1401,7 @@ def main():
                 ]:
                     subprocess.run(
                         ["python", "scripts/workflow-state.py"] + state_args,
-                        cwd=worktree_path, capture_output=True, text=True,
+                        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     )
 
                 if args.issue:
@@ -1526,14 +1525,14 @@ def main():
             if worktree_path and stage not in ("worktree", "retro", "pr"):
                 dirty = subprocess.run(
                     ["git", "status", "--porcelain"],
-                    cwd=worktree_path, capture_output=True, text=True, timeout=10,
+                    cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
                 )
                 if dirty.returncode == 0 and dirty.stdout.strip():
                     subprocess.run(["git", "add", "-u"], cwd=worktree_path,
-                                   capture_output=True, text=True, timeout=10)
+                                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
                     commit = subprocess.run(
                         ["git", "commit", "-m", f"chore({stage}): auto-commit stage changes"],
-                        cwd=worktree_path, capture_output=True, text=True, timeout=30,
+                        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                     )
                     if commit.returncode == 0:
                         log(logger, stage, "AUTO_COMMIT", reason="stranded files committed")
