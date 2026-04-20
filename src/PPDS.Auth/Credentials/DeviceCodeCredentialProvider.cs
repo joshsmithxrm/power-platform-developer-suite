@@ -26,8 +26,11 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
-    private AuthenticationResult? _cachedResult;
-    private string? _cachedResultUrl;
+    // volatile ensures cross-thread visibility: AccessTokenProviderFunctionAsync runs on a
+    // background thread; without a memory barrier the background thread can observe stale null
+    // after the main thread writes the post-auth result (Bug B fix — same pattern as InteractiveBrowserCredentialProvider).
+    private volatile AuthenticationResult? _cachedResult;
+    private volatile string? _cachedResultUrl;
     private bool _disposed;
 
     /// <inheritdoc />
