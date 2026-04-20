@@ -320,9 +320,11 @@ on the lane assignment in `.claude/interaction-patterns.md` §1:
   the 5-terminal babysitting of session `cd0c578e` and is now
   forbidden (meta-retro #11).
 
-Decide the lane **before** Phase D starts, record it as
-`Lane: B | C` on each plan entry, and surface which path this wave
-takes in the Phase C confirmation message so the operator knows
+Decide the lane **before** Phase D starts, encode it by suffixing
+each entry's intent with `[lane B]` or `[lane C]` (the `Intent`
+field is one of the keys the parser round-trips, so the lane tag
+survives subsequent `write_plan` calls), and surface which path this
+wave takes in the Phase C confirmation message so the operator knows
 whether autonomous dispatch or manual terminal paste is about to
 happen.
 
@@ -338,8 +340,12 @@ For each entry whose status is `planned` (in plan-file order):
    ```bash
    git worktree add .worktrees/<name> -b feat/<name>
    python scripts/workflow-state.py init "feat/<name>"
-   python scripts/inflight-register.py --branch "feat/<name>" --issues <N> --intent "<intent>"
+   python scripts/inflight-register.py --branch "feat/<name>" --issue <N> --intent "<intent>"
    ```
+
+   `--issue` is repeatable — for a grouped entry with multiple issues,
+   repeat the flag (`--issue 660 --issue 661`). `--issues` is **not** a
+   valid argument and will fail with "unrecognized arguments".
 
    Write `.plans/context.md` inside the new worktree with the issue
    bodies + routing guidance (same content `/start` step 5b writes —
@@ -356,8 +362,13 @@ For each entry whose status is `planned` (in plan-file order):
      issue #NNN (and #MMM if grouped). Return the PR URL when done.
    ```
 
-   The agent returns the PR URL inline; record it on the plan entry
-   as `PR: <url>`. No manual terminal is opened.
+   The agent returns the PR URL inline. Pass it to `mark_launched`
+   via the `session_id` parameter (see step 5) — that is the only
+   launch-identifier slot the plan's data model exposes, and the
+   parser renders it as a `Session: <value>` line. A freeform
+   `PR: <url>` line would be dropped on the next `write_plan` round-
+   trip because the parser only recognizes the documented keys. No
+   manual terminal is opened.
 
 4. **D.2 path — inline-prompt launch command.** Emit to chat (the
    operator pastes it into a new terminal):
@@ -371,8 +382,13 @@ For each entry whose status is `planned` (in plan-file order):
    is the exact failure mode meta-retro #11 flagged. If the plan
    entry has multiple issues, list them all in the prompt.
 
-5. Capture the session ID (D.2) or the agent-returned PR URL (D.1)
-   and mark the entry launched:
+5. Capture the launch identifier — the session ID for D.2 or the
+   agent-returned PR URL for D.1 — and mark the entry launched. The
+   `mark_launched` helper (in `scripts/dispatch_plan.py`) takes a
+   single `session_id` keyword argument; that slot carries the PR URL
+   for D.1 by convention because the plan's data model does not have a
+   separate PR field. The value round-trips through the markdown as a
+   `Session: <value>` line (see `PlanEntry.as_markdown`).
 
    ```bash
    python -c "
@@ -380,6 +396,7 @@ For each entry whose status is `planned` (in plan-file order):
    sys.path.insert(0, 'scripts')
    from dispatch_plan import load_plan, mark_launched, write_plan
    plan = load_plan()
+   # session_id carries the D.2 session ID or the D.1 PR URL
    mark_launched(plan, '<worktree>', session_id='<sid-or-pr-url>')
    write_plan(plan)
    "
@@ -423,8 +440,11 @@ After the loop completes:
    - re-reads `.claude/state/dispatch-plan.md`
    - runs `gh pr list --search "head:feat/<name>" --json number,state,isDraft,statusCheckRollup`
      for each launched entry
-   - marks entries `done` (PR merged), `ready` (not-draft + CI green),
-     or leaves them `in-flight` (still working)
+   - marks entries `done` (PR merged) or leaves them `in-flight`
+     (still working — includes not-yet-merged PRs even when ready to
+     merge; the `parse_plan` status vocabulary is
+     `planned | conflict | in-flight | done | skipped` and an
+     intermediate `ready` would be coerced back to `planned`)
    - if any entries remain `in-flight`, calls `ScheduleWakeup` again
      with the same delay
    - if all entries reached terminal state, exits with a
@@ -467,26 +487,28 @@ Status legend: planned | conflict | in-flight | done | skipped
 ### Worktree: feat/issue-660
 - Issues: #660
 - Areas: src/PPDS.Auth/
-- Intent: env var auth
-- Lane: B
+- Intent: env var auth [lane B]
 - Status: planned
 
 ### Worktree: feat/audit-capture
 - Issues: #101, #102
 - Areas: src/PPDS.Audit/
-- Intent: audit capture pipeline
-- Lane: C
+- Intent: audit capture pipeline [lane C]
 - Status: in-flight
 - Launched: 2026-04-19T01:32:14Z
-- Session: a1b2c3d4
-- PR: https://github.com/org/repo/pull/NNN
+- Session: https://github.com/org/repo/pull/NNN
 ```
 
-Allowed status values: `planned`, `conflict`, `in-flight`, `ready`,
-`done`, `skipped`. Lane is `B` (Agent-with-isolation / D.1) or `C`
-(manual launch command / D.2). The parser is forgiving of human edits (unknown lines
-inside an entry are ignored) so the operator can leave inline notes
-without breaking subsequent dispatch waves.
+Allowed status values (exactly as enforced by `parse_plan`):
+`planned`, `conflict`, `in-flight`, `done`, `skipped`. Recognized
+keys per entry are `Issues`, `Areas`, `Intent`, `Status`, `Conflict`,
+`Launched`, `Session` — any other line (e.g. `Lane:`, `PR:`) is
+silently dropped on the next `write_plan` round-trip. Encode lane
+and PR URL through the supported keys: suffix the intent with
+`[lane B|C]`, and store the D.1 PR URL (or D.2 session ID) in the
+`Session` field via `mark_launched(..., session_id=...)`. The parser
+is forgiving of unrecognized lines so a human can leave ephemeral
+notes, but those notes will not survive the next dispatcher write.
 
 ### Rules
 
