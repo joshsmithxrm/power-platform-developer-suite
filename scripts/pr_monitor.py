@@ -1110,9 +1110,13 @@ def _ready_flip_gates(worktree, pr_number, result, logger):
       - CI green, AND
       - Gemini dimension is satisfied — either the latest review body
         matches a clean-approval / declined pattern
-        (see ``_gemini_effectively_done``), OR Gemini posted a review and
-        all inline bot comments have replies, AND
-      - no unreplied bot comments remain.
+        (see ``_gemini_effectively_done``), OR Gemini posted a review, AND
+      - no unreplied bot comments remain from ANY reviewer (Gemini,
+        CodeQL / github-advanced-security, or other aggregated sources
+        returned by ``get_unreplied_comments``). A Gemini clean/declined
+        review satisfies the "Gemini reviewed" dimension but does NOT
+        bypass unreplied comments from other reviewers — see PR #846
+        review (gemini-code-assist HIGH, 2026-04-20).
     """
     reasons = []
     if result.get("ci_result") != "pass":
@@ -1131,10 +1135,11 @@ def _ready_flip_gates(worktree, pr_number, result, logger):
         logger.log("ready", "UNREPLIED_CHECK_ERROR", error=str(e))
         unreplied = []
         reasons.append("unreplied_check_error")
-    # Clean/declined reviews never have inline comments to reply to, so
-    # skip the unreplied gate in that branch. For the "flagged issues"
-    # branch, unreplied must be empty.
-    if not gemini_done_clean and unreplied:
+    # Always enforce the unreplied gate — regardless of Gemini's own
+    # state. ``get_unreplied_comments`` aggregates findings across
+    # multiple bots, and a clean Gemini review must not mask CodeQL or
+    # other unreplied bot findings.
+    if unreplied:
         reasons.append(f"unreplied_comments={len(unreplied)}")
     return (not reasons), reasons
 
