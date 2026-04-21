@@ -43,7 +43,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     public EnvironmentDetailsDialog(
         InteractiveSession session,
         string environmentUrl,
-        string? environmentDisplayName = null) : base("Environment Details", session)
+        string? environmentDisplayName = null) : base("View Organization Info", session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _errorService = session.GetErrorService();

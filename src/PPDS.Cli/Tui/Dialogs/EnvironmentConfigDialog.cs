@@ -20,6 +20,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     private readonly EnvironmentType?[] _typeValues;
     private readonly ListView _colorList;
     private readonly EnvironmentColor?[] _colorValues;
+    private readonly Action _loadedHandler;
 
     /// <summary>
     /// Gets whether the configuration was changed and saved.
@@ -37,7 +38,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         InteractiveSession session,
         string environmentUrl,
         string? currentDisplayName = null,
-        string? suggestedType = null) : base("Configure Environment", session)
+        string? suggestedType = null) : base("Edit Environment Label/Color", session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _environmentUrl = environmentUrl ?? throw new ArgumentNullException(nameof(environmentUrl));
@@ -145,7 +146,8 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             saveButton, cancelButton);
 
         // Load existing config after dialog is added to view hierarchy
-        Loaded += () => LoadExistingConfig();
+        _loadedHandler = () => LoadExistingConfig();
+        Loaded += _loadedHandler;
     }
 
     private void LoadExistingConfig()
@@ -237,6 +239,16 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         }
 
         Application.RequestStop();
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Loaded -= _loadedHandler;
+        }
+        base.Dispose(disposing);
     }
 
     /// <inheritdoc />

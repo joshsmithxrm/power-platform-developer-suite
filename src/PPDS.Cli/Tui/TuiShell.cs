@@ -290,9 +290,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Web Resources", "Browse and manage web resources", () => NavigateToWebResources()),
             new("Data Migration", "Export and import Dataverse data", () => NavigateToMigration()),
             new("", "", () => {}, null, null, Key.Null), // Separator
-            new("Environment Details...", "View organization and connection info",
+            new("View Organization Info...", "View organization and connection info",
                 hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
-            new("Configure Environment...", "Configure label, type, and color",
+            new("Edit Environment Label/Color...", "Configure label, type, and color",
                 hasEnvironment ? () => ShowEnvironmentConfig() : (Action?)null),
         }));
 
