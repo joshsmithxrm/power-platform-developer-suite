@@ -1683,19 +1683,23 @@ class TestMaxStageSecondsOverride:
         assert "ceiling=555s" in log_content, (
             f"Expected START log to record ceiling=555s, got:\n{log_content}"
         )
-        # AC-27: pr-summary run_claude received the override
+        # AC-27: pr-summary run_claude received the remaining stage budget.
+        # The value is the override (555) minus the elapsed stage time, so it
+        # should be <= 555 but positive on a fast test run.
         assert captured_run_claude.get("stage") == "pr-summary", (
             f"Expected run_claude stage='pr-summary', got "
             f"{captured_run_claude.get('stage')!r}"
         )
-        assert captured_run_claude.get("ceiling") == 555, (
-            f"Expected run_claude ceiling=555, got "
-            f"{captured_run_claude.get('ceiling')!r}"
+        summary_ceiling = captured_run_claude.get("ceiling")
+        assert isinstance(summary_ceiling, int) and 0 < summary_ceiling <= 555, (
+            f"Expected run_claude ceiling in (0, 555] (remaining budget of "
+            f"555s override), got {summary_ceiling!r}"
         )
-        # AC-27: _delegate_to_pr_monitor received the override
-        assert captured_monitor.get("ceiling") == 555, (
-            f"Expected _delegate_to_pr_monitor ceiling=555, got "
-            f"{captured_monitor.get('ceiling')!r}"
+        # AC-27: _delegate_to_pr_monitor received the remaining stage budget.
+        monitor_ceiling = captured_monitor.get("ceiling")
+        assert isinstance(monitor_ceiling, int) and 0 < monitor_ceiling <= 555, (
+            f"Expected _delegate_to_pr_monitor ceiling in (0, 555] (remaining "
+            f"budget of 555s override), got {monitor_ceiling!r}"
         )
 
     def test_pr_monitor_falls_back_to_default_without_override(self, tmp_path):

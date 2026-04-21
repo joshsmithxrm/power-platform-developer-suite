@@ -75,7 +75,7 @@ STAGE_OUTCOMES = {
 }
 
 STALL_LIMIT = 5    # consecutive idle heartbeats before kill (5 min at 60s interval)
-HARD_CEILING = 7200  # absolute maximum stage duration in seconds (120 min, overridable via --max-stage-seconds)
+HARD_CEILING = 7200  # max duration per AI invocation in seconds (120 min, overridable via --max-stage-seconds). Applied per run_claude call; stages with retries or converge rounds can accumulate multiple invocations.
 
 
 class PipelineFailure(Exception):
@@ -1027,7 +1027,8 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
     )
     exit_code, logger = run_claude(
         worktree_path, summary_prompt, logger, "pr-summary",
-        dry_run=dry_run, ceiling=ceiling,
+        dry_run=dry_run,
+        ceiling=int(max(0, effective_ceiling - (time.time() - start))),
     )
 
     # Read the generated summary
@@ -1101,7 +1102,8 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
     # PR creation, wait); pr_monitor.py owns the *polling loop*. Single
     # canonical implementation.
     monitor_exit = _delegate_to_pr_monitor(
-        worktree_path, pr_number, logger, dry_run=dry_run, ceiling=ceiling)
+        worktree_path, pr_number, logger, dry_run=dry_run,
+        ceiling=int(max(0, effective_ceiling - (time.time() - start))))
     if monitor_exit not in (0,):
         # pr_monitor failed (CI failure, timeout, etc.); pipeline still
         # records the PR URL but reports stage failure so the orchestrator
