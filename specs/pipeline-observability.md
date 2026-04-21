@@ -40,7 +40,7 @@ Pipeline Timeout Today:
                                                   → write_result: {failed_stage: "qa"} → no detail
 
 Pipeline Timeout After:
-  claude -p → JSONL grows → heartbeat: active? → keep running (up to 60 min ceiling)
+  claude -p → JSONL grows → heartbeat: active? → keep running (up to 120 min ceiling)
               (active)       idle 5 min? → STALL_TIMEOUT → proc.kill()
                                                           → extract assistant text → meaningful .log
                                                           → write_result: {last_output: [...]} → actionable
@@ -233,7 +233,7 @@ except PipelineFailure:
     _result_written = True
 
     # Best-effort failure retro — outside SystemExit, safe to spawn subprocesses
-    # Uses standard stall-based timeout (5 min idle) + hard ceiling (60 min)
+    # Uses standard stall-based timeout (5 min idle) + hard ceiling (120 min)
     log(logger, "retro", "START", mode="failure-retro")
     try:
         run_claude(worktree_path, "/retro", logger, "retro")
@@ -723,7 +723,7 @@ else:
 
 **Context:** QA currently gets 1200s (20 min). Both cmt-parity and v1-polish timed out at exactly this limit. cmt-parity was actively working (970KB output, Phase 1 complete, mid-Phase 2). v1-polish's first two runs were genuinely stuck (0 bytes). A fixed timeout can't distinguish these cases.
 
-**Decision:** Replace fixed per-stage timeouts with stall-based timeout (5 min idle) + hard ceiling (60 min).
+**Decision:** Replace fixed per-stage timeouts with stall-based timeout (5 min idle) + hard ceiling (120 min, overridable per-run via `--max-stage-seconds N`).
 
 **Alternatives considered:**
 - Raise fixed timeout to 45 min for QA (brute force — genuinely stuck runs waste 45 min instead of 20, doesn't solve the problem)
@@ -741,9 +741,9 @@ else:
 | v1-polish | QA #3 | 48KB → 2MB | active | Killed at 30 min | NOT killed (would keep running) |
 
 **Consequences:**
-- Positive: Stuck processes die 4x faster (5 min vs 20 min). Active processes get as long as they need (up to 60 min). The data already exists — `consecutive_idle` is computed every heartbeat.
+- Positive: Stuck processes die 4x faster (5 min vs 20 min). Active processes get as long as they need (up to 120 min by default, raisable per-run via `--max-stage-seconds`). The data already exists — `consecutive_idle` is computed every heartbeat.
 - Positive: No per-stage tuning needed. The stall threshold is universal because activity detection is multi-signal.
-- Negative: An active-but-not-converging process could run up to 60 min. The partial-results fixes in this spec make this acceptable — even if the ceiling fires, we capture the work done.
+- Negative: An active-but-not-converging process could run up to 120 min (or longer if `--max-stage-seconds` raises it). The partial-results fixes in this spec make this acceptable — even if the ceiling fires, we capture the work done.
 - Negative: A stage that produces output but is logically stuck (e.g., infinite retry loop with verbose logging) won't be caught by stall timeout. The hard ceiling catches this.
 
 ### Why Run Retro on Failure Instead of a Lightweight Diagnostic?
