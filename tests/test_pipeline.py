@@ -199,7 +199,8 @@ class TestHeartbeat:
 # ---------------------------------------------------------------------------
 class TestTimeout:
     def test_stall_and_hard_ceiling_constants_exist(self):
-        """AC-26: Stall-based and hard ceiling timeout constants are defined."""
+        """AC-12 + AC-26: Stall-based and hard ceiling timeout constants are
+        defined with the documented values (STALL_LIMIT=5, HARD_CEILING=7200)."""
         import pipeline
 
         assert hasattr(pipeline, "STALL_LIMIT")
@@ -1592,6 +1593,110 @@ class TestMaxStageSecondsOverride:
                 f"Error message for bad --max-stage-seconds={bad} should "
                 f"mention the flag, got:\n{err}"
             )
+
+    def test_run_pr_stage_threads_ceiling_to_summary_and_monitor(self, tmp_path, monkeypatch):
+        """AC-27: ``run_pr_stage`` forwards its ``ceiling`` argument to both
+        the internal ``run_claude`` (pr-summary) call and the
+        ``_delegate_to_pr_monitor`` subprocess, and records the effective
+        ceiling on the stage START log."""
+        import pipeline
+
+        (tmp_path / ".workflow" / "stages").mkdir(parents=True)
+        log_path = tmp_path / ".workflow" / "pipeline.log"
+        logger = pipeline.open_logger(str(log_path))
+
+        # Ensure the shakedown shortcut is inactive so the full PR path runs
+        monkeypatch.delenv("PPDS_SHAKEDOWN", raising=False)
+
+        # Mock all subprocess.run calls: fetch, rebase, rev-parse HEAD, push,
+        # workflow-state get issues, gh pr create, and any follow-ups.
+        def fake_subprocess_run(cmd, **kwargs):
+            result = unittest.mock.MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            if cmd and cmd[0] == "gh" and len(cmd) > 2 and cmd[1] == "pr" and cmd[2] == "create":
+                # gh pr create returns the PR URL on stdout
+                result.stdout = "https://github.com/owner/repo/pull/42\n"
+            elif "rev-parse" in cmd:
+                result.stdout = "feat/test-branch\n"
+            elif len(cmd) > 1 and "workflow-state.py" in cmd[1]:
+                result.stdout = "[]"  # no issues
+            else:
+                result.stdout = ""
+            return result
+
+        monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+        # Capture run_claude kwargs
+        captured_run_claude = {}
+
+        def fake_run_claude(worktree_path, prompt, logger_, stage, dry_run=False,
+                            agent=None, ceiling=None):
+            captured_run_claude["ceiling"] = ceiling
+            captured_run_claude["stage"] = stage
+            # Write a minimal summary log so the caller's file read succeeds
+            summary_log = os.path.join(
+                worktree_path, ".workflow", "stages", f"{stage}.log")
+            with open(summary_log, "w") as f:
+                f.write("test: stub title\n\n- bullet 1\n")
+            return 0, logger_
+
+        monkeypatch.setattr(pipeline, "run_claude", fake_run_claude)
+
+        # Capture _delegate_to_pr_monitor kwargs and short-circuit
+        captured_monitor = {}
+
+        def fake_delegate(worktree_path, pr_number, logger_, dry_run=False,
+                          ceiling=None):
+            captured_monitor["ceiling"] = ceiling
+            return 0
+
+        monkeypatch.setattr(pipeline, "_delegate_to_pr_monitor", fake_delegate)
+
+        # Mock check_pr_created + workflow-state reads via read_state stub
+        monkeypatch.setattr(pipeline, "read_state", lambda _p: {})
+
+        # The pr_number is extracted from gh pr create stdout. Patch the
+        # extraction helper so we don't have to simulate gh output.
+        if hasattr(pipeline, "_create_pr_draft"):
+            monkeypatch.setattr(
+                pipeline, "_create_pr_draft",
+                lambda *a, **kw: ("42", "https://example/pr/42"),
+            )
+
+        try:
+            pipeline.run_pr_stage(
+                str(tmp_path), logger, dry_run=False, ceiling=555,
+            )
+        except Exception:
+            # Internal steps after the delegate stub (notify, state writes)
+            # may fail on mocked subprocesses. We only care that the ceiling
+            # reached run_claude and _delegate_to_pr_monitor before those
+            # later steps, which is checked below.
+            pass
+
+        logger.close()
+        with open(log_path) as f:
+            log_content = f.read()
+
+        # AC-27/28: START log records the effective ceiling
+        assert "ceiling=555s" in log_content, (
+            f"Expected START log to record ceiling=555s, got:\n{log_content}"
+        )
+        # AC-27: pr-summary run_claude received the override
+        assert captured_run_claude.get("stage") == "pr-summary", (
+            f"Expected run_claude stage='pr-summary', got "
+            f"{captured_run_claude.get('stage')!r}"
+        )
+        assert captured_run_claude.get("ceiling") == 555, (
+            f"Expected run_claude ceiling=555, got "
+            f"{captured_run_claude.get('ceiling')!r}"
+        )
+        # AC-27: _delegate_to_pr_monitor received the override
+        assert captured_monitor.get("ceiling") == 555, (
+            f"Expected _delegate_to_pr_monitor ceiling=555, got "
+            f"{captured_monitor.get('ceiling')!r}"
+        )
 
     def test_pr_monitor_falls_back_to_default_without_override(self, tmp_path):
         """AC-27 boundary: ceiling=None preserves the module default

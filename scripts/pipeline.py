@@ -879,13 +879,18 @@ def poll_gemini(worktree_path, pr_number, logger, min_wait=90, max_wait=300):
     return comments
 
 
-def run_triage(worktree_path, pr_number, comments, logger, dry_run=False):
-    """Invoke gemini-triage agent to fix/dismiss comments. Returns list or None."""
+def run_triage(worktree_path, pr_number, comments, logger, dry_run=False,
+               ceiling=None):
+    """Invoke gemini-triage agent to fix/dismiss comments. Returns list or None.
+
+    ``ceiling`` is forwarded to ``run_claude`` for symmetry with other stage
+    wrappers; ``None`` means use the module-level ``HARD_CEILING``.
+    """
     prompt = build_triage_prompt(worktree_path, pr_number, comments)
 
     exit_code, logger_out = run_claude(
         worktree_path, prompt, logger, "pr-triage",
-        dry_run=dry_run, agent="gemini-triage",
+        dry_run=dry_run, agent="gemini-triage", ceiling=ceiling,
     )
 
     if exit_code != 0:

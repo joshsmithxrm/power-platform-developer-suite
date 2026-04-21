@@ -679,8 +679,8 @@ else:
 | AC-24 | Review reads `qa_findings` from state and passes to subagents as "already found by QA" context | Manual — run QA then review, observe review skipping duplicate findings | 🔲 |
 | AC-25 | Review does not re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem | Manual — verify dedup in review output | 🔲 |
 | AC-26 | `HARD_CEILING` default is 7200 seconds (120 min) | `test_hard_ceiling_default_is_7200` | 🔲 |
-| AC-27 | `scripts/pipeline.py --max-stage-seconds N` parses as a positive integer and replaces `HARD_CEILING` for the run; the effective ceiling is threaded into `run_claude`, `run_pr_stage`, and the PR monitor subprocess timeout | `test_max_stage_seconds_flag_overrides_ceiling` | 🔲 |
-| AC-28 | `run_claude` records the effective ceiling on stage start (`START` log entry includes `ceiling=<N>s`) so operators can see which value is in effect | `test_run_claude_logs_effective_ceiling_on_start` | 🔲 |
+| AC-27 | `scripts/pipeline.py --max-stage-seconds N` parses as a positive integer and replaces `HARD_CEILING` for the run; the effective ceiling is threaded into `run_claude`, `run_pr_stage`, and the PR monitor subprocess timeout | `test_max_stage_seconds_flag_overrides_ceiling`, `test_run_pr_stage_threads_ceiling_to_summary_and_monitor`, `test_pr_monitor_uses_effective_ceiling` | 🔲 |
+| AC-28 | `run_claude` records the effective ceiling on stage start (`START` log entry includes `ceiling=<N>s`) so operators can see which value is in effect | `test_run_claude_logs_effective_ceiling_on_start_default`, `test_run_claude_logs_effective_ceiling_on_start_override` | 🔲 |
 
 ### Edge Cases
 
