@@ -62,18 +62,20 @@ Published to the VS Code Marketplace stable channel. Thin UI layer that delegate
 
 ### MCP Server — `ppds-mcp-server`
 
-Installed via `dotnet tool install -g PPDS.Mcp`. Exposes Power Platform capabilities to MCP-compatible AI assistants (Claude Code, Claude Desktop).
+Installed via `dotnet tool install -g PPDS.Mcp`. Exposes Power Platform capabilities to MCP-compatible AI assistants (Claude Code, Claude Desktop). Registers **41 tools** total.
 
-- **Query tools** — SQL (via PPDS.Query) and FetchXML execution.
-- **Metadata tools** — `ppds_metadata_entities` and entity detail lookup for schema understanding.
-- **Metadata authoring tools** — Schema CRUD for tables, columns, relationships, choices, and keys with dry-run support (honors `--read-only`).
-- **Plugin tools** — `ppds_plugins_list`, `ppds_plugins_get`, plus assembly/package/type/step/image lookup and `ppds_plugin_traces_delete`.
+- **Query tools** — `ppds_query_sql`, `ppds_query_fetch`, `ppds_data_schema`, `ppds_data_analyze`.
+- **Metadata tools** — `ppds_metadata_entities`, `ppds_metadata_entity` for schema understanding.
+- **Metadata authoring tools** — `ppds_metadata_create_table`, `ppds_metadata_update_table`, `ppds_metadata_add_column`, `ppds_metadata_update_column`, `ppds_metadata_create_relationship`, `ppds_metadata_update_relationship`, `ppds_metadata_create_choice`, `ppds_metadata_update_choice`, `ppds_metadata_add_option_value`, `ppds_metadata_create_key`. All with dry-run support (honors `--read-only`).
+- **Plugin tools** — `ppds_plugins_list`, `ppds_plugins_get`, `ppds_plugin_traces_list`, `ppds_plugin_traces_get`, `ppds_plugin_traces_timeline`, `ppds_plugin_traces_delete`.
 - **Service endpoints, custom APIs, data providers** — `ppds_service_endpoints_list`, `ppds_custom_apis_list`, `ppds_data_providers_list`.
-- **Connection References and Environment Variables** — `ppds_connection_references_list/get/analyze`, `ppds_environment_variables_list/get/set`.
-- **Web Resources** — `ppds_web_resources_list/get/publish`.
+- **Connection References and Environment Variables** — `ppds_connection_references_list`, `ppds_connection_references_get`, `ppds_connection_references_analyze`, `ppds_environment_variables_list`, `ppds_environment_variables_get`, `ppds_environment_variables_set`.
+- **Web Resources** — `ppds_web_resources_list`, `ppds_web_resources_get`, `ppds_web_resources_publish`. `ppds_web_resources_list` supports pagination via `maxRows`/`nextPageToken`.
 - **Solutions tools** — `ppds_solutions_list`, `ppds_solutions_components`.
+- **Environment and auth tools** — `ppds_env_list`, `ppds_env_select`, `ppds_auth_who`.
+- **Import jobs** — `ppds_import_jobs_list`, `ppds_import_jobs_get`.
 - **Session safety** — `--profile`, `--environment`, `--read-only`, `--allowed-env` for isolation and DML protection.
-- **Pagination contract** — All list tools return `ListResult<T>` with `totalCount`, `wasTruncated`, `filtersApplied` — no silent truncation.
+- **Pagination contract** — All list tools return `totalCount` and a `nextPageToken` (where supported) — no silent truncation.
 
 ### NuGet libraries
 

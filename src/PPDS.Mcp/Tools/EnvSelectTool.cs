@@ -55,18 +55,33 @@ public sealed class EnvSelectTool : McpToolBase
 
             var resolved = result.Environment!;
 
-            // Validate environment switch against session allowlist
-            Context.ValidateEnvironmentSwitch(resolved.Url);
+            // Determine the currently-active environment URL.
+            var currentUrl = Context.EnvironmentUrlOverride
+                ?? profile.Environment?.Url;
 
-            // Invalidate cached pool for the old environment.
-            if (profile.Environment != null)
+            // No-op: if the resolved URL matches the already-active environment, skip
+            // the allowlist check and the save — switching to self is always allowed
+            // (Constitution SS2 only blocks *switching*, not confirming the current env).
+            var isSameEnvironment = currentUrl != null &&
+                currentUrl.TrimEnd('/').Equals(
+                    resolved.Url.TrimEnd('/'),
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!isSameEnvironment)
             {
-                Context.InvalidateEnvironment(profile.Environment.Url);
-            }
+                // Validate environment switch against session allowlist
+                Context.ValidateEnvironmentSwitch(resolved.Url);
 
-            // Update profile with new environment.
-            profile.Environment = resolved;
-            await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
+                // Invalidate cached pool for the old environment.
+                if (profile.Environment != null)
+                {
+                    Context.InvalidateEnvironment(profile.Environment.Url);
+                }
+
+                // Update profile with new environment.
+                profile.Environment = resolved;
+                await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
+            }
 
             return new EnvSelectResult
             {
