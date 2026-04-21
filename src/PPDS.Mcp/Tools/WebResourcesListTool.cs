@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Mcp.Infrastructure;
 
@@ -24,49 +25,96 @@ public sealed class WebResourcesListTool : McpToolBase
     /// </summary>
     /// <param name="solutionId">Optional solution ID to filter by (GUID string).</param>
     /// <param name="textOnly">If true, only return text-based web resources (default true).</param>
-    /// <param name="top">Maximum number of results to return.</param>
+    /// <param name="maxRows">Maximum number of records per page (default 100, max 500).</param>
+    /// <param name="nextPageToken">Cursor token from a previous call to fetch the next page.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of web resource summaries.</returns>
+    /// <returns>Page of web resource summaries with optional nextPageToken for continuation.</returns>
     [McpServerTool(Name = "ppds_web_resources_list")]
-    [Description("List web resources in a Dataverse environment, optionally filtered by solution. Returns name, type, managed status, and modification info. Use textOnly=true (default) to exclude binary types like images.")]
+    [Description("List web resources in a Dataverse environment, optionally filtered by solution. Returns name, type, managed status, and modification info. Use textOnly=true (default) to exclude binary types like images. Supports pagination via maxRows and nextPageToken parameters — when more records exist the response includes a nextPageToken to pass on the next call.")]
     public async Task<WebResourcesListResult> ExecuteAsync(
         [Description("Optional solution ID (GUID) to filter web resources by solution")]
         string? solutionId = null,
         [Description("If true, only return text-based web resources like JS/HTML/CSS (default true)")]
         bool textOnly = true,
+        [Description("Maximum records per page (default 100, max 500)")]
+        int maxRows = 100,
+        [Description("Pagination cursor from a previous call's nextPageToken field")]
+        string? nextPageToken = null,
         CancellationToken cancellationToken = default)
     {
-        Guid? parsedSolutionId = null;
-        if (solutionId != null)
+        try
         {
-            if (!Guid.TryParse(solutionId, out var parsed))
+            maxRows = Math.Clamp(maxRows, 1, 500);
+
+            Guid? parsedSolutionId = null;
+            if (solutionId != null)
             {
-                throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
+                if (!Guid.TryParse(solutionId, out var parsed))
+                {
+                    throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
+                }
+                parsedSolutionId = parsed;
             }
-            parsedSolutionId = parsed;
-        }
 
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IWebResourceService>();
-
-        var result = await service.ListAsync(parsedSolutionId, textOnly, cancellationToken).ConfigureAwait(false);
-
-        return new WebResourcesListResult
-        {
-            TotalCount = result.TotalCount,
-            Resources = result.Items.Select(r => new WebResourceSummary
+            // Decode offset from cursor token (base-10 integer, base64-encoded).
+            int offset = 0;
+            if (nextPageToken != null)
             {
-                Id = r.Id.ToString(),
-                Name = r.Name,
-                DisplayName = r.DisplayName,
-                Type = r.WebResourceType,
-                TypeName = r.TypeName,
-                IsManaged = r.IsManaged,
-                IsTextType = r.IsTextType,
-                ModifiedBy = r.ModifiedByName,
-                ModifiedOn = r.ModifiedOn?.ToString("o")
-            }).ToList()
-        };
+                try
+                {
+                    var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(nextPageToken));
+                    offset = int.Parse(decoded);
+                }
+                catch
+                {
+                    throw new ArgumentException("Invalid nextPageToken — use the value returned by a previous ppds_web_resources_list call.");
+                }
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IWebResourceService>();
+
+            var result = await service.ListAsync(parsedSolutionId, textOnly, cancellationToken).ConfigureAwait(false);
+
+            // Apply offset + page window (Constitution I4: show X of Y, provide nextPageToken when truncated).
+            var page = result.Items.Skip(offset).Take(maxRows).ToList();
+            var nextOffset = offset + page.Count;
+            var hasMore = nextOffset < result.TotalCount;
+
+            string? outToken = hasMore
+                ? Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(nextOffset.ToString()))
+                : null;
+
+            return new WebResourcesListResult
+            {
+                TotalCount = result.TotalCount,
+                ReturnedCount = page.Count,
+                Offset = offset,
+                NextPageToken = outToken,
+                Resources = page.Select(r => new WebResourceSummary
+                {
+                    Id = r.Id.ToString(),
+                    Name = r.Name,
+                    DisplayName = r.DisplayName,
+                    Type = r.WebResourceType,
+                    TypeName = r.TypeName,
+                    IsManaged = r.IsManaged,
+                    IsTextType = r.IsTextType,
+                    ModifiedBy = r.ModifiedByName,
+                    ModifiedOn = r.ModifiedOn?.ToString("o")
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 
@@ -76,14 +124,30 @@ public sealed class WebResourcesListTool : McpToolBase
 public sealed class WebResourcesListResult
 {
     /// <summary>
-    /// List of web resource summaries.
+    /// List of web resource summaries for this page.
     /// </summary>
     [JsonPropertyName("resources")]
     public List<WebResourceSummary> Resources { get; set; } = [];
 
-    /// <summary>Total count of records.</summary>
+    /// <summary>Total count of records matching the filter (all pages).</summary>
     [JsonPropertyName("totalCount")]
     public int TotalCount { get; set; }
+
+    /// <summary>Number of records returned in this page.</summary>
+    [JsonPropertyName("returnedCount")]
+    public int ReturnedCount { get; set; }
+
+    /// <summary>Zero-based offset of the first record in this page.</summary>
+    [JsonPropertyName("offset")]
+    public int Offset { get; set; }
+
+    /// <summary>
+    /// Cursor token to pass as nextPageToken to retrieve the next page.
+    /// Null when this is the last page.
+    /// </summary>
+    [JsonPropertyName("nextPageToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NextPageToken { get; set; }
 }
 
 /// <summary>
