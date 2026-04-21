@@ -589,8 +589,12 @@ def mark_pr_ready(worktree, pr_number, logger):
 
 
 # In-process dedupe set for POSTed replies (meta-retro finding #3).
-# Key: (pr_number, comment_id, action). Monitor is per-PR subprocess, so
-# an in-memory set suffices — it's reset on every monitor spawn.
+# Key: (pr_number, comment_id). PR #864 regression: the key used to include
+# ``action``, which let the same comment receive two replies across triage
+# rounds when the LLM re-classified it (e.g., fixed → dismissed). Once any
+# reply is POSTed for a comment in this monitor run, further replies are
+# dropped regardless of action. Monitor is per-PR subprocess, so an
+# in-memory set suffices — it's reset on every monitor spawn.
 _POSTED_REPLY_KEYS: "set[tuple]" = set()
 
 
@@ -611,9 +615,17 @@ def post_replies(worktree, pr_number, triage_results, logger):
 
     Applies two guards before delegating to _post_replies_common:
       1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
-      2. Dedupe on (pr, comment_id, action) (meta-retro #3).
+      2. Dedupe on (pr, comment_id) (meta-retro #3; PR #864 hardening).
+
+    The dedupe key is recorded only after a successful POST event so
+    transient failures (network, API timeout) don't permanently block
+    a comment from the reconciliation retry path (PR #865 review).
     """
     def _log_fn(event, **kwargs):
+        if event == "POSTED":
+            cid = kwargs.get("comment_id")
+            if cid is not None:
+                _POSTED_REPLY_KEYS.add((pr_number, cid))
         logger.log("replies", event, **kwargs)
 
     filtered = []
@@ -626,11 +638,10 @@ def post_replies(worktree, pr_number, triage_results, logger):
             _log_fn("SKIPPED_EMPTY_BODY", comment_id=comment_id, action=action)
             continue
 
-        key = (pr_number, comment_id, action)
+        key = (pr_number, comment_id)
         if key in _POSTED_REPLY_KEYS:
             _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
             continue
-        _POSTED_REPLY_KEYS.add(key)
         filtered.append(item)
 
     if not filtered:
@@ -978,9 +989,29 @@ def run_monitor(worktree, pr_number, resume=False):
                 logger.close()
                 return 1
 
-            # Re-poll Gemini for new comments after triage
-            comments = _step_gemini(worktree, pr_number, logger, result,
-                                    step_suffix=f"_r{triage_iteration}")
+            # Re-poll Gemini for new comments after triage. PR #864
+            # double-reply regression: the pulls/comments endpoint returns
+            # every Gemini-authored comment, including ones we already
+            # replied to, so the loop used to re-ingest them and post a
+            # second reply (often with a different LLM-classified action).
+            # On rounds 2+, restrict to genuinely unreplied bot comments.
+            # Fail-open on transient errors — don't abort the monitor run
+            # (matches _step_gemini and _ready_flip_gates patterns).
+            poll_step = f"gemini_r{triage_iteration}"
+            try:
+                comments = get_unreplied_comments(
+                    worktree, pr_number, shakedown=bool(SHAKEDOWN),
+                )
+                result["comment_counts"][poll_step] = len(comments)
+                mark_step(result, poll_step, "done")
+            except Exception as e:  # noqa: BLE001 — fail-open per repo pattern
+                logger.log("triage", "POLL_ERROR",
+                           round=triage_iteration, error=str(e))
+                mark_step(result, poll_step, "error")
+                comments = []
+            write_result(worktree, result)
+            logger.log("triage", "POLL_UNREPLIED",
+                       round=triage_iteration, comments=len(comments))
             inline_count = len(comments)
 
         # ---- Step 4: Mark PR ready ----

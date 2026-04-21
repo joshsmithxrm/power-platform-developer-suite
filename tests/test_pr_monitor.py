@@ -327,17 +327,21 @@ class TestTriageCiLoopLimit:
     def test_triage_ci_loop_limit(self, tmp_path):
         """Triage loop stops after MAX_TRIAGE_ITERATIONS even if comments persist."""
         wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
 
         persistent_comments = [
             {"id": 1, "user": "g", "path": "a.py", "line": 1, "body": "fix"}
         ]
 
-        # poll_ci: initial + 3 re-checks = 4 calls
-        # poll_gemini: initial + 3 re-polls = 4 calls (always returns comments)
-        # run_triage: 3 calls
+        # poll_ci: initial + 3 re-checks = 4 calls. Round 1 uses
+        # poll_gemini_comments; rounds 2+ use get_unreplied_comments.
+        # Both are stubbed to always return a persistent comment so the
+        # loop runs up to the iteration cap.
         with patch("pr_monitor.poll_ci", return_value="pass") as mock_ci, \
              patch("pr_monitor.poll_gemini_comments",
-                   return_value=persistent_comments) as mock_gemini, \
+                   return_value=persistent_comments), \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=persistent_comments), \
              patch("pr_monitor.run_triage", return_value=[]) as mock_triage, \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
@@ -1083,7 +1087,12 @@ class TestReplyDedupe:
         item = {"id": 777, "action": "fixed", "commit": "sha1",
                 "description": "renamed var"}
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        def fake_common(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fake_common) as mock_common:
             pr_monitor.post_replies(wt, 42, [item], logger)
             pr_monitor.post_replies(wt, 42, [item], logger)
 
@@ -1094,8 +1103,14 @@ class TestReplyDedupe:
         forwarded = mock_common.call_args[0][2]
         assert [i["id"] for i in forwarded] == [777]
 
-    def test_different_action_not_deduped(self, tmp_path):
-        """Same comment_id with different action is NOT considered a duplicate."""
+    def test_duplicate_reply_skipped_regardless_of_action(self, tmp_path):
+        """Same (pr, comment_id) posts once even when the action differs.
+
+        PR #864 regression: LLM non-determinism across triage rounds re-
+        classified the same Gemini comment as ``fixed`` then ``dismissed``
+        — the old dedupe key ``(pr, comment_id, action)`` let both replies
+        slip through. Dedupe must key on ``(pr, comment_id)`` only.
+        """
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
         pr_monitor._POSTED_REPLY_KEYS.clear()
@@ -1105,12 +1120,58 @@ class TestReplyDedupe:
         item_dismissed = {"id": 500, "action": "dismissed",
                           "description": "nvm"}
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        def fake_common(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fake_common) as mock_common:
             pr_monitor.post_replies(wt, 42, [item_fixed], logger)
             pr_monitor.post_replies(wt, 42, [item_dismissed], logger)
 
-        # Both actions distinct -> both POST through.
-        assert mock_common.call_count == 2
+        # Only the first reply POSTs — the second (different action,
+        # same comment_id) is dedupped.
+        assert mock_common.call_count == 1
+        forwarded = mock_common.call_args[0][2]
+        assert [i["id"] for i in forwarded] == [500]
+        assert forwarded[0]["action"] == "fixed"
+
+    def test_transient_failure_leaves_key_retryable(self, tmp_path):
+        """A FAILED POST must not pollute the dedupe set — retry must work.
+
+        PR #865 review (gemini-code-assist HIGH): pre-adding to the set
+        before the API call blocked retry on transient errors. The key is
+        now recorded only on the POSTED event, so a subsequent call for
+        the same comment_id reaches _post_replies_common again.
+        """
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        item = {"id": 999, "action": "fixed", "commit": "sha",
+                "description": "x"}
+
+        def fail_once(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("FAILED", comment_id=i["id"], error="boom")
+
+        def succeed(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fail_once) as mock_common:
+            pr_monitor.post_replies(wt, 42, [item], logger)
+            # First call failed; key must not be in the dedupe set.
+            assert (42, 999) not in pr_monitor._POSTED_REPLY_KEYS
+            assert mock_common.call_count == 1
+
+        # Retry succeeds — common is invoked again, then key lands in the set.
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=succeed) as mock_common:
+            pr_monitor.post_replies(wt, 42, [item], logger)
+            assert mock_common.call_count == 1
+            assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS
 
 
 class TestRebaseBeforeReady:
@@ -1389,3 +1450,83 @@ class TestRebasePushRefspec:
         assert not any(c[:2] == ["git", "push"] for c in call_log)
         with open(log_path, encoding="utf-8") as f:
             assert "BRANCH_DETECT_ERROR" in f.read()
+
+
+class TestTriageLoopSkipsRepliedComments:
+    """Regression: the triage loop must not re-ingest comments it already replied to.
+
+    PR #864 double-reply: round 1 POSTed action=fixed, the end-of-round re-poll
+    returned the same Gemini comment (the pulls/comments endpoint does not
+    filter by in_reply_to_id), round 2 POSTed action=dismissed against the same
+    id. On rounds 2+, the loop must consider only unreplied bot comments.
+    """
+
+    def test_round_two_sees_no_comments_when_round_one_already_replied(self, tmp_path):
+        """After round 1 posts, the next iteration must not re-triage the same comment."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        gemini_comment = {
+            "id": 3115341440, "user": "gemini-code-assist[bot]",
+            "path": "a.py", "line": 1, "body": "please fix",
+        }
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments",
+                   return_value=[gemini_comment]), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor.run_triage", return_value=[
+                 {"id": 3115341440, "action": "fixed", "commit": "abc",
+                  "description": "renamed var"}]) as mock_triage, \
+             patch("pr_monitor._post_replies_common"), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 864, resume=False)
+
+        assert exit_code == 0
+        # run_triage must fire exactly once — round 2's re-poll must
+        # treat the already-replied comment as out-of-scope and exit.
+        assert mock_triage.call_count == 1
+
+    def test_round_two_picks_up_new_unreplied_comments(self, tmp_path):
+        """If Gemini posts a NEW comment after round 1, round 2 still runs."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        first_comment = {
+            "id": 100, "user": "gemini-code-assist[bot]",
+            "path": "a.py", "line": 1, "body": "fix a",
+        }
+        second_comment = {
+            "id": 200, "user": "gemini-code-assist[bot]",
+            "path": "b.py", "line": 2, "body": "fix b",
+        }
+        # Round 1: run_triage sees first_comment and posts a reply.
+        # Round 2: a new second_comment is unreplied; run_triage fires.
+        # Round 3: nothing left; loop exits.
+        unreplied_results = iter([[second_comment], [], []])
+        triage_results = iter([
+            [{"id": 100, "action": "fixed", "commit": "abc", "description": "ok"}],
+            [{"id": 200, "action": "fixed", "commit": "def", "description": "ok"}],
+        ])
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments",
+                   return_value=[first_comment]), \
+             patch("pr_monitor.get_unreplied_comments",
+                   side_effect=lambda *a, **k: next(unreplied_results, [])), \
+             patch("pr_monitor.run_triage",
+                   side_effect=lambda *a, **k: next(triage_results, [])) as mock_triage, \
+             patch("pr_monitor._post_replies_common"), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 999, resume=False)
+
+        assert exit_code == 0
+        # Round 1 + round 2 (new comment) = 2 triage calls. Round 3
+        # has no unreplied comments so the loop exits.
+        assert mock_triage.call_count == 2
