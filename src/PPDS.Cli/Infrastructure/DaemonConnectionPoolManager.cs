@@ -349,7 +349,8 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// Creates a service provider from connection sources.
     /// This is similar to ProfileServiceFactory.CreateProviderFromSources but simplified for daemon use.
     /// </summary>
-    private ServiceProvider CreateProviderFromSources(
+    /// <remarks>Internal for testability — allows unit tests to verify DI registrations.</remarks>
+    internal ServiceProvider CreateProviderFromSources(
         IConnectionSource[] sources,
         ISecureCredentialStore credentialStore,
         AuthProfile profile,
@@ -399,6 +400,38 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 environmentUrl,
                 credentialStore,
                 sp.GetService<ILogger<TdsQueryExecutor>>()));
+
+        // Connection service — Power Apps Admin API for connection-reference enrichment.
+        // Overrides the AddCliApplicationServices registration that requires ResolvedConnectionInfo
+        // (not available in the daemon's per-profile container). Skipped when the environment ID
+        // is absent (direct-URL connections or profiles set before Global Discovery); those callers
+        // catch the InvalidOperationException from GetRequiredService and gracefully degrade to
+        // unenriched results — see connectionReferences/list and connectionReferences/get handlers.
+        var environmentId = profile.Environment?.EnvironmentId;
+        if (!string.IsNullOrEmpty(environmentId))
+        {
+            services.AddTransient<IConnectionService>(sp =>
+            {
+                var logger = sp.GetRequiredService<ILogger<ConnectionService>>();
+                IPowerPlatformTokenProvider tokenProvider;
+                if (profile.AuthMethod == AuthMethod.ClientSecret &&
+                    !string.IsNullOrEmpty(profile.ApplicationId))
+                {
+                    // DI factory delegates are synchronous; GetAsync is safe here because
+                    // credential store uses file I/O, not network calls.
+#pragma warning disable PPDS012 // Sync-over-async: DI factory cannot be async
+                    var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                    tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(
+                        profile, storedCredential?.ClientSecret ?? "");
+                }
+                else
+                {
+                    tokenProvider = PowerPlatformTokenProvider.FromProfile(profile);
+                }
+                return new ConnectionService(tokenProvider, profile.Cloud, environmentId, logger);
+            });
+        }
 
         // Connection pool with factory delegate
         services.AddSingleton<IDataverseConnectionPool>(sp =>

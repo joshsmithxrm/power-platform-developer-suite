@@ -196,7 +196,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
             var originalMenu = Colors.Menu;
             Colors.Menu = TuiColorPalette.FileDialog;
 
-            saveDialog.Loaded += () =>
+            Action saveDialogLoadedHandler = () =>
             {
                 ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.FileDialog);
 
@@ -204,6 +204,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
                 var textField = FindFirstTextField(saveDialog);
                 textField?.SetFocus();
             };
+            saveDialog.Loaded += saveDialogLoadedHandler;
 
             try
             {
@@ -211,6 +212,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
             }
             finally
             {
+                saveDialog.Loaded -= saveDialogLoadedHandler;
                 Colors.Menu = originalMenu;
             }
 

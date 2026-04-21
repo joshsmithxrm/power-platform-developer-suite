@@ -37,6 +37,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
     private EnvironmentSummary? _selectedEnvironment;
     private bool _useManualUrl;
     private string? _manualUrl;
+    private readonly Action _loadedHandler;
 
     /// <summary>
     /// Gets the selected environment, or null if cancelled.
@@ -240,12 +241,13 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         Add(filterLabel, _filterField, listFrame, previewFrame, urlLabel, _urlField, _spinner, _statusLabel, _selectButton, detailsButton, configButton, cancelButton, makerButton, dynamicsButton);
 
         // Defer loading until dialog is visible to ensure spinner renders
-        Loaded += () =>
+        _loadedHandler = () =>
         {
             _spinner.Start("Loading environments...");
 
             _errorService?.FireAndForget(DiscoverEnvironmentsAsync(), "DiscoverEnvironments");
         };
+        Loaded += _loadedHandler;
     }
 
     private async Task DiscoverEnvironmentsAsync()
@@ -525,6 +527,16 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         {
             MessageBox.ErrorQuery("Error", $"Failed to open browser: {ex.Message}", "OK");
         }
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Loaded -= _loadedHandler;
+        }
+        base.Dispose(disposing);
     }
 
     /// <inheritdoc />

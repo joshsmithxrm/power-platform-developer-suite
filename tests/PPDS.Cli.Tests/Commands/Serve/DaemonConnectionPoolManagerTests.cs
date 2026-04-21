@@ -1,6 +1,12 @@
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using PPDS.Auth.Cloud;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Services;
+using PPDS.Dataverse.Pooling;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Serve;
@@ -367,6 +373,77 @@ public class DaemonConnectionPoolManagerTests
 
         // Assert - Loader should have been called twice
         callCount.Should().Be(2, "timeout should have removed failed entry, allowing retry");
+    }
+
+    #endregion
+
+    #region DI Registration Tests (H4 — IConnectionService)
+
+    // Helper: creates a minimal mock IConnectionSource for CreateProviderFromSources tests
+    private static Mock<IConnectionSource> CreateMockSource()
+    {
+        var mockSource = new Mock<IConnectionSource>();
+        mockSource.Setup(s => s.Name).Returns("test-source");
+        mockSource.Setup(s => s.MaxPoolSize).Returns(1);
+        return mockSource;
+    }
+
+    // Helper: creates an AuthProfile with an environment selected via Global Discovery
+    private static AuthProfile CreateProfileWithEnvId(string? environmentId = "env-00000000-0000-0000-0000-000000000001")
+        => new()
+        {
+            AuthMethod = AuthMethod.DeviceCode,
+            Cloud = CloudEnvironment.Public,
+            TenantId = "tenant-id",
+            Environment = environmentId is null ? null : new PPDS.Auth.Profiles.EnvironmentInfo
+            {
+                Url = "https://org.crm.dynamics.com",
+                DisplayName = "Test Org",
+                EnvironmentId = environmentId
+            }
+        };
+
+    [Fact]
+    public void CreateProviderFromSources_WithEnvironmentId_ResolvesIConnectionService()
+    {
+        // Arrange
+        var manager = new DaemonConnectionPoolManager();
+        var mockSource = CreateMockSource();
+        var mockCredentialStore = new Mock<ISecureCredentialStore>();
+        var profile = CreateProfileWithEnvId("env-00000000-0000-0000-0000-000000000001");
+
+        // Act
+        using var provider = manager.CreateProviderFromSources(
+            new[] { mockSource.Object },
+            mockCredentialStore.Object,
+            profile,
+            "https://org.crm.dynamics.com");
+
+        // Assert — IConnectionService must resolve without throwing (shakedown H4)
+        var act = () => provider.GetRequiredService<IConnectionService>();
+        act.Should().NotThrow("the daemon DI container must resolve IConnectionService when environment ID is known");
+    }
+
+    [Fact]
+    public void CreateProviderFromSources_WithoutEnvironmentId_DoesNotRegisterIConnectionService()
+    {
+        // Arrange — profile with no environment or no environment ID (direct-URL connection)
+        var manager = new DaemonConnectionPoolManager();
+        var mockSource = CreateMockSource();
+        var mockCredentialStore = new Mock<ISecureCredentialStore>();
+        var profile = CreateProfileWithEnvId(environmentId: null);
+
+        // Act
+        using var provider = manager.CreateProviderFromSources(
+            new[] { mockSource.Object },
+            mockCredentialStore.Object,
+            profile,
+            "https://org.crm.dynamics.com");
+
+        // Assert — no registration; callers must catch and degrade gracefully
+        var act = () => provider.GetRequiredService<IConnectionService>();
+        act.Should().Throw<InvalidOperationException>(
+            "without an environment ID the daemon cannot construct IConnectionService — callers must degrade gracefully");
     }
 
     #endregion
