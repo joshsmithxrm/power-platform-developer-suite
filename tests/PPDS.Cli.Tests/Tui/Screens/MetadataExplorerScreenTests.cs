@@ -65,14 +65,65 @@ public sealed class MetadataExplorerScreenTests : IDisposable
     }
 
     [Fact]
-    public void RegisterHotkeys_TotalCount_IsSix()
+    public void RegisterHotkeys_TotalCount_IsEight()
     {
         using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
         var registry = new HotkeyRegistry();
 
         screen.OnActivated(registry);
 
-        Assert.Equal(6, registry.GetAllBindings().Count);
+        Assert.Equal(8, registry.GetAllBindings().Count);
+    }
+
+    [Fact]
+    public void RegisterHotkeys_RegistersCtrlTabForTabNavigation()
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+        var registry = new HotkeyRegistry();
+
+        screen.OnActivated(registry);
+
+        var bindings = registry.GetAllBindings();
+        Assert.Contains(bindings, b => b.Key == (Key.CtrlMask | Key.Tab) && b.Description == "Next tab");
+        Assert.Contains(bindings, b => b.Key == (Key.CtrlMask | Key.ShiftMask | Key.Tab) && b.Description == "Previous tab");
+    }
+
+    [Fact]
+    public void NextTab_CyclesForwardThroughAllFiveTabs()
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+
+        // Default tab is 0 (Attributes)
+        Assert.Equal(0, screen.GetActiveTabIndex());
+
+        screen.NextTab();
+        Assert.Equal(1, screen.GetActiveTabIndex());
+
+        screen.NextTab();
+        Assert.Equal(2, screen.GetActiveTabIndex());
+
+        screen.NextTab();
+        Assert.Equal(3, screen.GetActiveTabIndex());
+
+        screen.NextTab();
+        Assert.Equal(4, screen.GetActiveTabIndex());
+
+        // Wrap around from last to first
+        screen.NextTab();
+        Assert.Equal(0, screen.GetActiveTabIndex());
+    }
+
+    [Fact]
+    public void PreviousTab_CyclesBackwardThroughAllFiveTabs()
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+
+        // Wrap around from first to last
+        screen.PreviousTab();
+        Assert.Equal(4, screen.GetActiveTabIndex());
+
+        screen.PreviousTab();
+        Assert.Equal(3, screen.GetActiveTabIndex());
     }
 
     [Fact]

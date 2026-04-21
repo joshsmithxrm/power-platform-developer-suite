@@ -179,6 +179,33 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         RegisterHotkey(registry, Key.CtrlMask | Key.N, "New", OnNewClicked);
         RegisterHotkey(registry, Key.CtrlMask | Key.E, "Edit", OnEditClicked);
         RegisterHotkey(registry, Key.CtrlMask | Key.D, "Delete", OnDeleteClicked);
+        RegisterHotkey(registry, Key.CtrlMask | Key.Tab, "Next tab", NextTab);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.Tab, "Previous tab", PreviousTab);
+    }
+
+    /// <summary>
+    /// Gets the currently active tab index (0-based). Exposed for testing.
+    /// </summary>
+    internal int GetActiveTabIndex() => _activeTabIndex;
+
+    /// <summary>
+    /// Moves to the next detail panel tab (wraps around).
+    /// Ctrl+Tab navigates forward through Attributes, Relationships, Keys, Privileges, Choices.
+    /// </summary>
+    internal void NextTab()
+    {
+        var next = (_activeTabIndex + 1) % TabNames.Length;
+        SwitchTab(next);
+    }
+
+    /// <summary>
+    /// Moves to the previous detail panel tab (wraps around).
+    /// Ctrl+Shift+Tab navigates backward through the tabs.
+    /// </summary>
+    internal void PreviousTab()
+    {
+        var prev = (_activeTabIndex - 1 + TabNames.Length) % TabNames.Length;
+        SwitchTab(prev);
     }
 
     #region Action Bar
