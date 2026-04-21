@@ -52,12 +52,14 @@ configured and active.
    calls otherwise.
 3. **Arm the shakedown write-block (sentinel file).** Before any other
    Bash work, write `.claude/state/shakedown-active.json` containing at
-   least `started_at` (unix timestamp) and, when available, `session_id`:
+   least `started_at` (ISO-8601 UTC timestamp string, consumed by both
+   the Python `shakedown-safety` hook and the C# `IShakedownGuard`) and,
+   when available, `session_id`:
 
    ```bash
-   python -c "import json, os, time; \
+   python -c "import json, os; from datetime import datetime, timezone; \
      os.makedirs('.claude/state', exist_ok=True); \
-     json.dump({'started_at': int(time.time()), \
+     json.dump({'started_at': datetime.now(timezone.utc).isoformat(), \
                 'session_id': os.environ.get('CLAUDE_SESSION_ID', '')}, \
                open('.claude/state/shakedown-active.json', 'w'))"
    ```

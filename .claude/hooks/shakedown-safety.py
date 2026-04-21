@@ -44,7 +44,9 @@ positive.
 1. Env var ``$PPDS_SHAKEDOWN=1`` (or whichever name is configured under
    ``safety.readonly_env_var``). Best for shell scripts and CI.
 2. Sentinel file ``.claude/state/shakedown-active.json`` containing at
-   least ``started_at`` (unix timestamp). Required when the activator is
+   least ``started_at`` (ISO-8601 UTC timestamp string, so the same file
+   is consumed by both this hook and the C# ``IShakedownGuard``).
+   Required when the activator is
    a Claude Code session: the Bash tool spawns a fresh shell per
    invocation, so inline ``PPDS_SHAKEDOWN=1 ppds ...`` prefixes and
    ``export PPDS_SHAKEDOWN=1`` do not propagate to this hook process.
@@ -66,6 +68,7 @@ import re
 import shlex
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -179,9 +182,10 @@ def _delete_sentinel_quiet() -> None:
 def check_sentinel_active() -> bool:
     """True iff a fresh shakedown sentinel file is present.
 
-    Stale sentinels (older than 24h since ``started_at``) and malformed
-    sentinels are silently deleted -- a crashed session must not wedge
-    the write-block for future sessions.
+    ``started_at`` is an ISO-8601 UTC timestamp string -- same format the
+    C# ``IShakedownGuard`` parses. Stale sentinels (older than 24h since
+    ``started_at``) and malformed sentinels are silently deleted -- a
+    crashed session must not wedge the write-block for future sessions.
     """
     path = _sentinel_path()
     if not os.path.isfile(path):
@@ -192,12 +196,25 @@ def check_sentinel_active() -> bool:
         _delete_sentinel_quiet()
         return False
 
-    started_at = data.get("started_at")
-    if not isinstance(started_at, (int, float)):
+    raw = data.get("started_at")
+    if not isinstance(raw, str):
         _delete_sentinel_quiet()
         return False
 
-    if time.time() - float(started_at) > _SENTINEL_MAX_AGE_SECONDS:
+    try:
+        started_at_dt = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        _delete_sentinel_quiet()
+        return False
+
+    # Normalize to aware UTC for age comparison; naive strings assumed UTC.
+    if started_at_dt.tzinfo is None:
+        started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+
+    age_seconds = (datetime.now(timezone.utc) - started_at_dt).total_seconds()
+    # Absolute window tolerates clock skew in both directions -- matches the
+    # guard spec's "|now - started_at| <= 24h" definition.
+    if abs(age_seconds) > _SENTINEL_MAX_AGE_SECONDS:
         _delete_sentinel_quiet()
         return False
 
