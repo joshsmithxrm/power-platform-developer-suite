@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -47,44 +48,57 @@ public sealed class PluginTracesDeleteTool : McpToolBase
         bool? errorsOnly = null,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
+        try
         {
-            throw new InvalidOperationException(
-                "Cannot delete plugin traces: this MCP session is read-only.");
+            if (Context.IsReadOnly)
+            {
+                throw new InvalidOperationException(
+                    "Cannot delete plugin traces: this MCP session is read-only.");
+            }
+
+            var hasFilter = typeName != null || messageName != null || primaryEntity != null || errorsOnly == true;
+
+            int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
+                + (olderThanDays.HasValue ? 1 : 0)
+                + (hasFilter ? 1 : 0);
+
+            if (modeCount == 0)
+            {
+                throw new ArgumentException(
+                    "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion.");
+            }
+
+            if (modeCount > 1)
+            {
+                throw new ArgumentException(
+                    "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly).");
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
+
+            if (ids != null)
+            {
+                return await DeleteByIdsAsync(traceService, ids, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (olderThanDays != null)
+            {
+                return await DeleteOlderThanAsync(traceService, olderThanDays.Value, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await DeleteByFilterAsync(traceService, typeName, messageName, primaryEntity, errorsOnly, cancellationToken).ConfigureAwait(false);
         }
-
-        var hasFilter = typeName != null || messageName != null || primaryEntity != null || errorsOnly == true;
-
-        int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
-            + (olderThanDays.HasValue ? 1 : 0)
-            + (hasFilter ? 1 : 0);
-
-        if (modeCount == 0)
+        catch (PpdsException ex)
         {
-            throw new ArgumentException(
-                "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion.");
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        if (modeCount > 1)
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            throw new ArgumentException(
-                "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly).");
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
-
-        if (ids != null)
-        {
-            return await DeleteByIdsAsync(traceService, ids, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (olderThanDays != null)
-        {
-            return await DeleteOlderThanAsync(traceService, olderThanDays.Value, cancellationToken).ConfigureAwait(false);
-        }
-
-        return await DeleteByFilterAsync(traceService, typeName, messageName, primaryEntity, errorsOnly, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<PluginTracesDeleteResult> DeleteByIdsAsync(

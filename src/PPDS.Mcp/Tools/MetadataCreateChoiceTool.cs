@@ -6,6 +6,7 @@ using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;
@@ -44,49 +45,62 @@ public sealed class MetadataCreateChoiceTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(schemaName), schemaName),
-            (nameof(displayName), displayName),
-            (nameof(description), description),
-            (nameof(optionsJson), optionsJson)).ConfigureAwait(false);
-
-        OptionDefinition[] options;
         try
         {
-            options = JsonSerializer.Deserialize<OptionDefinition[]>(optionsJson, new JsonSerializerOptions
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(schemaName), schemaName),
+                (nameof(displayName), displayName),
+                (nameof(description), description),
+                (nameof(optionsJson), optionsJson)).ConfigureAwait(false);
+
+            OptionDefinition[] options;
+            try
             {
-                PropertyNameCaseInsensitive = true
-            }) ?? [];
+                options = JsonSerializer.Deserialize<OptionDefinition[]>(optionsJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }) ?? [];
+            }
+            catch (JsonException ex)
+            {
+                throw new ArgumentException(
+                    $"Invalid optionsJson: {ex.Message}. Expected JSON array of {{\"label\": \"...\", \"value\": N}}.",
+                    nameof(optionsJson), ex);
+            }
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            var result = await service.CreateGlobalChoiceAsync(new CreateGlobalChoiceRequest
+            {
+                SolutionUniqueName = solution,
+                SchemaName = schemaName,
+                DisplayName = displayName,
+                Description = description,
+                Options = options,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataCreateChoiceResult
+            {
+                Name = result.Name,
+                MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
+                WasDryRun = result.WasDryRun
+            };
         }
-        catch (JsonException ex)
+        catch (PpdsException ex)
         {
-            throw new ArgumentException(
-                $"Invalid optionsJson: {ex.Message}. Expected JSON array of {{\"label\": \"...\", \"value\": N}}.",
-                nameof(optionsJson), ex);
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        var result = await service.CreateGlobalChoiceAsync(new CreateGlobalChoiceRequest
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            SolutionUniqueName = solution,
-            SchemaName = schemaName,
-            DisplayName = displayName,
-            Description = description,
-            Options = options,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
-
-        return new MetadataCreateChoiceResult
-        {
-            Name = result.Name,
-            MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
-            WasDryRun = result.WasDryRun
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

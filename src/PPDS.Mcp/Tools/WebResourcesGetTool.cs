@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -35,32 +36,45 @@ public sealed class WebResourcesGetTool : McpToolBase
         bool published = false,
         CancellationToken cancellationToken = default)
     {
-        if (!Guid.TryParse(id, out var resourceId))
+        try
         {
-            throw new ArgumentException($"Invalid web resource ID: '{id}'. Must be a valid GUID.");
+            if (!Guid.TryParse(id, out var resourceId))
+            {
+                throw new ArgumentException($"Invalid web resource ID: '{id}'. Must be a valid GUID.");
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IWebResourceService>();
+
+            var content = await service.GetContentAsync(resourceId, published, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Web resource '{id}' not found.");
+
+            var info = new WebResourceInfo(
+                content.Id, content.Name, null, content.WebResourceType,
+                false, null, null, null, content.ModifiedOn);
+
+            return new WebResourceGetResult
+            {
+                Id = content.Id.ToString(),
+                Name = content.Name,
+                Type = content.WebResourceType,
+                TypeName = info.TypeName,
+                IsTextType = info.IsTextType,
+                Content = info.IsTextType ? content.Content : null,
+                ModifiedOn = content.ModifiedOn?.ToString("o"),
+                Note = info.IsTextType ? null : "Binary web resource content cannot be displayed. Use the Maker Portal to view this resource."
+            };
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IWebResourceService>();
-
-        var content = await service.GetContentAsync(resourceId, published, cancellationToken).ConfigureAwait(false)
-            ?? throw new KeyNotFoundException($"Web resource '{id}' not found.");
-
-        var info = new WebResourceInfo(
-            content.Id, content.Name, null, content.WebResourceType,
-            false, null, null, null, content.ModifiedOn);
-
-        return new WebResourceGetResult
+        catch (PpdsException ex)
         {
-            Id = content.Id.ToString(),
-            Name = content.Name,
-            Type = content.WebResourceType,
-            TypeName = info.TypeName,
-            IsTextType = info.IsTextType,
-            Content = info.IsTextType ? content.Content : null,
-            ModifiedOn = content.ModifiedOn?.ToString("o"),
-            Note = info.IsTextType ? null : "Binary web resource content cannot be displayed. Use the Maker Portal to view this resource."
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

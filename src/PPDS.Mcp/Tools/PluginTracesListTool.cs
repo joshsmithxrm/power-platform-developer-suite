@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -44,39 +45,52 @@ public sealed class PluginTracesListTool : McpToolBase
         int maxRows = 50,
         CancellationToken cancellationToken = default)
     {
-        maxRows = Math.Clamp(maxRows, 1, 500);
-
-        var filter = new PluginTraceFilter
+        try
         {
-            PrimaryEntity = entity,
-            MessageName = message,
-            TypeName = typeName,
-            HasException = errorsOnly ? true : null
-        };
+            maxRows = Math.Clamp(maxRows, 1, 500);
 
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
-
-        var result = await traceService.ListAsync(filter, maxRows, cancellationToken).ConfigureAwait(false);
-
-        return new PluginTracesListResult
-        {
-            TotalCount = result.TotalCount,
-            Traces = result.Items.Select(t => new PluginTraceSummary
+            var filter = new PluginTraceFilter
             {
-                Id = t.Id,
-                TypeName = t.TypeName,
-                MessageName = t.MessageName,
-                PrimaryEntity = t.PrimaryEntity,
-                Mode = t.Mode.ToString(),
-                Depth = t.Depth,
-                CreatedOn = t.CreatedOn,
-                DurationMs = t.DurationMs,
-                HasException = t.HasException,
-                CorrelationId = t.CorrelationId
-            }).ToList(),
-            Count = result.Items.Count
-        };
+                PrimaryEntity = entity,
+                MessageName = message,
+                TypeName = typeName,
+                HasException = errorsOnly ? true : null
+            };
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
+
+            var result = await traceService.ListAsync(filter, maxRows, cancellationToken).ConfigureAwait(false);
+
+            return new PluginTracesListResult
+            {
+                TotalCount = result.TotalCount,
+                Traces = result.Items.Select(t => new PluginTraceSummary
+                {
+                    Id = t.Id,
+                    TypeName = t.TypeName,
+                    MessageName = t.MessageName,
+                    PrimaryEntity = t.PrimaryEntity,
+                    Mode = t.Mode.ToString(),
+                    Depth = t.Depth,
+                    CreatedOn = t.CreatedOn,
+                    DurationMs = t.DurationMs,
+                    HasException = t.HasException,
+                    CorrelationId = t.CorrelationId
+                }).ToList(),
+                Count = result.Items.Count
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -47,62 +48,75 @@ public sealed class MetadataCreateRelationshipTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(referencedEntity), referencedEntity),
-            (nameof(referencingEntity), referencingEntity),
-            (nameof(schemaName), schemaName),
-            (nameof(relationshipType), relationshipType)).ConfigureAwait(false);
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        CreateRelationshipResult result;
-
-        if (string.Equals(relationshipType, "manyToMany", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            result = await service.CreateManyToManyAsync(new CreateManyToManyRequest
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(referencedEntity), referencedEntity),
+                (nameof(referencingEntity), referencingEntity),
+                (nameof(schemaName), schemaName),
+                (nameof(relationshipType), relationshipType)).ConfigureAwait(false);
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            CreateRelationshipResult result;
+
+            if (string.Equals(relationshipType, "manyToMany", StringComparison.OrdinalIgnoreCase))
             {
-                SolutionUniqueName = solution,
-                Entity1LogicalName = referencedEntity,
-                Entity2LogicalName = referencingEntity,
-                SchemaName = schemaName,
-                DryRun = dryRun
-            }, ct: cancellationToken).ConfigureAwait(false);
-        }
-        else if (string.Equals(relationshipType, "oneToMany", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrWhiteSpace(lookupSchemaName))
-                throw new ArgumentException("lookupSchemaName is required for oneToMany relationships.", nameof(lookupSchemaName));
-            if (string.IsNullOrWhiteSpace(lookupDisplayName))
-                throw new ArgumentException("lookupDisplayName is required for oneToMany relationships.", nameof(lookupDisplayName));
-
-            result = await service.CreateOneToManyAsync(new CreateOneToManyRequest
+                result = await service.CreateManyToManyAsync(new CreateManyToManyRequest
+                {
+                    SolutionUniqueName = solution,
+                    Entity1LogicalName = referencedEntity,
+                    Entity2LogicalName = referencingEntity,
+                    SchemaName = schemaName,
+                    DryRun = dryRun
+                }, ct: cancellationToken).ConfigureAwait(false);
+            }
+            else if (string.Equals(relationshipType, "oneToMany", StringComparison.OrdinalIgnoreCase))
             {
-                SolutionUniqueName = solution,
-                ReferencedEntity = referencedEntity,
-                ReferencingEntity = referencingEntity,
-                SchemaName = schemaName,
-                LookupSchemaName = lookupSchemaName,
-                LookupDisplayName = lookupDisplayName,
-                DryRun = dryRun
-            }, ct: cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            throw new ArgumentException(
-                $"Invalid relationship type '{relationshipType}'. Valid types: 'oneToMany', 'manyToMany'.",
-                nameof(relationshipType));
-        }
+                if (string.IsNullOrWhiteSpace(lookupSchemaName))
+                    throw new ArgumentException("lookupSchemaName is required for oneToMany relationships.", nameof(lookupSchemaName));
+                if (string.IsNullOrWhiteSpace(lookupDisplayName))
+                    throw new ArgumentException("lookupDisplayName is required for oneToMany relationships.", nameof(lookupDisplayName));
 
-        return new MetadataCreateRelationshipResult
+                result = await service.CreateOneToManyAsync(new CreateOneToManyRequest
+                {
+                    SolutionUniqueName = solution,
+                    ReferencedEntity = referencedEntity,
+                    ReferencingEntity = referencingEntity,
+                    SchemaName = schemaName,
+                    LookupSchemaName = lookupSchemaName,
+                    LookupDisplayName = lookupDisplayName,
+                    DryRun = dryRun
+                }, ct: cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                throw new ArgumentException(
+                    $"Invalid relationship type '{relationshipType}'. Valid types: 'oneToMany', 'manyToMany'.",
+                    nameof(relationshipType));
+            }
+
+            return new MetadataCreateRelationshipResult
+            {
+                SchemaName = result.SchemaName,
+                MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
+                WasDryRun = result.WasDryRun
+            };
+        }
+        catch (PpdsException ex)
         {
-            SchemaName = result.SchemaName,
-            MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
-            WasDryRun = result.WasDryRun
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

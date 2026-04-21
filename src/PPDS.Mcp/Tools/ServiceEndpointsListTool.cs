@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Query;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -54,64 +55,77 @@ public sealed class ServiceEndpointsListTool : McpToolBase
     public async Task<ServiceEndpointsListResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        var fetchXml = @"
-            <fetch>
-                <entity name=""serviceendpoint"">
-                    <attribute name=""serviceendpointid"" />
-                    <attribute name=""name"" />
-                    <attribute name=""description"" />
-                    <attribute name=""contract"" />
-                    <attribute name=""authtype"" />
-                    <attribute name=""url"" />
-                    <attribute name=""namespaceaddress"" />
-                    <attribute name=""path"" />
-                    <attribute name=""messageformat"" />
-                    <attribute name=""userclaim"" />
-                    <attribute name=""ismanaged"" />
-                    <attribute name=""createdon"" />
-                    <attribute name=""modifiedon"" />
-                    <order attribute=""name"" />
-                </entity>
-            </fetch>";
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        var result = await queryExecutor.ExecuteFetchXmlAsync(fetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        var endpoints = result.Records.Select(record =>
+        try
         {
-            var contractRaw = record.GetInt("contract");
-            var authTypeRaw = record.GetInt("authtype");
-            var messageFormatRaw = record.GetIntNullable("messageformat");
-            var userClaimRaw = record.GetIntNullable("userclaim");
-            var contractType = MapContract(contractRaw);
-            var isWebhook = contractRaw == ContractWebhook;
+            var fetchXml = @"
+                <fetch>
+                    <entity name=""serviceendpoint"">
+                        <attribute name=""serviceendpointid"" />
+                        <attribute name=""name"" />
+                        <attribute name=""description"" />
+                        <attribute name=""contract"" />
+                        <attribute name=""authtype"" />
+                        <attribute name=""url"" />
+                        <attribute name=""namespaceaddress"" />
+                        <attribute name=""path"" />
+                        <attribute name=""messageformat"" />
+                        <attribute name=""userclaim"" />
+                        <attribute name=""ismanaged"" />
+                        <attribute name=""createdon"" />
+                        <attribute name=""modifiedon"" />
+                        <order attribute=""name"" />
+                    </entity>
+                </fetch>";
 
-            return new ServiceEndpointSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+
+            var result = await queryExecutor.ExecuteFetchXmlAsync(fetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
+
+            var endpoints = result.Records.Select(record =>
             {
-                Id = record.GetGuid("serviceendpointid"),
-                Name = record.GetString("name") ?? "",
-                Description = record.GetString("description"),
-                ContractType = contractType,
-                IsWebhook = isWebhook,
-                Url = record.GetString("url"),
-                NamespaceAddress = record.GetString("namespaceaddress"),
-                Path = record.GetString("path"),
-                AuthType = MapAuthType(authTypeRaw),
-                MessageFormat = messageFormatRaw.HasValue ? MapMessageFormat(messageFormatRaw.Value) : null,
-                UserClaim = userClaimRaw.HasValue ? MapUserClaim(userClaimRaw.Value) : null,
-                IsManaged = record.GetBool("ismanaged"),
-                CreatedOn = record.GetDateTime("createdon"),
-                ModifiedOn = record.GetDateTime("modifiedon")
-            };
-        }).ToList();
+                var contractRaw = record.GetInt("contract");
+                var authTypeRaw = record.GetInt("authtype");
+                var messageFormatRaw = record.GetIntNullable("messageformat");
+                var userClaimRaw = record.GetIntNullable("userclaim");
+                var contractType = MapContract(contractRaw);
+                var isWebhook = contractRaw == ContractWebhook;
 
-        return new ServiceEndpointsListResult
+                return new ServiceEndpointSummary
+                {
+                    Id = record.GetGuid("serviceendpointid"),
+                    Name = record.GetString("name") ?? "",
+                    Description = record.GetString("description"),
+                    ContractType = contractType,
+                    IsWebhook = isWebhook,
+                    Url = record.GetString("url"),
+                    NamespaceAddress = record.GetString("namespaceaddress"),
+                    Path = record.GetString("path"),
+                    AuthType = MapAuthType(authTypeRaw),
+                    MessageFormat = messageFormatRaw.HasValue ? MapMessageFormat(messageFormatRaw.Value) : null,
+                    UserClaim = userClaimRaw.HasValue ? MapUserClaim(userClaimRaw.Value) : null,
+                    IsManaged = record.GetBool("ismanaged"),
+                    CreatedOn = record.GetDateTime("createdon"),
+                    ModifiedOn = record.GetDateTime("modifiedon")
+                };
+            }).ToList();
+
+            return new ServiceEndpointsListResult
+            {
+                Endpoints = endpoints,
+                Count = endpoints.Count
+            };
+        }
+        catch (PpdsException ex)
         {
-            Endpoints = endpoints,
-            Count = endpoints.Count
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static string MapContract(int value) => value switch

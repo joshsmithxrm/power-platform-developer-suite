@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,37 +33,50 @@ public sealed class DataSchemaTool : McpToolBase
         string entityName,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
-        var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
-
-        var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new DataSchemaResult
+        try
         {
-            EntityLogicalName = entity.LogicalName,
-            DisplayName = entity.DisplayName,
-            PrimaryIdAttribute = entity.PrimaryIdAttribute,
-            PrimaryNameAttribute = entity.PrimaryNameAttribute,
-            Attributes = entity.Attributes.Select(a => new SchemaAttributeInfo
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
+            var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
+
+            var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new DataSchemaResult
             {
-                LogicalName = a.LogicalName,
-                DisplayName = a.DisplayName,
-                AttributeType = a.AttributeType,
-                IsCustomAttribute = a.IsCustomAttribute,
-                IsPrimaryId = a.LogicalName == entity.PrimaryIdAttribute,
-                IsPrimaryName = a.LogicalName == entity.PrimaryNameAttribute,
-                MaxLength = a.MaxLength,
-                MinValue = a.MinValue,
-                MaxValue = a.MaxValue,
-                Precision = a.Precision,
-                TargetEntities = a.Targets?.ToList(),
-                OptionSetValues = a.Options?.Select(o => new OptionSetValue
+                EntityLogicalName = entity.LogicalName,
+                DisplayName = entity.DisplayName,
+                PrimaryIdAttribute = entity.PrimaryIdAttribute,
+                PrimaryNameAttribute = entity.PrimaryNameAttribute,
+                Attributes = entity.Attributes.Select(a => new SchemaAttributeInfo
                 {
-                    Value = o.Value,
-                    Label = o.Label
-                }).ToList()
-            }).OrderBy(a => a.LogicalName).ToList()
-        };
+                    LogicalName = a.LogicalName,
+                    DisplayName = a.DisplayName,
+                    AttributeType = a.AttributeType,
+                    IsCustomAttribute = a.IsCustomAttribute,
+                    IsPrimaryId = a.LogicalName == entity.PrimaryIdAttribute,
+                    IsPrimaryName = a.LogicalName == entity.PrimaryNameAttribute,
+                    MaxLength = a.MaxLength,
+                    MinValue = a.MinValue,
+                    MaxValue = a.MaxValue,
+                    Precision = a.Precision,
+                    TargetEntities = a.Targets?.ToList(),
+                    OptionSetValues = a.Options?.Select(o => new OptionSetValue
+                    {
+                        Value = o.Value,
+                        Label = o.Label
+                    }).ToList()
+                }).OrderBy(a => a.LogicalName).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

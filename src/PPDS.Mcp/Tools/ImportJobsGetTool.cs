@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.ImportJobs;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,30 +33,43 @@ public sealed class ImportJobsGetTool : McpToolBase
         string id,
         CancellationToken cancellationToken = default)
     {
-        if (!Guid.TryParse(id, out var importJobId))
+        try
         {
-            throw new ArgumentException($"Invalid import job ID: '{id}'. Must be a valid GUID.");
+            if (!Guid.TryParse(id, out var importJobId))
+            {
+                throw new ArgumentException($"Invalid import job ID: '{id}'. Must be a valid GUID.");
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IImportJobService>();
+
+            var job = await service.GetAsync(importJobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Import job '{id}' not found.");
+
+            var data = await service.GetDataAsync(importJobId, cancellationToken).ConfigureAwait(false);
+
+            return new ImportJobGetResult
+            {
+                Id = job.Id.ToString(),
+                SolutionName = job.SolutionName,
+                Status = job.Status,
+                Progress = job.Progress,
+                CreatedBy = job.CreatedByName,
+                CreatedOn = job.CreatedOn?.ToString("o"),
+                CompletedOn = job.CompletedOn?.ToString("o"),
+                Data = data
+            };
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(id), id)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IImportJobService>();
-
-        var job = await service.GetAsync(importJobId, cancellationToken).ConfigureAwait(false)
-            ?? throw new KeyNotFoundException($"Import job '{id}' not found.");
-
-        var data = await service.GetDataAsync(importJobId, cancellationToken).ConfigureAwait(false);
-
-        return new ImportJobGetResult
+        catch (PpdsException ex)
         {
-            Id = job.Id.ToString(),
-            SolutionName = job.SolutionName,
-            Status = job.Status,
-            Progress = job.Progress,
-            CreatedBy = job.CreatedByName,
-            CreatedOn = job.CreatedOn?.ToString("o"),
-            CompletedOn = job.CompletedOn?.ToString("o"),
-            Data = data
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

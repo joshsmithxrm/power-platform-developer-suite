@@ -6,6 +6,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Query.Parsing;
 using PPDS.Query.Transpilation;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -37,46 +38,59 @@ public sealed class QuerySqlTool : McpToolBase
         int maxRows = 100,
         CancellationToken cancellationToken = default)
     {
-        // Cap maxRows to prevent runaway queries.
-        maxRows = Math.Clamp(maxRows, 1, 5000);
-
-        // Validate required params and create service provider.
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(sql), sql)).ConfigureAwait(false);
-
-        // Parse and transpile SQL to FetchXML.
-        var parser = new QueryParser();
-        var stmt = parser.ParseStatement(sql);
-
-        // Block DML operations in read-only sessions.
-        if (Context.IsReadOnly && stmt is not SelectStatement)
+        try
         {
-            throw new InvalidOperationException(
-                "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only.");
-        }
+            // Cap maxRows to prevent runaway queries.
+            maxRows = Math.Clamp(maxRows, 1, 5000);
 
-        // Apply row limit only if the user hasn't already specified a TOP clause.
-        if (stmt is SelectStatement selectStmt
-            && selectStmt.QueryExpression is QuerySpecification querySpec
-            && querySpec.TopRowFilter == null)
-        {
-            querySpec.TopRowFilter = new TopRowFilter
+            // Validate required params and create service provider.
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(sql), sql)).ConfigureAwait(false);
+
+            // Parse and transpile SQL to FetchXML.
+            var parser = new QueryParser();
+            var stmt = parser.ParseStatement(sql);
+
+            // Block DML operations in read-only sessions.
+            if (Context.IsReadOnly && stmt is not SelectStatement)
             {
-                Expression = new IntegerLiteral { Value = maxRows.ToString() }
-            };
+                throw new InvalidOperationException(
+                    "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only.");
+            }
+
+            // Apply row limit only if the user hasn't already specified a TOP clause.
+            if (stmt is SelectStatement selectStmt
+                && selectStmt.QueryExpression is QuerySpecification querySpec
+                && querySpec.TopRowFilter == null)
+            {
+                querySpec.TopRowFilter = new TopRowFilter
+                {
+                    Expression = new IntegerLiteral { Value = maxRows.ToString() }
+                };
+            }
+
+            var generator = new FetchXmlGenerator();
+            var fetchXml = generator.Generate(stmt);
+
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+
+            var result = await queryExecutor.ExecuteFetchXmlAsync(
+                fetchXml,
+                pageNumber: null,
+                pagingCookie: null,
+                includeCount: false,
+                cancellationToken).ConfigureAwait(false);
+
+            return QueryResultMapper.MapToResult(result, fetchXml);
         }
-
-        var generator = new FetchXmlGenerator();
-        var fetchXml = generator.Generate(stmt);
-
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        var result = await queryExecutor.ExecuteFetchXmlAsync(
-            fetchXml,
-            pageNumber: null,
-            pagingCookie: null,
-            includeCount: false,
-            cancellationToken).ConfigureAwait(false);
-
-        return QueryResultMapper.MapToResult(result, fetchXml);
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }

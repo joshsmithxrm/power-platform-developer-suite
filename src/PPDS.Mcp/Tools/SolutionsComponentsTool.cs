@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -35,35 +36,48 @@ public sealed class SolutionsComponentsTool : McpToolBase
         int? componentType = null,
         CancellationToken cancellationToken = default)
     {
-        if (!Guid.TryParse(solutionId, out var id))
+        try
         {
-            throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
-        }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(solutionId), solutionId)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<ISolutionService>();
-
-        var components = await service.GetComponentsAsync(
-            id,
-            componentType: componentType,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new SolutionsComponentsResult
-        {
-            SolutionId = solutionId,
-            TotalCount = components.Count,
-            Components = components.Select(c => new ComponentDto
+            if (!Guid.TryParse(solutionId, out var id))
             {
-                Id = c.Id.ToString(),
-                ObjectId = c.ObjectId.ToString(),
-                ComponentType = c.ComponentType,
-                ComponentTypeName = c.ComponentTypeName,
-                DisplayName = c.DisplayName,
-                LogicalName = c.LogicalName,
-                SchemaName = c.SchemaName,
-                IsMetadata = c.IsMetadata
-            }).ToList()
-        };
+                throw new ArgumentException($"Invalid solution ID: '{solutionId}'. Must be a valid GUID.");
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(solutionId), solutionId)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<ISolutionService>();
+
+            var components = await service.GetComponentsAsync(
+                id,
+                componentType: componentType,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new SolutionsComponentsResult
+            {
+                SolutionId = solutionId,
+                TotalCount = components.Count,
+                Components = components.Select(c => new ComponentDto
+                {
+                    Id = c.Id.ToString(),
+                    ObjectId = c.ObjectId.ToString(),
+                    ComponentType = c.ComponentType,
+                    ComponentTypeName = c.ComponentTypeName,
+                    DisplayName = c.DisplayName,
+                    LogicalName = c.LogicalName,
+                    SchemaName = c.SchemaName,
+                    IsMetadata = c.IsMetadata
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

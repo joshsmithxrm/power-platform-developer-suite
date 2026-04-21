@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.ConnectionReferences;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,26 +33,39 @@ public sealed class ConnectionReferencesListTool : McpToolBase
         string? solutionId = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
-
-        var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new ConnectionReferencesListResult
+        try
         {
-            TotalCount = result.TotalCount,
-            ConnectionReferences = result.Items.Select(r => new ConnectionReferenceSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
+
+            var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new ConnectionReferencesListResult
             {
-                LogicalName = r.LogicalName,
-                DisplayName = r.DisplayName,
-                ConnectorId = r.ConnectorId,
-                ConnectionId = r.ConnectionId,
-                IsManaged = r.IsManaged,
-                IsBound = r.IsBound,
-                ConnectionStatus = "N/A",
-                ConnectorDisplayName = null
-            }).ToList()
-        };
+                TotalCount = result.TotalCount,
+                ConnectionReferences = result.Items.Select(r => new ConnectionReferenceSummary
+                {
+                    LogicalName = r.LogicalName,
+                    DisplayName = r.DisplayName,
+                    ConnectorId = r.ConnectorId,
+                    ConnectionId = r.ConnectionId,
+                    IsManaged = r.IsManaged,
+                    IsBound = r.IsBound,
+                    ConnectionStatus = "N/A",
+                    ConnectorDisplayName = null
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

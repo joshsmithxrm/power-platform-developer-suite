@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -41,57 +42,70 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(schemaName), schemaName)).ConfigureAwait(false);
-
-        CascadeConfigurationDto? cascadeConfig = null;
-
-        if (cascadeDelete != null || cascadeAssign != null)
+        try
         {
-            cascadeConfig = new CascadeConfigurationDto();
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
 
-            if (cascadeDelete != null)
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(schemaName), schemaName)).ConfigureAwait(false);
+
+            CascadeConfigurationDto? cascadeConfig = null;
+
+            if (cascadeDelete != null || cascadeAssign != null)
             {
-                if (!Enum.TryParse<CascadeBehavior>(cascadeDelete, ignoreCase: true, out var deleteBehavior))
+                cascadeConfig = new CascadeConfigurationDto();
+
+                if (cascadeDelete != null)
                 {
-                    throw new ArgumentException(
-                        $"Invalid cascade delete behavior '{cascadeDelete}'. Valid values: {string.Join(", ", Enum.GetNames<CascadeBehavior>())}",
-                        nameof(cascadeDelete));
+                    if (!Enum.TryParse<CascadeBehavior>(cascadeDelete, ignoreCase: true, out var deleteBehavior))
+                    {
+                        throw new ArgumentException(
+                            $"Invalid cascade delete behavior '{cascadeDelete}'. Valid values: {string.Join(", ", Enum.GetNames<CascadeBehavior>())}",
+                            nameof(cascadeDelete));
+                    }
+                    cascadeConfig.Delete = deleteBehavior;
                 }
-                cascadeConfig.Delete = deleteBehavior;
+
+                if (cascadeAssign != null)
+                {
+                    if (!Enum.TryParse<CascadeBehavior>(cascadeAssign, ignoreCase: true, out var assignBehavior))
+                    {
+                        throw new ArgumentException(
+                            $"Invalid cascade assign behavior '{cascadeAssign}'. Valid values: {string.Join(", ", Enum.GetNames<CascadeBehavior>())}",
+                            nameof(cascadeAssign));
+                    }
+                    cascadeConfig.Assign = assignBehavior;
+                }
             }
 
-            if (cascadeAssign != null)
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            await service.UpdateRelationshipAsync(new UpdateRelationshipRequest
             {
-                if (!Enum.TryParse<CascadeBehavior>(cascadeAssign, ignoreCase: true, out var assignBehavior))
-                {
-                    throw new ArgumentException(
-                        $"Invalid cascade assign behavior '{cascadeAssign}'. Valid values: {string.Join(", ", Enum.GetNames<CascadeBehavior>())}",
-                        nameof(cascadeAssign));
-                }
-                cascadeConfig.Assign = assignBehavior;
-            }
+                SolutionUniqueName = solution,
+                SchemaName = schemaName,
+                CascadeConfiguration = cascadeConfig,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataUpdateRelationshipResult
+            {
+                Success = true,
+                WasDryRun = dryRun
+            };
         }
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        await service.UpdateRelationshipAsync(new UpdateRelationshipRequest
+        catch (PpdsException ex)
         {
-            SolutionUniqueName = solution,
-            SchemaName = schemaName,
-            CascadeConfiguration = cascadeConfig,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
-
-        return new MetadataUpdateRelationshipResult
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            Success = true,
-            WasDryRun = dryRun
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

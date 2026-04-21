@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.EnvironmentVariables;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -35,25 +36,38 @@ public sealed class EnvironmentVariablesSetTool : McpToolBase
         string value,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
+        try
         {
-            throw new InvalidOperationException(
-                "Cannot set environment variable value: this MCP session is read-only.");
+            if (Context.IsReadOnly)
+            {
+                throw new InvalidOperationException(
+                    "Cannot set environment variable value: this MCP session is read-only.");
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName), (nameof(value), value)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
+
+            var success = await service.SetValueAsync(schemaName, value, cancellationToken).ConfigureAwait(false);
+
+            return new EnvironmentVariablesSetResult
+            {
+                Success = success,
+                SchemaName = schemaName,
+                Message = success
+                    ? $"Environment variable '{schemaName}' value updated successfully."
+                    : $"Environment variable '{schemaName}' not found."
+            };
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName), (nameof(value), value)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
-
-        var success = await service.SetValueAsync(schemaName, value, cancellationToken).ConfigureAwait(false);
-
-        return new EnvironmentVariablesSetResult
+        catch (PpdsException ex)
         {
-            Success = success,
-            SchemaName = schemaName,
-            Message = success
-                ? $"Environment variable '{schemaName}' value updated successfully."
-                : $"Environment variable '{schemaName}' not found."
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

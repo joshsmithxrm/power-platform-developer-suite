@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using PPDS.Auth.Discovery;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -31,44 +32,57 @@ public sealed class EnvListTool : McpToolBase
         string? filter = null,
         CancellationToken cancellationToken = default)
     {
-        var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
-
-        using var gds = GlobalDiscoveryService.FromProfile(profile);
-        var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
-
-        // Apply filter if provided.
-        IReadOnlyList<DiscoveredEnvironment> filtered = environments;
-        if (!string.IsNullOrWhiteSpace(filter))
+        try
         {
-            filtered = environments.Where(e =>
-                e.FriendlyName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                e.UniqueName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                e.ApiUrl.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                (e.EnvironmentId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
-            ).ToList();
-        }
+            var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
-        var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
+            using var gds = GlobalDiscoveryService.FromProfile(profile);
+            var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
 
-        return new EnvListResult
-        {
-            Filter = filter,
-            Environments = filtered.Select(e => new EnvironmentInfo
+            // Apply filter if provided.
+            IReadOnlyList<DiscoveredEnvironment> filtered = environments;
+            if (!string.IsNullOrWhiteSpace(filter))
             {
-                Id = e.Id,
-                EnvironmentId = e.EnvironmentId,
-                FriendlyName = e.FriendlyName,
-                UniqueName = e.UniqueName,
-                ApiUrl = e.ApiUrl,
-                Url = e.Url,
-                Type = e.EnvironmentType,
-                State = e.IsEnabled ? "Enabled" : "Disabled",
-                Region = e.Region,
-                Version = e.Version,
-                IsActive = selectedUrl != null &&
-                    e.ApiUrl.TrimEnd('/').ToLowerInvariant() == selectedUrl
-            }).ToList()
-        };
+                filtered = environments.Where(e =>
+                    e.FriendlyName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    e.UniqueName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    e.ApiUrl.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    (e.EnvironmentId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+                ).ToList();
+            }
+
+            var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
+
+            return new EnvListResult
+            {
+                Filter = filter,
+                Environments = filtered.Select(e => new EnvironmentInfo
+                {
+                    Id = e.Id,
+                    EnvironmentId = e.EnvironmentId,
+                    FriendlyName = e.FriendlyName,
+                    UniqueName = e.UniqueName,
+                    ApiUrl = e.ApiUrl,
+                    Url = e.Url,
+                    Type = e.EnvironmentType,
+                    State = e.IsEnabled ? "Enabled" : "Disabled",
+                    Region = e.Region,
+                    Version = e.Version,
+                    IsActive = selectedUrl != null &&
+                        e.ApiUrl.TrimEnd('/').ToLowerInvariant() == selectedUrl
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

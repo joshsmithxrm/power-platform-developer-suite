@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.EnvironmentVariables;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,27 +33,40 @@ public sealed class EnvironmentVariablesListTool : McpToolBase
         string? solutionId = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
-
-        var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new EnvironmentVariablesListResult
+        try
         {
-            TotalCount = result.TotalCount,
-            EnvironmentVariables = result.Items.Select(v => new EnvironmentVariableSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
+
+            var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new EnvironmentVariablesListResult
             {
-                SchemaName = v.SchemaName,
-                DisplayName = v.DisplayName,
-                Type = v.Type,
-                DefaultValue = v.DefaultValue,
-                CurrentValue = v.CurrentValue,
-                IsManaged = v.IsManaged,
-                IsRequired = v.IsRequired,
-                HasOverride = v.CurrentValueId.HasValue,
-                IsMissing = v.IsRequired && v.CurrentValue == null && v.DefaultValue == null
-            }).ToList()
-        };
+                TotalCount = result.TotalCount,
+                EnvironmentVariables = result.Items.Select(v => new EnvironmentVariableSummary
+                {
+                    SchemaName = v.SchemaName,
+                    DisplayName = v.DisplayName,
+                    Type = v.Type,
+                    DefaultValue = v.DefaultValue,
+                    CurrentValue = v.CurrentValue,
+                    IsManaged = v.IsManaged,
+                    IsRequired = v.IsRequired,
+                    HasOverride = v.CurrentValueId.HasValue,
+                    IsMissing = v.IsRequired && v.CurrentValue == null && v.DefaultValue == null
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

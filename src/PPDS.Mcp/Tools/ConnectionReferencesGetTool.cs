@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.ConnectionReferences;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,35 +33,48 @@ public sealed class ConnectionReferencesGetTool : McpToolBase
         string logicalName,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(logicalName), logicalName)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
-
-        var reference = await service.GetAsync(logicalName, cancellationToken).ConfigureAwait(false)
-            ?? throw new KeyNotFoundException($"Connection reference '{logicalName}' not found.");
-
-        var flows = await service.GetFlowsUsingAsync(logicalName, cancellationToken).ConfigureAwait(false);
-
-        return new ConnectionReferencesGetResult
+        try
         {
-            LogicalName = reference.LogicalName,
-            DisplayName = reference.DisplayName,
-            Description = reference.Description,
-            ConnectorId = reference.ConnectorId,
-            ConnectionId = reference.ConnectionId,
-            IsManaged = reference.IsManaged,
-            IsBound = reference.IsBound,
-            ConnectionStatus = "N/A",
-            ConnectorDisplayName = null,
-            CreatedOn = reference.CreatedOn?.ToString("o"),
-            ModifiedOn = reference.ModifiedOn?.ToString("o"),
-            Flows = flows.Select(f => new ConnectionReferenceFlowSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(logicalName), logicalName)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
+
+            var reference = await service.GetAsync(logicalName, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Connection reference '{logicalName}' not found.");
+
+            var flows = await service.GetFlowsUsingAsync(logicalName, cancellationToken).ConfigureAwait(false);
+
+            return new ConnectionReferencesGetResult
             {
-                UniqueName = f.UniqueName,
-                DisplayName = f.DisplayName,
-                State = f.State.ToString(),
-                Category = f.Category.ToString()
-            }).ToList()
-        };
+                LogicalName = reference.LogicalName,
+                DisplayName = reference.DisplayName,
+                Description = reference.Description,
+                ConnectorId = reference.ConnectorId,
+                ConnectionId = reference.ConnectionId,
+                IsManaged = reference.IsManaged,
+                IsBound = reference.IsBound,
+                ConnectionStatus = "N/A",
+                ConnectorDisplayName = null,
+                CreatedOn = reference.CreatedOn?.ToString("o"),
+                ModifiedOn = reference.ModifiedOn?.ToString("o"),
+                Flows = flows.Select(f => new ConnectionReferenceFlowSummary
+                {
+                    UniqueName = f.UniqueName,
+                    DisplayName = f.DisplayName,
+                    State = f.State.ToString(),
+                    Category = f.Category.ToString()
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

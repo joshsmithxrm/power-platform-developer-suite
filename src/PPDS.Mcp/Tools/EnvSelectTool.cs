@@ -4,6 +4,7 @@ using ModelContextProtocol.Server;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,47 +33,60 @@ public sealed class EnvSelectTool : McpToolBase
         string environment,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
-
-        var collection = await Context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
-
-        var profile = collection.ActiveProfile
-            ?? throw new InvalidOperationException("No active profile configured. Run 'ppds auth create' first.");
-
-        // Use multi-layer resolution.
-        using var credentialStore = new NativeCredentialStore();
-        using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
-        var result = await resolver.ResolveAsync(environment, cancellationToken).ConfigureAwait(false);
-
-        if (!result.Success)
+        try
         {
-            throw new InvalidOperationException(
-                result.ErrorMessage ?? $"Environment '{environment}' not found. Use ppds_env_list to see available environments.");
+            ArgumentException.ThrowIfNullOrWhiteSpace(environment);
+
+            var collection = await Context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
+
+            var profile = collection.ActiveProfile
+                ?? throw new InvalidOperationException("No active profile configured. Run 'ppds auth create' first.");
+
+            // Use multi-layer resolution.
+            using var credentialStore = new NativeCredentialStore();
+            using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
+            var result = await resolver.ResolveAsync(environment, cancellationToken).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                throw new InvalidOperationException(
+                    result.ErrorMessage ?? $"Environment '{environment}' not found. Use ppds_env_list to see available environments.");
+            }
+
+            var resolved = result.Environment!;
+
+            // Validate environment switch against session allowlist
+            Context.ValidateEnvironmentSwitch(resolved.Url);
+
+            // Invalidate cached pool for the old environment.
+            if (profile.Environment != null)
+            {
+                Context.InvalidateEnvironment(profile.Environment.Url);
+            }
+
+            // Update profile with new environment.
+            profile.Environment = resolved;
+            await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
+
+            return new EnvSelectResult
+            {
+                Url = resolved.Url,
+                DisplayName = resolved.DisplayName,
+                UniqueName = resolved.UniqueName,
+                EnvironmentId = resolved.EnvironmentId,
+                ResolutionMethod = result.Method.ToString()
+            };
         }
-
-        var resolved = result.Environment!;
-
-        // Validate environment switch against session allowlist
-        Context.ValidateEnvironmentSwitch(resolved.Url);
-
-        // Invalidate cached pool for the old environment.
-        if (profile.Environment != null)
+        catch (PpdsException ex)
         {
-            Context.InvalidateEnvironment(profile.Environment.Url);
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        // Update profile with new environment.
-        profile.Environment = resolved;
-        await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
-
-        return new EnvSelectResult
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            Url = resolved.Url,
-            DisplayName = resolved.DisplayName,
-            UniqueName = resolved.UniqueName,
-            EnvironmentId = resolved.EnvironmentId,
-            ResolutionMethod = result.Method.ToString()
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

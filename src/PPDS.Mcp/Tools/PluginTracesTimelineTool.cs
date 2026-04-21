@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,22 +33,35 @@ public sealed class PluginTracesTimelineTool : McpToolBase
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        if (!Guid.TryParse(correlationId, out var id))
+        try
         {
-            throw new ArgumentException($"Invalid correlation ID format: '{correlationId}'. Expected a GUID.", nameof(correlationId));
+            if (!Guid.TryParse(correlationId, out var id))
+            {
+                throw new ArgumentException($"Invalid correlation ID format: '{correlationId}'. Expected a GUID.", nameof(correlationId));
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(correlationId), correlationId)).ConfigureAwait(false);
+            var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
+
+            var timeline = await traceService.BuildTimelineAsync(id, cancellationToken).ConfigureAwait(false);
+
+            return new PluginTimelineResult
+            {
+                CorrelationId = id,
+                Nodes = timeline.Select(MapNode).ToList(),
+                TotalNodes = CountNodes(timeline)
+            };
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(correlationId), correlationId)).ConfigureAwait(false);
-        var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
-
-        var timeline = await traceService.BuildTimelineAsync(id, cancellationToken).ConfigureAwait(false);
-
-        return new PluginTimelineResult
+        catch (PpdsException ex)
         {
-            CorrelationId = id,
-            Nodes = timeline.Select(MapNode).ToList(),
-            TotalNodes = CountNodes(timeline)
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static TimelineNodeDto MapNode(TimelineNode node)

@@ -7,6 +7,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -44,61 +45,74 @@ public sealed class MetadataCreateKeyTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(entityName), entityName),
-            (nameof(schemaName), schemaName),
-            (nameof(displayName), displayName),
-            (nameof(attributesJson), attributesJson)).ConfigureAwait(false);
-
-        string[] attributes;
-
-        var trimmed = attributesJson.Trim();
-        if (trimmed.StartsWith('['))
+        try
         {
-            try
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(entityName), entityName),
+                (nameof(schemaName), schemaName),
+                (nameof(displayName), displayName),
+                (nameof(attributesJson), attributesJson)).ConfigureAwait(false);
+
+            string[] attributes;
+
+            var trimmed = attributesJson.Trim();
+            if (trimmed.StartsWith('['))
             {
-                attributes = JsonSerializer.Deserialize<string[]>(trimmed) ?? [];
+                try
+                {
+                    attributes = JsonSerializer.Deserialize<string[]>(trimmed) ?? [];
+                }
+                catch (JsonException ex)
+                {
+                    throw new ArgumentException(
+                        $"Invalid attributesJson: {ex.Message}. Expected a JSON array of strings or comma-separated values.",
+                        nameof(attributesJson), ex);
+                }
             }
-            catch (JsonException ex)
+            else
+            {
+                attributes = trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            }
+
+            if (attributes.Length == 0)
             {
                 throw new ArgumentException(
-                    $"Invalid attributesJson: {ex.Message}. Expected a JSON array of strings or comma-separated values.",
-                    nameof(attributesJson), ex);
+                    "At least one key attribute must be specified.",
+                    nameof(attributesJson));
             }
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            var result = await service.CreateKeyAsync(new CreateKeyRequest
+            {
+                SolutionUniqueName = solution,
+                EntityLogicalName = entityName,
+                SchemaName = schemaName,
+                DisplayName = displayName,
+                KeyAttributes = attributes,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataCreateKeyResult
+            {
+                SchemaName = result.SchemaName,
+                WasDryRun = result.WasDryRun
+            };
         }
-        else
+        catch (PpdsException ex)
         {
-            attributes = trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        if (attributes.Length == 0)
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            throw new ArgumentException(
-                "At least one key attribute must be specified.",
-                nameof(attributesJson));
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        var result = await service.CreateKeyAsync(new CreateKeyRequest
-        {
-            SolutionUniqueName = solution,
-            EntityLogicalName = entityName,
-            SchemaName = schemaName,
-            DisplayName = displayName,
-            KeyAttributes = attributes,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
-
-        return new MetadataCreateKeyResult
-        {
-            SchemaName = result.SchemaName,
-            WasDryRun = result.WasDryRun
-        };
     }
 }
 

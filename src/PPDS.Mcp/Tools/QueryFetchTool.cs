@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Query;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -34,26 +35,39 @@ public sealed class QueryFetchTool : McpToolBase
         int maxRows = 100,
         CancellationToken cancellationToken = default)
     {
-        // Cap maxRows to prevent runaway queries.
-        maxRows = Math.Clamp(maxRows, 1, 5000);
+        try
+        {
+            // Cap maxRows to prevent runaway queries.
+            maxRows = Math.Clamp(maxRows, 1, 5000);
 
-        // Validate required params and create service provider.
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(fetchXml), fetchXml)).ConfigureAwait(false);
+            // Validate required params and create service provider.
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(fetchXml), fetchXml)).ConfigureAwait(false);
 
-        // Inject top attribute if not already present.
-        var query = InjectTopAttribute(fetchXml, maxRows);
+            // Inject top attribute if not already present.
+            var query = InjectTopAttribute(fetchXml, maxRows);
 
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
-        // FetchXML is inherently read-only — no DML guard needed.
-        var result = await queryExecutor.ExecuteFetchXmlAsync(
-            query,
-            pageNumber: null,
-            pagingCookie: null,
-            includeCount: false,
-            cancellationToken).ConfigureAwait(false);
+            // FetchXML is inherently read-only — no DML guard needed.
+            var result = await queryExecutor.ExecuteFetchXmlAsync(
+                query,
+                pageNumber: null,
+                pagingCookie: null,
+                includeCount: false,
+                cancellationToken).ConfigureAwait(false);
 
-        return QueryResultMapper.MapToResult(result, query);
+            return QueryResultMapper.MapToResult(result, query);
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static string InjectTopAttribute(string fetchXml, int top)

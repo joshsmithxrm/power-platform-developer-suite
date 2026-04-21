@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.ImportJobs;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -30,26 +31,39 @@ public sealed class ImportJobsListTool : McpToolBase
     public async Task<ImportJobsListResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IImportJobService>();
-
-        var result = await service.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new ImportJobsListResult
+        try
         {
-            TotalCount = result.TotalCount,
-            Jobs = result.Items.Select(j => new ImportJobSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IImportJobService>();
+
+            var result = await service.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new ImportJobsListResult
             {
-                Id = j.Id.ToString(),
-                SolutionName = j.SolutionName,
-                Status = j.Status,
-                Progress = j.Progress,
-                CreatedBy = j.CreatedByName,
-                CreatedOn = j.CreatedOn?.ToString("o"),
-                CompletedOn = j.CompletedOn?.ToString("o"),
-                Duration = j.FormattedDuration
-            }).ToList()
-        };
+                TotalCount = result.TotalCount,
+                Jobs = result.Items.Select(j => new ImportJobSummary
+                {
+                    Id = j.Id.ToString(),
+                    SolutionName = j.SolutionName,
+                    Status = j.Status,
+                    Progress = j.Progress,
+                    CreatedBy = j.CreatedByName,
+                    CreatedOn = j.CreatedOn?.ToString("o"),
+                    CompletedOn = j.CompletedOn?.ToString("o"),
+                    Duration = j.FormattedDuration
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 
