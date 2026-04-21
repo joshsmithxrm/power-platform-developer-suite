@@ -17,7 +17,7 @@ public static class UrlCommand
     {
         var nameArgument = new Argument<string>("name")
         {
-            Description = "The unique name of the flow"
+            Description = "The workflow ID (GUID) or unique name"
         };
 
         var command = new Command("url", "Get Power Automate maker URL for a flow")
@@ -42,6 +42,18 @@ public static class UrlCommand
         return command;
     }
 
+    /// <summary>
+    /// Resolves a flow by GUID if <paramref name="nameOrId"/> parses as a GUID,
+    /// otherwise falls back to unique-name lookup. Internal for unit testing.
+    /// </summary>
+    internal static Task<FlowInfo?> ResolveFlowAsync(
+        IFlowService flowService,
+        string nameOrId,
+        CancellationToken cancellationToken) =>
+        Guid.TryParse(nameOrId, out var id)
+            ? flowService.GetByIdAsync(id, cancellationToken)
+            : flowService.GetAsync(nameOrId, cancellationToken);
+
     private static async Task<int> ExecuteAsync(
         string name,
         string? profile,
@@ -64,7 +76,7 @@ public static class UrlCommand
             var flowService = serviceProvider.GetRequiredService<IFlowService>();
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
 
-            var flow = await flowService.GetAsync(name, cancellationToken);
+            var flow = await ResolveFlowAsync(flowService, name, cancellationToken);
 
             if (flow == null)
             {

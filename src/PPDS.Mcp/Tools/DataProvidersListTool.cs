@@ -2,7 +2,8 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
-using PPDS.Dataverse.Query;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;
@@ -29,68 +30,52 @@ public sealed class DataProvidersListTool : McpToolBase
     public async Task<DataProvidersListResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        var dataSourceFetchXml = @"
-            <fetch>
-                <entity name=""entitydatasource"">
-                    <attribute name=""entitydatasourceid"" />
-                    <attribute name=""name"" />
-                    <order attribute=""name"" />
-                </entity>
-            </fetch>";
-
-        var dataProviderFetchXml = @"
-            <fetch>
-                <entity name=""entitydataprovider"">
-                    <attribute name=""entitydataproviderid"" />
-                    <attribute name=""name"" />
-                    <attribute name=""datasourcelogicalname"" />
-                    <attribute name=""retrieveplugin"" />
-                    <attribute name=""retrievemultipleplugin"" />
-                    <attribute name=""createplugin"" />
-                    <attribute name=""updateplugin"" />
-                    <attribute name=""deleteplugin"" />
-                    <attribute name=""ismanaged"" />
-                    <attribute name=""createdon"" />
-                    <attribute name=""modifiedon"" />
-                    <order attribute=""name"" />
-                </entity>
-            </fetch>";
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        // Execute queries sequentially (parallel would require .Result which is blocked by PPDS012)
-        var dataSourceResult = await queryExecutor.ExecuteFetchXmlAsync(dataSourceFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-        var dataProviderResult = await queryExecutor.ExecuteFetchXmlAsync(dataProviderFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        var dataSources = dataSourceResult.Records.Select(record => new DataSourceSummary
+        try
         {
-            Id = record.GetGuid("entitydatasourceid"),
-            Name = record.GetString("name") ?? ""
-        }).ToList();
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IDataProviderService>();
 
-        var dataProviders = dataProviderResult.Records.Select(record => new DataProviderSummary
-        {
-            Id = record.GetGuid("entitydataproviderid"),
-            Name = record.GetString("name") ?? "",
-            DataSourceName = record.GetString("datasourcelogicalname"),
-            RetrievePlugin = record.GetGuidNullable("retrieveplugin"),
-            RetrieveMultiplePlugin = record.GetGuidNullable("retrievemultipleplugin"),
-            CreatePlugin = record.GetGuidNullable("createplugin"),
-            UpdatePlugin = record.GetGuidNullable("updateplugin"),
-            DeletePlugin = record.GetGuidNullable("deleteplugin"),
-            IsManaged = record.GetBool("ismanaged"),
-            CreatedOn = record.GetDateTime("createdon"),
-            ModifiedOn = record.GetDateTime("modifiedon")
-        }).ToList();
+            // Delegate to the service layer — same path as CLI `data-providers list` (Constitution A2).
+            var dataSources = await service.ListDataSourcesAsync(cancellationToken).ConfigureAwait(false);
+            var dataProviders = await service.ListDataProvidersAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return new DataProvidersListResult
+            var dataSourceSummaries = dataSources.Select(ds => new DataSourceSummary
+            {
+                Id = ds.Id,
+                Name = ds.Name
+            }).ToList();
+
+            var dataProviderSummaries = dataProviders.Select(dp => new DataProviderSummary
+            {
+                Id = dp.Id,
+                Name = dp.Name,
+                DataSourceName = dp.DataSourceName,
+                RetrievePlugin = dp.RetrievePlugin,
+                RetrieveMultiplePlugin = dp.RetrieveMultiplePlugin,
+                CreatePlugin = dp.CreatePlugin,
+                UpdatePlugin = dp.UpdatePlugin,
+                DeletePlugin = dp.DeletePlugin,
+                IsManaged = dp.IsManaged
+            }).ToList();
+
+            return new DataProvidersListResult
+            {
+                DataSources = dataSourceSummaries,
+                DataProviders = dataProviderSummaries,
+                DataSourceCount = dataSourceSummaries.Count,
+                DataProviderCount = dataProviderSummaries.Count
+            };
+        }
+        catch (PpdsException ex)
         {
-            DataSources = dataSources,
-            DataProviders = dataProviders,
-            DataSourceCount = dataSources.Count,
-            DataProviderCount = dataProviders.Count
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
 }
@@ -208,18 +193,4 @@ public sealed class DataProviderSummary
     /// </summary>
     [JsonPropertyName("isManaged")]
     public bool IsManaged { get; set; }
-
-    /// <summary>
-    /// UTC creation timestamp.
-    /// </summary>
-    [JsonPropertyName("createdOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public DateTime? CreatedOn { get; set; }
-
-    /// <summary>
-    /// UTC last-modified timestamp.
-    /// </summary>
-    [JsonPropertyName("modifiedOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public DateTime? ModifiedOn { get; set; }
 }
