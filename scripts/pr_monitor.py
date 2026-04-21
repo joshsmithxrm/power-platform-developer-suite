@@ -480,9 +480,11 @@ def _rebase_source_branch(worktree, pr_number, logger):
     Detects the base branch via ``gh pr view`` (Gemini review #3107696762)
     so PRs targeting non-main branches rebase correctly. Runs
     ``git fetch origin <base>`` -> ``git rebase origin/<base>`` ->
-    ``git push --force-with-lease``. On rebase conflict, aborts cleanly
-    and returns False (caller must NOT flip-to-ready). Returns True only
-    on clean rebase+push. SHAKEDOWN short-circuits True.
+    ``git push --force-with-lease origin HEAD:<branch>`` (explicit refspec
+    so push.default=simple accepts it when local name differs from upstream).
+    On rebase conflict, aborts cleanly and returns False (caller must NOT
+    flip-to-ready). Returns True only on clean rebase+push. SHAKEDOWN
+    short-circuits True.
     """
     if SHAKEDOWN:
         logger.log("rebase", "SHAKEDOWN_SKIPPED")
@@ -532,9 +534,27 @@ def _rebase_source_branch(worktree, pr_number, logger):
             logger.log("rebase", "ABORT_ERROR", reason=str(e))
         return False
 
-    # 3. Push with lease
+    # 3. Resolve the local branch name so we can push with an explicit
+    # refspec. Bare ``git push`` fails under push.default=simple when the
+    # local branch name differs from its upstream tracking ref.
     try:
-        push = _run(["git", "push", "--force-with-lease"], timeout=60)
+        rev = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=10)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "BRANCH_DETECT_ERROR", reason=str(e))
+        return False
+    current = rev.stdout.strip()
+    if rev.returncode != 0 or not current or current == "HEAD":
+        reason = "Detached HEAD" if current == "HEAD" else "Empty output"
+        logger.log("rebase", "BRANCH_DETECT_ERROR",
+                   stderr=rev.stderr.strip()[:200] if rev.returncode != 0 else reason)
+        return False
+
+    # 4. Push with lease using explicit origin + HEAD:<branch> refspec.
+    try:
+        push = _run(
+            ["git", "push", "--force-with-lease", "origin", f"HEAD:{current}"],
+            timeout=60,
+        )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "PUSH_ERROR", reason=str(e))
         return False
