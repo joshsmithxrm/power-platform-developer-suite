@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 
@@ -14,13 +15,19 @@ public static class ServiceCollectionExtensions
     /// Call this once per DI container — stores are file-based singletons
     /// that should be shared across the application lifetime.
     /// </summary>
+    /// <remarks>
+    /// Uses TryAdd semantics so callers that pre-register a specialized
+    /// <see cref="ISecureCredentialStore"/> (e.g., the daemon's per-profile
+    /// instance, or an MCP tool context's captured store) keep their
+    /// registration even when AddCliApplicationServices later chains into this.
+    /// </remarks>
     /// <param name="services">The service collection to add services to.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddAuthServices(this IServiceCollection services)
     {
-        services.AddSingleton<ProfileStore>();
-        services.AddSingleton<EnvironmentConfigStore>();
-        services.AddSingleton<ISecureCredentialStore, NativeCredentialStore>();
+        services.TryAddSingleton<ProfileStore>();
+        services.TryAddSingleton<EnvironmentConfigStore>();
+        services.TryAddSingleton<ISecureCredentialStore, NativeCredentialStore>();
 
         return services;
     }

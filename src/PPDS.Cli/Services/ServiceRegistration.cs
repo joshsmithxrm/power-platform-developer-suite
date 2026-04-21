@@ -68,12 +68,12 @@ public static class ServiceRegistration
             var guard = sp.GetRequiredService<IShakedownGuard>();
             return new SqlQueryService(
                 queryExecutor,
+                guard,
                 tdsExecutor,
                 bulkExecutor,
                 metadataExecutor,
                 pool.GetTotalRecommendedParallelism(),
-                metadataProvider,
-                guard);
+                metadataProvider);
         });
 
         // TDS Endpoint executor — per-environment, uses same auth pattern as IConnectionService

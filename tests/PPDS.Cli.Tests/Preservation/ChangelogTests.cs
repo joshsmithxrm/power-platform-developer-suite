@@ -5,9 +5,10 @@ using System.IO;
 using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
-using PPDS.Cli.Services.Metadata.Authoring;
 public class ChangelogTests
 {
+    private const string UnreleasedHeader = "## [Unreleased]";
+
     [Fact]
     public void Dataverse_Changelog_DocumentsRelocation()
     {
@@ -15,7 +16,7 @@ public class ChangelogTests
         Assert.True(File.Exists(path), $"CHANGELOG not found: {path}");
         var changelog = File.ReadAllText(path);
 
-        Assert.Contains("## Unreleased", changelog);
+        Assert.Contains(UnreleasedHeader, changelog);
         var section = ExtractUnreleasedSection(changelog);
 
         var interfaces = new[]
@@ -34,9 +35,9 @@ public class ChangelogTests
 
     private static string ExtractUnreleasedSection(string changelog)
     {
-        var start = changelog.IndexOf("## Unreleased", StringComparison.Ordinal);
+        var start = changelog.IndexOf(UnreleasedHeader, StringComparison.Ordinal);
         Assert.True(start >= 0);
-        var afterHeader = start + "## Unreleased".Length;
+        var afterHeader = start + UnreleasedHeader.Length;
         var nextH2 = changelog.IndexOf("\n## ", afterHeader, StringComparison.Ordinal);
         return nextH2 < 0 ? changelog[afterHeader..] : changelog[afterHeader..nextH2];
     }

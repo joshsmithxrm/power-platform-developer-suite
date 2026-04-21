@@ -71,19 +71,19 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Required — production DI supplies the real guard; tests use a fake.</param>
     public SqlQueryService(
         IQueryExecutor queryExecutor,
+        IShakedownGuard guard,
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
         IMetadataQueryExecutor? metadataQueryExecutor = null,
         int poolCapacity = 1,
-        ICachedMetadataProvider? metadataProvider = null,
-        IShakedownGuard? guard = null)
+        ICachedMetadataProvider? metadataProvider = null)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _tdsQueryExecutor = tdsQueryExecutor;
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
         _metadataProvider = metadataProvider;
-        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _poolCapacity = poolCapacity;
         _planBuilder = new ExecutionPlanBuilder(_fetchXmlGeneratorService);
         _planExecutor = new PlanExecutor();

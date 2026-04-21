@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## Unreleased
-
 ### Breaking
 
 - 12 domain services have been moved from `PPDS.Dataverse` to `PPDS.Cli` as part of constitution A1 compliance and the shakedown-guard v1 landing. The services are no longer registered by `RegisterDataverseServices` — consumers must now reference `PPDS.Cli.Services` for these types:

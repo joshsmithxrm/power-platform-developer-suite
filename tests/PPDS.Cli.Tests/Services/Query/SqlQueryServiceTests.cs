@@ -29,7 +29,13 @@ public class SqlQueryServiceTests
     [Fact]
     public void Constructor_WithNullQueryExecutor_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => new SqlQueryService(null!));
+        Assert.Throws<ArgumentNullException>(() => new SqlQueryService(null!, guard: new InactiveFakeShakedownGuard()));
+    }
+
+    [Fact]
+    public void Constructor_WithNullGuard_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new SqlQueryService(_mockQueryExecutor.Object, guard: null!));
     }
 
     #endregion
