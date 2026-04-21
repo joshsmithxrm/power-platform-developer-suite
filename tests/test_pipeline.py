@@ -199,13 +199,32 @@ class TestHeartbeat:
 # ---------------------------------------------------------------------------
 class TestTimeout:
     def test_stall_and_hard_ceiling_constants_exist(self):
-        """AC-57: Stall-based and hard ceiling timeout constants are defined."""
+        """AC-12 + AC-26: Stall-based and hard ceiling timeout constants are
+        defined with the documented values (STALL_LIMIT=5, HARD_CEILING=7200)."""
         import pipeline
 
         assert hasattr(pipeline, "STALL_LIMIT")
         assert hasattr(pipeline, "HARD_CEILING")
         assert pipeline.STALL_LIMIT == 5
-        assert pipeline.HARD_CEILING == 3600
+        assert pipeline.HARD_CEILING == 7200
+
+    def test_hard_ceiling_default_is_7200(self):
+        """AC-26: HARD_CEILING default is 7200 seconds (120 min).
+
+        Negative check: the old 3600 value would undersize cross-cutting
+        architectural runs (shakedown-guard regression). Pin the new value
+        so a silent revert to 3600 fails the gate.
+        """
+        import pipeline
+
+        assert pipeline.HARD_CEILING == 7200, (
+            f"HARD_CEILING must be 7200 (120 min), got {pipeline.HARD_CEILING}. "
+            "If you need to lower this, update spec Tier 1 and the AC table first."
+        )
+        assert pipeline.HARD_CEILING != 3600, (
+            "HARD_CEILING reverted to the old 3600 default — see "
+            "specs/pipeline-observability.md AC-26."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1345,6 +1364,369 @@ class TestHardTimeout:
         mock_proc.terminate.assert_called_once()
         assert exit_code == -1
         logger.close()
+
+
+# ---------------------------------------------------------------------------
+# AC-27: --max-stage-seconds overrides HARD_CEILING for the run
+# AC-28: Effective ceiling is recorded on stage START
+# ---------------------------------------------------------------------------
+class TestMaxStageSecondsOverride:
+    def _run_claude_with_ceiling(self, tmp_path, stage_name, ceiling,
+                                  elapsed_offset):
+        """Helper: run run_claude with a mocked subprocess that never exits,
+        fake time jumping past ``elapsed_offset`` after start. Returns the
+        mock_proc and log content for assertions."""
+        import pipeline
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        log_path = tmp_path / ".workflow" / "pipeline.log"
+        logger = pipeline.open_logger(str(log_path))
+
+        mock_proc = unittest.mock.MagicMock()
+        mock_proc.poll.return_value = None  # Never exits naturally
+        mock_proc.wait.return_value = -1
+        mock_proc.returncode = -1
+
+        call_count = [0]
+
+        def fake_time():
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return 1000.0
+            return 1000.0 + elapsed_offset
+
+        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0\n", stderr="")
+
+        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc):
+            with unittest.mock.patch("subprocess.run", return_value=mock_run_result):
+                with unittest.mock.patch("time.time", side_effect=fake_time):
+                    with unittest.mock.patch("time.sleep"):
+                        exit_code, _ = pipeline.run_claude(
+                            str(tmp_path), "test", logger, stage_name,
+                            ceiling=ceiling)
+
+        logger.close()
+        with open(log_path) as f:
+            content = f.read()
+        return mock_proc, content, exit_code
+
+    def test_max_stage_seconds_flag_overrides_ceiling(self, tmp_path):
+        """AC-27: ceiling=N shortens the effective kill threshold below the
+        module default. Elapsed of 100s exceeds ceiling=60 but is well below
+        HARD_CEILING (7200) — terminate must still fire, proving the override
+        replaced the default."""
+        mock_proc, content, exit_code = self._run_claude_with_ceiling(
+            tmp_path, "override-short", ceiling=60, elapsed_offset=100,
+        )
+        mock_proc.terminate.assert_called_once()
+        assert exit_code == -1
+        assert "HARD_TIMEOUT" in content
+        assert "ceiling=60s" in content, (
+            f"Expected 'ceiling=60s' in HARD_TIMEOUT log, got:\n{content}"
+        )
+
+    def test_ceiling_override_extends_beyond_default(self, tmp_path):
+        """AC-27: ceiling=N can also extend the ceiling past HARD_CEILING.
+        Elapsed of HARD_CEILING+1 would normally trip the kill with the
+        default, but with ceiling=HARD_CEILING+1000 the stage keeps running
+        (proc.terminate is not called for the ceiling reason)."""
+        import pipeline
+
+        override = pipeline.HARD_CEILING + 1000  # 8200 (> default 7200)
+        # elapsed falls between default and override → default would kill, override keeps running.
+        elapsed = pipeline.HARD_CEILING + 500  # 7700
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        mock_proc = unittest.mock.MagicMock()
+        # Exit "naturally" on second poll so the loop terminates without
+        # hitting the ceiling branch.
+        poll_calls = [0]
+
+        def fake_poll():
+            poll_calls[0] += 1
+            if poll_calls[0] >= 2:
+                return 0  # clean exit
+            return None
+
+        mock_proc.poll.side_effect = fake_poll
+        mock_proc.returncode = 0
+
+        call_count = [0]
+
+        def fake_time():
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return 1000.0
+            return 1000.0 + elapsed
+
+        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0\n", stderr="")
+
+        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc):
+            with unittest.mock.patch("subprocess.run", return_value=mock_run_result):
+                with unittest.mock.patch("time.time", side_effect=fake_time):
+                    with unittest.mock.patch("time.sleep"):
+                        exit_code, _ = pipeline.run_claude(
+                            str(tmp_path), "test", logger, "override-long",
+                            ceiling=override,
+                        )
+
+        # With the override, the ceiling branch should NOT fire at elapsed=7700
+        # because 7700 < 8200. The stage exits cleanly via poll returning 0.
+        mock_proc.terminate.assert_not_called()
+        assert exit_code == 0
+        logger.close()
+
+    def test_run_claude_logs_effective_ceiling_on_start_default(self, tmp_path):
+        """AC-28: When no override is provided, START log records the module
+        default ceiling so operators can see which value is in effect."""
+        import pipeline
+
+        log_path = tmp_path / ".workflow" / "pipeline.log"
+        (tmp_path / ".workflow").mkdir()
+        logger = pipeline.open_logger(str(log_path))
+        pipeline.run_claude(
+            str(tmp_path), "test", logger, "start-default", dry_run=True,
+        )
+        logger.close()
+
+        with open(log_path) as f:
+            content = f.read()
+
+        assert "START" in content
+        assert f"ceiling={pipeline.HARD_CEILING}s" in content, (
+            f"Expected START entry to log ceiling={pipeline.HARD_CEILING}s, got:\n{content}"
+        )
+
+    def test_run_claude_logs_effective_ceiling_on_start_override(self, tmp_path):
+        """AC-28: When --max-stage-seconds (ceiling=N) is provided, START
+        log records N, not the default."""
+        import pipeline
+
+        log_path = tmp_path / ".workflow" / "pipeline.log"
+        (tmp_path / ".workflow").mkdir()
+        logger = pipeline.open_logger(str(log_path))
+        pipeline.run_claude(
+            str(tmp_path), "test", logger, "start-override",
+            dry_run=True, ceiling=1234,
+        )
+        logger.close()
+
+        with open(log_path) as f:
+            content = f.read()
+
+        assert "ceiling=1234s" in content, (
+            f"Expected START entry to log ceiling=1234s, got:\n{content}"
+        )
+        # Negative verification: the default must NOT leak into the log when
+        # an override is provided.
+        assert f"ceiling={pipeline.HARD_CEILING}s" not in content, (
+            "Default ceiling leaked into log when override was provided"
+        )
+
+    def test_pr_monitor_uses_effective_ceiling(self, tmp_path):
+        """AC-27: _delegate_to_pr_monitor passes the override to
+        subprocess.run's timeout kwarg (not the module default)."""
+        import pipeline
+
+        (tmp_path / ".workflow").mkdir()
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            result = unittest.mock.MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with unittest.mock.patch("subprocess.run", side_effect=fake_run):
+            pipeline._delegate_to_pr_monitor(
+                str(tmp_path), 42, logger, dry_run=False, ceiling=999,
+            )
+        logger.close()
+
+        assert captured["timeout"] == 999, (
+            f"Expected subprocess timeout=999 (override), got {captured['timeout']}"
+        )
+
+    def test_cli_exposes_max_stage_seconds_flag(self, capsys):
+        """AC-27: pipeline's argparse advertises the --max-stage-seconds flag.
+
+        This guards against accidental removal from the argparse block —
+        the behavioral tests above exercise ceiling= directly, so without
+        this gate the flag could silently disappear from the CLI surface
+        while all the plumbing tests still pass.
+        """
+        import pipeline
+
+        with unittest.mock.patch("sys.argv", ["pipeline.py", "--help"]):
+            with pytest.raises(SystemExit) as exc_info:
+                pipeline.main()
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "--max-stage-seconds" in out, (
+            f"--max-stage-seconds missing from --help output:\n{out}"
+        )
+
+    def test_cli_rejects_non_positive_max_stage_seconds(self, capsys):
+        """AC-27: --max-stage-seconds must be a positive integer; 0 and
+        negative values are rejected at parse time."""
+        import pipeline
+
+        for bad in ("0", "-1"):
+            argv = ["pipeline.py", "--spec", "x", "--branch", "y",
+                    "--max-stage-seconds", bad]
+            with unittest.mock.patch("sys.argv", argv):
+                with pytest.raises(SystemExit) as exc_info:
+                    pipeline.main()
+            assert exc_info.value.code != 0, (
+                f"Expected error for --max-stage-seconds {bad}, got exit 0"
+            )
+            err = capsys.readouterr().err.lower()
+            assert "max-stage-seconds" in err or "max_stage_seconds" in err, (
+                f"Error message for bad --max-stage-seconds={bad} should "
+                f"mention the flag, got:\n{err}"
+            )
+
+    def test_run_pr_stage_threads_ceiling_to_summary_and_monitor(self, tmp_path, monkeypatch):
+        """AC-27: ``run_pr_stage`` forwards its ``ceiling`` argument to both
+        the internal ``run_claude`` (pr-summary) call and the
+        ``_delegate_to_pr_monitor`` subprocess, and records the effective
+        ceiling on the stage START log."""
+        import pipeline
+
+        (tmp_path / ".workflow" / "stages").mkdir(parents=True)
+        log_path = tmp_path / ".workflow" / "pipeline.log"
+        logger = pipeline.open_logger(str(log_path))
+
+        # Ensure the shakedown shortcut is inactive so the full PR path runs
+        monkeypatch.delenv("PPDS_SHAKEDOWN", raising=False)
+
+        # Mock all subprocess.run calls: fetch, rebase, rev-parse HEAD, push,
+        # workflow-state get issues, gh pr create, and any follow-ups.
+        def fake_subprocess_run(cmd, **kwargs):
+            result = unittest.mock.MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            if cmd and cmd[0] == "gh" and len(cmd) > 2 and cmd[1] == "pr" and cmd[2] == "create":
+                # gh pr create returns the PR URL on stdout
+                result.stdout = "https://github.com/owner/repo/pull/42\n"
+            elif "rev-parse" in cmd:
+                result.stdout = "feat/test-branch\n"
+            elif len(cmd) > 1 and "workflow-state.py" in cmd[1]:
+                result.stdout = "[]"  # no issues
+            else:
+                result.stdout = ""
+            return result
+
+        monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+        # Capture run_claude kwargs
+        captured_run_claude = {}
+
+        def fake_run_claude(worktree_path, prompt, logger_, stage, dry_run=False,
+                            agent=None, ceiling=None):
+            captured_run_claude["ceiling"] = ceiling
+            captured_run_claude["stage"] = stage
+            # Write a minimal summary log so the caller's file read succeeds
+            summary_log = os.path.join(
+                worktree_path, ".workflow", "stages", f"{stage}.log")
+            with open(summary_log, "w") as f:
+                f.write("test: stub title\n\n- bullet 1\n")
+            return 0, logger_
+
+        monkeypatch.setattr(pipeline, "run_claude", fake_run_claude)
+
+        # Capture _delegate_to_pr_monitor kwargs and short-circuit
+        captured_monitor = {}
+
+        def fake_delegate(worktree_path, pr_number, logger_, dry_run=False,
+                          ceiling=None):
+            captured_monitor["ceiling"] = ceiling
+            return 0
+
+        monkeypatch.setattr(pipeline, "_delegate_to_pr_monitor", fake_delegate)
+
+        # Mock check_pr_created + workflow-state reads via read_state stub
+        monkeypatch.setattr(pipeline, "read_state", lambda _p: {})
+
+        # The pr_number is extracted from gh pr create stdout. Patch the
+        # extraction helper so we don't have to simulate gh output.
+        if hasattr(pipeline, "_create_pr_draft"):
+            monkeypatch.setattr(
+                pipeline, "_create_pr_draft",
+                lambda *a, **kw: ("42", "https://example/pr/42"),
+            )
+
+        try:
+            pipeline.run_pr_stage(
+                str(tmp_path), logger, dry_run=False, ceiling=555,
+            )
+        except Exception:
+            # Internal steps after the delegate stub (notify, state writes)
+            # may fail on mocked subprocesses. We only care that the ceiling
+            # reached run_claude and _delegate_to_pr_monitor before those
+            # later steps, which is checked below.
+            pass
+
+        logger.close()
+        with open(log_path) as f:
+            log_content = f.read()
+
+        # AC-27/28: START log records the effective ceiling
+        assert "ceiling=555s" in log_content, (
+            f"Expected START log to record ceiling=555s, got:\n{log_content}"
+        )
+        # AC-27: pr-summary run_claude received the remaining stage budget.
+        # The value is the override (555) minus the elapsed stage time, so it
+        # should be <= 555 but positive on a fast test run.
+        assert captured_run_claude.get("stage") == "pr-summary", (
+            f"Expected run_claude stage='pr-summary', got "
+            f"{captured_run_claude.get('stage')!r}"
+        )
+        summary_ceiling = captured_run_claude.get("ceiling")
+        assert isinstance(summary_ceiling, int) and 0 < summary_ceiling <= 555, (
+            f"Expected run_claude ceiling in (0, 555] (remaining budget of "
+            f"555s override), got {summary_ceiling!r}"
+        )
+        # AC-27: _delegate_to_pr_monitor received the remaining stage budget.
+        monitor_ceiling = captured_monitor.get("ceiling")
+        assert isinstance(monitor_ceiling, int) and 0 < monitor_ceiling <= 555, (
+            f"Expected _delegate_to_pr_monitor ceiling in (0, 555] (remaining "
+            f"budget of 555s override), got {monitor_ceiling!r}"
+        )
+
+    def test_pr_monitor_falls_back_to_default_without_override(self, tmp_path):
+        """AC-27 boundary: ceiling=None preserves the module default
+        (backwards compat — no regression in existing behavior)."""
+        import pipeline
+
+        (tmp_path / ".workflow").mkdir()
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            result = unittest.mock.MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with unittest.mock.patch("subprocess.run", side_effect=fake_run):
+            pipeline._delegate_to_pr_monitor(
+                str(tmp_path), 42, logger, dry_run=False, ceiling=None,
+            )
+        logger.close()
+
+        assert captured["timeout"] == pipeline.HARD_CEILING
 
 
 # ---------------------------------------------------------------------------
