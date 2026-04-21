@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-04-20T23:36:50Z",
+  "updated": "2026-04-21T05:42:33Z",
   "open_work": [
     {
       "session_id": "903eedac",
@@ -25,6 +25,17 @@
         "pipeline"
       ],
       "intent": "Raise HARD_CEILING to 7200s and add --max-stage-seconds override flag"
+    },
+    {
+      "session_id": "df895c3e",
+      "started": "2026-04-21T05:42:33Z",
+      "branch": "fix/pr-monitor-push-refspec",
+      "worktree": ".worktrees/pr-monitor-push-refspec",
+      "issues": [],
+      "areas": [
+        "pr-monitor"
+      ],
+      "intent": "fix pr-monitor git push missing explicit refspec \u2014 causes ready-flip skip when branch name differs from upstream"
     }
   ]
 }

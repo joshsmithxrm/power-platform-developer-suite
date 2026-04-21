@@ -1117,7 +1117,7 @@ class TestRebaseBeforeReady:
     """Meta-retro finding #6: rebase source branch before flipping ready."""
 
     def test_rebase_clean_path_calls_all_three_git_commands(self, tmp_path):
-        """Clean rebase: detect-base + fetch + rebase + push --force-with-lease all succeed."""
+        """Clean rebase: detect-base + fetch + rebase + rev-parse + push all succeed."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
 
@@ -1130,6 +1130,9 @@ class TestRebaseBeforeReady:
             call_log.append(cmd)
             if cmd[:3] == ["gh", "pr", "view"]:
                 return ok_base
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feature-branch\n", stderr="")
             return ok
 
         with patch("pr_monitor.subprocess.run", side_effect=fake_run):
@@ -1138,11 +1141,15 @@ class TestRebaseBeforeReady:
         assert result is True
         # First call: gh pr view to detect base
         assert call_log[0][:3] == ["gh", "pr", "view"]
-        # Then fetch + rebase + push (with -- separators on git fetch/rebase)
+        # Then fetch + rebase + rev-parse + push with explicit refspec
         assert call_log[1] == ["git", "fetch", "origin", "--", "main"]
         assert call_log[2] == ["git", "rebase", "--", "origin/main"]
-        assert call_log[3] == ["git", "push", "--force-with-lease"]
-        assert len(call_log) == 4  # no abort path
+        assert call_log[3] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        assert call_log[4] == [
+            "git", "push", "--force-with-lease",
+            "origin", "HEAD:feature-branch",
+        ]
+        assert len(call_log) == 5  # no abort path
 
     def test_rebase_conflict_aborts_and_returns_false(self, tmp_path):
         """On rebase conflict: git rebase --abort is called; no push; returns False."""
@@ -1215,6 +1222,9 @@ class TestRebaseBeforeReady:
             if cmd[:3] == ["gh", "pr", "view"]:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="develop\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feature-x\n", stderr="")
             return subprocess.CompletedProcess(
                 args=cmd, returncode=0, stdout="", stderr="")
 
@@ -1279,3 +1289,103 @@ class TestDetectBaseBranch:
 
         with patch("pr_monitor.subprocess.run", side_effect=fake_run):
             assert pr_monitor._detect_base_branch(wt, 856, logger) == "main"
+
+
+class TestRebasePushRefspec:
+    """Regression: git push must use explicit origin + HEAD:<branch> refspec.
+
+    Modern git's ``push.default=simple`` refuses a bare ``git push`` when the
+    local branch name differs from its upstream tracking ref, logging
+    ``rebase: PUSH_ERROR`` and leaving the PR in draft. Fix: detect the local
+    branch via ``git rev-parse --abbrev-ref HEAD`` and push with an explicit
+    refspec that is unambiguous regardless of upstream config.
+    """
+
+    def test_push_uses_explicit_origin_and_head_refspec(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout="fix/pr-monitor-push-refspec\n", stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        push_calls = [c for c in call_log if c[:2] == ["git", "push"]]
+        assert len(push_calls) == 1
+        # Exact argv shape — no bare ``git push``.
+        assert push_calls[0] == [
+            "git", "push", "--force-with-lease",
+            "origin", "HEAD:fix/pr-monitor-push-refspec",
+        ]
+        # rev-parse must have run before push.
+        rev_parse_idx = next(
+            i for i, c in enumerate(call_log)
+            if c[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        push_idx = next(
+            i for i, c in enumerate(call_log) if c[:2] == ["git", "push"])
+        assert rev_parse_idx < push_idx
+
+    def test_rev_parse_failure_returns_false_and_does_not_push(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=128, stdout="",
+                    stderr="fatal: not a git repository")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        log_path = str(tmp_path / "test.log")
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is False
+        # Must NOT have attempted any git push.
+        assert not any(c[:2] == ["git", "push"] for c in call_log)
+        # Must have logged a structured BRANCH_DETECT_ERROR event.
+        with open(log_path, encoding="utf-8") as f:
+            log_contents = f.read()
+        assert "BRANCH_DETECT_ERROR" in log_contents
+
+    def test_rev_parse_subprocess_exception_returns_false(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=10)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        log_path = str(tmp_path / "test.log")
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is False
+        assert not any(c[:2] == ["git", "push"] for c in call_log)
+        with open(log_path, encoding="utf-8") as f:
+            assert "BRANCH_DETECT_ERROR" in f.read()
