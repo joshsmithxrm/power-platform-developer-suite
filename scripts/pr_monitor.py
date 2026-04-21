@@ -542,11 +542,12 @@ def _rebase_source_branch(worktree, pr_number, logger):
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "BRANCH_DETECT_ERROR", reason=str(e))
         return False
-    if rev.returncode != 0 or not rev.stdout.strip():
-        logger.log("rebase", "BRANCH_DETECT_ERROR",
-                   stderr=rev.stderr.strip()[:200])
-        return False
     current = rev.stdout.strip()
+    if rev.returncode != 0 or not current or current == "HEAD":
+        reason = "Detached HEAD" if current == "HEAD" else "Empty output"
+        logger.log("rebase", "BRANCH_DETECT_ERROR",
+                   stderr=rev.stderr.strip()[:200] if rev.returncode != 0 else reason)
+        return False
 
     # 4. Push with lease using explicit origin + HEAD:<branch> refspec.
     try:
