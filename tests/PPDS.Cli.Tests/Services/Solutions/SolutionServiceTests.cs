@@ -325,4 +325,132 @@ public class SolutionServiceTests
         // Assert — OperationCanceledException propagates, not PpdsException
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
+
+    // ─── H1: filter operator tests (Like + %value% pattern) ────────────────────
+
+    private static (Mock<IDataverseConnectionPool> pool, List<QueryBase> capturedQueries) CreateCapturingPool()
+    {
+        var capturedQueries = new List<QueryBase>();
+
+        var mockClient = new Mock<IPooledClient>(MockBehavior.Loose);
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryBase, CancellationToken>((q, _) => capturedQueries.Add(q))
+            .ReturnsAsync(new EntityCollection());
+
+        var mockPool = new Mock<IDataverseConnectionPool>(MockBehavior.Loose);
+        mockPool
+            .Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+
+        return (mockPool, capturedQueries);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WithFilter_UsesLikeOperatorNotContains()
+    {
+        // Arrange
+        var (pool, capturedQueries) = CreateCapturingPool();
+        var service = CreateService(pool.Object);
+
+        // Act
+        await service.ListAsync(filter: "foo");
+
+        // Assert — query must use Like, never Contains
+        capturedQueries.Should().ContainSingle();
+        var query = (QueryExpression)capturedQueries[0];
+
+        var filterGroup = query.Criteria.Filters
+            .FirstOrDefault(f => f.FilterOperator == LogicalOperator.Or);
+        filterGroup.Should().NotBeNull("filter group should exist when filter is provided");
+
+        var conditions = filterGroup!.Conditions;
+        conditions.Should().HaveCount(2, "filter applies to UniqueName and FriendlyName");
+        conditions.Should().AllSatisfy(c =>
+            c.Operator.Should().Be(ConditionOperator.Like,
+                "filter must use Like not Contains to avoid fulltext-index fault 0x80048415"));
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WithFilter_AppliesWildcardPattern()
+    {
+        // Arrange
+        var (pool, capturedQueries) = CreateCapturingPool();
+        var service = CreateService(pool.Object);
+
+        // Act
+        await service.ListAsync(filter: "foo");
+
+        // Assert — each condition value must be %foo%
+        capturedQueries.Should().ContainSingle();
+        var query = (QueryExpression)capturedQueries[0];
+
+        var filterGroup = query.Criteria.Filters
+            .First(f => f.FilterOperator == LogicalOperator.Or);
+
+        filterGroup.Conditions.Should().AllSatisfy(c =>
+            c.Values.Should().ContainSingle(v =>
+                v.ToString() == "%foo%",
+                "Like pattern must be %filter% for substring match"));
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WithFilter_ReturnsMatchingSolutions()
+    {
+        // Arrange — mock returns a solution whose friendly name contains the filter term
+        var matchingEntity = new Entity(PPDS.Dataverse.Generated.Solution.EntityLogicalName)
+        {
+            Id = Guid.NewGuid()
+        };
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.UniqueName] = "MySolution";
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.FriendlyName] = "My foo Solution";
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.Version] = "1.0.0.0";
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.IsManaged] = false;
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.IsVisible] = true;
+        matchingEntity[PPDS.Dataverse.Generated.Solution.Fields.IsApiManaged] = false;
+
+        var entityCollection = new EntityCollection(new List<Entity> { matchingEntity });
+
+        var mockClient = new Mock<IPooledClient>(MockBehavior.Loose);
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entityCollection);
+
+        var mockPool = new Mock<IDataverseConnectionPool>(MockBehavior.Loose);
+        mockPool
+            .Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+
+        var service = CreateService(mockPool.Object);
+
+        // Act
+        var result = await service.ListAsync(filter: "foo");
+
+        // Assert — one match returned with expected friendly name
+        result.Items.Should().ContainSingle();
+        result.Items[0].FriendlyName.Should().Be("My foo Solution");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WithoutFilter_DoesNotAddFilterGroup()
+    {
+        // Arrange
+        var (pool, capturedQueries) = CreateCapturingPool();
+        var service = CreateService(pool.Object);
+
+        // Act
+        await service.ListAsync();
+
+        // Assert — no OR filter group added when no filter provided
+        capturedQueries.Should().ContainSingle();
+        var query = (QueryExpression)capturedQueries[0];
+
+        query.Criteria.Filters
+            .Should().NotContain(f => f.FilterOperator == LogicalOperator.Or,
+                "filter group should only be added when a filter is specified");
+    }
 }

@@ -203,11 +203,13 @@ public class SolutionService : ISolutionService
         }
 
         // Apply filter if provided
+        // Use Like with %value% pattern — Contains requires a fulltext index (Dataverse fault 0x80048415)
+        // whereas Like performs substring match without that requirement.
         if (!string.IsNullOrWhiteSpace(filter))
         {
             var filterCondition = new FilterExpression(LogicalOperator.Or);
-            filterCondition.AddCondition(Solution.Fields.UniqueName, ConditionOperator.Contains, filter);
-            filterCondition.AddCondition(Solution.Fields.FriendlyName, ConditionOperator.Contains, filter);
+            filterCondition.AddCondition(Solution.Fields.UniqueName, ConditionOperator.Like, $"%{filter}%");
+            filterCondition.AddCondition(Solution.Fields.FriendlyName, ConditionOperator.Like, $"%{filter}%");
             query.Criteria.AddFilter(filterCondition);
         }
 
