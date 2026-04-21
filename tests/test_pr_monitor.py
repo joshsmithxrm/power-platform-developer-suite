@@ -1087,7 +1087,12 @@ class TestReplyDedupe:
         item = {"id": 777, "action": "fixed", "commit": "sha1",
                 "description": "renamed var"}
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        def fake_common(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fake_common) as mock_common:
             pr_monitor.post_replies(wt, 42, [item], logger)
             pr_monitor.post_replies(wt, 42, [item], logger)
 
@@ -1115,7 +1120,12 @@ class TestReplyDedupe:
         item_dismissed = {"id": 500, "action": "dismissed",
                           "description": "nvm"}
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        def fake_common(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fake_common) as mock_common:
             pr_monitor.post_replies(wt, 42, [item_fixed], logger)
             pr_monitor.post_replies(wt, 42, [item_dismissed], logger)
 
@@ -1125,6 +1135,43 @@ class TestReplyDedupe:
         forwarded = mock_common.call_args[0][2]
         assert [i["id"] for i in forwarded] == [500]
         assert forwarded[0]["action"] == "fixed"
+
+    def test_transient_failure_leaves_key_retryable(self, tmp_path):
+        """A FAILED POST must not pollute the dedupe set — retry must work.
+
+        PR #865 review (gemini-code-assist HIGH): pre-adding to the set
+        before the API call blocked retry on transient errors. The key is
+        now recorded only on the POSTED event, so a subsequent call for
+        the same comment_id reaches _post_replies_common again.
+        """
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        item = {"id": 999, "action": "fixed", "commit": "sha",
+                "description": "x"}
+
+        def fail_once(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("FAILED", comment_id=i["id"], error="boom")
+
+        def succeed(_wt, _pr, items, log_fn, **_kw):
+            for i in items:
+                log_fn("POSTED", comment_id=i["id"], action=i["action"])
+
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=fail_once) as mock_common:
+            pr_monitor.post_replies(wt, 42, [item], logger)
+            # First call failed; key must not be in the dedupe set.
+            assert (42, 999) not in pr_monitor._POSTED_REPLY_KEYS
+            assert mock_common.call_count == 1
+
+        # Retry succeeds — common is invoked again, then key lands in the set.
+        with patch("pr_monitor._post_replies_common",
+                   side_effect=succeed) as mock_common:
+            pr_monitor.post_replies(wt, 42, [item], logger)
+            assert mock_common.call_count == 1
+            assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS
 
 
 class TestRebaseBeforeReady:
