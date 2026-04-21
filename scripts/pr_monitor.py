@@ -589,8 +589,12 @@ def mark_pr_ready(worktree, pr_number, logger):
 
 
 # In-process dedupe set for POSTed replies (meta-retro finding #3).
-# Key: (pr_number, comment_id, action). Monitor is per-PR subprocess, so
-# an in-memory set suffices — it's reset on every monitor spawn.
+# Key: (pr_number, comment_id). PR #864 regression: the key used to include
+# ``action``, which let the same comment receive two replies across triage
+# rounds when the LLM re-classified it (e.g., fixed → dismissed). Once any
+# reply is POSTed for a comment in this monitor run, further replies are
+# dropped regardless of action. Monitor is per-PR subprocess, so an
+# in-memory set suffices — it's reset on every monitor spawn.
 _POSTED_REPLY_KEYS: "set[tuple]" = set()
 
 
@@ -611,7 +615,7 @@ def post_replies(worktree, pr_number, triage_results, logger):
 
     Applies two guards before delegating to _post_replies_common:
       1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
-      2. Dedupe on (pr, comment_id, action) (meta-retro #3).
+      2. Dedupe on (pr, comment_id) (meta-retro #3; PR #864 hardening).
     """
     def _log_fn(event, **kwargs):
         logger.log("replies", event, **kwargs)
@@ -626,7 +630,7 @@ def post_replies(worktree, pr_number, triage_results, logger):
             _log_fn("SKIPPED_EMPTY_BODY", comment_id=comment_id, action=action)
             continue
 
-        key = (pr_number, comment_id, action)
+        key = (pr_number, comment_id)
         if key in _POSTED_REPLY_KEYS:
             _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
             continue
@@ -978,9 +982,17 @@ def run_monitor(worktree, pr_number, resume=False):
                 logger.close()
                 return 1
 
-            # Re-poll Gemini for new comments after triage
-            comments = _step_gemini(worktree, pr_number, logger, result,
-                                    step_suffix=f"_r{triage_iteration}")
+            # Re-poll Gemini for new comments after triage. PR #864
+            # double-reply regression: the pulls/comments endpoint returns
+            # every Gemini-authored comment, including ones we already
+            # replied to, so the loop used to re-ingest them and post a
+            # second reply (often with a different LLM-classified action).
+            # On rounds 2+, restrict to genuinely unreplied bot comments.
+            comments = get_unreplied_comments(
+                worktree, pr_number, shakedown=bool(SHAKEDOWN),
+            )
+            logger.log("triage", "POLL_UNREPLIED",
+                       round=triage_iteration, comments=len(comments))
             inline_count = len(comments)
 
         # ---- Step 4: Mark PR ready ----
