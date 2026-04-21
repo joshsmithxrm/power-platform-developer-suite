@@ -1,7 +1,11 @@
 using System.Collections.Generic;
 using System.Reflection;
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -9,6 +13,7 @@ using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Tests.Services.Shared;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Metadata;
@@ -193,5 +198,131 @@ public class SolutionServiceTests
         dict.Should().NotBeNull();
         dict.Should().ContainKey(typeCode);
         dict![typeCode].Should().Be(expectedName);
+    }
+
+    // ─── H5: D4 fault-wrapping tests ────────────────────────────────────────────
+
+    private static SolutionService CreateService(IDataverseConnectionPool pool)
+    {
+        return new SolutionService(
+            pool,
+            new InactiveFakeShakedownGuard(),
+            new NullLogger<SolutionService>(),
+            new Mock<IMetadataQueryService>().Object,
+            new Mock<IComponentNameResolver>().Object,
+            new Mock<ICachedMetadataProvider>().Object);
+    }
+
+    private static Mock<IDataverseConnectionPool> CreateFaultingPool(Exception fault)
+    {
+        var mockClient = new Mock<IPooledClient>(MockBehavior.Loose);
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(fault);
+        mockClient
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(fault);
+
+        var mockPool = new Mock<IDataverseConnectionPool>(MockBehavior.Loose);
+        mockPool
+            .Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+        return mockPool;
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WrapsFaultExceptionInPpdsException()
+    {
+        // Arrange
+        var innerFault = new FaultException("Dataverse unavailable");
+        var pool = CreateFaultingPool(innerFault);
+        var service = CreateService(pool.Object);
+
+        // Act
+        var act = () => service.ListAsync();
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.Solution.ListFailed);
+        ex.Which.InnerException.Should().BeSameAs(innerFault);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_WrapsGenericExceptionInPpdsException()
+    {
+        // Arrange
+        var innerException = new InvalidOperationException("network error");
+        var pool = CreateFaultingPool(innerException);
+        var service = CreateService(pool.Object);
+
+        // Act
+        var act = () => service.ListAsync();
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.Solution.ListFailed);
+        ex.Which.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetAsync_WrapsFaultExceptionInPpdsException()
+    {
+        // Arrange
+        var innerFault = new FaultException("Dataverse unavailable");
+        var pool = CreateFaultingPool(innerFault);
+        var service = CreateService(pool.Object);
+
+        // Act
+        var act = () => service.GetAsync("nonexistent");
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.Solution.GetFailed);
+        ex.Which.InnerException.Should().BeSameAs(innerFault);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExportAsync_WrapsFaultExceptionInPpdsException()
+    {
+        // Arrange
+        var innerFault = new FaultException("Export service unavailable");
+        var pool = CreateFaultingPool(innerFault);
+        var service = CreateService(pool.Object);
+
+        // Act
+        var act = () => service.ExportAsync("MySolution");
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.Solution.ExportFailed);
+        ex.Which.InnerException.Should().BeSameAs(innerFault);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListAsync_DoesNotWrapOperationCanceledException()
+    {
+        // Arrange — OperationCanceledException must propagate unwrapped
+        var mockClient = new Mock<IPooledClient>(MockBehavior.Loose);
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        var mockPool = new Mock<IDataverseConnectionPool>(MockBehavior.Loose);
+        mockPool
+            .Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+
+        var service = CreateService(mockPool.Object);
+
+        // Act
+        var act = () => service.ListAsync();
+
+        // Assert — OperationCanceledException propagates, not PpdsException
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }
