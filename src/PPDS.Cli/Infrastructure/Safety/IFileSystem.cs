@@ -27,4 +27,11 @@ public interface IFileSystem
     /// Returns the UTC last-write time of the file at <paramref name="path"/>.
     /// </summary>
     DateTimeOffset GetLastWriteTimeUtc(string path);
+
+    /// <summary>
+    /// Returns the current working directory of the process. Abstracted so
+    /// the guard can resolve project root without directly touching
+    /// process-global state in tests.
+    /// </summary>
+    string GetCurrentDirectory();
 }

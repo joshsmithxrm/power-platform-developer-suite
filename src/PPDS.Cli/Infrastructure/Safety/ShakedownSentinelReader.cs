@@ -45,9 +45,14 @@ internal static class ShakedownSentinelReader
         {
             using var stream = fs.OpenRead(absolutePath);
             using var doc = JsonDocument.Parse(stream);
+            // TryGetDateTimeOffset parses strict ISO-8601 directly from the JSON
+            // token (no intermediate string allocation) and returns false for
+            // invalid formats without throwing. The ValueKind guard is retained
+            // because TryGetDateTimeOffset throws InvalidOperationException when
+            // the element is not a JSON string.
             if (!doc.RootElement.TryGetProperty("started_at", out var el)
                 || el.ValueKind != JsonValueKind.String
-                || !DateTimeOffset.TryParse(el.GetString(), out startedAt))
+                || !el.TryGetDateTimeOffset(out startedAt))
             {
                 log.LogWarning(
                     "Shakedown sentinel at '{Path}' is corrupt or missing 'started_at'; treating as absent.",

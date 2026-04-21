@@ -21,6 +21,13 @@ internal sealed class FakeFileSystem : IFileSystem
     private int _fileExistsCallCount;
 
     /// <summary>
+    /// Value returned from <see cref="GetCurrentDirectory"/>. Defaults to an
+    /// empty string so tests that do not set it cannot accidentally resolve
+    /// to any registered fake directory.
+    /// </summary>
+    public string CurrentDirectory { get; set; } = string.Empty;
+
+    /// <summary>
     /// Count of <see cref="FileExists"/> + <see cref="OpenRead"/> invocations
     /// against the sentinel — used by AC-11 to prove the cache suppresses
     /// redundant stats.
@@ -71,4 +78,6 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public DateTimeOffset GetLastWriteTimeUtc(string path)
         => _writeTimes.TryGetValue(path, out var t) ? t : DateTimeOffset.MinValue;
+
+    public string GetCurrentDirectory() => CurrentDirectory;
 }

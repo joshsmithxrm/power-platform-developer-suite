@@ -144,7 +144,7 @@ public sealed class ShakedownGuard : IShakedownGuard
                 claudeProjectDir);
         }
 
-        return Directory.GetCurrentDirectory();
+        return _fs.GetCurrentDirectory();
     }
 
     private static string BuildUserMessage(string operationDescription, ActivationState state)

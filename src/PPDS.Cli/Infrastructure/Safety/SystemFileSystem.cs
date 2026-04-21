@@ -18,4 +18,7 @@ public sealed class SystemFileSystem : IFileSystem
     /// <inheritdoc />
     public DateTimeOffset GetLastWriteTimeUtc(string path)
         => new(File.GetLastWriteTimeUtc(path));
+
+    /// <inheritdoc />
+    public string GetCurrentDirectory() => Directory.GetCurrentDirectory();
 }
