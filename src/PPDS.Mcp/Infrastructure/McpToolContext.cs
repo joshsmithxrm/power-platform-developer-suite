@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
@@ -239,7 +240,9 @@ public sealed class McpToolContext
             builder.AddProvider(new LoggerFactoryProvider(_loggerFactory));
         });
 
-        // Register credential store (DI owns lifecycle, not this child provider).
+        // Register credential store FIRST (DI owns lifecycle, not this child provider).
+        // AddCliApplicationServices → AddAuthServices uses TryAddSingleton, so this
+        // per-tool-context instance wins over the default NativeCredentialStore.
         services.AddSingleton<ISecureCredentialStore>(credentialStore);
 
         var dataverseOptions = new DataverseOptions();
@@ -253,6 +256,12 @@ public sealed class McpToolContext
 
         // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService, etc.).
         services.RegisterDataverseServices();
+
+        // Register CLI application services — the 12 domain services (IPluginTraceService,
+        // ISolutionService, IWebResourceService, …) relocated out of PPDS.Dataverse now live
+        // here, plus IShakedownGuard. MCP tools resolve these from this child provider, so
+        // they must be registered here too (not only in PPDS.Mcp.Program.cs).
+        services.AddCliApplicationServices();
 
         // Connection pool with factory delegate.
         services.AddSingleton<IDataverseConnectionPool>(sp =>

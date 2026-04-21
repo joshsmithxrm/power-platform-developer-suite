@@ -5,7 +5,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Services;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.ConnectionReferences;
 
 namespace PPDS.Cli.Commands.ConnectionReferences;
 

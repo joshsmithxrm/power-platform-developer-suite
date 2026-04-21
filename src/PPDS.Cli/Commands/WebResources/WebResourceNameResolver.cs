@@ -1,4 +1,4 @@
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.WebResources;
 
 namespace PPDS.Cli.Commands.WebResources;
 

@@ -6,6 +6,7 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 
+using PPDS.Cli.Services.Metadata.Authoring;
 namespace PPDS.Cli.Commands.Metadata.Key;
 
 /// <summary>

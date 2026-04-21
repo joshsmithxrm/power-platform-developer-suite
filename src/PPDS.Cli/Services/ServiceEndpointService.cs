@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
@@ -18,6 +19,7 @@ namespace PPDS.Cli.Services;
 public sealed class ServiceEndpointService : IServiceEndpointService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly IShakedownGuard _guard;
     private readonly ILogger<ServiceEndpointService> _logger;
 
     // Contract OptionSet values
@@ -48,9 +50,10 @@ public sealed class ServiceEndpointService : IServiceEndpointService
     /// <summary>
     /// Creates a new instance of <see cref="ServiceEndpointService"/>.
     /// </summary>
-    public ServiceEndpointService(IDataverseConnectionPool pool, ILogger<ServiceEndpointService> logger)
+    public ServiceEndpointService(IDataverseConnectionPool pool, IShakedownGuard guard, ILogger<ServiceEndpointService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -102,6 +105,7 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         WebhookRegistration registration,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("serviceendpoints.webhook.register");
         // Validate URL
         if (!Uri.TryCreate(registration.Url, UriKind.Absolute, out _))
         {
@@ -137,6 +141,7 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         ServiceBusRegistration registration,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("serviceendpoints.servicebus.register");
         // Validate namespace address
         if (!registration.NamespaceAddress.StartsWith("sb://", StringComparison.OrdinalIgnoreCase))
         {
@@ -207,6 +212,7 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         ServiceEndpointUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("serviceendpoints.update");
         // Fetch the existing endpoint to verify it exists and check managed state
         var existing = await GetByIdAsync(id, cancellationToken);
         if (existing is null)
@@ -269,6 +275,7 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("serviceendpoints.unregister");
         var existing = await GetByIdAsync(id, cancellationToken);
         if (existing is null)
         {

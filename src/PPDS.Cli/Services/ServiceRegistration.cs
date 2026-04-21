@@ -4,16 +4,30 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.DependencyInjection;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.ConnectionReferences;
+using PPDS.Cli.Services.DeploymentSettings;
 using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.EnvironmentVariables;
 using PPDS.Cli.Services.Export;
+using PPDS.Cli.Services.Flows;
 using PPDS.Cli.Services.History;
+using PPDS.Cli.Services.ImportJobs;
+using PPDS.Cli.Services.Metadata.Authoring;
+using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Services.Roles;
+using PPDS.Cli.Services.SolutionComponents;
+using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
+using PPDS.Cli.Services.Users;
+using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 
@@ -51,8 +65,10 @@ public static class ServiceRegistration
             var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
             var metadataProvider = sp.GetService<ICachedMetadataProvider>();
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var guard = sp.GetRequiredService<IShakedownGuard>();
             return new SqlQueryService(
                 queryExecutor,
+                guard,
                 tdsExecutor,
                 bulkExecutor,
                 metadataExecutor,
@@ -76,20 +92,22 @@ public static class ServiceRegistration
         // Export services
         services.AddTransient<IExportService, ExportService>();
 
-        // Plugin registration service - requires connection pool
+        // Plugin registration service - requires connection pool + shakedown guard
         services.AddTransient<IPluginRegistrationService>(sp =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var guard = sp.GetRequiredService<IShakedownGuard>();
             var logger = sp.GetRequiredService<ILogger<PluginRegistrationService>>();
-            return new PluginRegistrationService(pool, logger);
+            return new PluginRegistrationService(pool, guard, logger);
         });
 
         // Service endpoint service - manages webhooks and service bus endpoints
         services.AddTransient<IServiceEndpointService>(sp =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var guard = sp.GetRequiredService<IShakedownGuard>();
             var logger = sp.GetRequiredService<ILogger<ServiceEndpointService>>();
-            return new ServiceEndpointService(pool, logger);
+            return new ServiceEndpointService(pool, guard, logger);
         });
 
         // Custom API service - manages Custom APIs and their request/response parameters
@@ -97,16 +115,18 @@ public static class ServiceRegistration
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var pluginRegistrationService = sp.GetRequiredService<IPluginRegistrationService>();
+            var guard = sp.GetRequiredService<IShakedownGuard>();
             var logger = sp.GetRequiredService<ILogger<CustomApiService>>();
-            return new CustomApiService(pool, pluginRegistrationService, logger);
+            return new CustomApiService(pool, pluginRegistrationService, guard, logger);
         });
 
         // Data provider service - manages virtual entity data providers and data sources
         services.AddTransient<IDataProviderService>(sp =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var guard = sp.GetRequiredService<IShakedownGuard>();
             var logger = sp.GetRequiredService<ILogger<DataProviderService>>();
-            return new DataProviderService(pool, logger);
+            return new DataProviderService(pool, guard, logger);
         });
 
         // SQL language service - uses ICachedMetadataProvider when available
@@ -181,6 +201,63 @@ public static class ServiceRegistration
         // factory would capture whatever was installed at first resolution and miss
         // per-test swaps.
         services.AddTransient<IBrowserLauncher>(_ => BrowserHelper.Launcher);
+
+        // Shakedown guard infrastructure — singleton cache of activation state.
+        services.AddSingleton<IEnvironment, SystemEnvironment>();
+        services.AddSingleton<IFileSystem, SystemFileSystem>();
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<IShakedownGuard, ShakedownGuard>();
+
+        // ------------------------------------------------------------------
+        // Application services relocated from PPDS.Dataverse (constitution A1).
+        // Infrastructure lives in PPDS.Dataverse; domain/application services
+        // live here in PPDS.Cli.Services.<Area>.
+        // ------------------------------------------------------------------
+
+        // Mutation-owning services (6) — each takes IShakedownGuard between pool and logger.
+        services.AddTransient<IPluginTraceService>(sp => new PluginTraceService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<PluginTraceService>>()));
+
+        services.AddTransient<IWebResourceService>(sp => new WebResourceService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ISolutionService>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<WebResourceService>>()));
+
+        services.AddTransient<IEnvironmentVariableService>(sp => new EnvironmentVariableService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<EnvironmentVariableService>>()));
+
+        services.AddTransient<ISolutionService>(sp => new SolutionService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<SolutionService>>(),
+            sp.GetRequiredService<IMetadataQueryService>(),
+            sp.GetRequiredService<IComponentNameResolver>(),
+            sp.GetRequiredService<ICachedMetadataProvider>()));
+
+        services.AddTransient<IMetadataAuthoringService>(sp => new DataverseMetadataAuthoringService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<SchemaValidator>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetService<ILogger<DataverseMetadataAuthoringService>>(),
+            sp.GetService<ICachedMetadataProvider>()));
+
+        services.AddTransient<IRoleService>(sp => new RoleService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<RoleService>>()));
+
+        // Read-only services (6) — unchanged ctor shape, simple type registration.
+        services.AddTransient<IImportJobService, ImportJobService>();
+        services.AddTransient<IUserService, UserService>();
+        services.AddTransient<IFlowService, FlowService>();
+        services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
+        services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
+        services.AddTransient<IComponentNameResolver, ComponentNameResolver>();
 
         return services;
     }

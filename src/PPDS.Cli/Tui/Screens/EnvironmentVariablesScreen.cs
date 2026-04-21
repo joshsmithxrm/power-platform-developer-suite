@@ -2,7 +2,8 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.EnvironmentVariables;
+using PPDS.Cli.Services.Solutions;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;

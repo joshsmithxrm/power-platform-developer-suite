@@ -6,6 +6,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -120,7 +121,7 @@ public class CustomApiServiceTests
             .ReturnsAsync(_mockClient.Object);
 
         _mockPluginRegistrationService = new Mock<IPluginRegistrationService>();
-        _sut = new CustomApiService(_mockPool.Object, _mockPluginRegistrationService.Object, _mockLogger.Object);
+        _sut = new CustomApiService(_mockPool.Object, _mockPluginRegistrationService.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
     }
 
     #region ListAsync

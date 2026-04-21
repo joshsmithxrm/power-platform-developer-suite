@@ -421,4 +421,14 @@ public static class ErrorCodes
         /// <summary>Multiple web resources matched a partial name.</summary>
         public const string Ambiguous = "WebResource.Ambiguous";
     }
+
+    /// <summary>
+    /// Safety-guard errors (e.g., refused mutations during shakedown).
+    /// </summary>
+    public static class Safety
+    {
+        /// <summary>A mutation was refused because a shakedown session is active.
+        /// Bypass: unset PPDS_SHAKEDOWN and/or remove .claude/state/shakedown-active.json.</summary>
+        public const string ShakedownActive = "Safety.ShakedownActive";
+    }
 }

@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.EnvironmentVariables;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;

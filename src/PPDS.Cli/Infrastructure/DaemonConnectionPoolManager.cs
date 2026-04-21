@@ -376,10 +376,23 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataQueryService, IQueryExecutor)
+        // Register shared Dataverse infrastructure services (IThrottleTracker, IBulkOperationExecutor,
+        // IMetadataQueryService, IQueryExecutor, ICachedMetadataProvider, SchemaValidator).
         services.RegisterDataverseServices();
 
+        // Register CLI application services: IShakedownGuard (+ its env/fs/clock dependencies), plus
+        // every domain service relocated out of PPDS.Dataverse (IPluginTraceService, ISolutionService,
+        // IWebResourceService, etc.) AND the CLI-hosted services (IPluginRegistrationService,
+        // IServiceEndpointService, ICustomApiService, IDataProviderService, ISqlQueryService).
+        // NOTE: AddCliApplicationServices also registers ITdsQueryExecutor via a factory that reads
+        // ResolvedConnectionInfo from DI; the daemon uses a different auth pathway (the `credentialStore`
+        // captured in this closure), so we override that registration *after* AddCliApplicationServices
+        // with the daemon-specific one below.
+        services.AddCliApplicationServices();
+
         // TDS Endpoint executor — per-environment, uses same auth as connection pool
+        // (Overrides the default registration from AddCliApplicationServices which expects
+        // ResolvedConnectionInfo in DI — not available in the daemon's per-profile container.)
         services.AddSingleton<ITdsQueryExecutor>(sp =>
             TdsQueryExecutorFactory.Create(
                 profile,
@@ -394,43 +407,6 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 sp.GetRequiredService<IThrottleTracker>(),
                 poolOptions,
                 sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
-
-        // SQL query service — shared pipeline for all query RPC handlers (query/sql, query/explain, query/export)
-        services.AddTransient<ISqlQueryService>(sp =>
-        {
-            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
-            var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
-            var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
-            var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
-            var metadataProvider = sp.GetService<ICachedMetadataProvider>();
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            return new SqlQueryService(
-                queryExecutor,
-                tdsExecutor,
-                bulkExecutor,
-                metadataExecutor,
-                pool.GetTotalRecommendedParallelism(),
-                metadataProvider);
-        });
-
-        // Plugin registration services — used by plugins/* and domain-specific RPC handlers
-        services.AddTransient<IPluginRegistrationService>(sp =>
-            new PluginRegistrationService(
-                sp.GetRequiredService<IDataverseConnectionPool>(),
-                sp.GetRequiredService<ILogger<PluginRegistrationService>>()));
-        services.AddTransient<Services.IServiceEndpointService>(sp =>
-            new Services.ServiceEndpointService(
-                sp.GetRequiredService<IDataverseConnectionPool>(),
-                sp.GetRequiredService<ILogger<Services.ServiceEndpointService>>()));
-        services.AddTransient<Services.ICustomApiService>(sp =>
-            new Services.CustomApiService(
-                sp.GetRequiredService<IDataverseConnectionPool>(),
-                sp.GetRequiredService<IPluginRegistrationService>(),
-                sp.GetRequiredService<ILogger<Services.CustomApiService>>()));
-        services.AddTransient<Services.IDataProviderService>(sp =>
-            new Services.DataProviderService(
-                sp.GetRequiredService<IDataverseConnectionPool>(),
-                sp.GetRequiredService<ILogger<Services.DataProviderService>>()));
 
         return services.BuildServiceProvider();
     }

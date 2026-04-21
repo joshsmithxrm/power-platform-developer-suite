@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -24,6 +25,7 @@ namespace PPDS.Cli.Plugins.Registration;
 public sealed class PluginRegistrationService : IPluginRegistrationService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly IShakedownGuard _guard;
     private readonly ILogger<PluginRegistrationService> _logger;
 
     // Cache for entity type codes (ETCs) - some like pluginpackage vary by environment
@@ -89,10 +91,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// Creates a new instance of the plugin registration service.
     /// </summary>
     /// <param name="pool">The Dataverse connection pool for acquiring clients.</param>
+    /// <param name="guard">Shakedown-session safety guard (refuses mutations while active).</param>
     /// <param name="logger">Logger for diagnostic output.</param>
-    public PluginRegistrationService(IDataverseConnectionPool pool, ILogger<PluginRegistrationService> logger)
+    public PluginRegistrationService(IDataverseConnectionPool pool, IShakedownGuard guard, ILogger<PluginRegistrationService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -965,6 +969,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.assembly.upsert");
         var existing = await GetAssemblyByNameAsync(name, cancellationToken);
 
         var entity = new PluginAssembly
@@ -1010,6 +1015,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.package.upsert");
         // packageName comes from .nuspec <id> (parsed from .nuspec)
         // Dataverse extracts uniquename from the nupkg content, so we use packageName for lookup
         var existing = await GetPackageByNameAsync(packageName, cancellationToken);
@@ -1190,6 +1196,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.pluginType.upsert");
         // Check if type exists
         var query = new QueryExpression(PluginType.EntityLogicalName)
         {
@@ -1243,6 +1250,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.upsert");
         // Check if step exists by name
         var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
@@ -1424,6 +1432,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string messageName,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.image.upsert");
         var defaultMessagePropertyName = GetDefaultImagePropertyName(messageName)
             ?? throw new PpdsException(
                 ErrorCodes.Plugin.ImageNotSupported,
@@ -1497,6 +1506,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         StepUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.update");
         // Verify the step exists and check managed state
         var existingStep = await GetStepByIdWithManagedStateAsync(stepId, cancellationToken);
         if (existingStep == null)
@@ -1577,6 +1587,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         ImageUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.image.update");
         // Verify the image exists and check managed state
         var existingImage = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
         if (existingImage == null)
@@ -1690,6 +1701,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeleteImageAsync(Guid imageId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.image.delete");
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
     }
@@ -1701,6 +1713,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeleteStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.delete");
         // Fetch secure config reference before deleting the step
         var secureConfigId = await GetSecureConfigIdForStepAsync(stepId, cancellationToken);
 
@@ -1738,6 +1751,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeletePluginTypeAsync(Guid pluginTypeId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.pluginType.delete");
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId, client, cancellationToken);
     }
@@ -1834,6 +1848,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public async Task<UnregisterResult> UnregisterImageAsync(Guid imageId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.image.unregister");
         // Get image info first
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
@@ -1868,6 +1883,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public async Task<UnregisterResult> UnregisterStepAsync(Guid stepId, bool force = false, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.unregister");
         // Get step info
         var step = await GetStepByNameOrIdAsync(stepId.ToString(), cancellationToken)
             ?? throw new UnregisterException(
@@ -1933,6 +1949,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public async Task<UnregisterResult> UnregisterPluginTypeAsync(Guid pluginTypeId, bool force = false, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.pluginType.unregister");
         // Get type info
         var pluginType = await GetPluginTypeByNameOrIdAsync(pluginTypeId.ToString(), cancellationToken)
             ?? throw new UnregisterException(
@@ -1980,6 +1997,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public async Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.assembly.unregister");
         // Get assembly info
         var assembly = await GetAssemblyByIdAsync(assemblyId, cancellationToken)
             ?? throw new UnregisterException(
@@ -2035,6 +2053,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public async Task<UnregisterResult> UnregisterPackageAsync(Guid packageId, bool force = false, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.package.unregister");
         // Get package info
         var package = await GetPackageByIdAsync(packageId, cancellationToken)
             ?? throw new UnregisterException(
@@ -2094,6 +2113,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string solutionName,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.addToSolution");
         var request = new AddSolutionComponentRequest
         {
             ComponentId = componentId,
@@ -2128,6 +2148,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task EnableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.enable");
         try
         {
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -2153,6 +2174,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DisableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("plugins.step.disable");
         try
         {
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);

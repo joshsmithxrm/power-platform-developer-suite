@@ -1,7 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Solutions;
+using PPDS.Cli.Services.WebResources;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;

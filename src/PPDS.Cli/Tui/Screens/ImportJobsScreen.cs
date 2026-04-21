@@ -1,7 +1,7 @@
 using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Tui.Infrastructure;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.ImportJobs;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;

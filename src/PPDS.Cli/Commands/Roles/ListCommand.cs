@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Roles;
 
 namespace PPDS.Cli.Commands.Roles;
 

@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Dataverse.Generated;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
@@ -20,6 +21,7 @@ public sealed class CustomApiService : ICustomApiService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly IPluginRegistrationService _pluginRegistrationService;
+    private readonly IShakedownGuard _guard;
     private readonly ILogger<CustomApiService> _logger;
 
     // BindingType OptionSet values
@@ -50,10 +52,11 @@ public sealed class CustomApiService : ICustomApiService
     /// <summary>
     /// Creates a new instance of <see cref="CustomApiService"/>.
     /// </summary>
-    public CustomApiService(IDataverseConnectionPool pool, IPluginRegistrationService pluginRegistrationService, ILogger<CustomApiService> logger)
+    public CustomApiService(IDataverseConnectionPool pool, IPluginRegistrationService pluginRegistrationService, IShakedownGuard guard, ILogger<CustomApiService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _pluginRegistrationService = pluginRegistrationService ?? throw new ArgumentNullException(nameof(pluginRegistrationService));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -116,6 +119,7 @@ public sealed class CustomApiService : ICustomApiService
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.register");
         // Validate unique name
         if (string.IsNullOrWhiteSpace(registration.UniqueName))
         {
@@ -178,6 +182,7 @@ public sealed class CustomApiService : ICustomApiService
         CustomApiUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.update");
         var existing = await GetByIdInternalAsync(id, cancellationToken);
         if (existing is null)
         {
@@ -249,6 +254,7 @@ public sealed class CustomApiService : ICustomApiService
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.unregister");
         var existing = await GetByIdInternalAsync(id, cancellationToken);
         if (existing is null)
         {
@@ -309,6 +315,7 @@ public sealed class CustomApiService : ICustomApiService
         CustomApiParameterRegistration parameter,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.parameter.add");
         ValidateParameterRegistration(parameter);
         return await AddParameterInternalAsync(apiId, parameter, cancellationToken);
     }
@@ -319,6 +326,7 @@ public sealed class CustomApiService : ICustomApiService
         CustomApiParameterUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.parameter.update");
         var existing = await FindParameterByIdAsync(parameterId, cancellationToken);
         if (existing is null)
         {
@@ -351,6 +359,7 @@ public sealed class CustomApiService : ICustomApiService
     /// <inheritdoc />
     public async Task RemoveParameterAsync(Guid parameterId, CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.parameter.remove");
         var existing = await FindParameterByIdAsync(parameterId, cancellationToken);
         if (existing is null)
         {
@@ -374,6 +383,7 @@ public sealed class CustomApiService : ICustomApiService
         string? assemblyName,
         CancellationToken cancellationToken = default)
     {
+        _guard.EnsureCanMutate("customapi.setPluginType");
         var update = new Entity(CustomAPI.EntityLogicalName) { Id = customApiId };
 
         if (pluginTypeName is null)

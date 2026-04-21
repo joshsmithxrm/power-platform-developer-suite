@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- 12 domain services have been moved from `PPDS.Dataverse` to `PPDS.Cli` as part of constitution A1 compliance and the shakedown-guard v1 landing. The services are no longer registered by `RegisterDataverseServices` — consumers must now reference `PPDS.Cli.Services` for these types:
+  - `IPluginTraceService` / `PluginTraceService` → `PPDS.Cli.Services.PluginTraces`
+  - `IWebResourceService` / `WebResourceService` → `PPDS.Cli.Services.WebResources`
+  - `IEnvironmentVariableService` / `EnvironmentVariableService` → `PPDS.Cli.Services.EnvironmentVariables`
+  - `ISolutionService` / `SolutionService` → `PPDS.Cli.Services.Solutions`
+  - `IImportJobService` / `ImportJobService` → `PPDS.Cli.Services.ImportJobs`
+  - `IMetadataAuthoringService` / `MetadataAuthoringService` → `PPDS.Cli.Services.Metadata.Authoring`
+  - `IUserService` / `UserService` → `PPDS.Cli.Services.Users`
+  - `IRoleService` / `RoleService` → `PPDS.Cli.Services.Roles`
+  - `IFlowService` / `FlowService` → `PPDS.Cli.Services.Flows`
+  - `IConnectionReferenceService` / `ConnectionReferenceService` → `PPDS.Cli.Services.ConnectionReferences`
+  - `IDeploymentSettingsService` / `DeploymentSettingsService` → `PPDS.Cli.Services.DeploymentSettings`
+  - `IComponentNameResolver` / `ComponentNameResolver` → `PPDS.Cli.Services.SolutionComponents`
+
+  Consumers depending on these services or on `RegisterDataverseServices` registering them will see compile/runtime errors on upgrade. Update `using` directives to the new namespaces and register them via `AddCliApplicationServices`. Method signatures are preserved.
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.7` series. Targets `net8.0`, `net9.0`, `net10.0`.

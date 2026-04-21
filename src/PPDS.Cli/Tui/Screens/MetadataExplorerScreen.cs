@@ -4,6 +4,7 @@ using PPDS.Cli.Tui.Dialogs.Metadata;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
+using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Dataverse.Metadata.Models;
 using Terminal.Gui;
 

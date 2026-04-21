@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 using Xunit;
@@ -98,7 +99,7 @@ public class DataProviderServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(_mockClient.Object);
 
-        _sut = new DataProviderService(_mockPool.Object, _mockLogger.Object);
+        _sut = new DataProviderService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
     }
 
     #region Helper builders

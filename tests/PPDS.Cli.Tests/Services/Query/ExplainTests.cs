@@ -1,5 +1,6 @@
 using Moq;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
@@ -22,7 +23,7 @@ public class ExplainTests
     public ExplainTests()
     {
         _mockQueryExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
-        _service = new SqlQueryService(_mockQueryExecutor.Object);
+        _service = new SqlQueryService(_mockQueryExecutor.Object, guard: new InactiveFakeShakedownGuard());
     }
 
     #region Basic Plan Structure

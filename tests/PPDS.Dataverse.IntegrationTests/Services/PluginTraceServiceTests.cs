@@ -1,9 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using PPDS.Cli.Infrastructure.Safety;
+using PPDS.Cli.Services.PluginTraces;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.IntegrationTests.Mocks;
-using PPDS.Dataverse.Services;
 using Xunit;
 
 namespace PPDS.Dataverse.IntegrationTests.Services;
@@ -19,7 +20,16 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
     public PluginTraceServiceTests()
     {
         _pool = new FakeConnectionPool(Service, "test-connection");
-        _service = new PluginTraceService(_pool, new NullLogger<PluginTraceService>());
+        _service = new PluginTraceService(_pool, new InactiveGuard(), new NullLogger<PluginTraceService>());
+    }
+
+    /// <summary>
+    /// Test guard that permits all mutations — integration tests exercise read paths
+    /// but the service constructor requires a non-null guard.
+    /// </summary>
+    private sealed class InactiveGuard : IShakedownGuard
+    {
+        public void EnsureCanMutate(string operationDescription) { /* no-op */ }
     }
 
     #region ListAsync Tests

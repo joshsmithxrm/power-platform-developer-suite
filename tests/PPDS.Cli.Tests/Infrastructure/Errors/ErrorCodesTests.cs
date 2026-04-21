@@ -146,4 +146,10 @@ public class ErrorCodesTests
         Assert.StartsWith("Operation.", ErrorCodes.Operation.Cancelled);
         Assert.StartsWith("Operation.", ErrorCodes.Operation.Internal);
     }
+
+    [Fact]
+    public void Safety_ShakedownActive_HasExpectedValue()
+    {
+        Assert.Equal("Safety.ShakedownActive", ErrorCodes.Safety.ShakedownActive);
+    }
 }

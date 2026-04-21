@@ -1,5 +1,5 @@
 using PPDS.Cli.Services.Settings;
-using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.PluginTraces;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services.Settings;
