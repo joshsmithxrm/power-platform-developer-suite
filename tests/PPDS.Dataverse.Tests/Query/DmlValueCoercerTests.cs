@@ -337,4 +337,17 @@ public class DmlValueCoercerTests
         var result = DmlValueCoercer.Coerce("9223372036854775807", Attr("BigInt"));
         Assert.Equal(long.MaxValue, Assert.IsType<long>(result));
     }
+
+    [Fact]
+    public void Coerce_DateTimeFromDateOnlyString_ReturnsDateTime()
+    {
+        // Regression for #866: SQL date literal '2026-05-20' (no time component)
+        // must coerce to DateTime, not pass through as a raw string.
+        var result = DmlValueCoercer.Coerce("2026-05-20", Attr("DateTime"));
+        var dt = Assert.IsType<DateTime>(result);
+        Assert.Equal(2026, dt.Year);
+        Assert.Equal(5, dt.Month);
+        Assert.Equal(20, dt.Day);
+        Assert.Equal(DateTimeKind.Unspecified, dt.Kind);
+    }
 }

@@ -40,7 +40,7 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 900           # 15 minutes max for CI
+CI_MAX_WAIT = 3600          # 60 minutes max for CI
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
@@ -509,7 +509,29 @@ def _rebase_source_branch(worktree, pr_number, logger):
                    stderr=fetch.stderr.strip()[:200])
         return False
 
-    # 2. Rebase onto origin/<base>
+    # 2. Stash workflow state files that are routinely dirty in agent worktrees.
+    #    Only stash known-safe paths — if other files are dirty the rebase
+    #    should fail so the user is aware of unexpected uncommitted changes.
+    _STASHABLE = (".claude/state/", ".workflow/")
+    stashed = False
+    try:
+        status = _run(["git", "status", "--porcelain"])
+        if status.returncode == 0 and status.stdout.strip():
+            dirty = [l.strip().split(maxsplit=1)[-1].strip('"')
+                     for l in status.stdout.strip().splitlines() if l.strip()]
+            safe = all(any(f.startswith(p) for p in _STASHABLE) for f in dirty)
+            if safe and dirty:
+                stash = _run(["git", "stash", "push", "-m", "pr-monitor-rebase",
+                              "--", *dirty])
+                stashed = stash.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    def _pop_stash():
+        if stashed:
+            _run(["git", "stash", "pop"])
+
+    # 3. Rebase onto origin/<base>
     rebase_ref = f"origin/{base}"
     try:
         rebase = _run(["git", "rebase", "--", rebase_ref], timeout=120)
@@ -520,6 +542,7 @@ def _rebase_source_branch(worktree, pr_number, logger):
             _run(["git", "rebase", "--abort"])
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
+        _pop_stash()
         return False
     if rebase.returncode != 0:
         logger.log("rebase", "CONFLICT", base=base,
@@ -532,24 +555,27 @@ def _rebase_source_branch(worktree, pr_number, logger):
                            stderr=abort.stderr.strip()[:200])
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.log("rebase", "ABORT_ERROR", reason=str(e))
+        _pop_stash()
         return False
 
-    # 3. Resolve the local branch name so we can push with an explicit
+    # 4. Resolve the local branch name so we can push with an explicit
     # refspec. Bare ``git push`` fails under push.default=simple when the
     # local branch name differs from its upstream tracking ref.
     try:
         rev = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=10)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "BRANCH_DETECT_ERROR", reason=str(e))
+        _pop_stash()
         return False
     current = rev.stdout.strip()
     if rev.returncode != 0 or not current or current == "HEAD":
         reason = "Detached HEAD" if current == "HEAD" else "Empty output"
         logger.log("rebase", "BRANCH_DETECT_ERROR",
                    stderr=rev.stderr.strip()[:200] if rev.returncode != 0 else reason)
+        _pop_stash()
         return False
 
-    # 4. Push with lease using explicit origin + HEAD:<branch> refspec.
+    # 5. Push with lease using explicit origin + HEAD:<branch> refspec.
     try:
         push = _run(
             ["git", "push", "--force-with-lease", "origin", f"HEAD:{current}"],
@@ -557,10 +583,14 @@ def _rebase_source_branch(worktree, pr_number, logger):
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("rebase", "PUSH_ERROR", reason=str(e))
+        _pop_stash()
         return False
     if push.returncode != 0:
         logger.log("rebase", "PUSH_ERROR", stderr=push.stderr.strip()[:200])
+        _pop_stash()
         return False
+
+    _pop_stash()
 
     logger.log("rebase", "DONE", base=base)
     return True

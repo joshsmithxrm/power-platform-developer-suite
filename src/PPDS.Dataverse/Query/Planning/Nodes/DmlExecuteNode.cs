@@ -164,27 +164,27 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                 "Provide it via QueryPlanContext.");
         }
 
-        long affectedCount;
+        (long successCount, long failureCount) dmlResult;
 
         switch (Operation)
         {
             case DmlOperation.Insert when InsertValueRows != null:
-                affectedCount = await ExecuteInsertValuesAsync(context, cancellationToken)
+                dmlResult = await ExecuteInsertValuesAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 break;
 
             case DmlOperation.Insert when SourceNode != null:
-                affectedCount = await ExecuteInsertSelectAsync(context, cancellationToken)
+                dmlResult = await ExecuteInsertSelectAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 break;
 
             case DmlOperation.Update:
-                affectedCount = await ExecuteUpdateAsync(context, cancellationToken)
+                dmlResult = await ExecuteUpdateAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 break;
 
             case DmlOperation.Delete:
-                affectedCount = await ExecuteDeleteAsync(context, cancellationToken)
+                dmlResult = await ExecuteDeleteAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 break;
 
@@ -194,10 +194,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                     $"Unsupported DML operation: {Operation}");
         }
 
-        // Return a single row with the affected count
         var values = new Dictionary<string, QueryValue>
         {
-            ["affected_rows"] = QueryValue.Simple(affectedCount)
+            ["affected_rows"] = QueryValue.Simple(dmlResult.successCount),
+            ["failed_rows"] = QueryValue.Simple(dmlResult.failureCount)
         };
         yield return new QueryRow(values, EntityLogicalName);
     }
@@ -205,7 +205,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     private static readonly IReadOnlyDictionary<string, QueryValue> EmptyRow =
         new Dictionary<string, QueryValue>();
 
-    private async System.Threading.Tasks.Task<long> ExecuteInsertValuesAsync(
+    private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteInsertValuesAsync(
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
@@ -235,10 +235,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return result.SuccessCount;
+        return (result.SuccessCount, result.FailureCount);
     }
 
-    private async System.Threading.Tasks.Task<long> ExecuteInsertSelectAsync(
+    private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteInsertSelectAsync(
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
@@ -282,7 +282,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        if (entities.Count == 0) return 0;
+        if (entities.Count == 0) return (0, 0);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.CreateMultipleAsync(
@@ -291,10 +291,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return result.SuccessCount;
+        return (result.SuccessCount, result.FailureCount);
     }
 
-    private async System.Threading.Tasks.Task<long> ExecuteUpdateAsync(
+    private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteUpdateAsync(
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
@@ -328,7 +328,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        if (entities.Count == 0) return 0;
+        if (entities.Count == 0) return (0, 0);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.UpdateMultipleAsync(
@@ -337,10 +337,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return result.SuccessCount;
+        return (result.SuccessCount, result.FailureCount);
     }
 
-    private async System.Threading.Tasks.Task<long> ExecuteDeleteAsync(
+    private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteDeleteAsync(
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
@@ -363,7 +363,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             ids.Add(recordId);
         }
 
-        if (ids.Count == 0) return 0;
+        if (ids.Count == 0) return (0, 0);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.DeleteMultipleAsync(
@@ -372,7 +372,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return result.SuccessCount;
+        return (result.SuccessCount, result.FailureCount);
     }
 
     /// <summary>

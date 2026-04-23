@@ -85,7 +85,7 @@ def build_launch_script(
         f"{prompt}\n"
         "'@\n"
         "\n"
-        f'& "{claude_path}" $prompt\n'
+        f'& "{claude_path}" --model claude-opus-4-6 $prompt\n'
     )
 
 
@@ -225,7 +225,7 @@ def _print_manual_fallback(target_win: str, prompt: str, claude_win: str) -> Non
         "  $prompt = @'\n"
         f"{prompt}\n"
         "'@\n"
-        f"  & '{claude_escaped}' $prompt\n"
+        f"  & '{claude_escaped}' --model claude-opus-4-6 $prompt\n"
     )
 
 

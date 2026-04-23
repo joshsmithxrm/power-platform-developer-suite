@@ -161,6 +161,108 @@ public class DmlExecuteNodeCoercionTests
         Assert.Equal(clinicId, Assert.IsType<EntityReference>(entity["hsl_clinic"]).Id);
     }
 
+    [Fact]
+    public async Task InsertValues_CoercesDateTimeString_ToDateTime()
+    {
+        var bulk = new RecordingBulkExecutor();
+        var metadata = new StubMetadataProvider(PetAttributes());
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(),
+            bulkOperationExecutor: bulk,
+            metadataProvider: metadata);
+
+        CompiledScalarExpression nameExpr = _ => "Buddy";
+        CompiledScalarExpression dateExpr = _ => "2026-05-20";
+
+        var node = DmlExecuteNode.InsertValues(
+            "hsl_pet",
+            new[] { "hsl_name", "hsl_birthdate" },
+            new IReadOnlyList<CompiledScalarExpression>[]
+            {
+                new[] { nameExpr, dateExpr }
+            });
+
+        await ConsumeAsync(node, context);
+
+        var entity = Assert.Single(bulk.Created);
+        Assert.Equal("Buddy", entity["hsl_name"]);
+        var birthdate = Assert.IsType<DateTime>(entity["hsl_birthdate"]);
+        Assert.Equal(new DateTime(2026, 5, 20), birthdate);
+    }
+
+    [Fact]
+    public async Task InsertValues_WithFailures_IncludesFailureCountInResult()
+    {
+        var bulk = new ConfigurableBulkExecutor(successCount: 2, failureCount: 1);
+        var metadata = new StubMetadataProvider(PetAttributes());
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(),
+            bulkOperationExecutor: bulk,
+            metadataProvider: metadata);
+
+        var rows = new IReadOnlyList<CompiledScalarExpression>[]
+        {
+            new CompiledScalarExpression[] { _ => "Pet1" },
+            new CompiledScalarExpression[] { _ => "Pet2" },
+            new CompiledScalarExpression[] { _ => "Pet3" },
+        };
+
+        var node = DmlExecuteNode.InsertValues(
+            "hsl_pet",
+            new[] { "hsl_name" },
+            rows);
+
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(context, CancellationToken.None))
+        {
+            results.Add(row);
+        }
+
+        var resultRow = Assert.Single(results);
+        Assert.True(resultRow.Values.TryGetValue("affected_rows", out var affected));
+        Assert.Equal(2L, affected.Value);
+        Assert.True(resultRow.Values.TryGetValue("failed_rows", out var failed));
+        Assert.Equal(1L, failed.Value);
+    }
+
+    [Fact]
+    public async Task Update_WithFailures_IncludesFailureCountInResult()
+    {
+        var petId = Guid.NewGuid();
+        var bulk = new ConfigurableBulkExecutor(successCount: 0, failureCount: 1);
+        var metadata = new StubMetadataProvider(PetAttributes());
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(),
+            bulkOperationExecutor: bulk,
+            metadataProvider: metadata);
+
+        var source = new StaticPlanNode(new[]
+        {
+            new QueryRow(
+                new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["hsl_petid"] = QueryValue.Simple(petId)
+                },
+                "hsl_pet")
+        });
+
+        CompiledScalarExpression nameExpr = _ => "Updated";
+        var node = DmlExecuteNode.Update(
+            "hsl_pet",
+            source,
+            new[] { new CompiledSetClause("hsl_name", nameExpr) });
+
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(context, CancellationToken.None))
+        {
+            results.Add(row);
+        }
+
+        var resultRow = Assert.Single(results);
+        Assert.True(resultRow.Values.TryGetValue("failed_rows", out var failed));
+        Assert.Equal(1L, failed.Value);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
 
     private static async Task ConsumeAsync(IQueryPlanNode node, QueryPlanContext context)
@@ -209,6 +311,13 @@ public class DmlExecuteNodeCoercionTests
             SchemaName = "hsl_clinic",
             AttributeType = "Lookup",
             Targets = new List<string> { "hsl_clinic" }
+        },
+        new AttributeMetadataDto
+        {
+            LogicalName = "hsl_birthdate",
+            DisplayName = "Birth Date",
+            SchemaName = "hsl_birthdate",
+            AttributeType = "DateTime"
         }
     };
 
@@ -307,6 +416,54 @@ public class DmlExecuteNodeCoercionTests
             int maxRecords = 5000,
             CancellationToken cancellationToken = default)
             => Task.FromResult(QueryResult.Empty(""));
+    }
+
+    private sealed class ConfigurableBulkExecutor : IBulkOperationExecutor
+    {
+        private readonly int _successCount;
+        private readonly int _failureCount;
+
+        public ConfigurableBulkExecutor(int successCount, int failureCount)
+        {
+            _successCount = successCount;
+            _failureCount = failureCount;
+        }
+
+        public Task<BulkOperationResult> CreateMultipleAsync(
+            string entityLogicalName,
+            IEnumerable<Entity> entities,
+            BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
+            IProgress<ProgressSnapshot>? progress = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+
+        public Task<BulkOperationResult> UpdateMultipleAsync(
+            string entityLogicalName,
+            IEnumerable<Entity> entities,
+            BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
+            IProgress<ProgressSnapshot>? progress = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+
+        public Task<BulkOperationResult> UpsertMultipleAsync(
+            string entityLogicalName,
+            IEnumerable<Entity> entities,
+            BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
+            IProgress<ProgressSnapshot>? progress = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+
+        public Task<BulkOperationResult> DeleteMultipleAsync(
+            string entityLogicalName,
+            IEnumerable<Guid> ids,
+            BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null,
+            IProgress<ProgressSnapshot>? progress = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
     }
 
     private sealed class StaticPlanNode : IQueryPlanNode

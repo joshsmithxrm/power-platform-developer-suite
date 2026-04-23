@@ -328,7 +328,7 @@ Could not open a new terminal automatically. Open PowerShell and run:
   $prompt = @'
   <full prompt content>
   '@
-  claude $prompt
+  claude --model claude-opus-4-6 $prompt
 ```
 
 Note the bare `claude $prompt` — NOT `claude -p $prompt`. The `-p`
