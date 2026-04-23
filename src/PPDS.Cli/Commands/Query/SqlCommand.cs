@@ -305,7 +305,7 @@ public static class SqlCommand
                     break;
             }
 
-            return ExitCodes.Success;
+            return DmlExitCode(queryResult.Result);
         }
         catch (QueryParseException ex)
         {
@@ -337,6 +337,19 @@ public static class SqlCommand
             foreach (var rp in remoteProviders)
                 await rp.DisposeAsync();
         }
+    }
+
+    private static int DmlExitCode(QueryResult result)
+    {
+        if (result.Records.Count == 0)
+            return ExitCodes.Success;
+
+        var row = result.Records[0];
+        if (!row.TryGetValue("failed_rows", out var fq) || fq.Value is not long failed || failed == 0)
+            return ExitCodes.Success;
+
+        var succeeded = row.TryGetValue("affected_rows", out var sq) && sq.Value is long s && s > 0;
+        return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
     }
 
     private static async Task<string> GetSqlAsync(
