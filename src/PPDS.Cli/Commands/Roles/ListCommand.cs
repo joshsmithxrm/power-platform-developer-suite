@@ -15,7 +15,7 @@ public static class ListCommand
 {
     public static Command Create()
     {
-        var filterOption = new Option<string?>("--filter", "-f")
+        var filterOption = new Option<string?>("--filter")
         {
             Description = "Filter by role name"
         };

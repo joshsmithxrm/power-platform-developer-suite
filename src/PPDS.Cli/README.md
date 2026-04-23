@@ -250,7 +250,7 @@ Options:
 - `--disable-plugins` - Set disableplugins=true on all entities
 - `--include-attributes`, `-a` - Whitelist specific attributes
 - `--exclude-attributes` - Blacklist specific attributes
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 #### Users
 

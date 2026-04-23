@@ -56,9 +56,9 @@ public class DocsCommandTests
     }
 
     [Fact]
-    public void DocsUrl_PointsToGitHubReadme()
+    public void DocsUrl_PointsToGitHubPagesSite()
     {
-        Assert.Contains("github.com", DocsCommand.DocsUrl);
-        Assert.Contains("README.md", DocsCommand.DocsUrl);
+        Assert.Contains("github.io", DocsCommand.DocsUrl);
+        Assert.Contains("ppds-docs", DocsCommand.DocsUrl);
     }
 }

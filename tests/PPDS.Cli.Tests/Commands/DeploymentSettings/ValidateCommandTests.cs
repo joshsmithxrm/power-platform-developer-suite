@@ -46,10 +46,32 @@ public class ValidateCommandTests
     }
 
     [Fact]
-    public void Create_FileOptionHasShortAlias()
+    public void Create_FileOptionHasNoShortAlias_FReservedForOutputFormat()
     {
-        var option = _command.Options.First(o => o.Name == "--file");
-        Assert.Contains("-f", option.Aliases);
+        // L1: -f is reserved exclusively for --output-format; --file uses only its long form.
+        var fileOption = _command.Options.First(o => o.Name == "--file");
+        Assert.DoesNotContain("-f", fileOption.Aliases);
+    }
+
+    [Fact]
+    public void Create_OutputFormatOption_HasFShortAlias()
+    {
+        // -f belongs to --output-format — consistent across the CLI.
+        var formatOption = _command.Options.FirstOrDefault(o => o.Name == "--output-format");
+        Assert.NotNull(formatOption);
+        Assert.Contains("-f", formatOption.Aliases);
+    }
+
+    [Fact]
+    public void Create_NoTwoOptions_ShareAShortAlias()
+    {
+        // Regression: duplicate short aliases cause silent parse collisions.
+        var aliases = _command.Options
+            .SelectMany(o => o.Aliases)
+            .Where(a => a.StartsWith("-") && !a.StartsWith("--"))
+            .ToList();
+        var duplicates = aliases.GroupBy(a => a).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Assert.Empty(duplicates);
     }
 
     [Fact]
