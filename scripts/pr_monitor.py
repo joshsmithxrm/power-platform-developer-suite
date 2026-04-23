@@ -40,7 +40,7 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 900           # 15 minutes max for CI
+CI_MAX_WAIT = 3600          # 60 minutes max for CI
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
