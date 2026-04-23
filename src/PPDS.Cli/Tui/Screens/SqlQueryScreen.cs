@@ -102,162 +102,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         // Create presenter (contains all query orchestration logic, Terminal.Gui-free)
         _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty);
 
-        // Pre-allocate stored handlers for R3-compliant unsubscription in OnDispose.
-        _onStreamingColumnsReady = (columns, entityLogicalName) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                try
-                {
-                    _resultsTable.InitializeStreamingColumns(columns, entityLogicalName);
-                    NotifyMenuChanged();
-                }
-                catch (Exception ex)
-                {
-                    ErrorService.ReportError("Failed to display streaming columns", ex, "Presenter.StreamingColumnsReady");
-                }
-            });
-        };
-
-        _onStreamingRowsReady = (rows, columns, isComplete, totalRowsSoFar) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                try
-                {
-                    _resultsTable.AppendStreamingRows(rows, columns);
-                }
-                catch (Exception ex)
-                {
-                    ErrorService.ReportError("Failed to display streaming results", ex, "Presenter.StreamingRowsReady");
-                }
-            });
-        };
-
-        _onStatusChanged = (statusMessage) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusSpinner.Message = statusMessage;
-                _statusLabel.Text = statusMessage;
-            });
-        };
-
-        _onExecutionComplete = (statusText, elapsedMs, executionMode) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusText = statusText;
-                _statusSpinner.Stop();
-                _statusLabel.Text = _statusText;
-                _statusLabel.Visible = true;
-            });
-        };
-
-        _onAuthenticationRequired = (authEx) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusSpinner.Stop();
-                _statusLabel.Visible = true;
-
-                TuiDebugLog.Log($"Authentication error: {authEx.Message}");
-
-                var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
-                Application.Run(dialog);
-
-                if (dialog.ShouldReauthenticate)
-                {
-                    TuiDebugLog.Log("User chose to re-authenticate");
-                    try
-                    {
-                        _statusLabel.Text = "Re-authenticating...";
-                        ErrorService.FireAndForget(HandleReauthAndRetryAsync(), "ReauthAndRetry");
-                    }
-                    catch (Exception reAuthEx)
-                    {
-                        ErrorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
-                        _statusText = $"Re-authentication failed: {reAuthEx.Message}";
-                        _statusLabel.Text = _statusText;
-                    }
-                }
-                else
-                {
-                    TuiDebugLog.Log("User cancelled re-authentication");
-                    ErrorService.ReportError("Session expired", authEx, "ExecuteQuery");
-                    _statusText = $"Error: {authEx.Message}";
-                    _statusLabel.Text = _statusText;
-                }
-            });
-        };
-
-        _onDmlConfirmationRequired = (dmlEx) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusSpinner.Stop();
-                _statusLabel.Visible = true;
-
-                var result = MessageBox.Query(
-                    "Confirm DML Operation",
-                    dmlEx.Message + "\n\nDo you want to proceed?",
-                    "Execute", "Cancel");
-
-                if (result == 0) // "Execute" button
-                {
-                    TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
-                    _statusLabel.Visible = false;
-                    _presenter.ConfirmDml();
-                    ErrorService.FireAndForget(
-                        _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation),
-                        "RetryDmlConfirmed");
-                }
-                else
-                {
-                    TuiDebugLog.Log("User cancelled DML operation");
-                    _statusText = "DML operation cancelled.";
-                    _statusLabel.Text = _statusText;
-                }
-            });
-        };
-
-        _onQueryCancelled = () =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusSpinner.Stop();
-                _statusLabel.Text = "Query cancelled.";
-                _statusLabel.Visible = true;
-            });
-        };
-
-        _onErrorOccurred = (errorMessage) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusText = $"Error: {errorMessage}";
-                _statusSpinner.Stop();
-                _statusLabel.Text = _statusText;
-                _statusLabel.Visible = true;
-            });
-        };
-
-        _onPageLoaded = (queryResult) =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                try
-                {
-                    _resultsTable.AddPage(queryResult);
-                }
-                catch (Exception ex)
-                {
-                    ErrorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
-                    TuiDebugLog.Log($"Error in LoadMore callback: {ex}");
-                }
-            });
-        };
-
         // Query input area
         _queryFrame = new FrameView("Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
         {
@@ -481,6 +325,164 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             {
                 _statusLabel.Text = "IntelliSense loading...";
             }
+        };
+
+        // Pre-allocate stored handlers for R3-compliant unsubscription in OnDispose.
+        // These lambdas close over `this` and reference UI fields (_resultsTable, _statusSpinner,
+        // _statusLabel, _queryInput) — they must be assigned after those fields are initialized.
+        _onStreamingColumnsReady = (columns, entityLogicalName) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.InitializeStreamingColumns(columns, entityLogicalName);
+                    NotifyMenuChanged();
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to display streaming columns", ex, "Presenter.StreamingColumnsReady");
+                }
+            });
+        };
+
+        _onStreamingRowsReady = (rows, columns, isComplete, totalRowsSoFar) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.AppendStreamingRows(rows, columns);
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to display streaming results", ex, "Presenter.StreamingRowsReady");
+                }
+            });
+        };
+
+        _onStatusChanged = (statusMessage) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Message = statusMessage;
+                _statusLabel.Text = statusMessage;
+            });
+        };
+
+        _onExecutionComplete = (statusText, elapsedMs, executionMode) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusText = statusText;
+                _statusSpinner.Stop();
+                _statusLabel.Text = _statusText;
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _onAuthenticationRequired = (authEx) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Visible = true;
+
+                TuiDebugLog.Log($"Authentication error: {authEx.Message}");
+
+                var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
+                Application.Run(dialog);
+
+                if (dialog.ShouldReauthenticate)
+                {
+                    TuiDebugLog.Log("User chose to re-authenticate");
+                    try
+                    {
+                        _statusLabel.Text = "Re-authenticating...";
+                        ErrorService.FireAndForget(HandleReauthAndRetryAsync(), "ReauthAndRetry");
+                    }
+                    catch (Exception reAuthEx)
+                    {
+                        ErrorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
+                        _statusText = $"Re-authentication failed: {reAuthEx.Message}";
+                        _statusLabel.Text = _statusText;
+                    }
+                }
+                else
+                {
+                    TuiDebugLog.Log("User cancelled re-authentication");
+                    ErrorService.ReportError("Session expired", authEx, "ExecuteQuery");
+                    _statusText = $"Error: {authEx.Message}";
+                    _statusLabel.Text = _statusText;
+                }
+            });
+        };
+
+        _onDmlConfirmationRequired = (dmlEx) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Visible = true;
+
+                var result = MessageBox.Query(
+                    "Confirm DML Operation",
+                    dmlEx.Message + "\n\nDo you want to proceed?",
+                    "Execute", "Cancel");
+
+                if (result == 0) // "Execute" button
+                {
+                    TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
+                    _statusLabel.Visible = false;
+                    _presenter.ConfirmDml();
+                    ErrorService.FireAndForget(
+                        _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation),
+                        "RetryDmlConfirmed");
+                }
+                else
+                {
+                    TuiDebugLog.Log("User cancelled DML operation");
+                    _statusText = "DML operation cancelled.";
+                    _statusLabel.Text = _statusText;
+                }
+            });
+        };
+
+        _onQueryCancelled = () =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusSpinner.Stop();
+                _statusLabel.Text = "Query cancelled.";
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _onErrorOccurred = (errorMessage) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusText = $"Error: {errorMessage}";
+                _statusSpinner.Stop();
+                _statusLabel.Text = _statusText;
+                _statusLabel.Visible = true;
+            });
+        };
+
+        _onPageLoaded = (queryResult) =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    _resultsTable.AddPage(queryResult);
+                }
+                catch (Exception ex)
+                {
+                    ErrorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
+                    TuiDebugLog.Log($"Error in LoadMore callback: {ex}");
+                }
+            });
         };
 
         // Subscribe to presenter events — marshal all UI updates to the main thread
