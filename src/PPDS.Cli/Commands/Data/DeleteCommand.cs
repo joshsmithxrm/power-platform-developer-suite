@@ -1,15 +1,12 @@
 using System.CommandLine;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
-using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
-using PPDS.Query.Parsing;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -253,7 +250,7 @@ public static class DeleteCommand
                 Console.Error.WriteLine();
             }
 
-            var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+            var dataQueryService = serviceProvider.GetRequiredService<IDataQueryService>();
             var bulkExecutor = serviceProvider.GetRequiredService<IBulkOperationExecutor>();
 
             // Resolve IDs to delete based on input mode
@@ -265,7 +262,7 @@ public static class DeleteCommand
             }
             else if (!string.IsNullOrEmpty(key))
             {
-                var resolvedId = await ResolveAlternateKeyAsync(pool, entity, key, cancellationToken);
+                var resolvedId = await dataQueryService.ResolveByAlternateKeyAsync(entity, key, cancellationToken);
                 if (resolvedId == null)
                 {
                     WriteError(globalOptions, "RECORD_NOT_FOUND", $"No record found with key: {key}");
@@ -275,7 +272,7 @@ public static class DeleteCommand
             }
             else if (file != null)
             {
-                idsToDelete = await LoadIdsFromFileAsync(file, idColumn, entity, pool, cancellationToken);
+                idsToDelete = await LoadIdsFromFileAsync(file, idColumn, entity, cancellationToken);
                 if (idsToDelete.Count == 0)
                 {
                     WriteError(globalOptions, "NO_RECORDS", "No record IDs found in file");
@@ -284,7 +281,11 @@ public static class DeleteCommand
             }
             else if (!string.IsNullOrEmpty(filter))
             {
-                idsToDelete = await QueryIdsAsync(pool, entity, filter, limit, globalOptions, cancellationToken);
+                if (!globalOptions.IsJsonMode)
+                {
+                    Console.Error.WriteLine("Querying records to delete...");
+                }
+                idsToDelete = (await dataQueryService.QueryIdsByFilterAsync(entity, filter, limit, cancellationToken)).ToList();
                 if (idsToDelete.Count == 0)
                 {
                     if (!globalOptions.IsJsonMode)
@@ -472,40 +473,10 @@ public static class DeleteCommand
         }
     }
 
-    private static async Task<Guid?> ResolveAlternateKeyAsync(
-        IDataverseConnectionPool pool,
-        string entity,
-        string keyString,
-        CancellationToken cancellationToken)
-    {
-        // Parse key=value pairs and build a query
-        var query = new QueryExpression(entity)
-        {
-            ColumnSet = new ColumnSet(false),
-            TopCount = 1
-        };
-
-        foreach (var pair in keyString.Split(','))
-        {
-            var parts = pair.Split('=', 2);
-            if (parts.Length != 2)
-            {
-                throw new ArgumentException($"Invalid key format: {pair}. Expected field=value.");
-            }
-            query.Criteria.AddCondition(parts[0].Trim(), ConditionOperator.Equal, parts[1].Trim());
-        }
-
-        await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-        return results.Entities.Count > 0 ? results.Entities[0].Id : null;
-    }
-
     private static async Task<List<Guid>> LoadIdsFromFileAsync(
         FileInfo file,
         string? idColumn,
         string entity,
-        IDataverseConnectionPool pool,
         CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
@@ -634,54 +605,6 @@ public static class DeleteCommand
 
         values.Add(current.ToString());
         return values;
-    }
-
-    private static async Task<List<Guid>> QueryIdsAsync(
-        IDataverseConnectionPool pool,
-        string entity,
-        string filter,
-        int? limit,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        if (!globalOptions.IsJsonMode)
-        {
-            Console.Error.WriteLine("Querying records to delete...");
-        }
-
-        // Build SQL query and transpile to FetchXML
-        var sql = $"SELECT {entity}id FROM {entity} WHERE {filter}";
-        if (limit.HasValue)
-        {
-            sql = $"SELECT TOP {limit.Value + 1} {entity}id FROM {entity} WHERE {filter}";
-        }
-
-        var parser = new QueryParser();
-        var stmt = parser.ParseStatement(sql);
-        var generator = new FetchXmlGenerator();
-        var fetchXml = generator.Generate(stmt);
-
-        await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        var query = new FetchExpression(fetchXml);
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-
-        var ids = new List<Guid>();
-        var primaryKeyAttribute = $"{entity}id";
-
-        foreach (var record in results.Entities)
-        {
-            if (record.Contains(primaryKeyAttribute) && record[primaryKeyAttribute] is Guid id)
-            {
-                ids.Add(id);
-            }
-            else
-            {
-                ids.Add(record.Id);
-            }
-        }
-
-        return ids;
     }
 
     private static void WriteTextResult(BulkOperationResult result)
