@@ -19,6 +19,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     private CancellationTokenSource? _loadCts;
     private bool _textOnly = true;
     private Guid? _selectedSolutionId;
+    private string? _selectedSolutionName;
     private bool _staleFilterChecked;
 
     public override string Title => "Web Resources";
@@ -112,9 +113,11 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                 _staleFilterChecked = true;
                 var solutionService = provider.GetRequiredService<ISolutionService>();
                 var solutions = await solutionService.ListAsync(cancellationToken: ct);
-                if (!solutions.Items.Any(s => s.Id == _selectedSolutionId.Value))
+                var matchedSolution = solutions.Items.FirstOrDefault(s => s.Id == _selectedSolutionId.Value);
+                if (matchedSolution == null)
                 {
                     _selectedSolutionId = null;
+                    _selectedSolutionName = null;
                     ErrorService.FireAndForget(
                         Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
                             new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
@@ -123,6 +126,13 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     {
                         _statusLabel.Text = "Previously filtered solution not found \u2014 showing all";
                     });
+                }
+                else if (_selectedSolutionName == null)
+                {
+                    // Restore solution name from service on first load (e.g. after app restart)
+                    _selectedSolutionName = !string.IsNullOrWhiteSpace(matchedSolution.FriendlyName)
+                        ? matchedSolution.FriendlyName
+                        : matchedSolution.UniqueName;
                 }
             }
 
@@ -160,6 +170,11 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                 if (managed > 0) statusParts.Add($"{managed} managed");
                 if (!_textOnly) statusParts.Add($"{textTypes} text");
                 statusParts.Add(_textOnly ? "text-only" : "all types");
+                // I4 / L11-c: show active solution filter so user knows a filter is applied.
+                if (_selectedSolutionId.HasValue && _selectedSolutionName != null)
+                {
+                    statusParts.Add($"Filtered: {_selectedSolutionName}");
+                }
                 _statusLabel.Text = string.Join(" \u2014 ", statusParts);
             });
         }
@@ -378,10 +393,15 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     if (args.Item == 0)
                     {
                         _selectedSolutionId = null;
+                        _selectedSolutionName = null;
                     }
                     else
                     {
-                        _selectedSolutionId = solutions[args.Item - 1].Id;
+                        var sol = solutions[args.Item - 1];
+                        _selectedSolutionId = sol.Id;
+                        _selectedSolutionName = !string.IsNullOrWhiteSpace(sol.FriendlyName)
+                            ? sol.FriendlyName
+                            : sol.UniqueName;
                     }
                     Application.RequestStop();
                 };

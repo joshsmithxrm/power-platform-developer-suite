@@ -189,6 +189,11 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     internal int GetActiveTabIndex() => _activeTabIndex;
 
     /// <summary>
+    /// Calls OnNewClicked(). Exposed for testing.
+    /// </summary>
+    internal void OnNewClickedForTest() => OnNewClicked();
+
+    /// <summary>
     /// Moves to the next detail panel tab (wraps around).
     /// Ctrl+Tab navigates forward through Attributes, Relationships, Keys, Privileges, Choices.
     /// </summary>
@@ -216,6 +221,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     /// </summary>
     internal void UpdateActionBarVisibility()
     {
+        if (Application.Driver == null) return;
         bool showActions = _activeTabIndex != TabPrivileges;
         _newButton.Visible = showActions;
         _editButton.Visible = showActions;
@@ -226,25 +232,30 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     {
         if (EnvironmentUrl == null) return;
 
+        // When no entity is selected, any tab routes to CreateTable (L11-a fix).
+        // This lets the user create a new table regardless of which tab is active.
+        if (_selectedEntity == null)
+        {
+            OpenCreateTableDialog();
+            return;
+        }
+
         switch (_activeTabIndex)
         {
             case TabAttributes:
-                if (_selectedEntity == null) return;
                 OpenCreateColumnDialog();
                 break;
             case TabRelationships:
-                if (_selectedEntity == null) return;
                 OpenCreateRelationshipDialog();
                 break;
             case TabKeys:
-                if (_selectedEntity == null) return;
                 OpenCreateKeyDialog();
                 break;
             case TabChoices:
                 OpenCreateChoiceDialog();
                 break;
             default:
-                // Entity-level new (no tab or tab==Attributes with no entity selected)
+                // Entity-level new (tab==Attributes with entity selected falls through here too)
                 OpenCreateTableDialog();
                 break;
         }
