@@ -145,8 +145,8 @@ public class Finding7AuthBugTests
         AuthenticationOutput.Reset();
 
         // Verify by redirecting both stdout and stderr and checking which stream receives output
-        var stdoutCapture = new StringWriter();
-        var stderrCapture = new StringWriter();
+        using var stdoutCapture = new StringWriter();
+        using var stderrCapture = new StringWriter();
 
         var originalOut = Console.Out;
         var originalErr = Console.Error;
@@ -185,8 +185,8 @@ public class Finding7AuthBugTests
         // Reset
         AuthenticationOutput.Reset();
 
-        var stdoutCapture = new StringWriter();
-        var stderrCapture = new StringWriter();
+        using var stdoutCapture = new StringWriter();
+        using var stderrCapture = new StringWriter();
         var originalOut = Console.Out;
         var originalErr = Console.Error;
 
@@ -257,7 +257,7 @@ public class Finding7AuthBugTests
         var requiredCustomModifiers = field!.GetRequiredCustomModifiers();
         var isVolatile = Array.Exists(
             requiredCustomModifiers,
-            t => t.FullName == "System.Runtime.CompilerServices.IsVolatile");
+            t => string.Equals(t.FullName, "System.Runtime.CompilerServices.IsVolatile", StringComparison.Ordinal));
         isVolatile.Should().BeTrue(
             because: "_persistenceVerified must be volatile to ensure cross-thread visibility without a full lock on every read");
     }
@@ -274,7 +274,7 @@ public class Finding7AuthBugTests
         var requiredCustomModifiers = field!.GetRequiredCustomModifiers();
         var isVolatile = Array.Exists(
             requiredCustomModifiers,
-            t => t.FullName == "System.Runtime.CompilerServices.IsVolatile");
+            t => string.Equals(t.FullName, "System.Runtime.CompilerServices.IsVolatile", StringComparison.Ordinal));
 
         isVolatile.Should().BeTrue(because: reason);
     }
