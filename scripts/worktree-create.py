@@ -63,6 +63,32 @@ def detect_stranded(target_abs: str, registered: List[str]) -> bool:
     return normalized not in registered_norm
 
 
+def _resolve_main_repo_root() -> str:
+    """Auto-detect the main repo root from ``git worktree list``.
+
+    The first entry in ``git worktree list --porcelain`` is always the
+    main worktree.  When ``worktree-create.py`` is invoked from inside a
+    secondary worktree without ``--repo-root``, falling back to ``cwd``
+    would nest the new worktree inside the current one — the path that
+    ``launch-claude-session.py`` targets wouldn't exist.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if line.startswith("worktree "):
+                    return line[len("worktree "):].strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return os.getcwd()
+
+
 def _run(cmd: List[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
     result = subprocess.run(
         cmd,
@@ -189,15 +215,16 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--branch", help="branch name (default: feat/<name>)")
     p.add_argument(
         "--repo-root",
-        default=os.getcwd(),
-        help="main repo root (default: cwd)",
+        default=None,
+        help="main repo root (default: auto-detected from git worktree list)",
     )
     return p.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
-    code, msg = create(args.repo_root, args.name, args.branch)
+    repo_root = args.repo_root or _resolve_main_repo_root()
+    code, msg = create(repo_root, args.name, args.branch)
     if code == 0:
         print(msg)
     else:
