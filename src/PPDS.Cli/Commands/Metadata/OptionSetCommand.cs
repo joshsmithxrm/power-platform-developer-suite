@@ -115,6 +115,25 @@ public static class OptionSetCommand
         }
         catch (Exception ex)
         {
+            // Dataverse throws a FaultException / OrganizationServiceFault when a global option
+            // set name cannot be found — this commonly trips users who pass entity-scoped names
+            // like 'statuscode' or 'statecode' which are per-entity, not global.
+            var msg = ex.Message;
+            var isNotFound = msg.Contains("Could not find", StringComparison.OrdinalIgnoreCase)
+                          || msg.Contains("optionset", StringComparison.OrdinalIgnoreCase)
+                          || ex is PpdsNotFoundException;
+
+            if (isNotFound && !globalOptions.IsJsonMode)
+            {
+                Console.Error.WriteLine($"Error: Option set '{name}' not found.");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("Hint: Only global option sets are supported by this command.");
+                Console.Error.WriteLine($"  For entity-scoped choices (like 'statuscode' or 'statecode'), use:");
+                Console.Error.WriteLine($"  ppds metadata entity <entity> --and inspect the Attributes section.");
+                Console.Error.WriteLine($"  Example: ppds metadata entity account");
+                return ExitCodes.NotFoundError;
+            }
+
             var error = ExceptionMapper.Map(ex, context: $"retrieving option set '{name}'", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);

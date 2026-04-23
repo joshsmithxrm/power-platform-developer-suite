@@ -584,8 +584,27 @@ public static class EnvCommandGroup
 
             if (string.IsNullOrWhiteSpace(url))
             {
-                Console.Error.WriteLine("Error: Environment URL is required. Use --list to see all configs.");
-                return ExitCodes.Failure;
+                // No-arg invocation — show the active profile's current environment config.
+                var store = localProvider.GetRequiredService<ProfileStore>();
+                var collection = await store.LoadAsync(cancellationToken);
+                var profile = collection.ActiveProfile;
+
+                if (profile == null)
+                {
+                    Console.Error.WriteLine("Error: No active profile. Use 'ppds auth create' first.");
+                    return ExitCodes.Failure;
+                }
+
+                var envUrl = profile.Environment?.Url;
+                if (string.IsNullOrWhiteSpace(envUrl))
+                {
+                    Console.Error.WriteLine($"Profile '{profile.DisplayIdentifier}' has no environment selected.");
+                    Console.Error.WriteLine("Use 'ppds env select <environment>' to select one, or");
+                    Console.Error.WriteLine("use 'ppds env config <url> --label <label> --type <type> --color <color>' to configure.");
+                    return ExitCodes.Failure;
+                }
+
+                return await ExecuteConfigShowAsync(service, envUrl, cancellationToken);
             }
 
             if (show)
