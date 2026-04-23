@@ -341,14 +341,22 @@ public static class SqlCommand
 
     private static int DmlExitCode(QueryResult result)
     {
-        if (result.Records.Count == 0)
+        // DmlExecuteNode always yields exactly one row with exactly two columns:
+        // affected_rows and failed_rows. Guard on that shape so a SELECT with a
+        // user-named "failed_rows" column can't produce a false-positive exit code.
+        if (result.Records.Count != 1)
             return ExitCodes.Success;
 
         var row = result.Records[0];
-        if (!row.TryGetValue("failed_rows", out var fq) || fq.Value is not long failed || failed == 0)
+        if (row.Count != 2 ||
+            !row.TryGetValue("failed_rows", out var fq) ||
+            !row.TryGetValue("affected_rows", out var sq))
             return ExitCodes.Success;
 
-        var succeeded = row.TryGetValue("affected_rows", out var sq) && sq.Value is long s && s > 0;
+        if (fq.Value is not long failed || failed == 0)
+            return ExitCodes.Success;
+
+        var succeeded = sq.Value is long s && s > 0;
         return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
     }
 
