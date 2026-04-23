@@ -307,7 +307,7 @@ class TestBuildLaunchScript:
         script = launch_session.build_launch_script(
             "C:\\w", "C:\\claude.exe", "hi"
         )
-        assert "& \"C:\\claude.exe\" $prompt" in script
+        assert "& \"C:\\claude.exe\" --model claude-opus-4-6 $prompt" in script
         assert "-p $prompt" not in script
         assert "--prompt" not in script
 
@@ -395,7 +395,7 @@ class TestPowerShellSingleQuoteEscaping:
         err = capsys.readouterr().err
         # Both apostrophes must be doubled in the rendered snippet.
         assert "cd 'C:\\Users\\O''Brien\\worktree'" in err
-        assert "& 'C:\\Users\\O''Brien\\bin\\claude.exe' $prompt" in err
+        assert "& 'C:\\Users\\O''Brien\\bin\\claude.exe' --model claude-opus-4-6 $prompt" in err
 
     def test_manual_fallback_path_without_apostrophe_unchanged(self, capsys):
         """Regression: the escape must not corrupt normal paths in
@@ -407,7 +407,7 @@ class TestPowerShellSingleQuoteEscaping:
         )
         err = capsys.readouterr().err
         assert "cd 'C:\\plain\\worktree'" in err
-        assert "& 'C:\\plain\\claude.exe' $prompt" in err
+        assert "& 'C:\\plain\\claude.exe' --model claude-opus-4-6 $prompt" in err
 
 
 class TestLaunchDryRun:
@@ -431,7 +431,7 @@ class TestLaunchDryRun:
         content = script_path.read_text(encoding="utf-8")
         assert "Task: do the thing" in content
         assert "$prompt = @'" in content
-        assert "& \"C:\\claude.exe\" $prompt" in content
+        assert "& \"C:\\claude.exe\" --model claude-opus-4-6 $prompt" in content
 
         out = capsys.readouterr().out
         assert "spawn:" in out
