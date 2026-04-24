@@ -24,15 +24,32 @@ Thank you for your interest in contributing to Power Platform Developer Suite! T
    code ppds.code-workspace
    ```
 
+   This provides .NET solution navigation with C# Dev Kit, extension F5 debugging with correct path resolution, unified build/test tasks for both .NET and TypeScript, and compound debugging for CLI + Extension integration testing.
+
+   Alternatives: open the root folder for .NET-only work, or `src/PPDS.Extension/` for extension-only work.
+
 3. Build the solution:
    ```bash
    dotnet build PPDS.sln
+
+   # Build extension
+   cd src/PPDS.Extension && npm run compile
    ```
 
 4. Run unit tests:
    ```bash
    dotnet test --filter Category!=Integration
    ```
+
+### Debugging (F5)
+
+| Configuration | Purpose |
+|---------------|---------|
+| `.NET: Debug TUI` | Launch interactive TUI |
+| `.NET: Debug CLI` | Debug CLI with custom args |
+| `.NET: Debug Daemon` | Run RPC daemon for extension |
+| `Extension: Run` | Launch extension dev host |
+| `Full-Stack: Daemon + Extension` | Debug both sides of RPC |
 
 ## Development Workflow
 
