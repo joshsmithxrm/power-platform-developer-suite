@@ -31,103 +31,23 @@ public class SolutionService : ISolutionService
     private readonly IComponentNameResolver _nameResolver;
     private readonly ICachedMetadataProvider _cachedMetadata;
 
-    /// <summary>
-    /// Component type names for common component types.
-    /// </summary>
-    private static readonly Dictionary<int, string> ComponentTypeNames = new()
+    private static readonly Dictionary<int, string> ComponentTypeNames = BuildComponentTypeNames();
+
+    private static Dictionary<int, string> BuildComponentTypeNames()
     {
-        { 1, "Entity" },
-        { 2, "Attribute" },
-        { 3, "Relationship" },
-        { 4, "AttributePicklistValue" },
-        { 5, "AttributeLookupValue" },
-        { 6, "ViewAttribute" },
-        { 7, "LocalizedLabel" },
-        { 8, "RelationshipExtraCondition" },
-        { 9, "OptionSet" },
-        { 10, "EntityRelationship" },
-        { 11, "EntityRelationshipRole" },
-        { 12, "EntityRelationshipRelationships" },
-        { 13, "ManagedProperty" },
-        { 14, "EntityKey" },
-        { 16, "Privilege" },
-        { 17, "PrivilegeObjectTypeCode" },
-        { 18, "Index" },
-        { 20, "Role" },
-        { 21, "RolePrivilege" },
-        { 22, "DisplayString" },
-        { 23, "DisplayStringMap" },
-        { 24, "Form" },
-        { 25, "Organization" },
-        { 26, "SavedQuery" },
-        { 29, "Workflow" },
-        { 31, "Report" },
-        { 32, "ReportEntity" },
-        { 33, "ReportCategory" },
-        { 34, "ReportVisibility" },
-        { 35, "Attachment" },
-        { 36, "EmailTemplate" },
-        { 37, "ContractTemplate" },
-        { 38, "KBArticleTemplate" },
-        { 39, "MailMergeTemplate" },
-        { 44, "DuplicateRule" },
-        { 45, "DuplicateRuleCondition" },
-        { 46, "EntityMap" },
-        { 47, "AttributeMap" },
-        { 48, "RibbonCommand" },
-        { 49, "RibbonContextGroup" },
-        { 50, "RibbonCustomization" },
-        { 52, "RibbonRule" },
-        { 53, "RibbonTabToCommandMap" },
-        { 55, "RibbonDiff" },
-        { 59, "SavedQueryVisualization" },
-        { 60, "SystemForm" },
-        { 61, "WebResource" },
-        { 62, "SiteMap" },
-        { 63, "ConnectionRole" },
-        { 64, "ComplexControl" },
-        { 65, "HierarchyRule" },
-        { 66, "CustomControl" },
-        { 68, "CustomControlDefaultConfig" },
-        { 70, "FieldSecurityProfile" },
-        { 71, "FieldPermission" },
-        { 80, "Model-Driven App" },
-        { 90, "PluginType" },
-        { 91, "PluginAssembly" },
-        { 92, "SDKMessageProcessingStep" },
-        { 93, "SDKMessageProcessingStepImage" },
-        { 95, "ServiceEndpoint" },
-        { 150, "RoutingRule" },
-        { 151, "RoutingRuleItem" },
-        { 152, "SLA" },
-        { 153, "SLAItem" },
-        { 154, "ConvertRule" },
-        { 155, "ConvertRuleItem" },
-        { 161, "MobileOfflineProfile" },
-        { 162, "MobileOfflineProfileItem" },
-        { 165, "SimilarityRule" },
-        { 166, "DataSourceMapping" },
-        { 201, "SDKMessage" },
-        { 202, "SDKMessageFilter" },
-        { 203, "SdkMessagePair" },
-        { 204, "SdkMessageRequest" },
-        { 205, "SdkMessageRequestField" },
-        { 206, "SdkMessageResponse" },
-        { 207, "SdkMessageResponseField" },
-        { 208, "ImportMap" },
-        { 210, "WebWizard" },
-        { 300, "CanvasApp" },
-        { 371, "Connector" },
-        { 372, "Connector" },
-        { 380, "EnvironmentVariableDefinition" },
-        { 381, "EnvironmentVariableValue" },
-        { 400, "AIProjectType" },
-        { 401, "AIProject" },
-        { 402, "AIConfiguration" },
-        { 430, "EntityAnalyticsConfiguration" },
-        { 431, "AttributeImageConfiguration" },
-        { 432, "EntityImageConfiguration" }
-    };
+        var dict = new Dictionary<int, string>();
+
+        foreach (var value in Enum.GetValues<componenttype>())
+        {
+            dict[(int)value] = Enum.GetName(value)!;
+        }
+
+        // Display-friendly overrides for enum names that need formatting
+        dict[80] = "Model-Driven App";
+        dict[(int)componenttype.Connector1] = "Connector";
+
+        return dict;
+    }
 
     /// <summary>
     /// Per-environment cache for runtime-resolved component type names.
