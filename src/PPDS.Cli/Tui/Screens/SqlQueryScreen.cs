@@ -67,9 +67,16 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private string _statusText = "Ready";
 
     /// <inheritdoc />
-    public override string Title => EnvironmentUrl != null
-        ? $"SQL Query - {EnvironmentDisplayName ?? EnvironmentUrl}"
-        : "SQL Query";
+    public override string Title
+    {
+        get
+        {
+            var mode = _presenter.UseFetchXmlMode ? "FetchXML" : "SQL Query";
+            return EnvironmentUrl != null
+                ? $"{mode} - {EnvironmentDisplayName ?? EnvironmentUrl}"
+                : mode;
+        }
+    }
 
     // Note: Keep underscore on MenuBarItem (_Query) for Alt+Q to open menu.
     // Remove underscores from MenuItems - they create global Alt+letter hotkeys in Terminal.Gui.
@@ -85,6 +92,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
             new("", "", () => {}, null, null, Key.Null), // Separator
+            new(_presenter.UseFetchXmlMode ? "\u2713 FetchXML Input" : "  FetchXML Input", "F11", ToggleFetchXmlMode),
             new(_presenter.UseTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "F10", ToggleTdsEndpoint),
         })
     };
@@ -527,6 +535,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         // F10 instead of Ctrl+Shift+T: terminals cannot distinguish Ctrl+T from Ctrl+Shift+T
         // (they send the same keycode), so the global Ctrl+T (new tab) always wins. See #580.
         RegisterHotkey(registry, Key.F10, "Toggle TDS Endpoint", ToggleTdsEndpoint);
+        RegisterHotkey(registry, Key.F11, "Toggle FetchXML Input", ToggleFetchXmlMode);
         // F-key alternatives for Linux compatibility (Ctrl+Shift combos don't work on Linux terminals)
         RegisterHotkey(registry, Key.F7, "Show execution plan", ShowExecutionPlanDialog);
         RegisterHotkey(registry, Key.F8, "Query history", ShowHistoryDialog);
@@ -708,9 +717,10 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _presenter.AuthenticationRequired += OnAuth;
         _presenter.DmlConfirmationRequired += OnDml;
 
-        ErrorService.FireAndForget(
-            _presenter.ExecuteAsync(sql, ScreenCancellation),
-            "ExecuteQuery");
+        var task = _presenter.UseFetchXmlMode
+            ? _presenter.ExecuteFetchXmlAsync(sql, ScreenCancellation)
+            : _presenter.ExecuteAsync(sql, ScreenCancellation);
+        ErrorService.FireAndForget(task, "ExecuteQuery");
     }
 
     /// <summary>
@@ -737,6 +747,16 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private void ToggleTdsEndpoint()
     {
         _presenter.ToggleTds();
+        _statusLabel.SetNeedsDisplay();
+        NotifyMenuChanged();
+    }
+
+    private void ToggleFetchXmlMode()
+    {
+        _presenter.ToggleFetchXml();
+        _queryFrame.Title = _presenter.UseFetchXmlMode
+            ? "FetchXML (F5 to execute, F11 to switch to SQL)"
+            : "Query (F5 to execute, Ctrl+Space for suggestions, Alt+↑↓ to resize, F6 to toggle focus)";
         _statusLabel.SetNeedsDisplay();
         NotifyMenuChanged();
     }

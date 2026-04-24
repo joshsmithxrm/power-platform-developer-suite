@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
@@ -29,6 +30,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     private QueryPlanDescription? _lastExecutionPlan;
     private long _lastExecutionTimeMs;
     private bool _useTdsEndpoint;
+    private bool _useFetchXmlMode;
     private bool _confirmedDml;
 
     // Read-only properties
@@ -40,6 +42,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     public QueryPlanDescription? LastExecutionPlan => _lastExecutionPlan;
     public long LastExecutionTimeMs => _lastExecutionTimeMs;
     public bool UseTdsEndpoint => _useTdsEndpoint;
+    public bool UseFetchXmlMode => _useFetchXmlMode;
 
     // Events -- screen subscribes and wraps with Application.MainLoop.Invoke()
 
@@ -105,6 +108,14 @@ internal sealed class SqlQueryPresenter : IDisposable
         StatusChanged?.Invoke(_useTdsEndpoint
             ? "Mode: TDS Read Replica (read-only, slight delay)"
             : "Mode: Dataverse (real-time)");
+    }
+
+    public void ToggleFetchXml()
+    {
+        _useFetchXmlMode = !_useFetchXmlMode;
+        StatusChanged?.Invoke(_useFetchXmlMode
+            ? "Input: FetchXML (paste raw FetchXML)"
+            : "Input: SQL");
     }
 
     public void ConfirmDml()
@@ -248,6 +259,76 @@ internal sealed class SqlQueryPresenter : IDisposable
         {
             _isExecuting = false;
             DmlConfirmationRequired?.Invoke(dmlEx);
+        }
+        catch (Exception ex)
+        {
+            _lastErrorMessage = ex.Message;
+            _isExecuting = false;
+            ErrorOccurred?.Invoke(ex.Message);
+        }
+    }
+
+    public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
+    {
+        if (string.IsNullOrWhiteSpace(fetchXml))
+        {
+            ErrorOccurred?.Invoke("FetchXML cannot be empty.");
+            return;
+        }
+
+        _queryCts?.Cancel();
+        _queryCts?.Dispose();
+        _queryCts = CancellationTokenSource.CreateLinkedTokenSource(screenCancellation);
+        var queryCt = _queryCts.Token;
+
+        _isExecuting = true;
+        _lastErrorMessage = null;
+        StatusChanged?.Invoke("Executing FetchXML...");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            var provider = await _session.GetServiceProviderAsync(_environmentUrl, queryCt);
+            var executor = provider.GetRequiredService<IQueryExecutor>();
+
+            var result = await executor.ExecuteFetchXmlAsync(fetchXml, cancellationToken: queryCt);
+
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.ElapsedMilliseconds;
+
+            _lastSql = fetchXml;
+            _lastPageNumber = result.PageNumber;
+            _lastPagingCookie = result.PagingCookie;
+            _lastExecutionTimeMs = elapsedMs;
+            _isExecuting = false;
+
+            if (result.Columns.Count > 0)
+                StreamingColumnsReady?.Invoke(result.Columns, result.EntityLogicalName);
+
+            if (result.Records.Count > 0 && result.Columns.Count > 0)
+                StreamingRowsReady?.Invoke(result.Records, result.Columns, true, result.Count);
+
+            var statusText = $"Returned {result.Count:N0} rows in {elapsedMs}ms via FetchXML";
+            ExecutionComplete?.Invoke(statusText, elapsedMs, null);
+
+            _session.GetErrorService().FireAndForget(
+                SaveToHistoryAsync(fetchXml, result.Count, elapsedMs),
+                "SaveHistory");
+        }
+        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
+        {
+            _isExecuting = false;
+            AuthenticationRequired?.Invoke(authEx);
+        }
+        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
+        {
+            _isExecuting = false;
+            QueryCancelled?.Invoke();
+        }
+        catch (OperationCanceledException) when (screenCancellation.IsCancellationRequested)
+        {
+            _isExecuting = false;
         }
         catch (Exception ex)
         {
