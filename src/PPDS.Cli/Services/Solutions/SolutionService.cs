@@ -31,19 +31,19 @@ public class SolutionService : ISolutionService
     private readonly IComponentNameResolver _nameResolver;
     private readonly ICachedMetadataProvider _cachedMetadata;
 
+    // componenttype value 80 (Model-Driven App) is not present in the generated enum,
+    // but appears at runtime in Dataverse solutions.
+    private const int ModelDrivenAppTypeCode = 80;
+
     private static readonly Dictionary<int, string> ComponentTypeNames = BuildComponentTypeNames();
 
     private static Dictionary<int, string> BuildComponentTypeNames()
     {
-        var dict = new Dictionary<int, string>();
-
-        foreach (var value in Enum.GetValues<componenttype>())
-        {
-            dict[(int)value] = Enum.GetName(value)!;
-        }
+        var dict = Enum.GetValues<componenttype>()
+            .ToDictionary(value => (int)value, value => Enum.GetName(value)!);
 
         // Display-friendly overrides for enum names that need formatting
-        dict[80] = "Model-Driven App";
+        dict[ModelDrivenAppTypeCode] = "Model-Driven App";
         dict[(int)componenttype.Connector1] = "Connector";
 
         return dict;
