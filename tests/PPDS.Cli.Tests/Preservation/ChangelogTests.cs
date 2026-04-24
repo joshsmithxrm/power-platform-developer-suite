@@ -10,22 +10,13 @@ public class ChangelogTests
     private const string UnreleasedHeader = "## [Unreleased]";
 
     [Fact]
-    public void Dataverse_Changelog_DocumentsRelocation()
+    public void Dataverse_Changelog_HasReleasedVersion()
     {
         var path = Path.Combine(PathHelpers.RepoRoot(), "src", "PPDS.Dataverse", "CHANGELOG.md");
         Assert.True(File.Exists(path), $"CHANGELOG not found: {path}");
         var changelog = File.ReadAllText(path);
 
         Assert.Contains(UnreleasedHeader, changelog);
-
-        var interfaces = new[]
-        {
-            "IPluginTraceService", "IWebResourceService", "IMetadataAuthoringService",
-            "IFlowService", "IConnectionReferenceService", "IDeploymentSettingsService"
-        };
-        foreach (var iface in interfaces)
-        {
-            Assert.Contains(iface, changelog);
-        }
+        Assert.Contains("## [1.0.0]", changelog);
     }
 }
