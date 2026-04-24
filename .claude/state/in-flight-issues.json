@@ -40,6 +40,18 @@
         "extension"
       ],
       "intent": "Fix Sync Deployment Settings getting stuck"
+  "updated": "2026-04-24T18:26:11Z",
+  "open_work": [
+    {
+      "session_id": "dd8f64eb",
+      "started": "2026-04-24T18:26:11Z",
+      "branch": "feat/release-cycle-design",
+      "worktree": ".worktrees/release-cycle-design",
+      "issues": [],
+      "areas": [
+        "release"
+      ],
+      "intent": "Design release cycle workflow: triggering, milestone targeting, branching policy, enforcement gaps"
     }
   ]
 }
