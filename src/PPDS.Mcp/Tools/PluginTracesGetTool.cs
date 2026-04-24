@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,42 +33,55 @@ public sealed class PluginTracesGetTool : McpToolBase
         string traceId,
         CancellationToken cancellationToken = default)
     {
-        if (!Guid.TryParse(traceId, out var id))
+        try
         {
-            throw new ArgumentException($"Invalid trace ID format: '{traceId}'. Expected a GUID.", nameof(traceId));
+            if (!Guid.TryParse(traceId, out var id))
+            {
+                throw new ArgumentException($"Invalid trace ID format: '{traceId}'. Expected a GUID.", nameof(traceId));
+            }
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(traceId), traceId)).ConfigureAwait(false);
+            var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
+
+            var trace = await traceService.GetAsync(id, cancellationToken).ConfigureAwait(false);
+
+            if (trace == null)
+            {
+                throw new KeyNotFoundException($"Trace with ID '{traceId}' not found.");
+            }
+
+            return new PluginTraceDetailResult
+            {
+                Id = trace.Id,
+                TypeName = trace.TypeName,
+                MessageName = trace.MessageName,
+                PrimaryEntity = trace.PrimaryEntity,
+                Mode = trace.Mode.ToString(),
+                OperationType = trace.OperationType.ToString(),
+                Depth = trace.Depth,
+                CreatedOn = trace.CreatedOn,
+                DurationMs = trace.DurationMs,
+                ConstructorDurationMs = trace.ConstructorDurationMs,
+                ExecutionStartTime = trace.ExecutionStartTime,
+                HasException = trace.HasException,
+                ExceptionDetails = trace.ExceptionDetails,
+                MessageBlock = trace.MessageBlock,
+                Configuration = trace.Configuration,
+                CorrelationId = trace.CorrelationId,
+                RequestId = trace.RequestId,
+                PluginStepId = trace.PluginStepId
+            };
         }
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(traceId), traceId)).ConfigureAwait(false);
-        var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
-
-        var trace = await traceService.GetAsync(id, cancellationToken).ConfigureAwait(false);
-
-        if (trace == null)
+        catch (PpdsException ex)
         {
-            throw new KeyNotFoundException($"Trace with ID '{traceId}' not found.");
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        return new PluginTraceDetailResult
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            Id = trace.Id,
-            TypeName = trace.TypeName,
-            MessageName = trace.MessageName,
-            PrimaryEntity = trace.PrimaryEntity,
-            Mode = trace.Mode.ToString(),
-            OperationType = trace.OperationType.ToString(),
-            Depth = trace.Depth,
-            CreatedOn = trace.CreatedOn,
-            DurationMs = trace.DurationMs,
-            ConstructorDurationMs = trace.ConstructorDurationMs,
-            ExecutionStartTime = trace.ExecutionStartTime,
-            HasException = trace.HasException,
-            ExceptionDetails = trace.ExceptionDetails,
-            MessageBlock = trace.MessageBlock,
-            Configuration = trace.Configuration,
-            CorrelationId = trace.CorrelationId,
-            RequestId = trace.RequestId,
-            PluginStepId = trace.PluginStepId
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -109,6 +109,9 @@ public class ComponentNameResolver : IComponentNameResolver
         catch (Exception ex)
         {
             stopwatch.Stop();
+            // Intentional degradation: name resolution failures return an empty dict so callers
+            // fall back to displaying raw GUIDs. The caller (SolutionService.GetComponentsAsync)
+            // treats missing names as non-fatal — users see component IDs instead of display names.
             _logger.LogWarning(
                 ex,
                 "Failed to resolve names for component type {ComponentType} ({Count} IDs) after {ElapsedMs}ms",

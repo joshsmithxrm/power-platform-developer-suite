@@ -50,18 +50,40 @@ configured and active.
    `ppds env current`) and confirm the displayed env matches an allowlist
    entry. The `shakedown-safety` hook will block downstream `ppds *`
    calls otherwise.
-3. **Set the read-only marker for this session:**
+3. **Arm the shakedown write-block (sentinel file).** Before any other
+   Bash work, write `.claude/state/shakedown-active.json` containing at
+   least `started_at` (ISO-8601 UTC timestamp string, consumed by both
+   the Python `shakedown-safety` hook and the C# `IShakedownGuard`) and,
+   when available, `session_id`:
+
    ```bash
-   export PPDS_SHAKEDOWN=1
+   python -c "import json, os; from datetime import datetime, timezone; \
+     os.makedirs('.claude/state', exist_ok=True); \
+     json.dump({'started_at': datetime.now(timezone.utc).isoformat(), \
+                'session_id': os.environ.get('CLAUDE_SESSION_ID', '')}, \
+               open('.claude/state/shakedown-active.json', 'w'))"
    ```
-   This activates the write-block path in `shakedown-safety`, which
-   refuses mutation verbs (`plugins deploy` without `--dry-run`,
+
+   The `shakedown-safety` hook reads this sentinel on every Bash call
+   and refuses mutation verbs (`plugins deploy` without `--dry-run`,
    `<surface> create/update/delete`, `solutions import`, etc.) for the
-   duration of the shakedown. (The env-var name is configurable via
-   `safety.readonly_env_var` in settings.json; default is `PPDS_SHAKEDOWN`.)
+   duration of the shakedown. The sentinel auto-expires after 24h so a
+   crashed session cannot wedge the write-block for future sessions.
+
+   **Why the sentinel and not just `export PPDS_SHAKEDOWN=1`?** Claude
+   Code's Bash tool spawns a fresh shell per invocation — both inline
+   `PPDS_SHAKEDOWN=1 ppds ...` prefixes and `export` from a prior call
+   fail to propagate to this hook subprocess. The sentinel file is the
+   reliable activation source from inside a Claude Code session. The
+   env var is still honored as a secondary source for shell scripts and
+   CI where sentinel-file management is awkward. (The env-var name is
+   configurable via `safety.readonly_env_var` in settings.json; default
+   is `PPDS_SHAKEDOWN`.)
 4. **Acknowledge the model:** plugin deploys MUST be invoked with
-   `--dry-run` during shakedown. To run a real deploy, unset
-   `PPDS_SHAKEDOWN` (deliberate action — there is no softer bypass).
+   `--dry-run` during shakedown. To run a real deploy, delete the
+   sentinel file (`rm .claude/state/shakedown-active.json`) and unset
+   `PPDS_SHAKEDOWN` if it's also in the environment — deliberate action,
+   there is no softer bypass.
 
 See `docs/SAFE-SHAKEDOWN.md` for the full safety model and how to add envs
 to the allowlist.
@@ -171,6 +193,17 @@ Before declaring complete:
 1. Enumerate features NOT tested (from the matrix)
 2. Present to user for explicit sign-off on skipping
 3. Do NOT declare the shakedown complete without this sign-off
+4. **Disarm the shakedown write-block** — delete the sentinel file as
+   the very last act, after sign-off on (1)–(3):
+
+   ```bash
+   rm .claude/state/shakedown-active.json
+   ```
+
+   A leftover sentinel keeps the write-block armed for any subsequent
+   session in this worktree until it expires 24h later (or until the
+   `session-start-workflow` hook self-heals it). Cleaning up explicitly
+   is the rule; the staleness self-heal is a safety net, not the plan.
 
 ### Default-mode Rules
 

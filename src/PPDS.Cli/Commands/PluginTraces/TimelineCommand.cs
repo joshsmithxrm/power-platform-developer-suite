@@ -18,13 +18,13 @@ public static class TimelineCommand
     {
         var traceIdArgument = new Argument<Guid?>("trace-id")
         {
-            Description = "The plugin trace ID (gets correlation ID from this trace)",
+            Description = "Trace ID of any execution in the request — the timeline shows all related traces via the correlation ID",
             Arity = ArgumentArity.ZeroOrOne
         };
 
         var correlationIdOption = new Option<Guid?>("--correlation-id", "-c")
         {
-            Description = "The correlation ID to look up (alternative to trace-id)"
+            Description = "Correlation ID to look up directly (use this if you already have the correlation ID)"
         };
 
         var command = new Command("timeline", "Display plugin execution timeline as a hierarchy tree")

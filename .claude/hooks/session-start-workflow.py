@@ -17,9 +17,58 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _pathfix import get_project_dir
+
+
+_SHAKEDOWN_SENTINEL_REL = os.path.join(".claude", "state", "shakedown-active.json")
+_SHAKEDOWN_SENTINEL_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def _cleanup_stale_shakedown_sentinel(project_dir):
+    """Remove a shakedown-active sentinel older than 24h.
+
+    Belt-and-suspenders for the shakedown-safety hook's own self-heal: a
+    crashed shakedown session must not wedge the write-block for future
+    sessions. Anything malformed is treated as stale and removed.
+
+    ``started_at`` is an ISO-8601 UTC timestamp string -- same format the
+    C# ``IShakedownGuard`` and the ``shakedown-safety`` PreToolUse hook
+    parse.
+    """
+    sentinel = os.path.join(project_dir, _SHAKEDOWN_SENTINEL_REL)
+    if not os.path.isfile(sentinel):
+        return
+
+    started_at_dt = None
+    try:
+        with open(sentinel, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            raw = data.get("started_at")
+            if isinstance(raw, str):
+                try:
+                    started_at_dt = datetime.fromisoformat(raw)
+                except ValueError:
+                    started_at_dt = None
+                else:
+                    if started_at_dt.tzinfo is None:
+                        started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+    except (OSError, json.JSONDecodeError):
+        started_at_dt = None
+
+    age_seconds = None
+    if started_at_dt is not None:
+        age_seconds = abs((datetime.now(timezone.utc) - started_at_dt).total_seconds())
+
+    if age_seconds is None or age_seconds > _SHAKEDOWN_SENTINEL_MAX_AGE_SECONDS:
+        try:
+            os.remove(sentinel)
+        except OSError:
+            pass
 
 
 def main():
@@ -35,6 +84,8 @@ def main():
         pass
 
     project_dir = get_project_dir()
+
+    _cleanup_stale_shakedown_sentinel(project_dir)
 
     # Get current branch
     branch = "unknown"

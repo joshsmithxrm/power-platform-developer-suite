@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -45,42 +46,55 @@ public sealed class MetadataCreateTableTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(schemaName), schemaName),
-            (nameof(displayName), displayName),
-            (nameof(pluralName), pluralName),
-            (nameof(description), description),
-            (nameof(ownershipType), ownershipType)).ConfigureAwait(false);
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        var result = await service.CreateTableAsync(new CreateTableRequest
+        try
         {
-            SolutionUniqueName = solution,
-            SchemaName = schemaName,
-            DisplayName = displayName,
-            PluralDisplayName = pluralName,
-            Description = description,
-            OwnershipType = ownershipType,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
 
-        return new MetadataCreateTableResult
-        {
-            LogicalName = result.LogicalName,
-            MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
-            WasDryRun = result.WasDryRun,
-            ValidationMessages = result.ValidationMessages.Select(v => new ValidationMessageDto
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(schemaName), schemaName),
+                (nameof(displayName), displayName),
+                (nameof(pluralName), pluralName),
+                (nameof(description), description),
+                (nameof(ownershipType), ownershipType)).ConfigureAwait(false);
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            var result = await service.CreateTableAsync(new CreateTableRequest
             {
-                Field = v.Field,
-                Rule = v.Rule,
-                Message = v.Message
-            }).ToList()
-        };
+                SolutionUniqueName = solution,
+                SchemaName = schemaName,
+                DisplayName = displayName,
+                PluralDisplayName = pluralName,
+                Description = description,
+                OwnershipType = ownershipType,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataCreateTableResult
+            {
+                LogicalName = result.LogicalName,
+                MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
+                WasDryRun = result.WasDryRun,
+                ValidationMessages = result.ValidationMessages.Select(v => new ValidationMessageDto
+                {
+                    Field = v.Field,
+                    Rule = v.Rule,
+                    Message = v.Message
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

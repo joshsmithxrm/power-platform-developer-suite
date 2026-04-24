@@ -29,8 +29,11 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
-    private AuthenticationResult? _cachedResult;
-    private string? _cachedResultUrl;
+    // volatile ensures cross-thread visibility: AccessTokenProviderFunctionAsync runs on a
+    // background thread; without a memory barrier the background thread can observe stale null
+    // after the main thread writes the post-interactive-auth result (Bug B fix).
+    private volatile AuthenticationResult? _cachedResult;
+    private volatile string? _cachedResultUrl;
     private bool _disposed;
 
     /// <inheritdoc />
@@ -232,8 +235,13 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
                 AuthDebugLog.WriteLine($"  Found account for silent auth: upn={LogIdentityHelper.HashIdentifier(account.Username)}");
                 try
                 {
-                    _cachedResult = await _msalClient!
-                        .AcquireTokenSilent(scopes, account)
+                    // Bug A fix: apply tenant override per-request when known. The MSAL client
+                    // uses "organizations" authority so cache keys align across providers; the
+                    // per-request .WithTenantId() narrows to the profile's tenant for token issuance.
+                    var silentBuilder = _msalClient!.AcquireTokenSilent(scopes, account);
+                    if (!string.IsNullOrWhiteSpace(_tenantId))
+                        silentBuilder = silentBuilder.WithTenantId(_tenantId);
+                    _cachedResult = await silentBuilder
                         .ExecuteAsync(cancellationToken)
                         .ConfigureAwait(false);
                     _cachedResultUrl = environmentUrl;
@@ -282,10 +290,15 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
         try
         {
-            _cachedResult = await _msalClient!
+            // Bug A fix: apply tenant override per-request when known so the interactive token
+            // is issued for the correct tenant while the MSAL app stays on "organizations".
+            var interactiveBuilder = _msalClient!
                 .AcquireTokenInteractive(scopes)
                 .WithUseEmbeddedWebView(false) // Use system browser
-                .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount) // Always show account picker
+                .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount); // Always show account picker
+            if (!string.IsNullOrWhiteSpace(_tenantId))
+                interactiveBuilder = interactiveBuilder.WithTenantId(_tenantId);
+            _cachedResult = await interactiveBuilder
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
             _cachedResultUrl = environmentUrl;
@@ -360,7 +373,13 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         if (_msalClient != null)
             return;
 
-        _msalClient = MsalClientBuilder.CreateClient(_cloud, _tenantId, MsalClientBuilder.RedirectUriOption.Localhost);
+        // Bug A fix: always use "organizations" (multi-tenant) authority so the MSAL token
+        // cache key matches GlobalDiscoveryService, which also uses "organizations".
+        // MSAL keys cached tokens by (authority, client_id, scope, account) — mismatched
+        // authorities produce cache misses across invocations causing repeated login prompts.
+        // Per MSAL multi-tenant public-client docs, the tenant override is applied per-request
+        // via .WithTenantId() on AcquireToken* calls (see GetTokenAsync below).
+        _msalClient = MsalClientBuilder.CreateClient(_cloud, tenantId: null, MsalClientBuilder.RedirectUriOption.Localhost);
         _cacheHelper = await MsalClientBuilder.CreateAndRegisterCacheAsync(_msalClient).ConfigureAwait(false);
     }
 
@@ -402,9 +421,13 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         {
             // Try silent acquisition - this will use cached tokens if available
             // WithForceRefresh(false) ensures we only check cache, don't refresh
-            var result = await _msalClient!
+            // Bug A fix: apply tenant override per-request when known.
+            var silentBuilder = _msalClient!
                 .AcquireTokenSilent(scopes, account)
-                .WithForceRefresh(false)
+                .WithForceRefresh(false);
+            if (!string.IsNullOrWhiteSpace(_tenantId))
+                silentBuilder = silentBuilder.WithTenantId(_tenantId);
+            var result = await silentBuilder
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
 

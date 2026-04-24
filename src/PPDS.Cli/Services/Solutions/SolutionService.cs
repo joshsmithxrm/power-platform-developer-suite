@@ -8,6 +8,7 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Dataverse.Generated;
@@ -202,11 +203,13 @@ public class SolutionService : ISolutionService
         }
 
         // Apply filter if provided
+        // Use Like with %value% pattern — Contains requires a fulltext index (Dataverse fault 0x80048415)
+        // whereas Like performs substring match without that requirement.
         if (!string.IsNullOrWhiteSpace(filter))
         {
             var filterCondition = new FilterExpression(LogicalOperator.Or);
-            filterCondition.AddCondition(Solution.Fields.UniqueName, ConditionOperator.Contains, filter);
-            filterCondition.AddCondition(Solution.Fields.FriendlyName, ConditionOperator.Contains, filter);
+            filterCondition.AddCondition(Solution.Fields.UniqueName, ConditionOperator.Like, $"%{filter}%");
+            filterCondition.AddCondition(Solution.Fields.FriendlyName, ConditionOperator.Like, $"%{filter}%");
             query.Criteria.AddFilter(filterCondition);
         }
 
@@ -221,7 +224,19 @@ public class SolutionService : ISolutionService
 
         _logger.LogDebug("Querying solutions with filter: {Filter}, includeManaged: {IncludeManaged}, includeInternal: {IncludeInternal}", filter, includeManaged, includeInternal);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection results;
+        try
+        {
+            results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.ListFailed,
+                "Failed to retrieve solutions from Dataverse.",
+                ex);
+        }
+
         var items = results.Entities.Select(e => MapToSolutionInfo(e)).ToList();
 
         return new ListResult<SolutionInfo>
@@ -268,7 +283,18 @@ public class SolutionService : ISolutionService
 
         _logger.LogDebug("Getting solution: {UniqueName}", uniqueName);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection results;
+        try
+        {
+            results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.GetFailed,
+                $"Failed to retrieve solution '{uniqueName}' from Dataverse.",
+                ex);
+        }
 
         return results.Entities.FirstOrDefault() is { } entity ? MapToSolutionInfo(entity) : null;
     }
@@ -309,7 +335,18 @@ public class SolutionService : ISolutionService
 
         _logger.LogDebug("Getting solution by ID: {SolutionId}", solutionId);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection results;
+        try
+        {
+            results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.GetFailed,
+                $"Failed to retrieve solution '{solutionId}' from Dataverse.",
+                ex);
+        }
 
         return results.Entities.FirstOrDefault() is { } entity ? MapToSolutionInfo(entity) : null;
     }
@@ -342,7 +379,18 @@ public class SolutionService : ISolutionService
 
         _logger.LogDebug("Getting components for solution: {SolutionId}, componentType: {ComponentType}", solutionId, componentType);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection results;
+        try
+        {
+            results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.GetComponentsFailed,
+                $"Failed to retrieve components for solution '{solutionId}' from Dataverse.",
+                ex);
+        }
 
         var envUrl = client.ConnectedOrgUniqueName ?? client.ConnectedOrgId?.ToString() ?? "default";
 
@@ -451,9 +499,20 @@ public class SolutionService : ISolutionService
             Managed = managed
         };
 
-        var response = (ExportSolutionResponse)await client.ExecuteAsync(request, cancellationToken);
+        OrganizationResponse response;
+        try
+        {
+            response = await client.ExecuteAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.ExportFailed,
+                $"Failed to export solution '{uniqueName}' from Dataverse.",
+                ex);
+        }
 
-        return response.ExportSolutionFile;
+        return ((ExportSolutionResponse)response).ExportSolutionFile;
     }
 
     /// <inheritdoc />
@@ -479,7 +538,17 @@ public class SolutionService : ISolutionService
             PublishWorkflows = publishWorkflows
         };
 
-        await client.ExecuteAsync(request, cancellationToken);
+        try
+        {
+            await client.ExecuteAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.ImportFailed,
+                "Failed to import solution into Dataverse.",
+                ex);
+        }
 
         return importJobId;
     }
@@ -494,7 +563,17 @@ public class SolutionService : ISolutionService
         _logger.LogInformation("Publishing all customizations");
 
         var request = new PublishAllXmlRequest();
-        await client.ExecuteAsync(request, cancellationToken);
+        try
+        {
+            await client.ExecuteAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Solution.PublishFailed,
+                "Failed to publish all customizations in Dataverse.",
+                ex);
+        }
     }
 
     /// <summary>

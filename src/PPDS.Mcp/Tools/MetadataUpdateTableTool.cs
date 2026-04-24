@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -43,30 +44,43 @@ public sealed class MetadataUpdateTableTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(entityName), entityName)).ConfigureAwait(false);
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        await service.UpdateTableAsync(new UpdateTableRequest
+        try
         {
-            SolutionUniqueName = solution,
-            EntityLogicalName = entityName,
-            DisplayName = displayName,
-            PluralDisplayName = pluralName,
-            Description = description,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
 
-        return new MetadataUpdateTableResult
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(entityName), entityName)).ConfigureAwait(false);
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            await service.UpdateTableAsync(new UpdateTableRequest
+            {
+                SolutionUniqueName = solution,
+                EntityLogicalName = entityName,
+                DisplayName = displayName,
+                PluralDisplayName = pluralName,
+                Description = description,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataUpdateTableResult
+            {
+                Success = true,
+                WasDryRun = dryRun
+            };
+        }
+        catch (PpdsException ex)
         {
-            Success = true,
-            WasDryRun = dryRun
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

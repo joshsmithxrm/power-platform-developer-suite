@@ -54,14 +54,27 @@ public class PluginTraceService : IPluginTraceService
             var query = BuildListQuery(filter, top);
 
             _logger.LogDebug("Querying plugin traces with top: {Top}", top);
-            var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            EntityCollection result;
+            try
+            {
+                result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new PpdsException(
+                    ErrorCodes.PluginTrace.ListFailed,
+                    "Failed to retrieve plugin trace logs from Dataverse.",
+                    ex);
+            }
             items = result.Entities.Select(MapToPluginTraceInfo).ToList();
         }
 
         // Wire existing CountAsync into TotalCount for I4 transparency.
         // CountAsync acquires its own pooled client — safe now that the first is disposed.
-        // May fail with certain filter combinations on mocked contexts;
-        // fall back to items.Count so ListAsync remains usable.
+        // Intentional degradation: count query failure does not fail the entire list operation.
+        // TotalCount falls back to the page size so WasTruncated reflects at least whether
+        // the caller got a full page. PpdsException from CountAsync is already structured;
+        // we intentionally swallow it here to keep ListAsync usable. Per design 2026-04-20.
         int totalCount;
         try
         {
@@ -277,7 +290,19 @@ public class PluginTraceService : IPluginTraceService
             TopCount = 1
         };
 
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.PluginTrace.GetSettingsFailed,
+                "Failed to retrieve plugin trace log settings from Dataverse.",
+                ex);
+        }
+
         var org = result.Entities.FirstOrDefault();
 
         var settingValue = org?.GetAttributeValue<OptionSetValue>("plugintracelogsetting")?.Value ?? 0;
@@ -304,7 +329,19 @@ public class PluginTraceService : IPluginTraceService
             TopCount = 1
         };
 
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.PluginTrace.SetSettingsFailed,
+                "Failed to retrieve the organization record needed to update plugin trace settings.",
+                ex);
+        }
+
         var org = result.Entities.FirstOrDefault()
             ?? throw new InvalidOperationException("Organization record not found.");
 
@@ -314,7 +351,18 @@ public class PluginTraceService : IPluginTraceService
             ["plugintracelogsetting"] = new OptionSetValue((int)setting)
         };
 
-        await client.UpdateAsync(update, cancellationToken);
+        try
+        {
+            await client.UpdateAsync(update, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.PluginTrace.SetSettingsFailed,
+                $"Failed to update plugin trace log settings to '{setting}' in Dataverse.",
+                ex);
+        }
+
         _logger.LogInformation("Set plugin trace log setting to: {Setting}", setting);
     }
 
@@ -326,7 +374,18 @@ public class PluginTraceService : IPluginTraceService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
         var fetchXml = BuildCountFetchXml(filter);
-        var result = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml), cancellationToken);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(
+                ErrorCodes.PluginTrace.CountFailed,
+                "Failed to count plugin trace logs in Dataverse.",
+                ex);
+        }
 
         var countEntity = result.Entities.FirstOrDefault();
         if (countEntity == null) return 0;

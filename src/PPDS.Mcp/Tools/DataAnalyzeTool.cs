@@ -5,6 +5,7 @@ using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -33,79 +34,92 @@ public sealed class DataAnalyzeTool : McpToolBase
         string entityName,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
-        var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        // Get entity metadata.
-        var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        // Get record count.
-        var escapedEntityName = QueryValueExtensions.EscapeXml(entityName);
-        var countQuery = $@"
-            <fetch aggregate=""true"">
-                <entity name=""{escapedEntityName}"">
-                    <attribute name=""{entity.PrimaryIdAttribute}"" alias=""count"" aggregate=""count"" />
-                </entity>
-            </fetch>";
-
-        var countResult = await queryExecutor.ExecuteFetchXmlAsync(
-            countQuery, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        var recordCount = 0;
-        if (countResult.Records.Count > 0 && countResult.Records[0].TryGetValue("count", out var countVal))
+        try
         {
-            if (countVal.Value is int intVal)
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
+            var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+
+            // Get entity metadata.
+            var entity = await metadataService.GetEntityAsync(entityName, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            // Get record count.
+            var escapedEntityName = QueryValueExtensions.EscapeXml(entityName);
+            var countQuery = $@"
+                <fetch aggregate=""true"">
+                    <entity name=""{escapedEntityName}"">
+                        <attribute name=""{entity.PrimaryIdAttribute}"" alias=""count"" aggregate=""count"" />
+                    </entity>
+                </fetch>";
+
+            var countResult = await queryExecutor.ExecuteFetchXmlAsync(
+                countQuery, null, null, false, cancellationToken).ConfigureAwait(false);
+
+            var recordCount = 0;
+            if (countResult.Records.Count > 0 && countResult.Records[0].TryGetValue("count", out var countVal))
             {
-                recordCount = intVal;
+                if (countVal.Value is int intVal)
+                {
+                    recordCount = intVal;
+                }
+                else if (int.TryParse(countVal.Value?.ToString(), out var parsed))
+                {
+                    recordCount = parsed;
+                }
             }
-            else if (int.TryParse(countVal.Value?.ToString(), out var parsed))
+
+            // Get sample records.
+            var sampleAttributes = new List<string>();
+            if (!string.IsNullOrEmpty(entity.PrimaryIdAttribute))
+                sampleAttributes.Add(entity.PrimaryIdAttribute);
+            if (!string.IsNullOrEmpty(entity.PrimaryNameAttribute))
+                sampleAttributes.Add(entity.PrimaryNameAttribute);
+
+            // Add a few more common attributes.
+            var commonAttrs = new[] { "createdon", "modifiedon", "statecode", "statuscode", "ownerid" };
+            foreach (var attr in commonAttrs)
             {
-                recordCount = parsed;
+                if (entity.Attributes.Any(a => a.LogicalName == attr))
+                    sampleAttributes.Add(attr);
             }
+
+            var attributeXml = string.Join("\n", sampleAttributes.Distinct().Select(a => $@"<attribute name=""{a}"" />"));
+            var sampleQuery = $@"
+                <fetch top=""5"">
+                    <entity name=""{escapedEntityName}"">
+                        {attributeXml}
+                        <order attribute=""createdon"" descending=""true"" />
+                    </entity>
+                </fetch>";
+
+            var sampleResult = await queryExecutor.ExecuteFetchXmlAsync(
+                sampleQuery, null, null, false, cancellationToken).ConfigureAwait(false);
+
+            return new DataAnalysisResult
+            {
+                EntityName = entityName,
+                DisplayName = entity.DisplayName,
+                RecordCount = recordCount,
+                PrimaryIdAttribute = entity.PrimaryIdAttribute,
+                PrimaryNameAttribute = entity.PrimaryNameAttribute,
+                AttributeCount = entity.Attributes.Count,
+                CustomAttributeCount = entity.Attributes.Count(a => a.IsCustomAttribute),
+                SampleRecords = sampleResult.Records.Select(r =>
+                    r.ToDictionary(
+                        kvp => kvp.Key,
+                        kvp => MapValue(kvp.Value))).ToList()
+            };
         }
-
-        // Get sample records.
-        var sampleAttributes = new List<string>();
-        if (!string.IsNullOrEmpty(entity.PrimaryIdAttribute))
-            sampleAttributes.Add(entity.PrimaryIdAttribute);
-        if (!string.IsNullOrEmpty(entity.PrimaryNameAttribute))
-            sampleAttributes.Add(entity.PrimaryNameAttribute);
-
-        // Add a few more common attributes.
-        var commonAttrs = new[] { "createdon", "modifiedon", "statecode", "statuscode", "ownerid" };
-        foreach (var attr in commonAttrs)
+        catch (PpdsException ex)
         {
-            if (entity.Attributes.Any(a => a.LogicalName == attr))
-                sampleAttributes.Add(attr);
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        var attributeXml = string.Join("\n", sampleAttributes.Distinct().Select(a => $@"<attribute name=""{a}"" />"));
-        var sampleQuery = $@"
-            <fetch top=""5"">
-                <entity name=""{escapedEntityName}"">
-                    {attributeXml}
-                    <order attribute=""createdon"" descending=""true"" />
-                </entity>
-            </fetch>";
-
-        var sampleResult = await queryExecutor.ExecuteFetchXmlAsync(
-            sampleQuery, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        return new DataAnalysisResult
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            EntityName = entityName,
-            DisplayName = entity.DisplayName,
-            RecordCount = recordCount,
-            PrimaryIdAttribute = entity.PrimaryIdAttribute,
-            PrimaryNameAttribute = entity.PrimaryNameAttribute,
-            AttributeCount = entity.Attributes.Count,
-            CustomAttributeCount = entity.Attributes.Count(a => a.IsCustomAttribute),
-            SampleRecords = sampleResult.Records.Select(r =>
-                r.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => MapValue(kvp.Value))).ToList()
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static object? MapValue(object? value)

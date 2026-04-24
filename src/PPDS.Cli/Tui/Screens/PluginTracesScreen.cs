@@ -153,26 +153,28 @@ internal sealed class PluginTracesScreen : TuiScreenBase
     private void PopulateTable()
     {
         var dt = new System.Data.DataTable();
+        // Columns ordered by priority: plugin identity first, then message context,
+        // then status, with Time and Duration deprioritised to the right.
+        dt.Columns.Add("Plugin", typeof(string));
+        dt.Columns.Add("Message", typeof(string));
+        dt.Columns.Add("Entity", typeof(string));
+        dt.Columns.Add("Status", typeof(string));
+        dt.Columns.Add("Mode", typeof(string));
+        dt.Columns.Add("Depth", typeof(string));
         dt.Columns.Add("Time", typeof(string));
         dt.Columns.Add("Duration (ms)", typeof(string));
-        dt.Columns.Add("Plugin", typeof(string));
-        dt.Columns.Add("Entity", typeof(string));
-        dt.Columns.Add("Message", typeof(string));
-        dt.Columns.Add("Depth", typeof(string));
-        dt.Columns.Add("Mode", typeof(string));
-        dt.Columns.Add("Status", typeof(string));
 
         foreach (var trace in _traces)
         {
             dt.Rows.Add(
-                trace.CreatedOn.ToString("G"),
-                trace.DurationMs?.ToString() ?? "\u2014",
                 trace.TypeName,
-                trace.PrimaryEntity ?? "\u2014",
                 trace.MessageName ?? "\u2014",
-                trace.Depth.ToString(),
+                trace.PrimaryEntity ?? "\u2014",
+                trace.HasException ? "Error" : "OK",
                 trace.Mode == PluginTraceMode.Synchronous ? "Sync" : "Async",
-                trace.HasException ? "Error" : "OK");
+                trace.Depth.ToString(),
+                trace.CreatedOn.ToString("G"),
+                trace.DurationMs?.ToString() ?? "\u2014");
         }
 
         _table.Table = dt;

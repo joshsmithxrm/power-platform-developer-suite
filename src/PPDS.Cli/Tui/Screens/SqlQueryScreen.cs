@@ -10,6 +10,7 @@ using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Sql.Intellisense;
@@ -45,6 +46,17 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private readonly SplitterView _splitter;
     private readonly TuiSpinner _statusSpinner;
     private readonly Label _statusLabel;
+
+    // Stored presenter event handlers for R3-compliant unsubscription in OnDispose.
+    private readonly Action<IReadOnlyList<QueryColumn>, string> _onStreamingColumnsReady;
+    private readonly Action<IReadOnlyList<IReadOnlyDictionary<string, QueryValue>>, IReadOnlyList<QueryColumn>, bool, int> _onStreamingRowsReady;
+    private readonly Action<string> _onStatusChanged;
+    private readonly Action<string, long, QueryExecutionMode?> _onExecutionComplete;
+    private readonly Action<DataverseAuthenticationException> _onAuthenticationRequired;
+    private readonly Action<PpdsException> _onDmlConfirmationRequired;
+    private readonly Action _onQueryCancelled;
+    private readonly Action<string> _onErrorOccurred;
+    private readonly Action<QueryResult> _onPageLoaded;
 
     /// <summary>
     /// Current editor height in rows. Adjusted by keyboard (Ctrl+Shift+Up/Down)
@@ -315,20 +327,10 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             }
         };
 
-        // Subscribe to presenter events — marshal all UI updates to the main thread
-        SubscribeToPresenterEvents();
-
-        // Set up keyboard handling for context-dependent shortcuts
-        SetupKeyboardHandling();
-    }
-
-    /// <summary>
-    /// Subscribes to all presenter events, wrapping each handler with
-    /// Application.MainLoop.Invoke() to marshal updates to the UI thread.
-    /// </summary>
-    private void SubscribeToPresenterEvents()
-    {
-        _presenter.StreamingColumnsReady += (columns, entityLogicalName) =>
+        // Pre-allocate stored handlers for R3-compliant unsubscription in OnDispose.
+        // These lambdas close over `this` and reference UI fields (_resultsTable, _statusSpinner,
+        // _statusLabel, _queryInput) — they must be assigned after those fields are initialized.
+        _onStreamingColumnsReady = (columns, entityLogicalName) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -344,7 +346,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.StreamingRowsReady += (rows, columns, isComplete, totalRowsSoFar) =>
+        _onStreamingRowsReady = (rows, columns, isComplete, totalRowsSoFar) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -359,7 +361,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.StatusChanged += (statusMessage) =>
+        _onStatusChanged = (statusMessage) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -368,7 +370,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.ExecutionComplete += (statusText, elapsedMs, executionMode) =>
+        _onExecutionComplete = (statusText, elapsedMs, executionMode) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -379,7 +381,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.AuthenticationRequired += (authEx) =>
+        _onAuthenticationRequired = (authEx) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -416,7 +418,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.DmlConfirmationRequired += (dmlEx) =>
+        _onDmlConfirmationRequired = (dmlEx) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -446,7 +448,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.QueryCancelled += () =>
+        _onQueryCancelled = () =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -456,7 +458,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.ErrorOccurred += (errorMessage) =>
+        _onErrorOccurred = (errorMessage) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -467,7 +469,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             });
         };
 
-        _presenter.PageLoaded += (queryResult) =>
+        _onPageLoaded = (queryResult) =>
         {
             Application.MainLoop?.Invoke(() =>
             {
@@ -482,6 +484,29 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 }
             });
         };
+
+        // Subscribe to presenter events — marshal all UI updates to the main thread
+        SubscribeToPresenterEvents();
+
+        // Set up keyboard handling for context-dependent shortcuts
+        SetupKeyboardHandling();
+    }
+
+    /// <summary>
+    /// Subscribes to all presenter events using stored handler fields for R3-compliant
+    /// unsubscription in <see cref="OnDispose"/>.
+    /// </summary>
+    private void SubscribeToPresenterEvents()
+    {
+        _presenter.StreamingColumnsReady += _onStreamingColumnsReady;
+        _presenter.StreamingRowsReady += _onStreamingRowsReady;
+        _presenter.StatusChanged += _onStatusChanged;
+        _presenter.ExecutionComplete += _onExecutionComplete;
+        _presenter.AuthenticationRequired += _onAuthenticationRequired;
+        _presenter.DmlConfirmationRequired += _onDmlConfirmationRequired;
+        _presenter.QueryCancelled += _onQueryCancelled;
+        _presenter.ErrorOccurred += _onErrorOccurred;
+        _presenter.PageLoaded += _onPageLoaded;
     }
 
     /// <inheritdoc />
@@ -1009,6 +1034,16 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
     protected override void OnDispose()
     {
+        // R3: unsubscribe all presenter events before disposing.
+        _presenter.StreamingColumnsReady -= _onStreamingColumnsReady;
+        _presenter.StreamingRowsReady -= _onStreamingRowsReady;
+        _presenter.StatusChanged -= _onStatusChanged;
+        _presenter.ExecutionComplete -= _onExecutionComplete;
+        _presenter.AuthenticationRequired -= _onAuthenticationRequired;
+        _presenter.DmlConfirmationRequired -= _onDmlConfirmationRequired;
+        _presenter.QueryCancelled -= _onQueryCancelled;
+        _presenter.ErrorOccurred -= _onErrorOccurred;
+        _presenter.PageLoaded -= _onPageLoaded;
         _presenter.Dispose();
     }
 }

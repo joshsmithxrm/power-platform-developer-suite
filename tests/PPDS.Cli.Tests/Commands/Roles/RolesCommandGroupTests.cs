@@ -90,4 +90,30 @@ public class RolesCommandGroupTests
     }
 
     #endregion
+
+    #region L1 Regression — no duplicate short aliases
+
+    [Fact]
+    public void ListSubcommand_NoTwoOptions_ShareAShortAlias()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var aliases = listCommand.Options
+            .SelectMany(o => o.Aliases)
+            .Where(a => a.StartsWith("-") && !a.StartsWith("--"))
+            .ToList();
+        var duplicates = aliases.GroupBy(a => a).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Assert.Empty(duplicates);
+    }
+
+    [Fact]
+    public void ListSubcommand_FilterOption_HasNoFShortAlias()
+    {
+        // L1: -f is reserved for --output-format; --filter uses long form only.
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var filterOption = listCommand.Options.FirstOrDefault(o => o.Name == "--filter");
+        Assert.NotNull(filterOption);
+        Assert.DoesNotContain("-f", filterOption!.Aliases);
+    }
+
+    #endregion
 }

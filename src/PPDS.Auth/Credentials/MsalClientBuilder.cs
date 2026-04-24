@@ -15,6 +15,14 @@ namespace PPDS.Auth.Credentials;
 internal static class MsalClientBuilder
 {
     /// <summary>
+    /// Guards once-per-process persistence verification (Bug D fix).
+    /// After the first successful <see cref="MsalCacheHelper.VerifyPersistence"/> call we skip
+    /// re-verification on every <see cref="CreateAndRegisterCacheAsync"/> invocation.
+    /// Failures (MsalCachePersistenceException) are still surfaced — we only skip on success.
+    /// </summary>
+    private static volatile bool _persistenceVerified;
+    private static readonly object _persistenceLock = new();
+    /// <summary>
     /// Microsoft's well-known public client ID for first-party apps.
     /// </summary>
     public const string MicrosoftPublicClientId = "51f81489-12ee-4a9e-aaae-a2591f45987d";
@@ -88,9 +96,21 @@ internal static class MsalClientBuilder
 
             var cacheHelper = await CreatePlatformCacheHelperAsync(warnOnFailure).ConfigureAwait(false);
 
-            // Verify persistence works before registering - performs write/read/clear test
-            // Throws MsalCachePersistenceException if persistence is unavailable
-            cacheHelper.VerifyPersistence();
+            // Verify persistence works before registering - performs write/read/clear test.
+            // Once-per-process guard: after the first successful verification we skip re-running
+            // the write/read/clear I/O on every invocation (Bug D fix).
+            // Failures (MsalCachePersistenceException) are still thrown — we only skip on success.
+            if (!_persistenceVerified)
+            {
+                lock (_persistenceLock)
+                {
+                    if (!_persistenceVerified)
+                    {
+                        cacheHelper.VerifyPersistence();
+                        _persistenceVerified = true;
+                    }
+                }
+            }
             AuthDebugLog.WriteLine("[MsalCache] Persistence verification PASSED");
 
             cacheHelper.RegisterCache(client.UserTokenCache);

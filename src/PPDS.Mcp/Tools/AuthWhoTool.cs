@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using PPDS.Auth.Credentials;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -27,50 +28,63 @@ public sealed class AuthWhoTool : McpToolBase
     [Description("Get the current authentication profile context including identity, connected environment, and token status. Use this to understand which Dataverse environment queries will run against.")]
     public async Task<AuthWhoResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
-        var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
-
-        // Query MSAL for current token state (if environment is bound)
-        CachedTokenInfo? tokenInfo = null;
-        if (profile.Environment != null && !string.IsNullOrEmpty(profile.Environment.Url))
+        try
         {
-            try
+            var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
+
+            // Query MSAL for current token state (if environment is bound)
+            CachedTokenInfo? tokenInfo = null;
+            if (profile.Environment != null && !string.IsNullOrEmpty(profile.Environment.Url))
             {
-                using var provider = CredentialProviderFactory.Create(profile);
-                tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
+                try
+                {
+                    using var provider = CredentialProviderFactory.Create(profile);
+                    tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
+                }
+                catch
+                {
+                    // Ignore errors - token info will be null
+                }
             }
-            catch
+
+            return new AuthWhoResult
             {
-                // Ignore errors - token info will be null
-            }
+                Index = profile.Index,
+                Name = profile.Name,
+                AuthMethod = profile.AuthMethod.ToString(),
+                Cloud = profile.Cloud.ToString(),
+                TenantId = profile.TenantId,
+                Username = profile.Username,
+                ObjectId = profile.ObjectId,
+                ApplicationId = profile.ApplicationId,
+                TokenExpiresOn = tokenInfo?.ExpiresOn,
+                TokenStatus = tokenInfo != null
+                    ? (tokenInfo.IsExpired ? "expired" : "valid")
+                    : null,
+                Environment = profile.Environment != null ? new EnvironmentDetails
+                {
+                    Url = profile.Environment.Url,
+                    DisplayName = profile.Environment.DisplayName,
+                    UniqueName = profile.Environment.UniqueName,
+                    EnvironmentId = profile.Environment.EnvironmentId,
+                    OrganizationId = profile.Environment.OrganizationId,
+                    Type = profile.Environment.Type,
+                    Region = profile.Environment.Region
+                } : null,
+                CreatedAt = profile.CreatedAt,
+                LastUsedAt = profile.LastUsedAt
+            };
         }
-
-        return new AuthWhoResult
+        catch (PpdsException ex)
         {
-            Index = profile.Index,
-            Name = profile.Name,
-            AuthMethod = profile.AuthMethod.ToString(),
-            Cloud = profile.Cloud.ToString(),
-            TenantId = profile.TenantId,
-            Username = profile.Username,
-            ObjectId = profile.ObjectId,
-            ApplicationId = profile.ApplicationId,
-            TokenExpiresOn = tokenInfo?.ExpiresOn,
-            TokenStatus = tokenInfo != null
-                ? (tokenInfo.IsExpired ? "expired" : "valid")
-                : null,
-            Environment = profile.Environment != null ? new EnvironmentDetails
-            {
-                Url = profile.Environment.Url,
-                DisplayName = profile.Environment.DisplayName,
-                UniqueName = profile.Environment.UniqueName,
-                EnvironmentId = profile.Environment.EnvironmentId,
-                OrganizationId = profile.Environment.OrganizationId,
-                Type = profile.Environment.Type,
-                Region = profile.Environment.Region
-            } : null,
-            CreatedAt = profile.CreatedAt,
-            LastUsedAt = profile.LastUsedAt
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -21,7 +21,7 @@ public static class ValidateCommand
 
     public static Command Create()
     {
-        var fileOption = new Option<string>("--file", "-f")
+        var fileOption = new Option<string>("--file")
         {
             Description = "Deployment settings file path",
             Required = true

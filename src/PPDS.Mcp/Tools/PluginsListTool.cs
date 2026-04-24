@@ -2,7 +2,8 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
-using PPDS.Dataverse.Query;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Plugins.Registration;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;
@@ -25,7 +26,7 @@ public sealed class PluginsListTool : McpToolBase
     /// <param name="nameFilter">Filter by assembly name (contains).</param>
     /// <param name="includeHidden">Include hidden system steps.</param>
     /// <param name="includeMicrosoft">Include Microsoft assemblies.</param>
-    /// <param name="maxRows">Maximum rows to return (default 50).</param>
+    /// <param name="maxRows">Maximum assemblies to return (default 50).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of plugin assemblies with types and steps.</returns>
     [McpServerTool(Name = "ppds_plugins_list")]
@@ -37,144 +38,109 @@ public sealed class PluginsListTool : McpToolBase
         bool includeHidden = false,
         [Description("Include Microsoft assemblies (default false)")]
         bool includeMicrosoft = false,
-        [Description("Maximum rows to return (default 50, max 200)")]
+        [Description("Maximum assemblies to return (default 50, max 200)")]
         int maxRows = 50,
         CancellationToken cancellationToken = default)
     {
-        maxRows = Math.Clamp(maxRows, 1, 200);
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        // Single query with link-entity joins: assembly -> type -> step -> message.
-        var query = BuildJoinedQuery(nameFilter, maxRows, includeHidden, includeMicrosoft);
-        var result = await queryExecutor.ExecuteFetchXmlAsync(
-            query, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        // Flatten the joined rows back into the assembly -> type -> step hierarchy.
-        var assemblyMap = new Dictionary<Guid, PluginAssemblyResult>();
-        var typeMap = new Dictionary<Guid, PluginTypeResult>();
-
-        foreach (var record in result.Records)
+        try
         {
-            var assemblyId = record.GetGuid("pluginassemblyid");
-            if (assemblyId == Guid.Empty) continue;
+            maxRows = Math.Clamp(maxRows, 1, 200);
 
-            if (!assemblyMap.TryGetValue(assemblyId, out var assembly))
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+
+            var listOptions = new PluginListOptions(
+                IncludeHidden: includeHidden,
+                IncludeMicrosoft: includeMicrosoft);
+
+            // Delegate to the service layer — same path as CLI `plugins list` (Constitution A2).
+            var assemblies = await registrationService.ListAssembliesAsync(nameFilter, listOptions, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Apply maxRows cap after retrieval (service does not support top-N directly).
+            var pagedAssemblies = assemblies.Take(maxRows).ToList();
+
+            var results = new List<PluginAssemblyResult>(pagedAssemblies.Count);
+            foreach (var assembly in pagedAssemblies)
             {
-                assembly = new PluginAssemblyResult
+                var assemblyResult = new PluginAssemblyResult
                 {
-                    Id = assemblyId,
-                    Name = record.GetString("name"),
-                    Version = record.GetString("version"),
-                    PublicKeyToken = record.GetString("publickeytoken"),
-                    IsolationMode = record.GetFormatted("isolationmode"),
-                    SourceType = record.GetFormatted("sourcetype"),
+                    Id = assembly.Id,
+                    Name = assembly.Name,
+                    Version = assembly.Version,
+                    PublicKeyToken = assembly.PublicKeyToken,
+                    IsolationMode = MapIsolationMode(assembly.IsolationMode),
+                    SourceType = MapSourceType(assembly.SourceType),
                     Types = []
                 };
-                assemblyMap[assemblyId] = assembly;
-            }
 
-            var typeId = record.GetGuid("pt.plugintypeid");
-            if (typeId == Guid.Empty) continue;
+                var types = await registrationService.ListTypesForAssemblyAsync(assembly.Id, cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (!typeMap.TryGetValue(typeId, out var pluginType))
-            {
-                pluginType = new PluginTypeResult
+                foreach (var type in types)
                 {
-                    Id = typeId,
-                    TypeName = record.GetString("pt.typename"),
-                    FriendlyName = record.GetString("pt.friendlyname"),
-                    Steps = []
-                };
-                typeMap[typeId] = pluginType;
-                assembly.Types.Add(pluginType);
+                    var typeResult = new PluginTypeResult
+                    {
+                        Id = type.Id,
+                        TypeName = type.TypeName,
+                        FriendlyName = type.FriendlyName,
+                        Steps = []
+                    };
+
+                    var steps = await registrationService.ListStepsForTypeAsync(type.Id, listOptions, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    foreach (var step in steps)
+                    {
+                        typeResult.Steps.Add(new PluginStepResult
+                        {
+                            Name = step.Name,
+                            Message = step.Message,
+                            Entity = step.PrimaryEntity,
+                            Stage = step.Stage,
+                            IsEnabled = step.IsEnabled
+                        });
+                    }
+
+                    assemblyResult.Types.Add(typeResult);
+                }
+
+                results.Add(assemblyResult);
             }
 
-            var stepName = record.GetString("step.name");
-            if (!string.IsNullOrEmpty(stepName))
+            return new PluginsListResult
             {
-                pluginType.Steps.Add(new PluginStepResult
-                {
-                    Name = stepName,
-                    Message = record.GetString("msg.name"),
-                    Entity = record.GetString("step.primaryobjecttypecode"),
-                    Stage = record.GetFormatted("step.stage"),
-                    IsEnabled = record.GetString("step.statecode") == "0"
-                });
-            }
+                Assemblies = results,
+                Count = results.Count,
+                TotalCount = assemblies.Count
+            };
         }
-
-        var assemblies = assemblyMap.Values.ToList();
-        return new PluginsListResult
+        catch (PpdsException ex)
         {
-            Assemblies = assemblies,
-            Count = assemblies.Count,
-            TotalCount = assemblies.Count
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
-    private static string BuildJoinedQuery(string? nameFilter, int maxRows, bool includeHidden, bool includeMicrosoft)
+    private static string MapIsolationMode(int value) => value switch
     {
-        var conditions = new System.Text.StringBuilder();
+        1 => "None",
+        2 => "Sandbox",
+        _ => value.ToString()
+    };
 
-        if (!string.IsNullOrWhiteSpace(nameFilter))
-        {
-            conditions.Append($@"<condition attribute=""name"" operator=""like"" value=""%{QueryValueExtensions.EscapeXml(nameFilter)}%"" />");
-        }
-
-        if (!includeHidden)
-        {
-            conditions.Append(@"<condition attribute=""ishidden"" operator=""eq"" value=""0"" />");
-        }
-
-        var filterXml = "";
-        if (conditions.Length > 0)
-        {
-            filterXml = $@"<filter type=""and"">{conditions}</filter>";
-        }
-
-        var microsoftFilter = "";
-        if (!includeMicrosoft)
-        {
-            microsoftFilter = @"<filter type=""or"">
-                    <condition attribute=""name"" operator=""not-like"" value=""Microsoft%"" />
-                    <condition attribute=""name"" operator=""eq"" value=""Microsoft.Crm.ServiceBus"" />
-                </filter>";
-        }
-
-        // Use top on the outer entity to limit assemblies. The link-entity joins
-        // bring in types and steps in a single round-trip, avoiding N+1 queries.
-        return $@"
-            <fetch top=""{maxRows}"">
-                <entity name=""pluginassembly"">
-                    <attribute name=""pluginassemblyid"" />
-                    <attribute name=""name"" />
-                    <attribute name=""version"" />
-                    <attribute name=""publickeytoken"" />
-                    <attribute name=""isolationmode"" />
-                    <attribute name=""sourcetype"" />
-                    {filterXml}
-                    {microsoftFilter}
-                    <order attribute=""name"" />
-                    <link-entity name=""plugintype"" from=""pluginassemblyid"" to=""pluginassemblyid"" link-type=""outer"" alias=""pt"">
-                        <attribute name=""plugintypeid"" />
-                        <attribute name=""typename"" />
-                        <attribute name=""friendlyname"" />
-                        <order attribute=""typename"" />
-                        <link-entity name=""sdkmessageprocessingstep"" from=""plugintypeid"" to=""plugintypeid"" link-type=""outer"" alias=""step"">
-                            <attribute name=""name"" />
-                            <attribute name=""stage"" />
-                            <attribute name=""statecode"" />
-                            <attribute name=""primaryobjecttypecode"" />
-                            <link-entity name=""sdkmessage"" from=""sdkmessageid"" to=""sdkmessageid"" link-type=""outer"" alias=""msg"">
-                                <attribute name=""name"" />
-                            </link-entity>
-                        </link-entity>
-                    </link-entity>
-                </entity>
-            </fetch>";
-    }
+    private static string MapSourceType(int value) => value switch
+    {
+        0 => "Database",
+        1 => "Disk",
+        2 => "Normal",
+        _ => value.ToString()
+    };
 
 }
 

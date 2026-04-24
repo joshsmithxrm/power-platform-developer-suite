@@ -179,6 +179,38 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         RegisterHotkey(registry, Key.CtrlMask | Key.N, "New", OnNewClicked);
         RegisterHotkey(registry, Key.CtrlMask | Key.E, "Edit", OnEditClicked);
         RegisterHotkey(registry, Key.CtrlMask | Key.D, "Delete", OnDeleteClicked);
+        RegisterHotkey(registry, Key.CtrlMask | Key.Tab, "Next tab", NextTab);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.Tab, "Previous tab", PreviousTab);
+    }
+
+    /// <summary>
+    /// Gets the currently active tab index (0-based). Exposed for testing.
+    /// </summary>
+    internal int GetActiveTabIndex() => _activeTabIndex;
+
+    /// <summary>
+    /// Calls OnNewClicked(). Exposed for testing.
+    /// </summary>
+    internal void OnNewClickedForTest() => OnNewClicked();
+
+    /// <summary>
+    /// Moves to the next detail panel tab (wraps around).
+    /// Ctrl+Tab navigates forward through Attributes, Relationships, Keys, Privileges, Choices.
+    /// </summary>
+    internal void NextTab()
+    {
+        var next = (_activeTabIndex + 1) % TabNames.Length;
+        SwitchTab(next);
+    }
+
+    /// <summary>
+    /// Moves to the previous detail panel tab (wraps around).
+    /// Ctrl+Shift+Tab navigates backward through the tabs.
+    /// </summary>
+    internal void PreviousTab()
+    {
+        var prev = (_activeTabIndex - 1 + TabNames.Length) % TabNames.Length;
+        SwitchTab(prev);
     }
 
     #region Action Bar
@@ -189,6 +221,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     /// </summary>
     internal void UpdateActionBarVisibility()
     {
+        if (Application.Driver == null) return;
         bool showActions = _activeTabIndex != TabPrivileges;
         _newButton.Visible = showActions;
         _editButton.Visible = showActions;
@@ -199,25 +232,30 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     {
         if (EnvironmentUrl == null) return;
 
+        // When no entity is selected, any tab routes to CreateTable (L11-a fix).
+        // This lets the user create a new table regardless of which tab is active.
+        if (_selectedEntity == null)
+        {
+            OpenCreateTableDialog();
+            return;
+        }
+
         switch (_activeTabIndex)
         {
             case TabAttributes:
-                if (_selectedEntity == null) return;
                 OpenCreateColumnDialog();
                 break;
             case TabRelationships:
-                if (_selectedEntity == null) return;
                 OpenCreateRelationshipDialog();
                 break;
             case TabKeys:
-                if (_selectedEntity == null) return;
                 OpenCreateKeyDialog();
                 break;
             case TabChoices:
                 OpenCreateChoiceDialog();
                 break;
             default:
-                // Entity-level new (no tab or tab==Attributes with no entity selected)
+                // Entity-level new (tab==Attributes with entity selected falls through here too)
                 OpenCreateTableDialog();
                 break;
         }

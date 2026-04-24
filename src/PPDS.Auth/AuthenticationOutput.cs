@@ -12,12 +12,14 @@ namespace PPDS.Auth;
 /// </remarks>
 public static class AuthenticationOutput
 {
-    private static volatile Action<string>? _writer = Console.WriteLine;
+    // Lambda (not method-group) so Console.Error is re-evaluated on every call — if a test or
+    // host redirects Console.Error after startup the new stream is used automatically.
+    private static volatile Action<string>? _writer = static msg => Console.Error.WriteLine(msg);
 
     /// <summary>
     /// Gets or sets the action used to write authentication status messages.
     /// Set to null to suppress all output, or provide a custom action to redirect.
-    /// Default: Console.WriteLine
+    /// Default: writes to Console.Error (stderr — stdout is reserved for data per PPDS I1/NEVER rule)
     /// </summary>
     /// <example>
     /// <code>
@@ -45,10 +47,10 @@ public static class AuthenticationOutput
     }
 
     /// <summary>
-    /// Resets the writer to the default (Console.WriteLine).
+    /// Resets the writer to the default (Console.Error / stderr).
     /// </summary>
     public static void Reset()
     {
-        _writer = Console.WriteLine;
+        _writer = static msg => Console.Error.WriteLine(msg);
     }
 }

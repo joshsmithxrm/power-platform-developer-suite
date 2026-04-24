@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Query;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -54,119 +55,132 @@ public sealed class CustomApisListTool : McpToolBase
     public async Task<CustomApisListResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        var apiFetchXml = @"
-            <fetch>
-                <entity name=""customapi"">
-                    <attribute name=""customapiid"" />
-                    <attribute name=""uniquename"" />
-                    <attribute name=""displayname"" />
-                    <attribute name=""name"" />
-                    <attribute name=""description"" />
-                    <attribute name=""plugintypeid"" />
-                    <attribute name=""bindingtype"" />
-                    <attribute name=""boundentitylogicalname"" />
-                    <attribute name=""allowedcustomprocessingsteptype"" />
-                    <attribute name=""isfunction"" />
-                    <attribute name=""isprivate"" />
-                    <attribute name=""executeprivilegename"" />
-                    <attribute name=""ismanaged"" />
-                    <attribute name=""createdon"" />
-                    <attribute name=""modifiedon"" />
-                    <order attribute=""uniquename"" />
-                </entity>
-            </fetch>";
-
-        var reqParamFetchXml = @"
-            <fetch>
-                <entity name=""customapirequestparameter"">
-                    <attribute name=""customapirequestparameterid"" />
-                    <attribute name=""customapiid"" />
-                    <attribute name=""uniquename"" />
-                    <attribute name=""displayname"" />
-                    <attribute name=""name"" />
-                    <attribute name=""description"" />
-                    <attribute name=""type"" />
-                    <attribute name=""logicalentityname"" />
-                    <attribute name=""isoptional"" />
-                    <attribute name=""ismanaged"" />
-                    <order attribute=""uniquename"" />
-                </entity>
-            </fetch>";
-
-        var respPropFetchXml = @"
-            <fetch>
-                <entity name=""customapiresponseproperty"">
-                    <attribute name=""customapiresponsepropertyid"" />
-                    <attribute name=""customapiid"" />
-                    <attribute name=""uniquename"" />
-                    <attribute name=""displayname"" />
-                    <attribute name=""name"" />
-                    <attribute name=""description"" />
-                    <attribute name=""type"" />
-                    <attribute name=""logicalentityname"" />
-                    <attribute name=""ismanaged"" />
-                    <order attribute=""uniquename"" />
-                </entity>
-            </fetch>";
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        // Execute all three queries sequentially (parallel would require .Result which is blocked by PPDS012)
-        var apiResult = await queryExecutor.ExecuteFetchXmlAsync(apiFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-        var reqResult = await queryExecutor.ExecuteFetchXmlAsync(reqParamFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-        var respResult = await queryExecutor.ExecuteFetchXmlAsync(respPropFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
-
-        // Group parameters and properties by API ID
-        var requestParamsByApi = reqResult.Records
-            .GroupBy(r => r.GetGuid("customapiid"))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        var responsePropertiesByApi = respResult.Records
-            .GroupBy(r => r.GetGuid("customapiid"))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        var apis = apiResult.Records.Select(record =>
+        try
         {
-            var apiId = record.GetGuid("customapiid");
-            var bindingRaw = record.GetInt("bindingtype");
-            var stepTypeRaw = record.GetInt("allowedcustomprocessingsteptype");
+            var apiFetchXml = @"
+                <fetch>
+                    <entity name=""customapi"">
+                        <attribute name=""customapiid"" />
+                        <attribute name=""uniquename"" />
+                        <attribute name=""displayname"" />
+                        <attribute name=""name"" />
+                        <attribute name=""description"" />
+                        <attribute name=""plugintypeid"" />
+                        <attribute name=""bindingtype"" />
+                        <attribute name=""boundentitylogicalname"" />
+                        <attribute name=""allowedcustomprocessingsteptype"" />
+                        <attribute name=""isfunction"" />
+                        <attribute name=""isprivate"" />
+                        <attribute name=""executeprivilegename"" />
+                        <attribute name=""ismanaged"" />
+                        <attribute name=""createdon"" />
+                        <attribute name=""modifiedon"" />
+                        <order attribute=""uniquename"" />
+                    </entity>
+                </fetch>";
 
-            var requestParams = requestParamsByApi.TryGetValue(apiId, out var reqList)
-                ? reqList.Select(r => MapParameter(r, "customapirequestparameterid", isOptionalAvailable: true)).ToList()
-                : [];
+            var reqParamFetchXml = @"
+                <fetch>
+                    <entity name=""customapirequestparameter"">
+                        <attribute name=""customapirequestparameterid"" />
+                        <attribute name=""customapiid"" />
+                        <attribute name=""uniquename"" />
+                        <attribute name=""displayname"" />
+                        <attribute name=""name"" />
+                        <attribute name=""description"" />
+                        <attribute name=""type"" />
+                        <attribute name=""logicalentityname"" />
+                        <attribute name=""isoptional"" />
+                        <attribute name=""ismanaged"" />
+                        <order attribute=""uniquename"" />
+                    </entity>
+                </fetch>";
 
-            var responseProps = responsePropertiesByApi.TryGetValue(apiId, out var respList)
-                ? respList.Select(r => MapParameter(r, "customapiresponsepropertyid", isOptionalAvailable: false)).ToList()
-                : [];
+            var respPropFetchXml = @"
+                <fetch>
+                    <entity name=""customapiresponseproperty"">
+                        <attribute name=""customapiresponsepropertyid"" />
+                        <attribute name=""customapiid"" />
+                        <attribute name=""uniquename"" />
+                        <attribute name=""displayname"" />
+                        <attribute name=""name"" />
+                        <attribute name=""description"" />
+                        <attribute name=""type"" />
+                        <attribute name=""logicalentityname"" />
+                        <attribute name=""ismanaged"" />
+                        <order attribute=""uniquename"" />
+                    </entity>
+                </fetch>";
 
-            return new CustomApiSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+
+            // Execute all three queries sequentially (parallel would require .Result which is blocked by PPDS012)
+            var apiResult = await queryExecutor.ExecuteFetchXmlAsync(apiFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
+            var reqResult = await queryExecutor.ExecuteFetchXmlAsync(reqParamFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
+            var respResult = await queryExecutor.ExecuteFetchXmlAsync(respPropFetchXml, null, null, false, cancellationToken).ConfigureAwait(false);
+
+            // Group parameters and properties by API ID
+            var requestParamsByApi = reqResult.Records
+                .GroupBy(r => r.GetGuid("customapiid"))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var responsePropertiesByApi = respResult.Records
+                .GroupBy(r => r.GetGuid("customapiid"))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var apis = apiResult.Records.Select(record =>
             {
-                Id = apiId,
-                UniqueName = record.GetString("uniquename") ?? "",
-                DisplayName = record.GetString("displayname") ?? "",
-                Name = record.GetString("name"),
-                Description = record.GetString("description"),
-                PluginTypeId = record.GetGuidNullable("plugintypeid"),
-                BindingType = MapBindingType(bindingRaw),
-                BoundEntity = record.GetString("boundentitylogicalname"),
-                AllowedProcessingStepType = MapProcessingStepType(stepTypeRaw),
-                IsFunction = record.GetBool("isfunction"),
-                IsPrivate = record.GetBool("isprivate"),
-                ExecutePrivilegeName = record.GetString("executeprivilegename"),
-                IsManaged = record.GetBool("ismanaged"),
-                CreatedOn = record.GetDateTime("createdon"),
-                ModifiedOn = record.GetDateTime("modifiedon"),
-                RequestParameters = requestParams,
-                ResponseProperties = responseProps
-            };
-        }).ToList();
+                var apiId = record.GetGuid("customapiid");
+                var bindingRaw = record.GetInt("bindingtype");
+                var stepTypeRaw = record.GetInt("allowedcustomprocessingsteptype");
 
-        return new CustomApisListResult
+                var requestParams = requestParamsByApi.TryGetValue(apiId, out var reqList)
+                    ? reqList.Select(r => MapParameter(r, "customapirequestparameterid", isOptionalAvailable: true)).ToList()
+                    : [];
+
+                var responseProps = responsePropertiesByApi.TryGetValue(apiId, out var respList)
+                    ? respList.Select(r => MapParameter(r, "customapiresponsepropertyid", isOptionalAvailable: false)).ToList()
+                    : [];
+
+                return new CustomApiSummary
+                {
+                    Id = apiId,
+                    UniqueName = record.GetString("uniquename") ?? "",
+                    DisplayName = record.GetString("displayname") ?? "",
+                    Name = record.GetString("name"),
+                    Description = record.GetString("description"),
+                    PluginTypeId = record.GetGuidNullable("plugintypeid"),
+                    BindingType = MapBindingType(bindingRaw),
+                    BoundEntity = record.GetString("boundentitylogicalname"),
+                    AllowedProcessingStepType = MapProcessingStepType(stepTypeRaw),
+                    IsFunction = record.GetBool("isfunction"),
+                    IsPrivate = record.GetBool("isprivate"),
+                    ExecutePrivilegeName = record.GetString("executeprivilegename"),
+                    IsManaged = record.GetBool("ismanaged"),
+                    CreatedOn = record.GetDateTime("createdon"),
+                    ModifiedOn = record.GetDateTime("modifiedon"),
+                    RequestParameters = requestParams,
+                    ResponseProperties = responseProps
+                };
+            }).ToList();
+
+            return new CustomApisListResult
+            {
+                Apis = apis,
+                Count = apis.Count
+            };
+        }
+        catch (PpdsException ex)
         {
-            Apis = apis,
-            Count = apis.Count
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static CustomApiParameterSummary MapParameter(

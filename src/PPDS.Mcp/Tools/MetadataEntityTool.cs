@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -38,82 +39,95 @@ public sealed class MetadataEntityTool : McpToolBase
         bool includeRelationships = false,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
-        var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
-
-        var entity = await metadataService.GetEntityAsync(
-            entityName,
-            includeAttributes: includeAttributes,
-            includeRelationships: includeRelationships,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        var result = new EntityMetadataResult
+        try
         {
-            LogicalName = entity.LogicalName,
-            DisplayName = entity.DisplayName,
-            DisplayCollectionName = entity.PluralName,
-            Description = entity.Description,
-            PrimaryIdAttribute = entity.PrimaryIdAttribute,
-            PrimaryNameAttribute = entity.PrimaryNameAttribute,
-            SchemaName = entity.SchemaName,
-            IsCustomEntity = entity.IsCustomEntity,
-            IsActivityEntity = entity.IsActivity,
-            OwnershipType = entity.OwnershipType
-        };
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(entityName), entityName)).ConfigureAwait(false);
+            var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
 
-        if (includeAttributes)
-        {
-            result.Attributes = entity.Attributes.Select(a => new MetadataAttributeInfo
+            var entity = await metadataService.GetEntityAsync(
+                entityName,
+                includeAttributes: includeAttributes,
+                includeRelationships: includeRelationships,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var result = new EntityMetadataResult
             {
-                LogicalName = a.LogicalName,
-                DisplayName = a.DisplayName,
-                Description = a.Description,
-                AttributeType = a.AttributeType,
-                SchemaName = a.SchemaName,
-                IsCustomAttribute = a.IsCustomAttribute,
-                RequiredLevel = a.RequiredLevel,
-                MaxLength = a.MaxLength,
-                MinValue = a.MinValue,
-                MaxValue = a.MaxValue,
-                Precision = a.Precision,
-                TargetEntities = a.Targets?.ToList()
-            }).OrderBy(a => a.LogicalName).ToList();
+                LogicalName = entity.LogicalName,
+                DisplayName = entity.DisplayName,
+                DisplayCollectionName = entity.PluralName,
+                Description = entity.Description,
+                PrimaryIdAttribute = entity.PrimaryIdAttribute,
+                PrimaryNameAttribute = entity.PrimaryNameAttribute,
+                SchemaName = entity.SchemaName,
+                IsCustomEntity = entity.IsCustomEntity,
+                IsActivityEntity = entity.IsActivity,
+                OwnershipType = entity.OwnershipType
+            };
+
+            if (includeAttributes)
+            {
+                result.Attributes = entity.Attributes.Select(a => new MetadataAttributeInfo
+                {
+                    LogicalName = a.LogicalName,
+                    DisplayName = a.DisplayName,
+                    Description = a.Description,
+                    AttributeType = a.AttributeType,
+                    SchemaName = a.SchemaName,
+                    IsCustomAttribute = a.IsCustomAttribute,
+                    RequiredLevel = a.RequiredLevel,
+                    MaxLength = a.MaxLength,
+                    MinValue = a.MinValue,
+                    MaxValue = a.MaxValue,
+                    Precision = a.Precision,
+                    TargetEntities = a.Targets?.ToList()
+                }).OrderBy(a => a.LogicalName).ToList();
+            }
+
+            if (includeRelationships)
+            {
+                result.OneToManyRelationships = entity.OneToManyRelationships?.Select(r => new RelationshipInfo
+                {
+                    SchemaName = r.SchemaName,
+                    ReferencingEntity = r.ReferencingEntity,
+                    ReferencingAttribute = r.ReferencingAttribute,
+                    ReferencedEntity = r.ReferencedEntity,
+                    ReferencedAttribute = r.ReferencedAttribute,
+                    RelationshipType = "OneToMany"
+                }).ToList();
+
+                result.ManyToOneRelationships = entity.ManyToOneRelationships?.Select(r => new RelationshipInfo
+                {
+                    SchemaName = r.SchemaName,
+                    ReferencingEntity = r.ReferencingEntity,
+                    ReferencingAttribute = r.ReferencingAttribute,
+                    ReferencedEntity = r.ReferencedEntity,
+                    ReferencedAttribute = r.ReferencedAttribute,
+                    RelationshipType = "ManyToOne"
+                }).ToList();
+
+                result.ManyToManyRelationships = entity.ManyToManyRelationships?.Select(r => new ManyToManyRelationshipInfo
+                {
+                    SchemaName = r.SchemaName,
+                    Entity1LogicalName = r.Entity1LogicalName,
+                    Entity1Attribute = r.Entity1IntersectAttribute,
+                    Entity2LogicalName = r.Entity2LogicalName,
+                    Entity2Attribute = r.Entity2IntersectAttribute,
+                    IntersectEntityName = r.IntersectEntityName
+                }).ToList();
+            }
+
+            return result;
         }
-
-        if (includeRelationships)
+        catch (PpdsException ex)
         {
-            result.OneToManyRelationships = entity.OneToManyRelationships?.Select(r => new RelationshipInfo
-            {
-                SchemaName = r.SchemaName,
-                ReferencingEntity = r.ReferencingEntity,
-                ReferencingAttribute = r.ReferencingAttribute,
-                ReferencedEntity = r.ReferencedEntity,
-                ReferencedAttribute = r.ReferencedAttribute,
-                RelationshipType = "OneToMany"
-            }).ToList();
-
-            result.ManyToOneRelationships = entity.ManyToOneRelationships?.Select(r => new RelationshipInfo
-            {
-                SchemaName = r.SchemaName,
-                ReferencingEntity = r.ReferencingEntity,
-                ReferencingAttribute = r.ReferencingAttribute,
-                ReferencedEntity = r.ReferencedEntity,
-                ReferencedAttribute = r.ReferencedAttribute,
-                RelationshipType = "ManyToOne"
-            }).ToList();
-
-            result.ManyToManyRelationships = entity.ManyToManyRelationships?.Select(r => new ManyToManyRelationshipInfo
-            {
-                SchemaName = r.SchemaName,
-                Entity1LogicalName = r.Entity1LogicalName,
-                Entity1Attribute = r.Entity1IntersectAttribute,
-                Entity2LogicalName = r.Entity2LogicalName,
-                Entity2Attribute = r.Entity2IntersectAttribute,
-                IntersectEntityName = r.IntersectEntityName
-            }).ToList();
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
         }
-
-        return result;
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

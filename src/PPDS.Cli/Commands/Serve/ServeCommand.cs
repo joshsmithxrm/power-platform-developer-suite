@@ -21,7 +21,19 @@ public static class ServeCommand
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("serve", "Start daemon for IDE integration (JSON-RPC over stdio)")
+        var command = new Command(
+            "serve",
+            "Start the PPDS daemon for VS Code extension integration (JSON-RPC over stdio)" + Environment.NewLine +
+            Environment.NewLine +
+            "The daemon process communicates with the VS Code extension over stdin/stdout using" + Environment.NewLine +
+            "JSON-RPC (header-delimited framing). It is launched automatically by the extension" + Environment.NewLine +
+            "and is not intended for direct interactive use." + Environment.NewLine +
+            Environment.NewLine +
+            "On successful startup the process writes a readiness line to stderr:" + Environment.NewLine +
+            "  [ppds serve] Daemon ready on stdio — <pid>" + Environment.NewLine +
+            Environment.NewLine +
+            "The process stays alive until the host (extension) closes stdin or sends a" + Environment.NewLine +
+            "shutdown notification. Non-zero exit indicates a startup failure.")
         {
             Hidden = true // IDE-callable but not user-facing
         };
@@ -36,6 +48,11 @@ public static class ServeCommand
 
     private static async Task<int> ExecuteAsync(CancellationToken cancellationToken)
     {
+        // Readiness signal — written to stderr so it is visible to the extension host without
+        // corrupting the JSON-RPC stdout stream. The extension waits for this line before sending
+        // the first method call.
+        Console.Error.WriteLine($"[ppds serve] Daemon ready on stdio \u2014 {Environment.ProcessId}");
+
         // Open stdin/stdout as raw streams for JSON-RPC communication
         // IMPORTANT: Do not use Console.WriteLine in this mode - it corrupts the JSON-RPC stream
         using var stdin = Console.OpenStandardInput();
@@ -98,10 +115,12 @@ public static class ServeCommand
             // Graceful shutdown via cancellation token
             return ExitCodes.Success;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Connection closed unexpectedly - not necessarily an error
-            // (e.g., client process terminated)
+            // (e.g., client process terminated). Log to stderr for diagnostics but
+            // do not treat as a failure — the host side sees stdin close as normal shutdown.
+            Console.Error.WriteLine($"[ppds serve] Connection closed: {ex.Message}");
             return ExitCodes.Success;
         }
     }

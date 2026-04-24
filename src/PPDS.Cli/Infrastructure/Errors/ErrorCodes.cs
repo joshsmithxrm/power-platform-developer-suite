@@ -279,6 +279,42 @@ public static class ErrorCodes
     {
         /// <summary>The requested solution was not found.</summary>
         public const string NotFound = "Solution.NotFound";
+
+        /// <summary>Failed to list solutions from Dataverse.</summary>
+        public const string ListFailed = "Solution.ListFailed";
+
+        /// <summary>Failed to retrieve solution details from Dataverse.</summary>
+        public const string GetFailed = "Solution.GetFailed";
+
+        /// <summary>Failed to retrieve solution components from Dataverse.</summary>
+        public const string GetComponentsFailed = "Solution.GetComponentsFailed";
+
+        /// <summary>Failed to export the solution from Dataverse.</summary>
+        public const string ExportFailed = "Solution.ExportFailed";
+
+        /// <summary>Failed to import the solution into Dataverse.</summary>
+        public const string ImportFailed = "Solution.ImportFailed";
+
+        /// <summary>Failed to publish all customizations.</summary>
+        public const string PublishFailed = "Solution.PublishFailed";
+    }
+
+    /// <summary>
+    /// Plugin trace log errors.
+    /// </summary>
+    public static class PluginTrace
+    {
+        /// <summary>Failed to list plugin trace logs from Dataverse.</summary>
+        public const string ListFailed = "PluginTrace.ListFailed";
+
+        /// <summary>Failed to count plugin trace logs in Dataverse.</summary>
+        public const string CountFailed = "PluginTrace.CountFailed";
+
+        /// <summary>Failed to retrieve plugin trace log settings.</summary>
+        public const string GetSettingsFailed = "PluginTrace.GetSettingsFailed";
+
+        /// <summary>Failed to update plugin trace log settings.</summary>
+        public const string SetSettingsFailed = "PluginTrace.SetSettingsFailed";
     }
 
     /// <summary>

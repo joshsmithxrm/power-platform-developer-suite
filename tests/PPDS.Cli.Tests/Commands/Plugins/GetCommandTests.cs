@@ -147,6 +147,26 @@ public class GetCommandTests
         Assert.NotEmpty(result.Errors);
     }
 
+    [Fact]
+    public async Task Invoke_MissingTypeArgument_ReturnsNonZeroExitCode()
+    {
+        // L3: missing required args must exit non-zero (System.CommandLine 2.x returns 1 on parse errors)
+        var parseResult = _command.Parse("");
+        Assert.NotEmpty(parseResult.Errors);
+        var exitCode = await parseResult.InvokeAsync();
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public async Task Invoke_MissingNameOrIdArgument_ReturnsNonZeroExitCode()
+    {
+        // L3: partial args (type present, name missing) must also exit non-zero
+        var parseResult = _command.Parse("assembly");
+        Assert.NotEmpty(parseResult.Errors);
+        var exitCode = await parseResult.InvokeAsync();
+        Assert.NotEqual(0, exitCode);
+    }
+
     #endregion
 
     #region Type Validation Tests

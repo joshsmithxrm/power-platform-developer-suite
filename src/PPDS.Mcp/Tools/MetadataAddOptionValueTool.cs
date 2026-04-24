@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -43,30 +44,43 @@ public sealed class MetadataAddOptionValueTool : McpToolBase
         [Description("Color associated with the option as hex string, e.g., '#FF0000' (optional).")] string? color = null,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(optionSetName), optionSetName),
-            (nameof(label), label)).ConfigureAwait(false);
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        var assignedValue = await service.AddOptionValueAsync(new AddOptionValueRequest
+        try
         {
-            SolutionUniqueName = solution,
-            OptionSetName = optionSetName,
-            Label = label,
-            Value = value,
-            Description = description,
-            Color = color
-        }, ct: cancellationToken).ConfigureAwait(false);
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
 
-        return new MetadataAddOptionValueResult
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(optionSetName), optionSetName),
+                (nameof(label), label)).ConfigureAwait(false);
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            var assignedValue = await service.AddOptionValueAsync(new AddOptionValueRequest
+            {
+                SolutionUniqueName = solution,
+                OptionSetName = optionSetName,
+                Label = label,
+                Value = value,
+                Description = description,
+                Color = color
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataAddOptionValueResult
+            {
+                Value = assignedValue
+            };
+        }
+        catch (PpdsException ex)
         {
-            Value = assignedValue
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

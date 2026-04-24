@@ -442,16 +442,22 @@ export class DaemonClient implements vscode.Disposable {
         // Handshake succeeded — remove the startup exit listener to prevent
         // unhandled rejections, then install a post-startup exit listener for
         // auto-reconnect cleanup.
+        // Guard: if the process exited in the narrow window between the handshake
+        // resolving and this line, onStartupExit has already set this.process to null.
+        // In that case we skip listener cleanup (nothing to remove) and skip the
+        // post-startup exit listener (process is already gone).
         startupExitReject = null;
-        this.process.removeListener('exit', onStartupExit);
+        if (this.process) {
+            this.process.removeListener('exit', onStartupExit);
 
-        this.process.on('exit', (code: number | null) => {
-            this.log.warn(`Daemon exited with code ${code}`);
-            this.connection = null;
-            this.process = null;
-            this.stopHeartbeat();
-            this.setState('error');
-        });
+            this.process.on('exit', (code: number | null) => {
+                this.log.warn(`Daemon exited with code ${code}`);
+                this.connection = null;
+                this.process = null;
+                this.stopHeartbeat();
+                this.setState('error');
+            });
+        }
 
         this.log.info('Daemon connection established');
         this.setState('ready');

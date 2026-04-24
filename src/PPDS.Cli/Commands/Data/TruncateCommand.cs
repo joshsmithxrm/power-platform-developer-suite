@@ -1,11 +1,10 @@
 using System.CommandLine;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
-using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
 
 namespace PPDS.Cli.Commands.Data;
@@ -156,11 +155,11 @@ public static class TruncateCommand
                 cancellationToken);
 
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-            var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+            var dataQueryService = serviceProvider.GetRequiredService<IDataQueryService>();
             var bulkExecutor = serviceProvider.GetRequiredService<IBulkOperationExecutor>();
 
             // Count records
-            var count = await CountRecordsAsync(pool, entity, cancellationToken);
+            var count = await dataQueryService.CountRecordsAsync(entity, cancellationToken);
 
             if (count == 0)
             {
@@ -247,7 +246,7 @@ public static class TruncateCommand
             }
 
             var result = await ExecuteTruncateAsync(
-                pool, bulkExecutor, entity, batchSize,
+                dataQueryService, bulkExecutor, entity, batchSize,
                 bypassPlugins, bypassFlows, continueOnError,
                 globalOptions, cancellationToken);
 
@@ -304,37 +303,8 @@ public static class TruncateCommand
         }
     }
 
-    private static async Task<int> CountRecordsAsync(
-        IDataverseConnectionPool pool,
-        string entity,
-        CancellationToken cancellationToken)
-    {
-        await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        // Use aggregate query to count records efficiently
-        var fetchXml = $@"
-            <fetch aggregate='true'>
-                <entity name='{entity}'>
-                    <attribute name='{entity}id' alias='count' aggregate='count' />
-                </entity>
-            </fetch>";
-
-        var result = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml), cancellationToken);
-
-        if (result.Entities.Count > 0 && result.Entities[0].Contains("count"))
-        {
-            var countValue = result.Entities[0]["count"];
-            if (countValue is Microsoft.Xrm.Sdk.AliasedValue aliased)
-            {
-                return Convert.ToInt32(aliased.Value);
-            }
-        }
-
-        return 0;
-    }
-
     private static async Task<BulkOperationResult> ExecuteTruncateAsync(
-        IDataverseConnectionPool pool,
+        IDataQueryService dataQueryService,
         IBulkOperationExecutor bulkExecutor,
         string entity,
         int batchSize,
@@ -344,7 +314,6 @@ public static class TruncateCommand
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
-        var primaryKey = $"{entity}id";
         var allResults = new List<BulkOperationResult>();
         var totalDeleted = 0;
         var totalFailed = 0;
@@ -356,7 +325,7 @@ public static class TruncateCommand
             cancellationToken.ThrowIfCancellationRequested();
 
             // Fetch a batch of IDs
-            var ids = await FetchRecordIdsAsync(pool, entity, primaryKey, batchSize, cancellationToken);
+            var ids = await dataQueryService.FetchBatchIdsAsync(entity, batchSize, cancellationToken);
 
             if (ids.Count == 0)
                 break;
@@ -406,25 +375,6 @@ public static class TruncateCommand
             Duration = duration,
             Errors = allErrors
         };
-    }
-
-    private static async Task<List<Guid>> FetchRecordIdsAsync(
-        IDataverseConnectionPool pool,
-        string entity,
-        string primaryKey,
-        int batchSize,
-        CancellationToken cancellationToken)
-    {
-        await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        var query = new QueryExpression(entity)
-        {
-            ColumnSet = new ColumnSet(primaryKey),
-            TopCount = batchSize
-        };
-
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
-        return result.Entities.Select(e => e.Id).ToList();
     }
 
     private static void WriteTextResult(string entity, BulkOperationResult result)

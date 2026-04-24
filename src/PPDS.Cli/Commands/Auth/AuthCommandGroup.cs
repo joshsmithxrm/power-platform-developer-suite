@@ -1365,8 +1365,8 @@ public static class AuthCommandGroup
                         ? $"app:{profile.ApplicationId}"
                         : "(unknown)";
 
-                Console.WriteLine($"Connected as {identity}");
-                Console.WriteLine();
+                Console.Error.WriteLine($"Connected as {identity}");
+                Console.Error.WriteLine();
 
                 // Auth info section - ordered to match PAC CLI
                 Console.WriteLine($"Method:                      {profile.AuthMethod}");

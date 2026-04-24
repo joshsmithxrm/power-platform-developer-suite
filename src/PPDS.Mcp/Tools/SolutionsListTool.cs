@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -35,29 +36,42 @@ public sealed class SolutionsListTool : McpToolBase
         bool includeManaged = false,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<ISolutionService>();
-
-        var result = await service.ListAsync(
-            filter: filter,
-            includeManaged: includeManaged,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return new SolutionsListResult
+        try
         {
-            TotalCount = result.TotalCount,
-            Solutions = result.Items.Select(s => new SolutionSummary
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<ISolutionService>();
+
+            var result = await service.ListAsync(
+                filter: filter,
+                includeManaged: includeManaged,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new SolutionsListResult
             {
-                Id = s.Id.ToString(),
-                UniqueName = s.UniqueName,
-                FriendlyName = s.FriendlyName,
-                Version = s.Version,
-                IsManaged = s.IsManaged,
-                PublisherName = s.PublisherName,
-                ModifiedOn = s.ModifiedOn?.ToString("o"),
-                InstalledOn = s.InstalledOn?.ToString("o")
-            }).ToList()
-        };
+                TotalCount = result.TotalCount,
+                Solutions = result.Items.Select(s => new SolutionSummary
+                {
+                    Id = s.Id.ToString(),
+                    UniqueName = s.UniqueName,
+                    FriendlyName = s.FriendlyName,
+                    Version = s.Version,
+                    IsManaged = s.IsManaged,
+                    PublisherName = s.PublisherName,
+                    ModifiedOn = s.ModifiedOn?.ToString("o"),
+                    InstalledOn = s.InstalledOn?.ToString("o")
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -6,6 +6,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -55,47 +56,60 @@ public sealed class MetadataAddColumnTool : McpToolBase
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
-        if (Context.IsReadOnly)
-            throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken,
-            (nameof(solution), solution),
-            (nameof(entityName), entityName),
-            (nameof(schemaName), schemaName),
-            (nameof(displayName), displayName),
-            (nameof(type), type)).ConfigureAwait(false);
-
-        if (!Enum.TryParse<SchemaColumnType>(type, ignoreCase: true, out var columnType))
+        try
         {
-            throw new ArgumentException(
-                $"Invalid column type '{type}'. Valid types: {string.Join(", ", Enum.GetNames<SchemaColumnType>())}",
-                nameof(type));
+            if (Context.IsReadOnly)
+                throw new InvalidOperationException("Cannot modify metadata: this MCP session is read-only.");
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken,
+                (nameof(solution), solution),
+                (nameof(entityName), entityName),
+                (nameof(schemaName), schemaName),
+                (nameof(displayName), displayName),
+                (nameof(type), type)).ConfigureAwait(false);
+
+            if (!Enum.TryParse<SchemaColumnType>(type, ignoreCase: true, out var columnType))
+            {
+                throw new ArgumentException(
+                    $"Invalid column type '{type}'. Valid types: {string.Join(", ", Enum.GetNames<SchemaColumnType>())}",
+                    nameof(type));
+            }
+
+            var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+            var result = await service.CreateColumnAsync(new CreateColumnRequest
+            {
+                SolutionUniqueName = solution,
+                EntityLogicalName = entityName,
+                SchemaName = schemaName,
+                DisplayName = displayName,
+                Description = description ?? "",
+                ColumnType = columnType,
+                MaxLength = maxLength,
+                MinValue = minValue,
+                MaxValue = maxValue,
+                Precision = precision,
+                Format = format,
+                DryRun = dryRun
+            }, ct: cancellationToken).ConfigureAwait(false);
+
+            return new MetadataAddColumnResult
+            {
+                LogicalName = result.LogicalName,
+                MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
+                WasDryRun = result.WasDryRun
+            };
         }
-
-        var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-        var result = await service.CreateColumnAsync(new CreateColumnRequest
+        catch (PpdsException ex)
         {
-            SolutionUniqueName = solution,
-            EntityLogicalName = entityName,
-            SchemaName = schemaName,
-            DisplayName = displayName,
-            Description = description ?? "",
-            ColumnType = columnType,
-            MaxLength = maxLength,
-            MinValue = minValue,
-            MaxValue = maxValue,
-            Precision = precision,
-            Format = format,
-            DryRun = dryRun
-        }, ct: cancellationToken).ConfigureAwait(false);
-
-        return new MetadataAddColumnResult
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
         {
-            LogicalName = result.LogicalName,
-            MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
-            WasDryRun = result.WasDryRun
-        };
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Query;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -35,23 +36,36 @@ public sealed class PluginsGetTool : McpToolBase
         string nameOrId,
         CancellationToken cancellationToken = default)
     {
-        string[] validTypes = ["assembly", "package", "type", "step", "image"];
-        var typeLower = (type ?? throw new ArgumentNullException(nameof(type))).ToLowerInvariant();
-        if (!validTypes.Contains(typeLower))
-            throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}");
-
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(nameOrId), nameOrId)).ConfigureAwait(false);
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-
-        return typeLower switch
+        try
         {
-            "assembly" => await GetAssemblyAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            "package" => await GetPackageAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            "type" => await GetPluginTypeAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            "step" => await GetStepAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            "image" => await GetImageAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
-            _ => throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}")
-        };
+            string[] validTypes = ["assembly", "package", "type", "step", "image"];
+            var typeLower = (type ?? throw new ArgumentNullException(nameof(type))).ToLowerInvariant();
+            if (!validTypes.Contains(typeLower))
+                throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}");
+
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(nameOrId), nameOrId)).ConfigureAwait(false);
+            var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+
+            return typeLower switch
+            {
+                "assembly" => await GetAssemblyAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
+                "package" => await GetPackageAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
+                "type" => await GetPluginTypeAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
+                "step" => await GetStepAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
+                "image" => await GetImageAsync(nameOrId, queryExecutor, cancellationToken).ConfigureAwait(false),
+                _ => throw new ArgumentException($"Invalid type '{type}'. Must be one of: {string.Join(", ", validTypes)}")
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 
     private static async Task<PluginsGetResult> GetAssemblyAsync(

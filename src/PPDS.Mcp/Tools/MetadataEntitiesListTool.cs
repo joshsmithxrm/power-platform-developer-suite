@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Metadata;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -33,29 +34,42 @@ public sealed class MetadataEntitiesListTool : McpToolBase
         [Description("Optional filter pattern to match entity logical names. Supports * wildcard (e.g., 'account*', '*custom*').")] string? filter = null,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var metadataService = serviceProvider
-            .GetRequiredService<IMetadataQueryService>();
-
-        var entities = await metadataService
-            .GetEntitiesAsync(customOnly, filter, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        return new MetadataEntitiesResult
+        try
         {
-            Entities = entities.Select(e => new EntityListItem
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var metadataService = serviceProvider
+                .GetRequiredService<IMetadataQueryService>();
+
+            var entities = await metadataService
+                .GetEntitiesAsync(customOnly, filter, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            return new MetadataEntitiesResult
             {
-                LogicalName = e.LogicalName,
-                DisplayName = e.DisplayName,
-                SchemaName = e.SchemaName,
-                IsCustomEntity = e.IsCustomEntity,
-                IsManaged = e.IsManaged,
-                OwnershipType = e.OwnershipType,
-                Description = e.Description
-            }).ToList()
-        };
+                Entities = entities.Select(e => new EntityListItem
+                {
+                    LogicalName = e.LogicalName,
+                    DisplayName = e.DisplayName,
+                    SchemaName = e.SchemaName,
+                    IsCustomEntity = e.IsCustomEntity,
+                    IsManaged = e.IsManaged,
+                    OwnershipType = e.OwnershipType,
+                    Description = e.Description
+                }).ToList()
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

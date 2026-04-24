@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient, PluginAssemblyInfoDto } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { PLUGIN_REGISTRATION_DOCS_URL } from '../constants/docsUrls.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
@@ -116,7 +117,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 await this.handleEnvironmentPickerClick(this.daemon, this.panelId, PluginsPanel.instances.length > 1);
                 break;
             case 'openHelp':
-                await vscode.env.openExternal(vscode.Uri.parse('https://ppds.dev/docs/plugin-registration'));
+                await vscode.env.openExternal(vscode.Uri.parse(PLUGIN_REGISTRATION_DOCS_URL));
                 break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);

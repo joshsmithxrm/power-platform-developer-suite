@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.ConnectionReferences;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -29,42 +30,55 @@ public sealed class ConnectionReferencesAnalyzeTool : McpToolBase
     public async Task<ConnectionReferencesAnalyzeResult> ExecuteAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
-
-        var analysis = await service.AnalyzeAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        var orphanedReferences = analysis.Relationships
-            .Where(r => r.Type == RelationshipType.OrphanedConnectionReference)
-            .Select(r => new OrphanedConnectionReferenceSummary
-            {
-                LogicalName = r.ConnectionReferenceLogicalName ?? "",
-                DisplayName = r.ConnectionReferenceDisplayName,
-                ConnectorId = r.ConnectorId,
-                IsBound = r.IsBound
-            })
-            .ToList();
-
-        var orphanedFlows = analysis.Relationships
-            .Where(r => r.Type == RelationshipType.OrphanedFlow)
-            .Select(r => new OrphanedFlowSummary
-            {
-                UniqueName = r.FlowUniqueName ?? "",
-                DisplayName = r.FlowDisplayName,
-                MissingConnectionReferenceLogicalName = r.ConnectionReferenceLogicalName
-            })
-            .ToList();
-
-        return new ConnectionReferencesAnalyzeResult
+        try
         {
-            OrphanedReferences = orphanedReferences,
-            OrphanedFlows = orphanedFlows,
-            TotalRelationships = analysis.Relationships.Count,
-            ValidRelationships = analysis.ValidCount,
-            OrphanedReferenceCount = analysis.OrphanedConnectionReferenceCount,
-            OrphanedFlowCount = analysis.OrphanedFlowCount,
-            HasOrphans = analysis.HasOrphans
-        };
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
+
+            var analysis = await service.AnalyzeAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var orphanedReferences = analysis.Relationships
+                .Where(r => r.Type == RelationshipType.OrphanedConnectionReference)
+                .Select(r => new OrphanedConnectionReferenceSummary
+                {
+                    LogicalName = r.ConnectionReferenceLogicalName ?? "",
+                    DisplayName = r.ConnectionReferenceDisplayName,
+                    ConnectorId = r.ConnectorId,
+                    IsBound = r.IsBound
+                })
+                .ToList();
+
+            var orphanedFlows = analysis.Relationships
+                .Where(r => r.Type == RelationshipType.OrphanedFlow)
+                .Select(r => new OrphanedFlowSummary
+                {
+                    UniqueName = r.FlowUniqueName ?? "",
+                    DisplayName = r.FlowDisplayName,
+                    MissingConnectionReferenceLogicalName = r.ConnectionReferenceLogicalName
+                })
+                .ToList();
+
+            return new ConnectionReferencesAnalyzeResult
+            {
+                OrphanedReferences = orphanedReferences,
+                OrphanedFlows = orphanedFlows,
+                TotalRelationships = analysis.Relationships.Count,
+                ValidRelationships = analysis.ValidCount,
+                OrphanedReferenceCount = analysis.OrphanedConnectionReferenceCount,
+                OrphanedFlowCount = analysis.OrphanedFlowCount,
+                HasOrphans = analysis.HasOrphans
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

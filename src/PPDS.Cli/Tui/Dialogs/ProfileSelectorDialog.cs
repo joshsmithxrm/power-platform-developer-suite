@@ -25,6 +25,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
     private ProfileSummary? _selectedProfile;
     private bool _isLoading = true;
     private string? _errorMessage;
+    private readonly Action _loadedHandler;
 
     /// <summary>
     /// Gets whether the user selected "Create New Profile".
@@ -165,12 +166,13 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
         };
 
         // Defer loading until dialog is visible to ensure spinner renders
-        Loaded += () =>
+        _loadedHandler = () =>
         {
             _spinner.Start("Loading profiles...");
 
             _errorService?.FireAndForget(LoadProfilesAsync(), "LoadProfiles");
         };
+        Loaded += _loadedHandler;
     }
 
     private async Task LoadProfilesAsync()
@@ -517,5 +519,13 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             ErrorMessage: _errorMessage);
     }
 
-    // Note: Dispose is handled by TuiDialog base class which clears active dialog
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Loaded -= _loadedHandler;
+        }
+        base.Dispose(disposing);
+    }
 }

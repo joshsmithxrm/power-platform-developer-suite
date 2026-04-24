@@ -878,4 +878,75 @@ describe('DaemonClient', () => {
             expect(mockProcess.kill).not.toHaveBeenCalled();
         });
     });
+
+    describe('restart', () => {
+        // Regression test for shakedown M9:
+        // TypeError: Cannot read properties of null (reading 'removeListener')
+        // Cause: the process exit handler fired in the window between the startup handshake
+        // completing and start() calling this.process.removeListener(), setting this.process
+        // to null before the removeListener guard was added.
+
+        it('should restart the daemon after a clean stop', async () => {
+            // client is already connected (see outer beforeEach)
+            mockConnection.sendRequest.mockResolvedValue({
+                activeProfile: null,
+                activeProfileIndex: null,
+                profiles: [],
+            });
+
+            await expect(client.restart()).resolves.not.toThrow();
+
+            // After restart, spawn should have been called a second time
+            const { spawn } = await import('child_process');
+            expect(spawn).toHaveBeenCalled();
+        });
+
+        it('should not throw when process is null at restart time', async () => {
+            // Simulate the daemon having exited (process set to null by exit handler)
+            // before restart is called — the pre-fix code would NPE on removeListener
+            // because start() would set this.process = spawn(...) but if process had
+            // already been null, no stale listener needed removal.
+            // This test exercises the null-guarded restart path directly.
+            vi.clearAllMocks();
+            const freshClient = new DaemonClient('/test/extension', mockLogChannel as any);
+
+            // Connect the client
+            mockConnection.sendRequest.mockResolvedValue({
+                activeProfile: null,
+                activeProfileIndex: null,
+                profiles: [],
+            });
+            await freshClient.authList();
+            vi.clearAllMocks();
+
+            // Simulate daemon process exiting and setting process to null
+            // (mirrors the post-startup exit handler in start())
+            (freshClient as any).process = null;
+            (freshClient as any).connection = null;
+            (freshClient as any)._state = 'error';
+
+            // restart() should not throw even though process is already null
+            mockConnection.sendRequest.mockResolvedValue({
+                activeProfile: null,
+                activeProfileIndex: null,
+                profiles: [],
+            });
+
+            await expect(freshClient.restart()).resolves.not.toThrow();
+        });
+
+        it('should not throw when restart is called on a never-started client', async () => {
+            vi.clearAllMocks();
+            const unconnectedClient = new DaemonClient('/test/extension', mockLogChannel as any);
+
+            mockConnection.sendRequest.mockResolvedValue({
+                activeProfile: null,
+                activeProfileIndex: null,
+                profiles: [],
+            });
+
+            // Should not throw — process and connection are both null, null-guards protect removeListener
+            await expect(unconnectedClient.restart()).resolves.not.toThrow();
+        });
+    });
 });

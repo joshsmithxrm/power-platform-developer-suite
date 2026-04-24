@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services.EnvironmentVariables;
 using PPDS.Mcp.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Mcp.Tools;
 
@@ -32,28 +33,41 @@ public sealed class EnvironmentVariablesGetTool : McpToolBase
         string schemaName,
         CancellationToken cancellationToken = default)
     {
-        await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName)).ConfigureAwait(false);
-        var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
-
-        var variable = await service.GetAsync(schemaName, cancellationToken).ConfigureAwait(false)
-            ?? throw new KeyNotFoundException($"Environment variable '{schemaName}' not found.");
-
-        return new EnvironmentVariablesGetResult
+        try
         {
-            SchemaName = variable.SchemaName,
-            DisplayName = variable.DisplayName,
-            Description = variable.Description,
-            Type = variable.Type,
-            DefaultValue = variable.DefaultValue,
-            CurrentValue = variable.CurrentValue,
-            IsManaged = variable.IsManaged,
-            IsRequired = variable.IsRequired,
-            SecretStore = variable.SecretStore,
-            HasOverride = variable.CurrentValueId.HasValue,
-            IsMissing = variable.IsRequired && variable.CurrentValue == null && variable.DefaultValue == null,
-            CreatedOn = variable.CreatedOn?.ToString("o"),
-            ModifiedOn = variable.ModifiedOn?.ToString("o")
-        };
+            await using var serviceProvider = await CreateScopeAsync(cancellationToken, (nameof(schemaName), schemaName)).ConfigureAwait(false);
+            var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
+
+            var variable = await service.GetAsync(schemaName, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Environment variable '{schemaName}' not found.");
+
+            return new EnvironmentVariablesGetResult
+            {
+                SchemaName = variable.SchemaName,
+                DisplayName = variable.DisplayName,
+                Description = variable.Description,
+                Type = variable.Type,
+                DefaultValue = variable.DefaultValue,
+                CurrentValue = variable.CurrentValue,
+                IsManaged = variable.IsManaged,
+                IsRequired = variable.IsRequired,
+                SecretStore = variable.SecretStore,
+                HasOverride = variable.CurrentValueId.HasValue,
+                IsMissing = variable.IsRequired && variable.CurrentValue == null && variable.DefaultValue == null,
+                CreatedOn = variable.CreatedOn?.ToString("o"),
+                ModifiedOn = variable.ModifiedOn?.ToString("o")
+            };
+        }
+        catch (PpdsException ex)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not ArgumentException)
+        {
+            McpToolErrorHelper.ThrowStructuredError(ex);
+            throw; // unreachable — ThrowStructuredError always throws
+        }
     }
 }
 

@@ -7,6 +7,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.ConnectionReferences;
+using PPDS.Cli.Services.Data;
 using PPDS.Cli.Services.DeploymentSettings;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.EnvironmentVariables;
@@ -250,6 +251,11 @@ public static class ServiceRegistration
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<IShakedownGuard>(),
             sp.GetRequiredService<ILogger<RoleService>>()));
+
+        // Data query service — thin pool wrapper for Delete/Truncate/Update query logic (M6).
+        services.AddTransient<IDataQueryService>(sp => new DataQueryService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ILogger<DataQueryService>>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();

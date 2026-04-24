@@ -84,7 +84,7 @@ public static class Program
         var rootCommand = new RootCommand(
             "PPDS CLI - Power Platform Developer Suite command-line tool" + Environment.NewLine +
             Environment.NewLine +
-            "Documentation: https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/src/PPDS.Cli/README.md");
+            $"Documentation: {DocsCommand.DocsUrl}");
 
         // Add command groups
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());
@@ -129,10 +129,15 @@ public static class Program
         // CancellationToken to command handlers via SetAction's cancellationToken parameter.
         // No manual CancelKeyPress handler is needed.
 
-        var parseResult = rootCommand.Parse(args);
-
+        // ── Invoke / catch section ──────────────────────────────────────────────────────
+        // Parse is included in the try so that any unexpected exception during arg-binding
+        // (e.g. a type-converter that throws) is caught and rendered as a clean one-liner on
+        // stderr rather than a raw stack trace.  System.CommandLine validation errors (e.g.
+        // invalid GUID) are surfaced via parseResult.Errors and handled by InvokeAsync's
+        // built-in error renderer; we only catch exceptions that leak past that mechanism.
         try
         {
+            var parseResult = rootCommand.Parse(args);
             return await parseResult.InvokeAsync();
         }
         catch (OperationCanceledException)
@@ -144,6 +149,8 @@ public static class Program
             var debug = args.Any(a => a == "--debug");
             var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex, debug: debug);
 
+            // Never expose stack traces unless --debug is set.  The build-path in stack frames
+            // (e.g. D:\a\power-platform-developer-suite\...) leaks CI internals and confuses users.
             if (debug)
             {
                 Console.Error.WriteLine(ex.ToString());
@@ -157,6 +164,7 @@ public static class Program
 
             return exitCode;
         }
+        // ────────────────────────────────────────────────────────────────────────────────
     }
 
     /// <summary>
