@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Last Updated:** 2026-04-24
-**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/)
+**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py)
 **Surfaces:** All
 
 ---
@@ -210,8 +210,8 @@ A merged PR does NOT warrant `release:patch`:
 | AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | 🔲 |
 | AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | 🔲 |
 | AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | 🔲 |
-| AC-06 | `/release` skill contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_skill_content.py::test_patch_procedure_documented` | 🔲 |
-| AC-07 | `/release` skill contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_skill_content.py::test_stabilization_branch_documented` | 🔲 |
+| AC-06 | `/release` skill contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_skill_content.py::test_patch_procedure_documented` | ✅ |
+| AC-07 | `/release` skill contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_skill_content.py::test_stabilization_branch_documented` | ✅ |
 | AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | 🔲 |
 | AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | 🔲 |
 | AC-10 | `post-merge-release-check.yml` opens an issue with "unknown package" warning when a `release:patch` PR touches no recognized `src/PPDS.*` paths | `tests/ci/test_post_merge_release_check.py::test_unknown_package_warning` | 🔲 |
