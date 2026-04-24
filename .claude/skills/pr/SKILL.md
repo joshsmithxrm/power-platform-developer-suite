@@ -156,11 +156,13 @@ python scripts/workflow-state.py set pr.url "{pr-url}"
 python scripts/workflow-state.py set pr.created now
 ```
 
-### 5. Launch Background Monitor (MANDATORY)
+### 5. Launch Background Monitor (MANDATORY — state-tracked)
 
 The pr-monitor handles the entire post-creation lifecycle: CI polling, Gemini review wait (with overload detection + retry), CodeQL check wait, triage dispatch, threaded replies, reconciliation, draft→ready conversion, retro, and notification. It runs as a detached background process that survives session exit.
 
-**This step is MANDATORY. Do not skip it. Do not attempt inline Gemini polling instead.**
+**This step is MANDATORY. Do not skip it. Do not manually triage comments via `gh api` instead.**
+
+> **Retro-enforced (PR #868):** Agent skipped the monitor, manually replied to 3 of 9 review comments via `gh api`, missed all CodeQL comments. User had to force monitor invocation. Manual comment triage is never an acceptable substitute — the monitor handles Gemini, CodeQL, ready-flip, and notification as a unit.
 
 The monitor exists because Gemini review timing is unpredictable (2-10+ minutes). Inline polling with a fixed timeout creates a gap where late-arriving comments go untriaged. The monitor eliminates this gap.
 
@@ -172,12 +174,16 @@ Launch as a detached background process:
 - Windows: `subprocess.Popen(..., creationflags=subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NEW_PROCESS_GROUP)`
 - Unix: `subprocess.Popen(..., start_new_session=True)`
 
-After launching, verify the PID file was written:
+After launching, verify the PID file was written AND record in workflow state:
 ```bash
 cat .workflow/pr-monitor.pid
+python scripts/workflow-state.py set pr.monitor_launched now
 ```
 
-If the monitor fails to launch (e.g., `claude` command not found), fall back to manual triage: wait inline, triage comments yourself, convert to ready. But this is the exception, not the norm.
+If the monitor fails to launch (e.g., `claude` command not found), fall back to manual triage: wait inline, triage comments yourself, convert to ready. But this is the exception, not the norm — and you MUST record the fallback reason:
+```bash
+python scripts/workflow-state.py set pr.monitor_launched "fallback: <reason>"
+```
 
 ### 6. Present Summary and Return
 
