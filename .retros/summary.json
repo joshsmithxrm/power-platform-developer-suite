@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-04-23",
-  "total_retros": 9,
+  "total_retros": 8,
   "findings_by_category": {
     "external": [
       {
@@ -211,6 +211,21 @@
         "date": "2026-04-23",
         "branch": "verify/v1-shakedown",
         "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-06"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-07"
       }
     ],
     "setup": [
@@ -218,6 +233,11 @@
         "date": "2026-04-21",
         "branch": "feat/shakedown-guard",
         "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-05"
       }
     ]
   },
