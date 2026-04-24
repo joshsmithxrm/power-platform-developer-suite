@@ -320,13 +320,17 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                     cancellable: true,
                 },
                 async (_progress, progressToken) => {
-                    progressToken.onCancellationRequested(() => cts.cancel());
-                    return this.daemon.environmentVariablesSyncDeploymentSettings(
-                        this.solutionFilter!,
-                        uri.fsPath,
-                        this.environmentUrl,
-                        cts.token,
-                    );
+                    const tokenDisposable = progressToken.onCancellationRequested(() => cts.cancel());
+                    try {
+                        return await this.daemon.environmentVariablesSyncDeploymentSettings(
+                            this.solutionFilter!,
+                            uri.fsPath,
+                            this.environmentUrl,
+                            cts.token,
+                        );
+                    } finally {
+                        tokenDisposable.dispose();
+                    }
                 },
             );
 
