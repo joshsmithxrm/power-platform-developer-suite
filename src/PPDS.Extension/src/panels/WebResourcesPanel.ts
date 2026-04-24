@@ -202,6 +202,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         // WR-23: Environment change invalidates all cached data
         this.resourceCache.clear();
         await this.loadSolutionList();
+        this.postMessage({ command: 'filterState', solutionId: this.solutionId, textOnly: this.textOnly });
         await this.loadWebResources();
     }
 
@@ -219,7 +220,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 friendlyName: s.friendlyName,
             }));
 
-            if (this.solutionId && !solutions.find(s => s.id === this.solutionId)) {
+            if (this.solutionId && !solutions.some(s => s.id === this.solutionId)) {
                 this.solutionId = null;
                 void this.context.globalState.update('ppds.webResources.solutionId', null);
             }
