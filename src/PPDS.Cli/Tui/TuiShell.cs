@@ -126,6 +126,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private void OnScreenMenuStateChanged()
     {
+        if (_currentScreen != null)
+            _contentArea.Title = _currentScreen.Title;
         RebuildMenuBar();
     }
 
