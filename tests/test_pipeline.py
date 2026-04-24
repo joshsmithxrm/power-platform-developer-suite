@@ -42,8 +42,8 @@ def _mock_pipeline_v8_helpers(monkeypatch):
 # AC-51: All hook commands use relative paths
 # ---------------------------------------------------------------------------
 class TestHookPaths:
-    def test_all_commands_use_relative_paths(self):
-        """AC-51: No ${CLAUDE_PROJECT_DIR} in any hook command string."""
+    def test_all_commands_use_absolute_paths(self):
+        """AC-51 (updated #906): All hook commands use $CLAUDE_PROJECT_DIR."""
         settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
         with open(settings_path, "r") as f:
             settings = json.load(f)
@@ -53,13 +53,10 @@ class TestHookPaths:
             for matcher_entry in matchers:
                 for hook in matcher_entry.get("hooks", []):
                     cmd = hook.get("command", "")
-                    assert "CLAUDE_PROJECT_DIR" not in cmd, (
-                        f"Hook command in {event_type} still uses "
-                        f"CLAUDE_PROJECT_DIR: {cmd}"
-                    )
                     if ".claude/hooks/" in cmd:
-                        assert cmd.startswith('python ".claude/hooks/'), (
-                            f"Hook command should use relative path: {cmd}"
+                        assert "$CLAUDE_PROJECT_DIR" in cmd, (
+                            f"Hook command in {event_type} uses a relative "
+                            f"path that breaks when CWD drifts: {cmd}"
                         )
 
 
@@ -2493,8 +2490,8 @@ class TestConvergeRunsOnPassWithFindings:
 # AC-123: Hook path resolution in worktrees
 # ---------------------------------------------------------------------------
 class TestHookPathResolution:
-    def test_hooks_use_relative_paths_that_work_in_worktrees(self):
-        """AC-123: Hook commands use relative paths that resolve in worktrees."""
+    def test_hooks_use_claude_project_dir(self):
+        """AC-123 (updated #906): Hook commands use $CLAUDE_PROJECT_DIR for CWD-safe resolution."""
         settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
         with open(settings_path, "r") as f:
             settings = json.load(f)
@@ -2505,16 +2502,14 @@ class TestHookPathResolution:
                 for hook in matcher_entry.get("hooks", []):
                     cmd = hook.get("command", "")
                     if ".claude/hooks/" in cmd:
-                        # Verify it uses a simple relative path (no env var expansion)
-                        assert "CLAUDE_PROJECT_DIR" not in cmd, (
-                            f"Hook should not use CLAUDE_PROJECT_DIR: {cmd}"
+                        assert "$CLAUDE_PROJECT_DIR" in cmd, (
+                            f"Hook should use $CLAUDE_PROJECT_DIR: {cmd}"
                         )
-                        # Verify the hook file actually exists
-                        # Extract filename from command
                         parts = cmd.split('"')
                         for part in parts:
                             if ".claude/hooks/" in part:
-                                hook_path = os.path.join(REPO_ROOT, part)
+                                rel = part.replace("$CLAUDE_PROJECT_DIR/", "")
+                                hook_path = os.path.join(REPO_ROOT, rel)
                                 assert os.path.exists(hook_path), (
                                     f"Hook file not found: {hook_path}"
                                 )
