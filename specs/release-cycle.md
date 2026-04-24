@@ -205,18 +205,18 @@ A merged PR does NOT warrant `release:patch`:
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `post-merge-release-check.yml` opens a GitHub issue when a PR with `release:patch` label merges to main | `tests/ci/test_post_merge_release_check.py::test_opens_issue_on_patch_label` | 🔲 |
-| AC-02 | The patch release issue body identifies affected package(s) by mapping changed file paths to package prefixes | `tests/ci/test_post_merge_release_check.py::test_maps_paths_to_packages` | 🔲 |
-| AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | 🔲 |
-| AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | 🔲 |
-| AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | 🔲 |
+| AC-01 | `post-merge-release-check.yml` opens a GitHub issue when a PR with `release:patch` label merges to main | `tests/ci/test_post_merge_release_check.py::test_opens_issue_on_patch_label` | ✅ |
+| AC-02 | The patch release issue body identifies affected package(s) by mapping changed file paths to package prefixes | `tests/ci/test_post_merge_release_check.py::test_maps_paths_to_packages` | ✅ |
+| AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | ✅ |
+| AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | ✅ |
+| AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | ✅ |
 | AC-06 | `/release` skill contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_skill_content.py::test_patch_procedure_documented` | ✅ |
 | AC-07 | `/release` skill contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_skill_content.py::test_stabilization_branch_documented` | ✅ |
-| AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | 🔲 |
-| AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | 🔲 |
-| AC-10 | `post-merge-release-check.yml` opens an issue with "unknown package" warning when a `release:patch` PR touches no recognized `src/PPDS.*` paths | `tests/ci/test_post_merge_release_check.py::test_unknown_package_warning` | 🔲 |
-| AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | 🔲 |
-| AC-12 | `post-merge-release-check.yml` identifies multiple affected packages when a `release:patch` PR touches paths in more than one package | `tests/ci/test_post_merge_release_check.py::test_multi_package_detection` | 🔲 |
+| AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | ✅ |
+| AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | ✅ |
+| AC-10 | `post-merge-release-check.yml` opens an issue with "unknown package" warning when a `release:patch` PR touches no recognized `src/PPDS.*` paths | `tests/ci/test_post_merge_release_check.py::test_unknown_package_warning` | ✅ |
+| AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | ✅ |
+| AC-12 | `post-merge-release-check.yml` identifies multiple affected packages when a `release:patch` PR touches paths in more than one package | `tests/ci/test_post_merge_release_check.py::test_multi_package_detection` | ✅ |
 
 ### Edge Cases
 
