@@ -63,6 +63,7 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
     <PackageReference Include="CsvHelper" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="Terminal.Gui" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />

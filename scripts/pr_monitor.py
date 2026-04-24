@@ -384,7 +384,6 @@ def run_triage(worktree, pr_number, comments, logger):
     )
 
     env = os.environ.copy()
-    env["MSYS_NO_PATHCONV"] = "1"
     env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree).resolve())
 
@@ -770,7 +769,6 @@ def run_retro(worktree, logger):
         return "skipped"
 
     env = os.environ.copy()
-    env["MSYS_NO_PATHCONV"] = "1"
     env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree).resolve())
 

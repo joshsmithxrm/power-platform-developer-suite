@@ -138,6 +138,31 @@ class TestPipelineEnv:
         assert env_passed.get("PPDS_PIPELINE") == "1"
         logger.close()
 
+    def test_claude_env_excludes_msys_no_pathconv(self, tmp_path):
+        """#910: MSYS_NO_PATHCONV must not propagate to claude subprocesses.
+
+        It suppresses MSYS path conversion for hooks, causing
+        $CLAUDE_PROJECT_DIR to resolve as C:\\c\\Users\\... instead of
+        C:\\Users\\... — breaking every hook invocation.
+        """
+        import pipeline
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        mock_proc = unittest.mock.MagicMock()
+        mock_proc.poll.return_value = 0
+        mock_proc.returncode = 0
+
+        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pipeline.run_claude(str(tmp_path), "test", logger, "test-stage")
+
+        env_passed = mock_popen.call_args.kwargs.get("env", {})
+        assert "MSYS_NO_PATHCONV" not in env_passed, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
+        logger.close()
+
 
 # ---------------------------------------------------------------------------
 # AC-55: Stage output goes to file

@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
+import { RpcTimeoutError, withRpcTimeout } from '../daemonClient.js';
 import type { ProfileInfo } from '../types.js';
 
-type ProfileTreeElement = ProfileTreeItem | EnvironmentTreeItem | ManualUrlTreeItem;
+type ProfileTreeElement = ProfileTreeItem | EnvironmentTreeItem | ManualUrlTreeItem | ErrorTreeItem;
 
 /**
  * Tree item representing a single authentication profile.
@@ -88,6 +89,22 @@ export class ManualUrlTreeItem extends vscode.TreeItem {
     }
 }
 
+/**
+ * Tree item shown when the daemon is unreachable or an RPC call fails.
+ * Clicking it triggers a refresh to retry.
+ */
+export class ErrorTreeItem extends vscode.TreeItem {
+    constructor(message: string) {
+        super(message, vscode.TreeItemCollapsibleState.None);
+        this.iconPath = new vscode.ThemeIcon('warning');
+        this.contextValue = 'error';
+        this.command = {
+            command: 'ppds.refreshProfiles',
+            title: 'Retry',
+        };
+    }
+}
+
 function buildTooltip(profile: ProfileInfo): string {
     const lines: string[] = [];
     lines.push(`Name: ${profile.name ?? '(unnamed)'}`);
@@ -123,6 +140,7 @@ export class ProfileTreeDataProvider
     private envCache: Awaited<ReturnType<DaemonClient['envList']>> | null = null;
     private envCacheTime = 0;
     private static readonly ENV_CACHE_TTL_MS = 30_000; // 30 seconds
+    private static readonly RPC_TIMEOUT_MS = 10_000;
 
     constructor(
         private readonly daemonClient: DaemonClient,
@@ -141,7 +159,11 @@ export class ProfileTreeDataProvider
         if (this.envCache && (now - this.envCacheTime) < ProfileTreeDataProvider.ENV_CACHE_TTL_MS) {
             return this.envCache;
         }
-        const result = await this.daemonClient.envList();
+        const result = await withRpcTimeout(
+            this.daemonClient.envList(),
+            ProfileTreeDataProvider.RPC_TIMEOUT_MS,
+            'envList',
+        );
         this.envCache = result;
         this.envCacheTime = now;
         return result;
@@ -163,9 +185,13 @@ export class ProfileTreeDataProvider
         return [];
     }
 
-    private async getProfiles(): Promise<ProfileTreeItem[]> {
+    private async getProfiles(): Promise<ProfileTreeElement[]> {
         try {
-            const result = await this.daemonClient.authList();
+            const result = await withRpcTimeout(
+                this.daemonClient.authList(),
+                ProfileTreeDataProvider.RPC_TIMEOUT_MS,
+                'authList',
+            );
             void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'ready');
             void vscode.commands.executeCommand('setContext', 'ppds.profileCount', result.profiles.length);
             if (this.stateTracker) {
@@ -198,7 +224,10 @@ export class ProfileTreeDataProvider
                 this.stateTracker.daemonState = 'error';
                 this.stateTracker.profileCount = 0;
             }
-            return [];
+            const errorMsg = err instanceof RpcTimeoutError
+                ? 'Daemon not responding — click to retry'
+                : 'Failed to load profiles — click to retry';
+            return [new ErrorTreeItem(errorMsg)];
         }
     }
 
