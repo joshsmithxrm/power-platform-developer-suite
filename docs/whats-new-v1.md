@@ -144,7 +144,7 @@ dotnet add package PPDS.Plugins
 
 - **.NET runtime** — .NET 8.0 or later (CLI, MCP, libraries). Plugins: .NET Framework 4.6.2 (Dataverse sandbox requirement).
 - **OS** — Windows, macOS, Linux.
-- **VS Code** — 1.109 or later.
+- **VS Code** — 1.116 or later.
 - **Node.js** — 20 or later (contributors only).
 
 ---

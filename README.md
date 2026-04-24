@@ -38,7 +38,7 @@ ppds data export --schema schema.xml --output data.zip
 | Component | Type | Install | Requirement |
 |-----------|------|---------|-------------|
 | **ppds** | CLI + TUI | `dotnet tool install -g PPDS.Cli` | .NET 8.0+ (Windows / macOS / Linux) |
-| **VS Code Extension** | IDE Extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite) | VS Code 1.109+ |
+| **VS Code Extension** | IDE Extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite) | VS Code 1.116+ |
 | **ppds-mcp-server** | MCP Server | `dotnet tool install -g PPDS.Mcp` | .NET 8.0+ |
 
 ### NuGet Libraries
