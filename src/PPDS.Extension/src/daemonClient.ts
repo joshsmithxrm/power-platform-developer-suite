@@ -185,13 +185,11 @@ export class RpcTimeoutError extends Error {
 }
 
 export function withRpcTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new RpcTimeoutError(label, timeoutMs)), timeoutMs);
-        promise.then(
-            value => { clearTimeout(timer); resolve(value); },
-            err => { clearTimeout(timer); reject(err as Error); },
-        );
+    let timer: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new RpcTimeoutError(label, timeoutMs)), timeoutMs);
     });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer!));
 }
 
 /**
