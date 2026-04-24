@@ -294,8 +294,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             // is issued for the correct tenant while the MSAL app stays on "organizations".
             var interactiveBuilder = _msalClient!
                 .AcquireTokenInteractive(scopes)
-                .WithUseEmbeddedWebView(false) // Use system browser
-                .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount); // Always show account picker
+                .WithUseEmbeddedWebView(false); // Use system browser
             if (!string.IsNullOrWhiteSpace(_tenantId))
                 interactiveBuilder = interactiveBuilder.WithTenantId(_tenantId);
             _cachedResult = await interactiveBuilder
