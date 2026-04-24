@@ -293,14 +293,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
         // Visual focus indicators - only change title, not colors
         // The table's built-in selection highlighting is sufficient
-        _queryFrame.Enter += (_) =>
-        {
-            _queryFrame.Title = "\u25b6 Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
-        };
-        _queryFrame.Leave += (_) =>
-        {
-            _queryFrame.Title = "Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
-        };
+        _queryFrame.Enter += (_) => UpdateQueryFrameTitle(focused: true);
+        _queryFrame.Leave += (_) => UpdateQueryFrameTitle(focused: false);
         _resultsTable.Enter += (_) =>
         {
             _resultsTable.Title = "\u25b6 Results";
@@ -756,11 +750,18 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private void ToggleFetchXmlMode()
     {
         _presenter.ToggleFetchXml();
-        _queryFrame.Title = _presenter.UseFetchXmlMode
-            ? "FetchXML (F5 to execute, F11 to switch to SQL)"
-            : "Query (F5 to execute, Ctrl+Space for suggestions, Alt+↑↓ to resize, F6 to toggle focus)";
+        UpdateQueryFrameTitle(focused: _queryFrame.HasFocus);
         _statusLabel.SetNeedsDisplay();
         NotifyMenuChanged();
+    }
+
+    private void UpdateQueryFrameTitle(bool focused)
+    {
+        var prefix = focused ? "▶ " : string.Empty;
+        var body = _presenter.UseFetchXmlMode
+            ? "FetchXML (F5 to execute, F11 to switch to SQL)"
+            : "Query (F5 to execute, Ctrl+Space for suggestions, Alt+↑↓ to resize, F6 to toggle focus)";
+        _queryFrame.Title = prefix + body;
     }
 
     private void ShowFilter()

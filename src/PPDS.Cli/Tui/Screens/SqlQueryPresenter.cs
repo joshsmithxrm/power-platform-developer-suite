@@ -16,6 +16,7 @@ namespace PPDS.Cli.Tui.Screens;
 internal sealed class SqlQueryPresenter : IDisposable
 {
     private const int StreamingChunkSize = 100;
+    private const string UnknownEntityName = "unknown";
 
     private readonly InteractiveSession _session;
     private readonly string _environmentUrl;
@@ -31,6 +32,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     private long _lastExecutionTimeMs;
     private bool _useTdsEndpoint;
     private bool _useFetchXmlMode;
+    private bool _lastExecutionUsedFetchXml;
     private bool _confirmedDml;
 
     // Read-only properties
@@ -191,7 +193,7 @@ internal sealed class SqlQueryPresenter : IDisposable
                 if (isFirstChunk && chunk.Columns != null)
                 {
                     columns = chunk.Columns;
-                    StreamingColumnsReady?.Invoke(columns, chunk.EntityLogicalName ?? "unknown");
+                    StreamingColumnsReady?.Invoke(columns, chunk.EntityLogicalName ?? UnknownEntityName);
                 }
 
                 totalRows = chunk.TotalRowsSoFar;
@@ -223,6 +225,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             _lastPageNumber = 1;
             _lastPagingCookie = null;
             _lastExecutionTimeMs = elapsedMs;
+            _lastExecutionUsedFetchXml = false;
             _isExecuting = false;
 
             var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
@@ -301,10 +304,12 @@ internal sealed class SqlQueryPresenter : IDisposable
             _lastPageNumber = result.PageNumber;
             _lastPagingCookie = result.PagingCookie;
             _lastExecutionTimeMs = elapsedMs;
+            _lastExecutionPlan = null;
+            _lastExecutionUsedFetchXml = true;
             _isExecuting = false;
 
             if (result.Columns.Count > 0)
-                StreamingColumnsReady?.Invoke(result.Columns, result.EntityLogicalName);
+                StreamingColumnsReady?.Invoke(result.Columns, result.EntityLogicalName ?? UnknownEntityName);
 
             if (result.Records.Count > 0 && result.Columns.Count > 0)
                 StreamingRowsReady?.Invoke(result.Records, result.Columns, true, result.Count);
@@ -347,7 +352,7 @@ internal sealed class SqlQueryPresenter : IDisposable
 
         try
         {
-            if (_useFetchXmlMode)
+            if (_lastExecutionUsedFetchXml)
             {
                 var provider = await _session.GetServiceProviderAsync(_environmentUrl, cancellationToken);
                 var executor = provider.GetRequiredService<IQueryExecutor>();
