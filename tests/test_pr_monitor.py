@@ -1530,3 +1530,58 @@ class TestTriageLoopSkipsRepliedComments:
         # Round 1 + round 2 (new comment) = 2 triage calls. Round 3
         # has no unreplied comments so the loop exits.
         assert mock_triage.call_count == 2
+
+
+class TestMsysPathconvNotInherited:
+    """#910: MSYS_NO_PATHCONV must not propagate to claude subprocesses.
+
+    Setting MSYS_NO_PATHCONV=1 in the claude -p env suppresses MSYS path
+    conversion for ALL child processes, including hooks. Claude Code hooks
+    reference $CLAUDE_PROJECT_DIR which needs MSYS->Windows conversion
+    when passed to Python. Without conversion, /c/Users/... becomes
+    C:\\c\\Users\\... — a non-existent path.
+    """
+
+    def test_triage_env_excludes_msys_no_pathconv(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        comments = [{"id": 1, "user": "g", "path": "a.py", "line": 1, "body": "fix"}]
+
+        stage_dir = os.path.join(wt, ".workflow", "stages")
+        os.makedirs(stage_dir, exist_ok=True)
+        jsonl_path = os.path.join(stage_dir, "pr-monitor-triage.jsonl")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        def fake_wait(timeout=None):
+            with open(jsonl_path, "w") as f:
+                f.write(json.dumps({"type": "result", "result": "[]"}) + "\n")
+            return 0
+
+        mock_proc.wait.side_effect = fake_wait
+
+        with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pr_monitor.run_triage(wt, 42, comments, logger)
+
+        env = mock_popen.call_args[1]["env"]
+        assert "MSYS_NO_PATHCONV" not in env, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
+
+    def test_retro_env_excludes_msys_no_pathconv(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        stage_dir = os.path.join(wt, ".workflow", "stages")
+        os.makedirs(stage_dir, exist_ok=True)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+
+        with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pr_monitor.run_retro(wt, logger)
+
+        env = mock_popen.call_args[1]["env"]
+        assert "MSYS_NO_PATHCONV" not in env, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
