@@ -42,7 +42,7 @@ def test_hook_command_uses_absolute_path(event, command):
 def test_no_bare_relative_claude_hooks_path():
     with open(SETTINGS_PATH) as f:
         content = f.read()
-    matches = re.findall(r'"\\.claude/hooks/', content)
+    matches = re.findall(r'(?<!\$CLAUDE_PROJECT_DIR/)\.claude/hooks/', content)
     assert not matches, (
         f"Found bare relative .claude/hooks/ paths (without $CLAUDE_PROJECT_DIR): {matches}"
     )
