@@ -18,10 +18,11 @@ public class DependencyBundlingTests
         // Regression guard for #889: without a direct PackageReference the assembly
         // only appears as a transitive dep of PPDS.Dataverse, and the .NET host's
         // probing may skip it in single-file or tool-install layouts.
-        var depsPath = Path.Combine(AppContext.BaseDirectory, "PPDS.Cli.Tests.deps.json");
+        var depsPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(DependencyBundlingTests).Assembly.GetName().Name}.deps.json");
         File.Exists(depsPath).Should().BeTrue("deps.json must exist in the test output");
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(depsPath));
+        using var stream = File.OpenRead(depsPath);
+        using var doc = JsonDocument.Parse(stream);
         var targets = doc.RootElement.GetProperty("targets");
 
         bool found = false;
