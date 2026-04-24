@@ -41,6 +41,7 @@ import {
     ProfileTreeDataProvider,
     EnvironmentTreeItem,
     ManualUrlTreeItem,
+    ErrorTreeItem,
     getProfileId,
 } from '../../views/profileTreeView.js';
 
@@ -249,13 +250,30 @@ describe('ProfileTreeDataProvider', () => {
         expect(children).toEqual([]);
     });
 
-    it('getChildren returns empty array when daemon throws', async () => {
+    it('getChildren returns ErrorTreeItem when daemon throws', async () => {
         const daemon = { authList: vi.fn().mockRejectedValue(new Error('daemon not available')) };
         const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         const children = await provider.getChildren();
 
-        expect(children).toEqual([]);
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(ErrorTreeItem);
+        expect(children[0].label).toBe('Failed to load profiles — click to retry');
+    });
+
+    it('getChildren returns timeout ErrorTreeItem when authList hangs', async () => {
+        vi.useFakeTimers();
+        const daemon = { authList: vi.fn().mockReturnValue(new Promise(() => {})) };
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
+
+        const childrenPromise = provider.getChildren();
+        await vi.advanceTimersByTimeAsync(10_000);
+        const children = await childrenPromise;
+
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(ErrorTreeItem);
+        expect(children[0].label).toBe('Daemon not responding — click to retry');
+        vi.useRealTimers();
     });
 
     it('refresh fires onDidChangeTreeData event', () => {
