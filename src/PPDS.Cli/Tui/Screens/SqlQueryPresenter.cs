@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
@@ -15,6 +16,7 @@ namespace PPDS.Cli.Tui.Screens;
 internal sealed class SqlQueryPresenter : IDisposable
 {
     private const int StreamingChunkSize = 100;
+    private const string UnknownEntityName = "unknown";
 
     private readonly InteractiveSession _session;
     private readonly string _environmentUrl;
@@ -29,6 +31,8 @@ internal sealed class SqlQueryPresenter : IDisposable
     private QueryPlanDescription? _lastExecutionPlan;
     private long _lastExecutionTimeMs;
     private bool _useTdsEndpoint;
+    private bool _useFetchXmlMode;
+    private bool _lastExecutionUsedFetchXml;
     private bool _confirmedDml;
 
     // Read-only properties
@@ -40,6 +44,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     public QueryPlanDescription? LastExecutionPlan => _lastExecutionPlan;
     public long LastExecutionTimeMs => _lastExecutionTimeMs;
     public bool UseTdsEndpoint => _useTdsEndpoint;
+    public bool UseFetchXmlMode => _useFetchXmlMode;
 
     // Events -- screen subscribes and wraps with Application.MainLoop.Invoke()
 
@@ -105,6 +110,14 @@ internal sealed class SqlQueryPresenter : IDisposable
         StatusChanged?.Invoke(_useTdsEndpoint
             ? "Mode: TDS Read Replica (read-only, slight delay)"
             : "Mode: Dataverse (real-time)");
+    }
+
+    public void ToggleFetchXml()
+    {
+        _useFetchXmlMode = !_useFetchXmlMode;
+        StatusChanged?.Invoke(_useFetchXmlMode
+            ? "Input: FetchXML (paste raw FetchXML)"
+            : "Input: SQL");
     }
 
     public void ConfirmDml()
@@ -180,7 +193,7 @@ internal sealed class SqlQueryPresenter : IDisposable
                 if (isFirstChunk && chunk.Columns != null)
                 {
                     columns = chunk.Columns;
-                    StreamingColumnsReady?.Invoke(columns, chunk.EntityLogicalName ?? "unknown");
+                    StreamingColumnsReady?.Invoke(columns, chunk.EntityLogicalName ?? UnknownEntityName);
                 }
 
                 totalRows = chunk.TotalRowsSoFar;
@@ -212,6 +225,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             _lastPageNumber = 1;
             _lastPagingCookie = null;
             _lastExecutionTimeMs = elapsedMs;
+            _lastExecutionUsedFetchXml = false;
             _isExecuting = false;
 
             var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
@@ -257,6 +271,78 @@ internal sealed class SqlQueryPresenter : IDisposable
         }
     }
 
+    public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
+    {
+        if (string.IsNullOrWhiteSpace(fetchXml))
+        {
+            ErrorOccurred?.Invoke("FetchXML cannot be empty.");
+            return;
+        }
+
+        _queryCts?.Cancel();
+        _queryCts?.Dispose();
+        _queryCts = CancellationTokenSource.CreateLinkedTokenSource(screenCancellation);
+        var queryCt = _queryCts.Token;
+
+        _isExecuting = true;
+        _lastErrorMessage = null;
+        StatusChanged?.Invoke("Executing FetchXML...");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            var provider = await _session.GetServiceProviderAsync(_environmentUrl, queryCt);
+            var executor = provider.GetRequiredService<IQueryExecutor>();
+
+            var result = await executor.ExecuteFetchXmlAsync(fetchXml, cancellationToken: queryCt);
+
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.ElapsedMilliseconds;
+
+            _lastSql = fetchXml;
+            _lastPageNumber = result.PageNumber;
+            _lastPagingCookie = result.PagingCookie;
+            _lastExecutionTimeMs = elapsedMs;
+            _lastExecutionPlan = null;
+            _lastExecutionUsedFetchXml = true;
+            _isExecuting = false;
+
+            if (result.Columns.Count > 0)
+                StreamingColumnsReady?.Invoke(result.Columns, result.EntityLogicalName ?? UnknownEntityName);
+
+            if (result.Records.Count > 0 && result.Columns.Count > 0)
+                StreamingRowsReady?.Invoke(result.Records, result.Columns, true, result.Count);
+
+            var statusText = $"Returned {result.Count:N0} rows in {elapsedMs}ms via FetchXML";
+            ExecutionComplete?.Invoke(statusText, elapsedMs, null);
+
+            _session.GetErrorService().FireAndForget(
+                SaveToHistoryAsync(fetchXml, result.Count, elapsedMs),
+                "SaveHistory");
+        }
+        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
+        {
+            _isExecuting = false;
+            AuthenticationRequired?.Invoke(authEx);
+        }
+        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
+        {
+            _isExecuting = false;
+            QueryCancelled?.Invoke();
+        }
+        catch (OperationCanceledException) when (screenCancellation.IsCancellationRequested)
+        {
+            _isExecuting = false;
+        }
+        catch (Exception ex)
+        {
+            _lastErrorMessage = ex.Message;
+            _isExecuting = false;
+            ErrorOccurred?.Invoke(ex.Message);
+        }
+    }
+
     /// <summary>
     /// Loads the next page of results for the current query.
     /// </summary>
@@ -266,22 +352,41 @@ internal sealed class SqlQueryPresenter : IDisposable
 
         try
         {
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, cancellationToken);
-
-            var request = new SqlQueryRequest
+            if (_lastExecutionUsedFetchXml)
             {
-                Sql = _lastSql,
-                PageNumber = _lastPageNumber + 1,
-                PagingCookie = _lastPagingCookie,
-                EnablePrefetch = true
-            };
+                var provider = await _session.GetServiceProviderAsync(_environmentUrl, cancellationToken);
+                var executor = provider.GetRequiredService<IQueryExecutor>();
 
-            var result = await service.ExecuteAsync(request, cancellationToken);
+                var result = await executor.ExecuteFetchXmlAsync(
+                    _lastSql,
+                    _lastPageNumber + 1,
+                    _lastPagingCookie,
+                    cancellationToken: cancellationToken);
 
-            _lastPagingCookie = result.Result.PagingCookie;
-            _lastPageNumber = result.Result.PageNumber;
+                _lastPagingCookie = result.PagingCookie;
+                _lastPageNumber = result.PageNumber;
 
-            PageLoaded?.Invoke(result.Result);
+                PageLoaded?.Invoke(result);
+            }
+            else
+            {
+                var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, cancellationToken);
+
+                var request = new SqlQueryRequest
+                {
+                    Sql = _lastSql,
+                    PageNumber = _lastPageNumber + 1,
+                    PagingCookie = _lastPagingCookie,
+                    EnablePrefetch = true
+                };
+
+                var result = await service.ExecuteAsync(request, cancellationToken);
+
+                _lastPagingCookie = result.Result.PagingCookie;
+                _lastPageNumber = result.Result.PageNumber;
+
+                PageLoaded?.Invoke(result.Result);
+            }
         }
         catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
         {

@@ -466,6 +466,8 @@ downstream `get`/`url` can find the record.
 
 ### M2 — `ppds logs tail` and `ppds logs dump` don't exist
 
+**Status: FIXED** — `LogsCommandGroup` registered in `Program.cs`; `LogsTailCommand` and `LogsDumpCommand` fully implemented with unit tests.
+
 **Surface:** CLI
 **Evidence:** Both commands are listed in the test matrix but produce
 `"logs" was not matched` when invoked. No `logs` command group is registered
@@ -822,7 +824,7 @@ Areas).
 | 23 | Users / roles | ✅ | — | — | — |
 | 24 | Data schema / analyze | ✅ (L16) | ? | ✅ | — |
 | 25 | Deployment settings | ? | — | — | — |
-| 26 | Logs | ✗ (M2) | ✅ | — | ✅ |
+| 26 | Logs | ✅ | ✅ | — | ✅ |
 | 27 | Notebooks | — | — | — | ✅ (deep) |
 | 28 | Serve / daemon | ✗ (M5) | — | — | ✗ (M9) |
 
@@ -990,8 +992,7 @@ Three items originally slated for Track 3 were also pulled into this PR:
 - **H7** (MCP opaque errors) — commit `6c07ca353` *(originally Track 3)*
 - **M6** (DataQueryService extraction — A1 violation) — commit `35a26b8b3` *(originally Track 3)*
 
-Remaining from the original Track 1 list: **M2** (`logs` command missing —
-decision: implement or strike) is not yet addressed.
+All original Track 1 items are now addressed (M2 resolved — logs commands implemented).
 
 ### Track 2 — `feat/shakedown-guard` (already launched)
 
@@ -1016,7 +1017,6 @@ Remaining Track 3 items (not yet addressed):
 - L7 (FetchXML mode toggle — TUI UX)
 - L12 (auth prompt optimization — needs its own design pass)
 - L16 (docs drift — flag-name discrepancies)
-- M2 (logs command missing — decision: implement or strike)
 - M7 (sovereign cloud Maker URLs — larger refactor)
 
 None of the remaining Track 3 items is release-blocking, but several materially

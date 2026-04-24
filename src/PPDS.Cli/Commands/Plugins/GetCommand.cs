@@ -49,8 +49,17 @@ public static class GetCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var type = parseResult.GetValue(typeArgument)!;
-            var nameOrId = parseResult.GetValue(nameOrIdArgument)!;
+            var type = parseResult.GetValue(typeArgument);
+            var nameOrId = parseResult.GetValue(nameOrIdArgument);
+
+            if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(nameOrId))
+            {
+                Console.Error.WriteLine("Error: Both 'type' and 'name-or-id' arguments are required.");
+                Console.Error.WriteLine($"Usage: ppds plugins get <type> <name-or-id>");
+                Console.Error.WriteLine($"Valid types: {string.Join(", ", ValidTypes)}");
+                return ExitCodes.InvalidArguments;
+            }
+
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
