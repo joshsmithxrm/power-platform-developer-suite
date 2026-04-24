@@ -14,6 +14,8 @@ import { assertNever } from './webview/shared/assert-never.js';
 /** Default Solution GUID — always present in every environment. */
 const DEFAULT_SOLUTION_ID = 'fd140aaf-4df4-11dd-bd17-0019b9312238';
 
+const SYNC_TIMEOUT_MS = 60_000;
+
 export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionReferencesPanelWebviewToHost, ConnectionReferencesPanelHostToWebview> {
     private static instances: ConnectionReferencesPanel[] = [];
     private static nextId = 1;
@@ -310,7 +312,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
         if (!uri) return;
 
         const cts = new CancellationTokenSource();
-        const timeout = setTimeout(() => cts.cancel(), 60_000);
+        const timeout = setTimeout(() => cts.cancel(), SYNC_TIMEOUT_MS);
 
         try {
             const result = await vscode.window.withProgress(

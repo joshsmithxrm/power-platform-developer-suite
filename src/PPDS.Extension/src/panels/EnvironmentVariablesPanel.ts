@@ -11,6 +11,8 @@ import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { EnvironmentVariablesPanelWebviewToHost, EnvironmentVariablesPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
+const SYNC_TIMEOUT_MS = 60_000;
+
 export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVariablesPanelWebviewToHost, EnvironmentVariablesPanelHostToWebview> {
     private static instances: EnvironmentVariablesPanel[] = [];
     private static nextId = 1;
@@ -294,7 +296,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
         if (!uri) return;
 
         const cts = new CancellationTokenSource();
-        const timeout = setTimeout(() => cts.cancel(), 60_000);
+        const timeout = setTimeout(() => cts.cancel(), SYNC_TIMEOUT_MS);
 
         try {
             const result = await vscode.window.withProgress(
