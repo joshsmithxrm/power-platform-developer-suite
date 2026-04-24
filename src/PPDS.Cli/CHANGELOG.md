@@ -39,50 +39,11 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Version header at startup** — CLI, SDK, .NET runtime and platform emitted to stderr for build correlation (skipped for `--help`, `--version`, no args).
 - **`ppds logs` command group** — Local-only observability for post-launch triage. `ppds logs tail` shows recent lines with `--lines` and `--level` filtering; `ppds logs dump` bundles logs, `dotnet --info`, and redacted environment variables into a timestamped zip for bug reports ([#862](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/862)).
 - **`ppds env config` no-arg mode** — Running `ppds env config` without a URL now shows the active profile's current environment configuration ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-
-### Changed
-
-- **BREAKING — Profile storage schema v2**. Name-based active profile, secure storage for secrets. v1 profiles auto-deleted on first load ([#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107)).
-- **BREAKING — Output format flag standardized** to `--output-format`/`-f` with `Text`/`Json` values (replaces `--json`/`-j`) ([#73](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/73)).
-- **BREAKING — Schema and user commands moved to `data` group** (`ppds data schema`, `ppds data users`) ([#74](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/74)).
-- **BREAKING — Renamed `--what-if` to `--dry-run`** for `ppds plugins deploy|clean` to match Unix convention.
-- **Progress and status messages route to stderr** — enables clean `ppds data export -f json | jq` piping ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76)).
-- **`ListResult<T>` transparency** — All service responses expose `Items`, `TotalCount`, `WasTruncated`, `FiltersApplied`; silent `$top` defaults removed; progressive paging cookie support throughout ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651)).
-- **Filter UX for metadata commands** — Filters without wildcards now perform contains search (e.g. `--filter zipcode` matches `ppds_zipcode`); `foo*` / `*foo` for explicit patterns ([#167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/167)).
-- **Plugin registration v1 surface** — Removed `IsManaged` gatekeeping; `IMetadataService` renamed to `IMetadataQueryService` ahead of authoring split ([#699](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/699), [#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766)).
-- **Extension UX pass** — 28 fixes across 8 panels: unified panel navigation/filtering, thread-safe Terminal.Gui marshaling via `Application.MainLoop.Invoke()`, 300 ms filter debouncing, CTS-based race-condition prevention, cross-platform VSIX extraction (PowerShell on Windows, tar elsewhere) ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
-- **`ppds docs` URL updated** — Documentation URL changed from GitHub README to the published docs site ([#792](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/792)).
-- **`ppds flows get|url` accept GUID or unique name** — The `name` argument now resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-
-### Fixed
-
-- **Environment resolution for service principals** — `ppds env select` now tries direct Dataverse connection before Global Discovery ([#89](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/89)).
-- **`auth create -env` resolution bug** — Auth method now correctly passed to Global Discovery Service.
-- **`env select` connection validation** — Performs actual WhoAmI before saving selection ([#91](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/91)).
-- **`auth who`** — Shows `(EXPIRED)` for stale tokens and includes `tokenStatus` in JSON output ([#94](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/94)). Fixed DisplayName null handling and output-field ordering to match PAC CLI.
-- **`auth clear` / `auth delete` / `auth create` failure cleanup** — Credentials removed from secure storage when orphaned or when authentication fails ([#90](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/90), [#107](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/107)).
-- **Query execution** — DML confirmation dialog; preserved user-supplied `TOP`; guarded `TOP` in `EXPLAIN`; daemon `ProfileResolutionService` handles duplicate environment labels.
-- **Daemon JSON-RPC** — `SystemTextJsonFormatter` for camelCase responses; `query/complete` validation and history-save shutdown handling; correct error codes for export safety checks; export-safety cap enforcement.
-- **Metadata authoring validation** — Global choice editing with display-name validation; block editing of local choices; prevent invalid option-set name modifications ([#770](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/770)).
-- **TUI environment handling** — Graceful handling of duplicate/reserved labels; last-write-wins config resolution; splash-screen crash prevention; friendly-name display for unnamed SPN profiles; scrollable keyboard-shortcuts dialog ([#595](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/595), [#596](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/596), [#602](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/602), [#603](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/603)).
-- **TUI rendering** — Menu flicker, cursor visibility, first-frame colors, stale-diagnostic clearing, timer/event leaks, splitter drag, autocomplete-during-paste, tab highlight regression.
-- **CodeQL code-scanning findings** — 70 alerts resolved across production code.
-- **`PpdsException` compliance** — Error-handling hardening across the codebase ([#676](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/676)).
-- **SQL DML exit codes** — `ppds query sql` now returns exit code 1 (partial success) when DML operations report failed rows, and exit code 2 (failure) when all rows fail. Previously always returned 0 ([#869](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/869)).
-- **SQL DML type coercion** — DML values (INSERT/UPDATE/DELETE) are now coerced to Dataverse SDK types (Money, OptionSetValue, EntityReference, etc.) before submission, fixing silent failures with decimal, lookup, and choice columns ([#827](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/827)).
-- **`auth who` status line routed to stderr** — The "Connected as ..." preamble now writes to stderr so it does not pollute stdout when piping JSON output ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **`metadata optionset` error UX** — Entity-scoped option sets now show a hint directing users to `ppds metadata entity <entity>` instead of a raw Dataverse fault ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **Plugin deploy/diff duplicate detection** — Duplicate plugin type names or step names now surface a clear `Operation.Duplicate` error instead of crashing ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **`plugins get` argument validation** — Missing `type` or `name-or-id` arguments now produce a usage hint instead of a `NullReferenceException` ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **`deployment-settings validate --file` alias conflict** — Removed `-f` alias from `--file` to avoid collision with the global `--output-format` / `-f` option ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **`roles list --filter` alias conflict** — Removed `-f` alias from `--filter` to avoid collision with `--output-format` / `-f` ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
-- **URL scheme validation** — `BrowserHelper.OpenUrl` now rejects non-`http(s)` schemes with a `Validation.InvalidUrlScheme` error, hardening against untrusted Dataverse record values ([#881](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/881)).
-
-### Removed
-
-- **Session orchestration commands** — Removed `ppds session` and `ppds backlog` command groups (moved to a separate repository) ([#492](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/492)).
-- **`ppds schema list`** — Replaced by `ppds metadata entities` ([#74](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/74)).
-- **Legacy SQL parser** — Replaced by the ScriptDom-based PPDS.Query engine; ~22K lines of legacy parser/AST/transpiler/evaluator removed.
+- **Progress and status messages route to stderr** — Enables clean `ppds data export -f json | jq` piping without noise in the data stream ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76)).
+- **`ListResult<T>` transparency** — All list responses expose `Items`, `TotalCount`, `WasTruncated`, and `FiltersApplied`; silent `$top` defaults removed; progressive paging cookie support throughout ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651)).
+- **Filter UX for metadata commands** — Filters without wildcards perform a contains search (e.g. `--filter zipcode` matches `ppds_zipcode`); `foo*` / `*foo` for explicit prefix/suffix patterns ([#167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/167)).
+- **`ppds flows get|url` accept GUID or unique name** — The `name` argument resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
+- **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Cli-v1.0.0

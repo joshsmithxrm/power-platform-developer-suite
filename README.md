@@ -5,7 +5,7 @@
 [![.NET](https://img.shields.io/badge/.NET-8.0%2B-512BD4)](https://dotnet.microsoft.com/)
 [![Docs](https://img.shields.io/badge/docs-ppds--docs-blue)](https://joshsmithxrm.github.io/ppds-docs/)
 
-Developer platform for Microsoft Power Platform and Dataverse. PPDS ships a CLI, TUI, VS Code extension, MCP server, and NuGet libraries — each surface independently consumable, all developed in parallel. Install only what you need.
+Developer platform for Microsoft Power Platform and Dataverse. PPDS ships a CLI, TUI, [VS Code extension](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite), MCP server, and NuGet libraries — each surface independently consumable, all developed in parallel. Install only what you need.
 
 ## v1.0 Highlights
 
