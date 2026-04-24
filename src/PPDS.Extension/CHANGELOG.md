@@ -15,7 +15,7 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 ### Added
 
 - **Daemon-backed architecture** — Thin VS Code UI layer delegates all operations to the `ppds serve` daemon via JSON-RPC. Authentication managed by the CLI profile store.
-- **Profile and environment management** — Create, delete, rename, select profiles from the sidebar. Browse and select Dataverse environments. Status-bar profile indicator with click-to-switch quick pick. Environment color theming — a 3-pixel top border on panel toolbars driven by environment type (Dev / Test / Prod) and a 4-pixel left border driven by per-environment color, with per-panel persistence.
+- **Profile and environment management** — Create, delete, rename, select profiles from the sidebar. Browse and select Dataverse environments. Status-bar profile indicator with click-to-switch quick pick; shows a friendly name for unnamed profiles. Environment color theming — a 3-pixel top border on panel toolbars driven by environment type (Dev / Test / Prod) and a 4-pixel left border driven by per-environment color, with per-panel persistence.
 - **Notebooks (`.ppdsnb`)** — SSMS-like query experience with SQL and FetchXML cells, IntelliSense (autocomplete for tables, columns, FetchXML elements/attributes), FetchXML syntax highlighting, query history, CSV/JSON export per cell, notebook-environment selection.
 - **Data Explorer panel** — Webview for quick ad-hoc queries with virtual scrolling for large result sets.
 - **Solutions panel** — Expandable component groups with managed/visible toggles and Maker Portal buttons.
@@ -32,23 +32,9 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 - **Environment Details command** — Org and connection info for the active environment.
 - **Environment-variable authentication** — Stateless CI/CD via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`. Takes precedence over profiles.
 - **Session persistence** — Solution-filter selections restored across sessions via `globalState`.
-
-### Changed
-
-- **UX audit across all eight panels** — 28 findings addressed: search bars added to Import Jobs, Plugin Traces, Connection References, Environment Variables, Web Resources; Managed/Visible toggles for Solutions; status text labels (e.g. `Unknown` instead of `N/A`); ISO timestamp formatting; expandable detail rows with chevron toggles; `X of Y` record count display; Maker Portal buttons on Solutions and Plugin Traces; title-case headers (no uppercase transform).
-- **FetchXML parsing** — Lazy regex for multi-entity queries improves parse performance.
-- **CSS class standardization** — `.panel-content` → `.content` for naming consistency.
-- **`IMetadataService` consumption** — Renamed to `IMetadataQueryService` ahead of the `IMetadataAuthoringService` UI.
-
-### Fixed
-
-- **Multi-panel webview targeting** — Targets the active panel correctly.
-- **Environment-type resolution** — Reads from config when rendering toolbar borders.
-- **Webview message handlers** — Guarded against VS Code internal messages.
-- **Daemon binary shadow-copy** — Prevents file-locking issues during reinstalls (debug mode).
-- **Profile status bar** — Shows a friendly name for unnamed profiles.
-- **FetchXML nested-filter parsing** — Documented edge case and limitation.
-- **CSS reset** — `box-sizing` reset applied globally across all panels.
+- **UX polish across all panels** — Search bars on Import Jobs, Plugin Traces, Connection References, Environment Variables, and Web Resources; Managed/Visible toggles for Solutions; `Unknown` status labels instead of `N/A`; ISO timestamp formatting; expandable detail rows with chevron toggles; `X of Y` record count display; Maker Portal buttons on Solutions and Plugin Traces; title-case column headers.
+- **FetchXML parsing performance** — Lazy regex for multi-entity queries reduces parse time on complex FetchXML.
+- **"Open Documentation" command** — Opens the canonical GitHub Pages docs site.
 
 ## [0.7.0] - 2026-04-17 (pre-release)
 

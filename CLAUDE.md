@@ -1,6 +1,6 @@
 # PPDS
 
-TUI-first multi-interface platform (CLI / TUI / VS Code Extension / MCP / NuGet).
+Multi-surface platform (CLI / TUI / VS Code Extension / MCP / NuGet).
 All business logic lives in **Application Services** — never in UI code.
 
 Read **`specs/CONSTITUTION.md`** before any work (Spec Laws SL1–SL5 are non-negotiable).

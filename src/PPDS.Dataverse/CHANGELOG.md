@@ -7,24 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking
-
-- 12 domain services have been moved from `PPDS.Dataverse` to `PPDS.Cli` as part of constitution A1 compliance and the shakedown-guard v1 landing. The services are no longer registered by `RegisterDataverseServices` — consumers must now reference `PPDS.Cli.Services` for these types:
-  - `IPluginTraceService` / `PluginTraceService` → `PPDS.Cli.Services.PluginTraces`
-  - `IWebResourceService` / `WebResourceService` → `PPDS.Cli.Services.WebResources`
-  - `IEnvironmentVariableService` / `EnvironmentVariableService` → `PPDS.Cli.Services.EnvironmentVariables`
-  - `ISolutionService` / `SolutionService` → `PPDS.Cli.Services.Solutions`
-  - `IImportJobService` / `ImportJobService` → `PPDS.Cli.Services.ImportJobs`
-  - `IMetadataAuthoringService` / `MetadataAuthoringService` → `PPDS.Cli.Services.Metadata.Authoring`
-  - `IUserService` / `UserService` → `PPDS.Cli.Services.Users`
-  - `IRoleService` / `RoleService` → `PPDS.Cli.Services.Roles`
-  - `IFlowService` / `FlowService` → `PPDS.Cli.Services.Flows`
-  - `IConnectionReferenceService` / `ConnectionReferenceService` → `PPDS.Cli.Services.ConnectionReferences`
-  - `IDeploymentSettingsService` / `DeploymentSettingsService` → `PPDS.Cli.Services.DeploymentSettings`
-  - `IComponentNameResolver` / `ComponentNameResolver` → `PPDS.Cli.Services.SolutionComponents`
-
-  Consumers depending on these services or on `RegisterDataverseServices` registering them will see compile/runtime errors on upgrade. Update `using` directives to the new namespaces and register them via `AddCliApplicationServices`. Method signatures are preserved.
-
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.7` series. Targets `net8.0`, `net9.0`, `net10.0`.
@@ -45,32 +27,17 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`IWebResourceService`** — Web resource querying, content access, and publishing operations ([#618](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/618)).
 - **`IFlowService`, `IConnectionReferenceService`, `IDeploymentSettingsService`** — Cloud-flow operations, connection-reference analysis (orphan detection), and PAC-compatible deployment settings (`Generate`, `Sync`, `Validate`) ([#142](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/142)–[#145](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/145)).
 - **`IPluginTraceService`** — Trace log operations with 15+ filter options: `ListAsync`, `GetAsync`, `GetRelatedAsync`, `GetTimelineAsync`, `GetSettingsAsync`/`SetSettingsAsync`, `DeleteAsync`/`DeleteByFilterAsync`/`DeleteByAgeAsync`, `CountAsync`. `TimelineHierarchyBuilder` for execution-tree visualization ([#152](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/152)–[#158](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/158)).
-- **SQL parser and FetchXML transpiler (legacy)** — Shipped in beta.3 and superseded by PPDS.Query in later betas; retained entry points for backwards compatibility during transition ([#52](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/52)).
+- **SQL parser and FetchXML transpiler (legacy)** — Built-in SQL-to-FetchXML transpilation; superseded by the standalone PPDS.Query engine; entry points retained for backwards compatibility ([#52](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/52)).
 - **`ListResult<T>`** — Structured return type for all service `List*` methods: `Items`, `TotalCount`, `WasTruncated`, `FiltersApplied` per Constitution I4 (no silent truncation) ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651)).
 - **`CallerId` impersonation** — Bulk-operation pipeline accepts `DataverseClientOptions` end-to-end so callers can execute as mapped owners.
 - **`ComponentNameResolver`** — Resolves solution component types via `IMetadataQueryService` with per-environment caching; names for Roles, Forms, SiteMaps, ConnectionRoles, and entity-typed components.
 - **Early-bound entity classes** — `PluginTracelog`, `ServiceEndpoint`, `CustomAPI`, `CustomAPIRequestParameter`, `CustomAPIResponseProperty`, `EntityDataProvider`, `WebResource`, `Workflow`, `ConnectionReference`, and supporting types. Generated classes replace magic-string attribute access ([#56](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/56), [#149](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/149), [#440](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/440)).
 - **Field-level error context** — `BulkOperationError` includes `FieldName` (extracted from error messages) and sanitized `FieldValueDescription` for `EntityReference` lookups.
 - **Full `appsettings.json` configuration** for all pool options.
-
-### Changed
-
-- **BREAKING — `IMetadataService` renamed to `IMetadataQueryService`** — Read-only semantics made explicit ahead of `IMetadataAuthoringService`; consumers must update references ([#766](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/766)).
-- **BREAKING — Service `List*` return type** — Changed from `IReadOnlyList<T>` to `ListResult<T>` ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651)).
-- **BREAKING — Replaced Newtonsoft.Json with System.Text.Json** — Removes external dependency; case-insensitive property matching ([#72](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/72)).
-- **Default `AcquireTimeout` raised from 30 s to 120 s** — Accommodates queuing on the DOP semaphore during large imports.
-- **Pool-managed concurrency** — Replaced adaptive parallelism calculation with pool-queue blocking at `GetClientAsync()`; batch parallelism capped at pool capacity to prevent oversubscription during throttling. Exhaustion retry reduced from 3 to 1 (rare under proper queuing).
-- **Removed rate-control presets and adaptive rate control** — Replaced by DOP-based parallelism driven by `RecommendedDegreesOfParallelism`.
-- **Reduced seed-failure log noise** — Per-attempt seed failures log at DEBUG; consolidated final errors log at ERROR with classified reason ([#287](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/287)).
-- **Pool initialization status accuracy** — Logs "initialized with N degraded source(s)" or "initialization failed" based on actual seed results.
-
-### Fixed
-
-- **Double-checked locking in `ConnectionStringSource`** — Added `volatile` to `_client` for correct multi-threaded behavior ([#81](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/81)).
-- **Pool exhaustion under concurrent bulk operations** — Multiple consumers no longer oversubscribe the DOP semaphore.
-- **Pool exhaustion during throttling** — Batch parallelism capped at pool capacity on high-core machines.
-- **Floating-point equality comparisons** — Use proper SQL semantics for `float` comparisons.
-- **Throttle detection extraction** — `ThrottleDetector` separated from `PooledClient` for cleaner separation of concerns ([#82](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/82)).
+- **`DmlValueCoercer`** — SQL DML values are now coerced to Dataverse SDK types (`EntityReference`, `OptionSetValue`, `Money`, etc.) using cached attribute metadata, fixing `CreateMultiple`/`UpdateMultiple` failures on lookup, choice, money, and boolean columns.
+- **DML failure count propagation** — DML results now surface both `affected_rows` and `failed_rows`, enabling callers to detect partial failures and return non-zero exit codes.
+- **Default `AcquireTimeout` of 120 s** — Connection acquisition from the pool waits up to 120 s, accommodating queuing on the DOP semaphore during large imports.
+- **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0

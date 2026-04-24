@@ -45,11 +45,5 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **FetchXML IntelliSense** — `FetchXmlCompletionEngine` provides cursor-aware completions (element names, attribute names, operators, filter types, boolean flags); wired through CLI daemon, TUI, and VS Code extension.
 - **Safety and protection** — DML safety guard with configurable thresholds and environment protection levels; `QueryExecutionException` with structured error codes for programmatic handling.
 
-### Fixed
-
-- **Paged TDS queries** — Consistent results maintained across pages.
-- **`FetchXmlCompletionEngine` tag detection** — Correct XML context identification for nested elements.
-- **Notebook interactive prompts** — Appear once before execution rather than per-cell during Run All.
-
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Query-v1.0.0
