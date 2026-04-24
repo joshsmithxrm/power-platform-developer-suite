@@ -25,6 +25,8 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Session locking and security** — `--profile`, `--environment`, `--read-only`, and `--allowed-env` flags for session isolation and DML protection.
 - **DI-based architecture** — Injected `ProfileStore` and auth services; all PPDS.Auth authentication methods supported (interactive browser, device code, service principal, etc.).
 - **`ListResult<T>` pagination model** — All list tools return `totalCount`, `wasTruncated`, and `filtersApplied` per Constitution I4 (no silent truncation) ([#651](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/651)).
+- **Structured MCP error responses** — All tool exceptions now surface `errorCode`, `userMessage`, and `context`, giving MCP clients machine-readable failure details ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
+- **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
 ### Changed
 
@@ -33,6 +35,7 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 ### Fixed
 
 - **Read-only compliance** — Metadata authoring tools honor the `--read-only` flag and refuse mutations when set ([#764](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/764)).
+- **`ppds_env_select` self-switch no-op** — Selecting the already-active environment no longer triggers the allowlist check or re-saves the profile ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Mcp-v1.0.0

@@ -32,6 +32,7 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 - **Environment Details command** — Org and connection info for the active environment.
 - **Environment-variable authentication** — Stateless CI/CD via `PPDS_CLIENT_ID`, `PPDS_CLIENT_SECRET`, `PPDS_TENANT_ID`, `PPDS_ENVIRONMENT_URL`. Takes precedence over profiles.
 - **Session persistence** — Solution-filter selections restored across sessions via `globalState`.
+- **Marketplace listing** — README rewritten for Marketplace discovery with hero copy, nine-panel feature grid, and CLI/MCP/AI sections; `package.json` updated with categories, keywords, gallery banner, and marketplace metadata ([#856](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/856)).
 
 ### Changed
 
@@ -39,6 +40,8 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 - **FetchXML parsing** — Lazy regex for multi-entity queries improves parse performance.
 - **CSS class standardization** — `.panel-content` → `.content` for naming consistency.
 - **`IMetadataService` consumption** — Renamed to `IMetadataQueryService` ahead of the `IMetadataAuthoringService` UI.
+- **Documentation link** — "Open Documentation" command now opens the canonical GitHub Pages docs site instead of the retired `ppds.dev` domain ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/868)).
+- **Dependencies** — Bump stylelint, typescript, @vscode/vsce, @types/vscode, vitest, lodash, @types/node, knip, @playwright/test, esbuild, eslint ([#849](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/849), [#850](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/850), [#851](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/851), [#852](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/852), [#853](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/853), [#805](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/805), [#775](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/775), [#773](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/773), [#771](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/771), [#774](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/774), [#772](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/772)).
 
 ### Fixed
 
@@ -49,6 +52,8 @@ First stable release. Per the odd/even minor convention, `1.0.0` is a stable-cha
 - **Profile status bar** — Shows a friendly name for unnamed profiles.
 - **FetchXML nested-filter parsing** — Documented edge case and limitation.
 - **CSS reset** — `box-sizing` reset applied globally across all panels.
+- **Daemon restart null guard** — `removeListener`/`on('exit')` in `start()` now checks `this.process` before accessing, preventing a `TypeError` when the process exits during the handshake window ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/868)).
+- **monaco-editor pinned to 0.53.0** — Resolves upstream DOMPurify CVEs present in 0.55.x ([#792](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/792)).
 
 ## [0.7.0] - 2026-04-17 (pre-release)
 

@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **`ProfileEncryption.Decrypt`** — On non-Windows platforms, now throws `AuthenticationException` with error code `Auth.LegacyEncryptedProfileUnsupported` when handed a bare `ENCRYPTED:`-prefixed value. Previously returned `string.Empty`, which silently cascaded into "wrong credentials" UX when a Windows-encrypted profile was copied to macOS/Linux. SDK consumers should catch this exception and trigger reauth, or migrate to `NativeCredentialStore` (Keychain/libsecret) which is the recommended production credential store on all platforms.
-
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.8` series. Targets `net8.0`, `net9.0`, `net10.0`.
@@ -36,6 +32,9 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`Clone()` methods** — Deep copying on `AuthProfile`, `EnvironmentInfo`, and `ProfileCollection`.
 - **`MsalClientBuilder`** — Shared MSAL client setup extracted from credential providers to reduce duplication.
 - **Platform-native token caching via MSAL**, JWT claims parsing, and integration tests for service-principal credential providers ([#55](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55)).
+- **`ProfileEncryption` cleartext opt-in for CI/CD** — On non-Windows platforms, `Encrypt()` now supports explicit opt-in to base64-encoded cleartext storage via `PPDS_ALLOW_CLEARTEXT=1` environment variable. Without opt-in, throws `AuthenticationException` with error code `Auth.SecureStorageUnavailable` instead of silently using insecure XOR obfuscation ([#858](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/858)).
+- **Linux MSAL token cache hardening** — Token cache on Linux now prefers libsecret (GNOME Keyring / KWallet) and only falls back to unprotected file storage when the keyring is unavailable. Fallback files are pre-created at mode `0600` ([#858](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/858)).
+- **Credential store failure error code** — OS-level credential store failures now surface as `AuthenticationException` with error code `Auth.CredentialStoreFailure` instead of propagating raw interop exceptions ([#803](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/803)).
 
 ### Changed
 
@@ -45,6 +44,12 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`EnvironmentConfig.Type` uses `EnvironmentType` enum** — Changed from `string` for compile-time safety.
 - **Native OS credential storage** — Replaced custom `SecureCredentialStore` with OS-native APIs (Windows Credential Manager, macOS Keychain, Linux Secret Service) for better security and reliability ([#485](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/485)).
 - **Deprecated Azure.Identity APIs replaced** — `ManagedIdentityCredentialProvider` updated to `ManagedIdentityId.SystemAssigned` / `ManagedIdentityId.FromUserAssignedClientId()` (Azure.Identity 1.19.0+).
+- **BREAKING — `AuthenticationOutput` defaults to stderr** — `AuthenticationOutput.Writer` now writes to `Console.Error` (stderr) by default instead of `Console.Out` (stdout). Callers that parsed stdout for data will no longer see authentication status messages mixed in ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/868)).
+- **BREAKING — `ProfileEncryption.Decrypt` on non-Windows** — Throws `AuthenticationException` with error code `Auth.LegacyEncryptedProfileUnsupported` when given an `ENCRYPTED:`-prefixed value on macOS/Linux. Previously returned `string.Empty`, which silently cascaded into "wrong credentials" UX ([#881](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/881)).
+- **Vendored credential store backends** — Replaced `Devlooped.CredentialManager` NuGet dependency with vendored git-credential-manager interop code (MIT-licensed from Microsoft). No user-facing behavior change ([#803](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/803)).
+- **`AddAuthServices()` uses TryAdd semantics** — DI registration methods now use `TryAddSingleton` instead of `AddSingleton`, allowing callers to pre-register specialized implementations ([#858](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/858)).
+- **Linux plaintext credential fallback is double-gated** — `NativeCredentialStore` plaintext fallback on Linux now requires BOTH the `allowCleartextFallback` constructor parameter AND the `GCM_CREDENTIAL_STORE=plaintext` environment variable ([#803](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/803)).
+- **`AddAuthServices()` uses TryAdd semantics** — DI registration methods now use `TryAddSingleton` instead of `AddSingleton`, allowing callers to pre-register specialized implementations ([#858](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/858)).
 
 ### Fixed
 
@@ -65,6 +70,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **MSAL token-state query** — Token validity checked against MSAL's actual cache rather than stale profile metadata ([#491](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/491)).
 - **Credential store bypass for test scenarios** — `PPDS_TEST_CLIENT_SECRET` env var supported for test/CI scenarios ([#488](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/488)).
 - **Input validation in `CredentialProviderFactory`** — Added for required fields.
+- **Repeated login prompts eliminated** — `InteractiveBrowserCredentialProvider` now uses the "organizations" (multi-tenant) MSAL authority with per-request `.WithTenantId()` overrides, aligning cache keys with `GlobalDiscoveryService` ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/868)).
+- **CVE pin for `System.Security.Cryptography.Xml`** — Explicit package reference pins to patched 8.0.3, preventing transitive resolution from pulling 8.0.2 with two High CVEs ([#858](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/858)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Auth-v1.0.0

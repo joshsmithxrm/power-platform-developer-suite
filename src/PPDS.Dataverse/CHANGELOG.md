@@ -7,24 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking
-
-- 12 domain services have been moved from `PPDS.Dataverse` to `PPDS.Cli` as part of constitution A1 compliance and the shakedown-guard v1 landing. The services are no longer registered by `RegisterDataverseServices` — consumers must now reference `PPDS.Cli.Services` for these types:
-  - `IPluginTraceService` / `PluginTraceService` → `PPDS.Cli.Services.PluginTraces`
-  - `IWebResourceService` / `WebResourceService` → `PPDS.Cli.Services.WebResources`
-  - `IEnvironmentVariableService` / `EnvironmentVariableService` → `PPDS.Cli.Services.EnvironmentVariables`
-  - `ISolutionService` / `SolutionService` → `PPDS.Cli.Services.Solutions`
-  - `IImportJobService` / `ImportJobService` → `PPDS.Cli.Services.ImportJobs`
-  - `IMetadataAuthoringService` / `MetadataAuthoringService` → `PPDS.Cli.Services.Metadata.Authoring`
-  - `IUserService` / `UserService` → `PPDS.Cli.Services.Users`
-  - `IRoleService` / `RoleService` → `PPDS.Cli.Services.Roles`
-  - `IFlowService` / `FlowService` → `PPDS.Cli.Services.Flows`
-  - `IConnectionReferenceService` / `ConnectionReferenceService` → `PPDS.Cli.Services.ConnectionReferences`
-  - `IDeploymentSettingsService` / `DeploymentSettingsService` → `PPDS.Cli.Services.DeploymentSettings`
-  - `IComponentNameResolver` / `ComponentNameResolver` → `PPDS.Cli.Services.SolutionComponents`
-
-  Consumers depending on these services or on `RegisterDataverseServices` registering them will see compile/runtime errors on upgrade. Update `using` directives to the new namespaces and register them via `AddCliApplicationServices`. Method signatures are preserved.
-
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.7` series. Targets `net8.0`, `net9.0`, `net10.0`.
@@ -52,6 +34,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Early-bound entity classes** — `PluginTracelog`, `ServiceEndpoint`, `CustomAPI`, `CustomAPIRequestParameter`, `CustomAPIResponseProperty`, `EntityDataProvider`, `WebResource`, `Workflow`, `ConnectionReference`, and supporting types. Generated classes replace magic-string attribute access ([#56](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/56), [#149](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/149), [#440](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/440)).
 - **Field-level error context** — `BulkOperationError` includes `FieldName` (extracted from error messages) and sanitized `FieldValueDescription` for `EntityReference` lookups.
 - **Full `appsettings.json` configuration** for all pool options.
+- **`DmlValueCoercer`** — SQL DML values are now coerced to Dataverse SDK types (`EntityReference`, `OptionSetValue`, `Money`, etc.) using cached attribute metadata, fixing `CreateMultiple`/`UpdateMultiple` failures on lookup, choice, money, and boolean columns ([#827](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/827)).
+- **DML failure count propagation** — DML results now surface both `affected_rows` and `failed_rows`, enabling callers to detect partial failures and return non-zero exit codes ([#869](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/869)).
 
 ### Changed
 
@@ -63,6 +47,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Removed rate-control presets and adaptive rate control** — Replaced by DOP-based parallelism driven by `RecommendedDegreesOfParallelism`.
 - **Reduced seed-failure log noise** — Per-attempt seed failures log at DEBUG; consolidated final errors log at ERROR with classified reason ([#287](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/287)).
 - **Pool initialization status accuracy** — Logs "initialized with N degraded source(s)" or "initialization failed" based on actual seed results.
+- **BREAKING — 12 domain services relocated from `PPDS.Dataverse` to `PPDS.Cli`** — `RegisterDataverseServices` no longer registers these types; consumers must reference `PPDS.Cli.Services` and call `AddCliApplicationServices`. Affected services: `IPluginTraceService`, `IWebResourceService`, `IEnvironmentVariableService`, `ISolutionService`, `IImportJobService`, `IMetadataAuthoringService`, `IUserService`, `IRoleService`, `IFlowService`, `IConnectionReferenceService`, `IDeploymentSettingsService`, `IComponentNameResolver`. Method signatures are preserved ([#862](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/862)).
+- **Bumped `Azure.Identity`** from 1.19.0 to 1.21.0 ([#784](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/784)).
 
 ### Fixed
 
@@ -71,6 +57,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Pool exhaustion during throttling** — Batch parallelism capped at pool capacity on high-core machines.
 - **Floating-point equality comparisons** — Use proper SQL semantics for `float` comparisons.
 - **Throttle detection extraction** — `ThrottleDetector` separated from `PooledClient` for cleaner separation of concerns ([#82](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/82)).
+- **SQL DML type coercion** — Lookup, choice, money, boolean, datetime, and GUID columns in `INSERT`/`UPDATE` statements are now coerced from raw CLR primitives to Dataverse SDK types, fixing "Incorrect attribute value type" errors ([#827](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/827)).
+- **DML failure count silently discarded** — `DmlExecuteNode` previously returned only `SuccessCount`; partial failures now surface via `failed_rows` and produce non-zero exit codes ([#869](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/869)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0
