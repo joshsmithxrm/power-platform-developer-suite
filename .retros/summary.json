@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-20",
-  "total_retros": 4,
+  "last_updated": "2026-04-23",
+  "total_retros": 8,
   "findings_by_category": {
     "external": [
       {
@@ -58,12 +58,42 @@
       },
       {
         "date": "2026-04-20",
-        "branch": "feat/shakedown-guard",
+        "branch": "feat/pipeline-ceiling",
         "finding_id": "R-01"
       },
       {
         "date": "2026-04-20",
+        "branch": "feat/pipeline-ceiling",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-21",
         "branch": "feat/shakedown-guard",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "fix/pr-monitor-push-refspec",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
         "finding_id": "R-03"
       }
     ],
@@ -114,19 +144,106 @@
         "date": "2026-03-27",
         "branch": "feat/workflow-overhaul",
         "finding_id": "R-10"
+      },
+      {
+        "date": "2026-04-20",
+        "branch": "feat/pipeline-ceiling",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-20",
+        "branch": "feat/pipeline-ceiling",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-01"
       }
     ],
     "process": [
       {
-        "date": "2026-04-20",
+        "date": "2026-04-21",
         "branch": "feat/shakedown-guard",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "feat/shakedown-guard",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "fix/pr-monitor-push-refspec",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "fix/pr-monitor-push-refspec",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "fix/pr-monitor-reply-dedupe",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-21",
+        "branch": "fix/pr-monitor-reply-dedupe",
         "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-05"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "fix/sql-query-bugs",
+        "finding_id": "R-06"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-06"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-07"
+      }
+    ],
+    "setup": [
+      {
+        "date": "2026-04-21",
+        "branch": "feat/shakedown-guard",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-23",
+        "branch": "verify/v1-shakedown",
+        "finding_id": "R-05"
       }
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.35,
-    "pipeline_success_rate": 0.0,
-    "avg_convergence_rounds": 2.6666666666666665
+    "avg_fix_ratio": 0.4333,
+    "pipeline_success_rate": 0.5556,
+    "avg_convergence_rounds": 2.79
   }
 }

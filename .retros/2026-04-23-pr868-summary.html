@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Retro 2026-04-23 — #868</title>
+<style>
+:root {
+  --bg: #0e1116;
+  --panel: #171b22;
+  --panel-2: #20252e;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+  --border: #30363d;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 2rem;
+  line-height: 1.5;
+}
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 1.75rem; margin: 0 0 0.25rem 0; }
+h2 { font-size: 1.25rem; margin: 2rem 0 0.75rem 0; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+.meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+.meta a { color: var(--accent); text-decoration: none; }
+.meta a:hover { text-decoration: underline; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
+.controls input, .controls select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+.controls input { flex: 1; min-width: 12rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+tr.hidden { display: none; }
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.tier-auto-fix { background: #1f6feb33; color: #79c0ff; border-color: #1f6feb66; }
+.badge.tier-draft-fix { background: #d2992233; color: #e3b341; border-color: #d2992266; }
+.badge.tier-issue-only { background: #f8514933; color: #ff7b72; border-color: #f8514966; }
+.badge.tier-observation { background: #8b949e33; color: #c9d1d9; }
+.badge.verb-DO_NOW, .badge.verb-DO-NOW { background: #3fb95033; color: #56d364; border-color: #3fb95066; }
+.badge.verb-DEFER { background: #d2992233; color: #e3b341; border-color: #d2992266; }
+.badge.verb-DROP { background: #8b949e33; color: #c9d1d9; }
+.badge.verb-RESEARCH_FIRST, .badge.verb-RESEARCH-FIRST { background: #58a6ff33; color: #79c0ff; border-color: #58a6ff66; }
+.badge.kind-rule-drift { background: #bc8cff33; color: #d2a8ff; border-color: #bc8cff66; }
+.badge.kind-behavior { background: #bc8cff33; color: #d2a8ff; border-color: #bc8cff66; }
+.badge.kind-process { background: #58a6ff33; color: #79c0ff; border-color: #58a6ff66; }
+.badge.kind-tooling { background: #d2992233; color: #e3b341; border-color: #d2992266; }
+.badge.kind-setup { background: #f8514933; color: #ff7b72; border-color: #f8514966; }
+.badge.status-landed { background: #3fb95033; color: #56d364; }
+.badge.status-open { background: #d2992233; color: #e3b341; }
+.badge.status-blocked { background: #f8514933; color: #ff7b72; }
+.badge.status-dropped { background: #8b949e33; color: #c9d1d9; }
+.confidence-HIGH { color: var(--ok); font-weight: 500; }
+.confidence-LOW { color: var(--warn); font-weight: 500; }
+.narrative { white-space: pre-wrap; color: var(--text); }
+.narrative h1, .narrative h2, .narrative h3 { color: var(--text); }
+.mermaid-wrap { background: #fff; border-radius: 6px; padding: 1rem; }
+.nav-breadcrumb { font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem; }
+.nav-breadcrumb a { color: var(--accent); text-decoration: none; }
+.empty { color: var(--muted); font-style: italic; }
+.stats { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; }
+.stat .k { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat .v { font-size: 1.1rem; font-weight: 500; }
+
+</style>
+</head>
+<body>
+<div class="nav-breadcrumb"><a href="findings-index.html">&larr; All retros</a></div>
+<h1>Retro 2026-04-23 — #868</h1><div class="meta">Session date: 2026-04-23 · PR #868</div>
+<div class="stats"><div class="stat"><div class="k">Commits</div><div class="v">23</div></div><div class="stat"><div class="k">Feat/Fix</div><div class="v">0/23</div></div><div class="stat"><div class="k">Thrashing</div><div class="v">0</div></div><div class="stat"><div class="k">Sessions→OK</div><div class="v">6</div></div><div class="stat"><div class="k">Interrupts</div><div class="v">3</div></div><div class="stat"><div class="k">Severity</div><div class="v">rough</div></div></div>
+<h2>Narrative</h2><div class="panel narrative"><h1>Retro: PR #868 — v1 Shakedown (27 findings fixed)</h1>
+<p><strong>Date:</strong> 2026-04-23 <strong>PR:</strong> #868 (<code>verify/v1-shakedown</code>) <strong>Scope:</strong> 23 commits, 116 files, +6268/-2163 <strong>Sessions:</strong> 6 (3 primary + 3 headless monitor dispatches) <strong>Severity:</strong> ROUGH (3 user interrupts, 5 frustration hits)</p>
+<h2>Pattern Narrative</h2>
+<p>PR #868 delivered a genuinely impressive shakedown: 39 findings across CLI, TUI, MCP, Extension, and auth — with 27 fixed in one coordinated PR. The shakedown report itself (docs/qa/shakedown-v1-2026-04-20.md) is the quality bar for the project: evidence-cited, categorized, parity-verified across all 4 surfaces. Five Sonnet subagents ran in parallel under Opus coordination without collision.</p>
+<p>The session was rough despite the strong output. Two incidents stand out. First, the agent couldn&#x27;t execute the simple task of spawning a new Claude Code session in the same worktree — 6+ user corrections, 3 interrupts, escalating to ALL-CAPS, before the agent found the <code>launch-claude-session.py</code> helper that already existed. The agent overthought branch hygiene when the user was explicit about what they wanted. Second, after creating the PR, the agent skipped the mandatory monitor step — manually triaging 3 of 9 review comments via <code>gh api</code> and missing all 6 CodeQL comments entirely. The user had to identify the gap and force the monitor invocation. The agent&#x27;s self-assessment when challenged was honest (&quot;No good reason. I knew the script existed...it was a process failure&quot;), but the PR body itself reads as a clean success with no mention of these difficulties.</p>
+<p>Usage exhaustion killed the first session mid-work, requiring a recovery session that had to reconstruct context. This is an external constraint but contributed to the session&#x27;s friction.</p>
+<h2>Self-Evaluation Assessment</h2>
+<p>The PR body&#x27;s factual claims are accurate: 39 findings, 27 fixed, 9,900+ tests passing (3,300 x 3 TFMs), architecture changes correctly described. The &quot;1 pre-existing infra bug excluded&quot; disclosure is honest. But the self-evaluation is <strong>accurate by omission</strong> — the session spawning meltdown, monitor skip, CodeQL last-minute fix, and 2 unchecked test plan items are all absent. Everything stated is true; material process failures are missing.</p>
+<h2>Top Findings (Prioritized)</h2>
+<p>| ID | Verb | Description | |----|------|-------------| | R-02 | DO NOW | PR monitor not run until user forced it. /pr skill says MANDATORY but no enforcement. Fix: add state tracking (pr.monitor_launched) to skill. | | R-01 | DROP | Session spawning meltdown (6+ corrections, 3 interrupts). One-off behavior, helper exists. wontfix. | | R-03 | DROP | CodeQL found 6 issues in test code. System worked, just late. wontfix. | | R-04 | DROP | PR size (116 files). User-directed expansion. wontfix. | | R-05 | DROP | Usage exhaustion killed session. External constraint. wontfix. | | R-06 | DROP | 2 unchecked test plan items at merge. User decision to drop. | | R-07 | DROP | Shakedown report quality: excellent. Positive observation. |</p>
+<h2>Decisions Log</h2>
+<p>| ID | AI Lean | User Override | Final Verb | Hand-off | Status | |----|---------|--------------|------------|----------|--------| | R-01 | DROP | — | DROP | — | dropped | | R-02 | DO NOW (option a) | Accepted | DO NOW | Committed to <code>retro/pr-868</code> branch | landed | | R-03 | DROP | — | DROP | — | dropped | | R-04 | DROP | — | DROP | — | dropped | | R-05 | DROP | — | DROP | — | dropped | | R-06 | DEFER | User overrode to DROP | DROP | — | dropped | | R-07 | DROP | — | DROP | — | dropped |</p>
+<h2>What Worked</h2>
+<ul>
+<li>Shakedown coordination: 5 parallel Sonnet subagents, no collision, structured findings</li>
+<li>Report quality: 1000+ lines with evidence, parity verification, explicit untested-areas disclosure</li>
+<li>Commit organization: batched by area, each references its finding ID (H1, L4, M6, etc.)</li>
+<li>Honest self-assessment when challenged directly about the monitor</li>
+<li>Architecture improvements: DataQueryService extraction (A1), PpdsException wrapping (D4), MCP structured errors</li>
+</ul>
+<h2>Rule Change (R-02)</h2>
+<p><strong>File:</strong> <code>.claude/skills/pr/SKILL.md</code> <strong>Change:</strong> Step 5 renamed to &quot;(MANDATORY — state-tracked)&quot;. Added retro-enforced note, <code>pr.monitor_launched</code> workflow state tracking, fallback recording requirement. The monitor was already documented as mandatory; this adds auditability so skips are visible in workflow state rather than invisible process failures.</p></div>
+<h2>Findings</h2><div class="panel"><div class="controls"><input id="filter" placeholder="Filter by text..." aria-label="Filter findings" /><select id="filter-tier" aria-label="Filter by tier"><option value="">All tiers</option><option value="auto-fix">auto-fix</option><option value="draft-fix">draft-fix</option><option value="issue-only">issue-only</option><option value="observation">observation</option></select><select id="filter-verb" aria-label="Filter by verb"><option value="">All verbs</option><option value="DO_NOW">DO NOW</option><option value="DEFER">DEFER</option><option value="DROP">DROP</option><option value="RESEARCH_FIRST">RESEARCH-FIRST</option></select></div><table id="findings-table"><thead><tr><th>ID</th><th>Classification</th><th>Issue</th><th>Fix / Routed</th><th>Conf.</th></tr></thead><tbody><tr data-tier="observation" data-verb="DROP"><td><strong>R-01</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-behavior">behavior</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>Session spawning meltdown: agent couldn&#x27;t open a new Claude Code session in the same worktree. 6+ user corrections, 3 interrupts, ALL-CAPS rage. Agent overthought branch hygiene, flailed on PowerShell escaping, eventually found launch-claude-session.py helper.</td><td>No durable fix — one-off model behavior. Helper script exists.<br/><small>→ dropped</small></td><td><span class="confidence-HIGH">HIGH</span></td></tr>
+<tr data-tier="draft-fix" data-verb="DO_NOW"><td><strong>R-02</strong></td><td><span class="badge tier-draft-fix">draft-fix</span> <span class="badge kind-process">process</span> <span class="badge verb-DO_NOW">DO NOW</span> <span class="badge status-landed">landed</span></td><td>PR monitor not run until user forced it. Agent manually replied to 3/9 review comments via gh api, missed all 6 CodeQL comments. /pr skill says MANDATORY but agent skipped it.<br/><small><code>.claude/skills/pr/SKILL.md</code></small></td><td>Add state tracking (pr.monitor_launched) to /pr skill so monitor skip is auditable. Strengthen language with retro-enforced note.<br/><small>→ commit on retro/pr-868</small></td><td><span class="confidence-HIGH">HIGH</span></td></tr>
+<tr data-tier="observation" data-verb="DROP"><td><strong>R-03</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-tooling">tooling</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>CodeQL flagged 6 issues in Finding7AuthBugTests.cs (4 undisposed StringWriter, 2 erroneous class compare). Required last-minute commit after CI.<br/><small><code>tests/PPDS.Auth.Tests/Finding7AuthBugTests.cs</code></small></td><td>No fix — CodeQL caught them. System worked, just late.<br/><small>→ dropped</small></td><td><span class="confidence-HIGH">HIGH</span></td></tr>
+<tr data-tier="observation" data-verb="DROP"><td><strong>R-04</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-process">process</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>PR size: 116 files, +6268/-2163. User-directed expansion. Size waiver applied.</td><td>No fix — user-directed scope.<br/><small>→ dropped</small></td><td><span class="confidence-LOW">LOW</span></td></tr>
+<tr data-tier="observation" data-verb="DROP"><td><strong>R-05</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-setup">setup</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>Usage exhaustion killed the primary session mid-work. Recovery session had to reconstruct context.</td><td>No fix — external constraint.<br/><small>→ dropped</small></td><td><span class="confidence-HIGH">HIGH</span></td></tr>
+<tr data-tier="observation" data-verb="DROP"><td><strong>R-06</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-process">process</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>Two manual test plan items unchecked at merge: ppds serve readiness signal, ppds env config no-arg output.</td><td>Dropped per user decision.<br/><small>→ dropped</small></td><td><span class="confidence-LOW">LOW</span></td></tr>
+<tr data-tier="observation" data-verb="DROP"><td><strong>R-07</strong></td><td><span class="badge tier-observation">observation</span> <span class="badge kind-process">process</span> <span class="badge verb-DROP">DROP</span> <span class="badge status-dropped">dropped</span></td><td>Shakedown report quality: excellent. 1000+ line report with evidence-cited findings, categorized severity, parity comparison, explicit Untested Areas. Quality bar for shakedown reports.<br/><small><code>docs/qa/shakedown-v1-2026-04-20.md</code></small></td><td>Positive observation.<br/><small>→ dropped</small></td><td><span class="confidence-HIGH">HIGH</span></td></tr></tbody></table></div>
+<h2>Retro flow</h2><div class="panel mermaid-wrap"><pre class="mermaid">flowchart TD
+    A[1. Invoke /retro scope] --&gt; B[2. Scope + Carryover]
+    B --&gt; C[3. Mechanical Extraction&lt;br/&gt;&lt;i&gt;subprocess&lt;/i&gt;]
+    C --&gt; D[4. Main-Session Analysis&lt;br/&gt;&lt;i&gt;main Claude only&lt;/i&gt;]
+    D --&gt; E[5. Decision Phase&lt;br/&gt;&lt;i&gt;plan-with-defaults&lt;/i&gt;]
+    E --&gt;|DO NOW| F[6. Routing]
+    E --&gt;|DEFER| F
+    E --&gt;|DROP| F
+    E --&gt;|RESEARCH-FIRST| R[/investigate] --&gt; E
+    F --&gt;|/pr| G[7. Monitor &amp;amp; Confirm]
+    F --&gt;|/backlog| G
+    G --&gt; H[8. Executive Synthesis&lt;br/&gt;md + HTML]
+    H --&gt; I[9. Persist&lt;br/&gt;.retros/summary.json + index.html]
+</pre></div>
+<script>(function() {
+  var input = document.getElementById('filter');
+  var tierSel = document.getElementById('filter-tier');
+  var verbSel = document.getElementById('filter-verb');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#findings-table tbody tr'));
+  function apply() {
+    var q = (input && input.value || '').toLowerCase();
+    var tier = tierSel && tierSel.value || '';
+    var verb = verbSel && verbSel.value || '';
+    rows.forEach(function(row) {
+      var text = row.textContent.toLowerCase();
+      var rowTier = row.getAttribute('data-tier') || '';
+      var rowVerb = row.getAttribute('data-verb') || '';
+      var matchQ = !q || text.indexOf(q) !== -1;
+      var matchTier = !tier || rowTier === tier;
+      var matchVerb = !verb || rowVerb === verb;
+      if (matchQ && matchTier && matchVerb) { row.classList.remove('hidden'); }
+      else { row.classList.add('hidden'); }
+    });
+  }
+  [input, tierSel, verbSel].forEach(function(el) {
+    if (el) el.addEventListener('input', apply);
+    if (el) el.addEventListener('change', apply);
+  });
+})();
+</script><script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";mermaid.initialize({startOnLoad:true, theme:"default"});</script>
+</body>
+</html>
