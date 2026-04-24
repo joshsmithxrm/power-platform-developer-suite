@@ -105,6 +105,7 @@ describe('WebResourcesPanel message types', () => {
                     totalCount: 1000,
                 },
                 { command: 'webResourcesLoadComplete', requestId: 1, totalCount: 1000 },
+                { command: 'filterState', solutionId: null, textOnly: true },
                 { command: 'loading' },
                 { command: 'error', message: 'load failed' },
                 { command: 'publishResult', count: 3 },
@@ -185,6 +186,30 @@ describe('WebResourcesPanel message types', () => {
             if (msg.command === 'publishResult') {
                 expect(msg.count).toBe(5);
                 expect(msg.error).toBeUndefined();
+            }
+        });
+
+        it('filterState synchronizes persisted filter to webview', () => {
+            const msg: WebResourcesPanelHostToWebview = {
+                command: 'filterState',
+                solutionId: '11111111-1111-1111-1111-111111111111',
+                textOnly: false,
+            };
+            if (msg.command === 'filterState') {
+                expect(msg.solutionId).toBe('11111111-1111-1111-1111-111111111111');
+                expect(msg.textOnly).toBe(false);
+            }
+        });
+
+        it('filterState accepts null solutionId for all-solutions', () => {
+            const msg: WebResourcesPanelHostToWebview = {
+                command: 'filterState',
+                solutionId: null,
+                textOnly: true,
+            };
+            if (msg.command === 'filterState') {
+                expect(msg.solutionId).toBeNull();
+                expect(msg.textOnly).toBe(true);
             }
         });
     });

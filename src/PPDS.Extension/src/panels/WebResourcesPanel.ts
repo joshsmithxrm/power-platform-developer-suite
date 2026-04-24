@@ -187,6 +187,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
         }
         await this.loadSolutionList();
+        this.postMessage({ command: 'filterState', solutionId: this.solutionId, textOnly: this.textOnly });
         await this.loadWebResources();
     }
 
@@ -212,13 +213,20 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     private async loadSolutionList(): Promise<void> {
         try {
             const result = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
+            const solutions = result.solutions.map(s => ({
+                id: s.id,
+                uniqueName: s.uniqueName,
+                friendlyName: s.friendlyName,
+            }));
+
+            if (this.solutionId && !solutions.find(s => s.id === this.solutionId)) {
+                this.solutionId = null;
+                void this.context.globalState.update('ppds.webResources.solutionId', null);
+            }
+
             this.postMessage({
                 command: 'solutionListLoaded',
-                solutions: result.solutions.map(s => ({
-                    id: s.id,
-                    uniqueName: s.uniqueName,
-                    friendlyName: s.friendlyName,
-                })),
+                solutions,
             });
         } catch {
             // Non-critical — solution filter will just be empty
