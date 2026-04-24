@@ -1,41 +1,45 @@
 {
   "version": 1,
-  "updated": "2026-04-21T05:42:33Z",
+  "updated": "2026-04-24T17:12:22Z",
   "open_work": [
     {
-      "session_id": "903eedac",
-      "started": "2026-04-20T18:48:32Z",
-      "branch": "feat/shakedown-guard",
-      "worktree": ".worktrees/shakedown-guard",
-      "issues": [],
-      "areas": [
-        "src/PPDS.Cli/Services",
-        ".claude/hooks",
-        ".claude/skills/shakedown"
+      "session_id": "e8079a50",
+      "started": "2026-04-24T17:12:20Z",
+      "branch": "feat/profiles-spinner-fix",
+      "worktree": ".worktrees/profiles-spinner-fix",
+      "issues": [
+        904
       ],
-      "intent": "service-layer IShakedownGuard to close safety triad findings #6/#23/#37"
+      "areas": [
+        "extension"
+      ],
+      "intent": "Fix profiles tree infinite spinner - add RPC timeouts and error states"
     },
     {
-      "session_id": "468161f6",
-      "started": "2026-04-20T23:36:50Z",
-      "branch": "feat/pipeline-ceiling",
-      "worktree": ".worktrees/pipeline-ceiling",
-      "issues": [],
-      "areas": [
-        "pipeline"
+      "session_id": "4500f1bb",
+      "started": "2026-04-24T17:12:21Z",
+      "branch": "feat/tds-assembly-fix",
+      "worktree": ".worktrees/tds-assembly-fix",
+      "issues": [
+        889
       ],
-      "intent": "Raise HARD_CEILING to 7200s and add --max-stage-seconds override flag"
+      "areas": [
+        "cli"
+      ],
+      "intent": "Fix TDS Endpoint Microsoft.Data.SqlClient assembly not found"
     },
     {
-      "session_id": "df895c3e",
-      "started": "2026-04-21T05:42:33Z",
-      "branch": "fix/pr-monitor-push-refspec",
-      "worktree": ".worktrees/pr-monitor-push-refspec",
-      "issues": [],
-      "areas": [
-        "pr-monitor"
+      "session_id": "7d08a8f8",
+      "started": "2026-04-24T17:12:22Z",
+      "branch": "feat/sync-settings-fix",
+      "worktree": ".worktrees/sync-settings-fix",
+      "issues": [
+        893
       ],
-      "intent": "fix pr-monitor git push missing explicit refspec \u2014 causes ready-flip skip when branch name differs from upstream"
+      "areas": [
+        "extension"
+      ],
+      "intent": "Fix Sync Deployment Settings getting stuck"
     }
   ]
 }

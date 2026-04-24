@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
@@ -283,21 +284,34 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             return;
         }
 
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Sync Deployment Settings — Save To',
+        });
+
+        if (!uri) return;
+
+        const cts = new CancellationTokenSource();
+        const timeout = setTimeout(() => cts.cancel(), 60_000);
+
         try {
-            // Ask the user to select a file to sync (open existing or create new)
-            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const uri = await vscode.window.showSaveDialog({
-                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
-                filters: { 'JSON Files': ['json'] },
-                title: 'Sync Deployment Settings — Save To',
-            });
-
-            if (!uri) return;
-
-            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
-                this.solutionFilter,
-                uri.fsPath,
-                this.environmentUrl,
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Syncing deployment settings…',
+                    cancellable: true,
+                },
+                async (_progress, progressToken) => {
+                    progressToken.onCancellationRequested(() => cts.cancel());
+                    return this.daemon.environmentVariablesSyncDeploymentSettings(
+                        this.solutionFilter!,
+                        uri.fsPath,
+                        this.environmentUrl,
+                        cts.token,
+                    );
+                },
             );
 
             this.postMessage({
@@ -307,8 +321,15 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 connectionRefs: result.connectionReferences,
             });
         } catch (error) {
+            if (cts.token.isCancellationRequested) {
+                this.postMessage({ command: 'error', message: 'Sync cancelled — the operation timed out or was cancelled by the user.' });
+                return;
+            }
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
+        } finally {
+            clearTimeout(timeout);
+            cts.dispose();
         }
     }
 

@@ -17,12 +17,14 @@ describe('EnvironmentVariablesPanel message types', () => {
             { command: 'filterBySolution', solutionId: 'MySolution' },
             { command: 'requestSolutionList' },
             { command: 'exportDeploymentSettings' },
+            { command: 'syncDeploymentSettings' },
+            { command: 'setIncludeInactive', includeInactive: true },
             { command: 'requestEnvironmentList' },
             { command: 'openInMaker' },
             { command: 'copyToClipboard', text: 'test' },
             { command: 'webviewError', error: 'test', stack: 'trace' },
         ];
-        expect(messages).toHaveLength(12);
+        expect(messages).toHaveLength(14);
     });
 
     it('WebviewToHost filterBySolution accepts null for "All Solutions"', () => {
@@ -55,10 +57,11 @@ describe('EnvironmentVariablesPanel message types', () => {
             { command: 'variableSaved', schemaName: 'test_var', success: true },
             { command: 'solutionListLoaded', solutions: [] },
             { command: 'deploymentSettingsExported', filePath: '/path/to/file.json' },
+            { command: 'deploymentSettingsSynced', filePath: '/path/to/file.json', envVars: { added: 1, removed: 0, preserved: 2 }, connectionRefs: { added: 0, removed: 0, preserved: 1 } },
             { command: 'error', message: 'test' },
             { command: 'daemonReconnected' },
         ];
-        expect(messages).toHaveLength(10);
+        expect(messages).toHaveLength(11);
     });
 
     it('EnvironmentVariableViewDto has all required fields', () => {

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
@@ -299,20 +300,34 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             return;
         }
 
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Sync Deployment Settings \u2014 Save To',
+        });
+
+        if (!uri) return;
+
+        const cts = new CancellationTokenSource();
+        const timeout = setTimeout(() => cts.cancel(), 60_000);
+
         try {
-            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const uri = await vscode.window.showSaveDialog({
-                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
-                filters: { 'JSON Files': ['json'] },
-                title: 'Sync Deployment Settings \u2014 Save To',
-            });
-
-            if (!uri) return;
-
-            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
-                this.solutionFilter,
-                uri.fsPath,
-                this.environmentUrl,
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Syncing deployment settings\u2026',
+                    cancellable: true,
+                },
+                async (_progress, progressToken) => {
+                    progressToken.onCancellationRequested(() => cts.cancel());
+                    return this.daemon.environmentVariablesSyncDeploymentSettings(
+                        this.solutionFilter!,
+                        uri.fsPath,
+                        this.environmentUrl,
+                        cts.token,
+                    );
+                },
             );
 
             this.postMessage({
@@ -322,8 +337,15 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 connectionRefs: result.connectionReferences,
             });
         } catch (error) {
+            if (cts.token.isCancellationRequested) {
+                this.postMessage({ command: 'error', message: 'Sync cancelled \u2014 the operation timed out or was cancelled by the user.' });
+                return;
+            }
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
+        } finally {
+            clearTimeout(timeout);
+            cts.dispose();
         }
     }
 
