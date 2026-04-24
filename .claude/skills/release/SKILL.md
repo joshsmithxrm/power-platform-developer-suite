@@ -209,7 +209,7 @@ Template: use PR #785 as reference (`gh pr view 785 --json body`).
 
 ### 8. Post-Merge: Push Tags
 
-After the PR merges, pull main and push tags in a **single batch**:
+After the PR merges, pull main and push tags **individually** (see Gotcha 6):
 
 ```bash
 git fetch origin
@@ -225,8 +225,8 @@ git tag Migration-v<migration-version>
 git tag Query-v<query-version>
 git tag Plugins-v<plugins-version>
 
-# Extension (published via release-published event, not directly on tag push —
-# but push the tag anyway for source-of-truth)
+# Extension (requires manual workflow dispatch with --ref Extension-v<version> —
+# push the tag for source-of-truth and as the --ref target)
 git tag Extension-v<extension-version>
 
 # Verify tag prefixes BEFORE push — catches MinVer-prefix bugs early
@@ -234,8 +234,11 @@ git tag -l 'Auth-v*' | tail -3
 git tag -l 'Cli-v*' | tail -3
 # ...etc for each prefix
 
-# Batch push
-git push origin --tags
+# Push tags individually (batch --tags does NOT trigger GitHub Actions — see Gotcha 6)
+for tag in Auth-v<auth-version> Cli-v<cli-version> Dataverse-v<dataverse-version> Mcp-v<mcp-version> Migration-v<migration-version> Query-v<query-version> Plugins-v<plugins-version> Extension-v<extension-version>; do
+  git push origin "refs/tags/$tag"
+  sleep 3
+done
 ```
 
 **Worked example** — verbatim from PR #785 (2026-04-17 prerelease):
@@ -248,7 +251,10 @@ git tag Migration-v1.0.0-beta.8
 git tag Query-v1.0.0-beta.2
 git tag Plugins-v2.1.0-beta.1
 git tag Extension-v0.7.0
-git push origin --tags
+for tag in Auth-v1.0.0-beta.8 Cli-v1.0.0-beta.14 Dataverse-v1.0.0-beta.7 Mcp-v1.0.0-beta.2 Migration-v1.0.0-beta.8 Query-v1.0.0-beta.2 Plugins-v2.1.0-beta.1 Extension-v0.7.0; do
+  git push origin "refs/tags/$tag"
+  sleep 3
+done
 ```
 
 **Tag prefixes must match MinVer config** in each csproj's `<MinVerTagPrefix>`. Deviations will produce wrong versions.
@@ -261,7 +267,7 @@ Tags trigger different workflows:
 |---|---|---|
 | `Auth-v*`, `Dataverse-v*`, `Migration-v*`, `Query-v*`, `Mcp-v*`, `Plugins-v*` | `publish-nuget.yml` | NuGet.org packages |
 | `Cli-v*` | `publish-nuget.yml` + `release-cli.yml` | NuGet tool package + multi-platform binaries (win-x64/arm64, osx-x64/arm64, linux-x64) + draft GitHub release published |
-| `Extension-v*` | `extension-publish.yml` (triggered by `release: published` event) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). One target failing does not fail the rest. |
+| `Extension-v*` | `extension-publish.yml` (**requires manual dispatch** — does NOT auto-chain from CLI release) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). One target failing does not fail the rest. Dispatch with: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable` (or `-f channel=pre-release`). |
 
 **Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
 
@@ -280,7 +286,7 @@ gh run list --limit 20 --json status,conclusion,createdAt,displayTitle,workflowN
 Expected sequence (typical timing):
 1. 7 `publish-nuget.yml` runs start within seconds of `git push --tags` — ~3–5 min each
 2. `release-cli.yml` runs in parallel — builds binaries on 3 OSes — ~8–15 min
-3. `extension-publish.yml` fires ONLY after the CLI draft release is published (chained via release-published event)
+3. `extension-publish.yml` must be manually dispatched with the Extension tag ref (it does NOT auto-chain from the CLI release). Use `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=<stable|pre-release>`.
 
 ### 10. Verify Publishes
 
@@ -337,17 +343,16 @@ tag_name was used by an immutable release
 
 **Prevention:** Don't manually create GitHub releases. Let `release-cli.yml` own that. If a previous release for this tag partially succeeded, delete the draft before re-pushing.
 
-### Gotcha 2: Extension publish depends on release-cli success
+### Gotcha 2: Extension publish does NOT auto-chain from CLI release
 
-**Symptom:** `extension-publish.yml` never fires even though the `Extension-v*` tag was pushed.
+**Symptom:** `extension-publish.yml` never fires even though the `Extension-v*` tag was pushed and the CLI release was published.
 
-**Cause:** `extension-publish.yml` triggers on `release: published` event, not on tag push. The release is published by `release-cli.yml` (via `gh release edit --draft=false`). If `release-cli.yml` fails (see Gotcha 1), the release stays a draft and the Extension workflow never fires.
+**Cause:** The workflow's `if` conditions on both `preflight` and `publish` jobs require `refs/tags/Extension-v*` as the git ref. The `release: published` event from the CLI release has `github.ref = refs/tags/Cli-v*`, which doesn't match. Even with `workflow_dispatch`, omitting `--ref` defaults to `refs/heads/main`, which also doesn't match.
 
-**Fix:** Resolve the release-cli failure first. Once the CLI release publishes, the Extension workflow fires automatically.
-
-**Alternate:** Manually dispatch `extension-publish.yml` with workflow_dispatch:
+**Fix:** Always dispatch with `--ref Extension-v<version>`:
 ```bash
-gh workflow run extension-publish.yml -f dry_run=false -f channel=pre-release
+gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable
+# For prerelease: -f channel=pre-release
 ```
 
 ### Gotcha 3: NuGet central package management (NU1507)
@@ -376,6 +381,28 @@ Previous releases have needed inline fixes:
 - `.claude/hooks/protect-main-branch.py` reading `file_path` at top level instead of under `tool_input`
 
 **Prevention:** Run full CI on the release branch BEFORE opening the release PR. Catch these on the release branch, not in the merge.
+
+### Gotcha 6: `git push --tags` does not trigger GitHub Actions workflows
+
+**Symptom:** After `git push origin --tags`, no `publish-nuget.yml` or `release-cli.yml` workflow runs appear.
+
+**Cause:** GitHub Actions does not fire `on: push: tags:` triggers for tags pushed in a single batch via `--tags`. This is a known GitHub platform limitation.
+
+**Fix:** Push tags individually with a small delay between each:
+```bash
+for tag in Auth-v<ver> Cli-v<ver> Dataverse-v<ver> Mcp-v<ver> Migration-v<ver> Query-v<ver> Plugins-v<ver> Extension-v<ver>; do
+  git push origin "refs/tags/$tag"
+  sleep 3
+done
+```
+
+### Gotcha 7: MSYS2 path conversion strips `/p:` MSBuild properties
+
+**Symptom:** `dotnet pack` for Plugins fails with MSB1008 when run in a `shell: bash` step on `windows-latest`.
+
+**Cause:** Git Bash (MSYS2) converts `/p:PropertyName=value` to a Windows path like `C:/msys64/p:PropertyName=value`. This breaks MSBuild property syntax.
+
+**Fix:** Use `-p:` instead of `/p:` for MSBuild properties in bash shell steps. The `-p:` syntax is equivalent and not subject to MSYS2 path conversion. Fixed in PR #884.
 
 ## Rollback / Recovery
 
@@ -421,7 +448,7 @@ After all publishes verify:
 
 1. **Version bumps only via tags for NuGet packages.** Never edit `<Version>` in a `.csproj`.
 2. **Extension version lives in `package.json` only.** Must match `package-lock.json`.
-3. **Tags push in a single batch.** Individual tag pushes work but are error-prone; one `git push --tags` after all tags are created.
+3. **Tags push individually with delay.** `git push --tags` does not trigger GitHub Actions workflows (see Gotcha 6). Push each tag separately with a small delay.
 4. **Monitor all workflow runs.** Don't assume success — verify each publish separately.
 5. **Stable releases require full verification.** Prereleases tolerate gotchas being caught post-publish; stable releases should not.
 6. **Package lineage is immutable.** PPDS.Plugins started at 1.0.0 stable in Jan 2026; never regress to an earlier major.
