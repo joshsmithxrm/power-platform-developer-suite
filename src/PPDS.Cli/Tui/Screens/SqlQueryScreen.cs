@@ -443,9 +443,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
                     _statusLabel.Visible = false;
                     _presenter.ConfirmDml();
-                    ErrorService.FireAndForget(
-                        _presenter.ExecuteAsync(_queryInput.Text.ToString() ?? string.Empty, ScreenCancellation),
-                        "RetryDmlConfirmed");
+                    var queryText = _queryInput.Text.ToString() ?? string.Empty;
+                    var task = _presenter.UseFetchXmlMode
+                        ? _presenter.ExecuteFetchXmlAsync(queryText, ScreenCancellation)
+                        : _presenter.ExecuteAsync(queryText, ScreenCancellation);
+                    ErrorService.FireAndForget(task, "RetryDmlConfirmed");
                 }
                 else
                 {

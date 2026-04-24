@@ -347,22 +347,41 @@ internal sealed class SqlQueryPresenter : IDisposable
 
         try
         {
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, cancellationToken);
-
-            var request = new SqlQueryRequest
+            if (_useFetchXmlMode)
             {
-                Sql = _lastSql,
-                PageNumber = _lastPageNumber + 1,
-                PagingCookie = _lastPagingCookie,
-                EnablePrefetch = true
-            };
+                var provider = await _session.GetServiceProviderAsync(_environmentUrl, cancellationToken);
+                var executor = provider.GetRequiredService<IQueryExecutor>();
 
-            var result = await service.ExecuteAsync(request, cancellationToken);
+                var result = await executor.ExecuteFetchXmlAsync(
+                    _lastSql,
+                    _lastPageNumber + 1,
+                    _lastPagingCookie,
+                    cancellationToken: cancellationToken);
 
-            _lastPagingCookie = result.Result.PagingCookie;
-            _lastPageNumber = result.Result.PageNumber;
+                _lastPagingCookie = result.PagingCookie;
+                _lastPageNumber = result.PageNumber;
 
-            PageLoaded?.Invoke(result.Result);
+                PageLoaded?.Invoke(result);
+            }
+            else
+            {
+                var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, cancellationToken);
+
+                var request = new SqlQueryRequest
+                {
+                    Sql = _lastSql,
+                    PageNumber = _lastPageNumber + 1,
+                    PagingCookie = _lastPagingCookie,
+                    EnablePrefetch = true
+                };
+
+                var result = await service.ExecuteAsync(request, cancellationToken);
+
+                _lastPagingCookie = result.Result.PagingCookie;
+                _lastPageNumber = result.Result.PageNumber;
+
+                PageLoaded?.Invoke(result.Result);
+            }
         }
         catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
         {
