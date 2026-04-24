@@ -1564,7 +1564,8 @@ class TestMsysPathconvNotInherited:
         with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
             pr_monitor.run_triage(wt, 42, comments, logger)
 
-        env = mock_popen.call_args[1]["env"]
+        assert mock_popen.called, "subprocess.Popen was not called (check PPDS_SHAKEDOWN)"
+        env = mock_popen.call_args.kwargs.get("env", {})
         assert "MSYS_NO_PATHCONV" not in env, \
             "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
 
@@ -1582,6 +1583,7 @@ class TestMsysPathconvNotInherited:
         with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
             pr_monitor.run_retro(wt, logger)
 
-        env = mock_popen.call_args[1]["env"]
+        assert mock_popen.called, "subprocess.Popen was not called (check PPDS_SHAKEDOWN)"
+        env = mock_popen.call_args.kwargs.get("env", {})
         assert "MSYS_NO_PATHCONV" not in env, \
             "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
