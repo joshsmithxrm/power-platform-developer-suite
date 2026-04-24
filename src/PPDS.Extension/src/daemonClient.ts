@@ -177,6 +177,21 @@ interface DataSourceDto {
 
 export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';
 
+export class RpcTimeoutError extends Error {
+    constructor(label: string, timeoutMs: number) {
+        super(`${label} timed out after ${timeoutMs}ms`);
+        this.name = 'RpcTimeoutError';
+    }
+}
+
+export function withRpcTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new RpcTimeoutError(label, timeoutMs)), timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer!));
+}
+
 /**
  * Client for communicating with the ppds serve daemon via JSON-RPC.
  *
@@ -217,6 +232,7 @@ const RPC_QUERY_EXPLAIN = new RequestType<Record<string, unknown>, QueryExplainR
 
 export class DaemonClient implements vscode.Disposable {
     private static readonly STARTUP_TIMEOUT_MS = 30_000;
+    private static readonly CONNECT_TIMEOUT_MS = 15_000;
 
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
@@ -1610,7 +1626,7 @@ export class DaemonClient implements vscode.Disposable {
                 this.connectingPromise = null;
             });
         }
-        await this.connectingPromise;
+        await withRpcTimeout(this.connectingPromise, DaemonClient.CONNECT_TIMEOUT_MS, 'ensureConnected');
     }
 
     private startHeartbeat(): void {
