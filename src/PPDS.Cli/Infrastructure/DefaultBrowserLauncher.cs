@@ -18,6 +18,7 @@ public sealed class DefaultBrowserLauncher : IBrowserLauncher
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
+                // S2: UseShellExecute required to open URL in the user's default browser on Windows.
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))

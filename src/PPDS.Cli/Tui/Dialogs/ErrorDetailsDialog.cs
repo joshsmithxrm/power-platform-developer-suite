@@ -236,7 +236,7 @@ internal sealed class ErrorDetailsDialog : TuiDialog, ITuiStateCapture<ErrorDeta
 
         try
         {
-            // Use shell execute to open with default text editor
+            // S2: UseShellExecute required to open log file in the user's default text editor.
             Process.Start(new ProcessStartInfo
             {
                 FileName = logPath,
