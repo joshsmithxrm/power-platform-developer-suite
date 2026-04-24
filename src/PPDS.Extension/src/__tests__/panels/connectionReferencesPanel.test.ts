@@ -21,10 +21,11 @@ describe('ConnectionReferencesPanel message types', () => {
             { command: 'requestEnvironmentList' },
             { command: 'openInMaker' },
             { command: 'openFlowInMaker', url: 'https://make.powerautomate.com/environments/env1/flows/flow1/details' },
+            { command: 'syncDeploymentSettings' },
             { command: 'copyToClipboard', text: 'test' },
             { command: 'webviewError', error: 'test', stack: 'trace' },
         ];
-        expect(messages).toHaveLength(12);
+        expect(messages).toHaveLength(13);
     });
 
     it('WebviewToHost filterBySolution accepts null for "All Solutions"', () => {
@@ -58,10 +59,11 @@ describe('ConnectionReferencesPanel message types', () => {
             } },
             { command: 'analyzeResult', result: { orphanedReferences: [], orphanedFlows: [], totalReferences: 0, totalFlows: 0 } },
             { command: 'solutionListLoaded', solutions: [] },
+            { command: 'deploymentSettingsSynced', filePath: '/path/to/file.json', envVars: { added: 1, removed: 0, preserved: 2 }, connectionRefs: { added: 0, removed: 0, preserved: 1 } },
             { command: 'error', message: 'test' },
             { command: 'daemonReconnected' },
         ];
-        expect(messages).toHaveLength(8);
+        expect(messages).toHaveLength(9);
     });
 
     it('ConnectionReferenceViewDto has all required fields', () => {

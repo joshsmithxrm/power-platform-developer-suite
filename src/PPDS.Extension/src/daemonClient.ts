@@ -934,12 +934,14 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async environmentVariablesSyncDeploymentSettings(solutionId: string, filePath: string, environmentUrl?: string): Promise<EnvironmentVariablesSyncDeploymentSettingsResponse> {
+    async environmentVariablesSyncDeploymentSettings(solutionId: string, filePath: string, environmentUrl?: string, token?: CancellationToken): Promise<EnvironmentVariablesSyncDeploymentSettingsResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { solutionId, filePath };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
         this.log.info('Calling environmentVariables/syncDeploymentSettings...');
-        return await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params);
+        return token
+            ? await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params, token)
+            : await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params);
     }
 
     async environmentVariablesGet(schemaName: string, environmentUrl?: string): Promise<EnvironmentVariablesGetResponse> {
