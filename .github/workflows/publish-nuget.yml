@@ -113,8 +113,8 @@ jobs:
             # Key path comes from RUNNER_TEMP (set by the decode step) so the
             # private key never enters the workspace tree.
             dotnet pack "$project" --configuration Release --output ./nupkgs \
-              /p:PublicSign=false \
-              /p:AssemblyOriginatorKeyFile="$PLUGINS_SNK_PATH"
+              -p:PublicSign=false \
+              -p:AssemblyOriginatorKeyFile="$PLUGINS_SNK_PATH"
           else
             dotnet pack "$project" --configuration Release --no-build --output ./nupkgs
           fi
