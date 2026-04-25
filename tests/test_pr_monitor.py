@@ -1202,15 +1202,18 @@ class TestRebaseBeforeReady:
         assert result is True
         # First call: gh pr view to detect base
         assert call_log[0][:3] == ["gh", "pr", "view"]
-        # Then fetch + rebase + rev-parse + push with explicit refspec
+        # Then fetch-base + status (stash check) + rebase + rev-parse
+        # + fetch-source (tracking ref update) + push
         assert call_log[1] == ["git", "fetch", "origin", "--", "main"]
-        assert call_log[2] == ["git", "rebase", "--", "origin/main"]
-        assert call_log[3] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
-        assert call_log[4] == [
+        assert call_log[2] == ["git", "status", "--porcelain"]
+        assert call_log[3] == ["git", "rebase", "--", "origin/main"]
+        assert call_log[4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        assert call_log[5] == ["git", "fetch", "origin", "--", "feature-branch"]
+        assert call_log[6] == [
             "git", "push", "--force-with-lease",
             "origin", "HEAD:feature-branch",
         ]
-        assert len(call_log) == 5  # no abort path
+        assert len(call_log) == 7  # no abort path
 
     def test_rebase_conflict_aborts_and_returns_false(self, tmp_path):
         """On rebase conflict: git rebase --abort is called; no push; returns False."""
@@ -1307,6 +1310,75 @@ class TestRebaseBeforeReady:
         # Must NOT have used main
         assert not any(
             c == ["git", "fetch", "origin", "--", "main"] for c in call_log)
+
+
+class TestStaleTrackingRef:
+    """Regression #929: fetch feature branch before push to avoid stale tracking ref.
+
+    After the triage agent pushes to the remote, the local tracking ref is
+    stale.  --force-with-lease compares the stale ref against the actual
+    remote and rejects the push.  The fix fetches the feature branch before
+    pushing.
+    """
+
+    def test_fetch_source_runs_before_push(self, tmp_path):
+        """The feature branch must be fetched between rev-parse and push."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/my-branch\n", stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        fetch_src = ["git", "fetch", "origin", "--", "feat/my-branch"]
+        assert fetch_src in call_log
+        fetch_idx = call_log.index(fetch_src)
+        push_idx = next(
+            i for i, c in enumerate(call_log) if c[:2] == ["git", "push"])
+        rev_parse_idx = next(
+            i for i, c in enumerate(call_log)
+            if c[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        assert rev_parse_idx < fetch_idx < push_idx
+
+    def test_fetch_source_failure_returns_false_and_does_not_push(self, tmp_path):
+        """If fetching the feature branch fails, no push and return False."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/stale\n", stderr="")
+            # Fail the source-branch fetch (but not the base-branch fetch)
+            if cmd == ["git", "fetch", "origin", "--", "feat/stale"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=128, stdout="",
+                    stderr="fatal: couldn't find remote ref feat/stale")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is False
+        assert not any(c[:2] == ["git", "push"] for c in call_log)
 
 
 class TestDetectBaseBranch:

@@ -574,7 +574,23 @@ def _rebase_source_branch(worktree, pr_number, logger):
         _pop_stash()
         return False
 
-    # 5. Push with lease using explicit origin + HEAD:<branch> refspec.
+    # 5. Fetch the feature branch so the local tracking ref is current.
+    #    Without this, --force-with-lease rejects the push when another
+    #    process (e.g. the triage agent) has pushed to the remote since
+    #    this worktree last fetched.
+    try:
+        fetch_src = _run(["git", "fetch", "origin", "--", current])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "FETCH_SOURCE_ERROR", reason=str(e), branch=current)
+        _pop_stash()
+        return False
+    if fetch_src.returncode != 0:
+        logger.log("rebase", "FETCH_SOURCE_ERROR", branch=current,
+                   stderr=fetch_src.stderr.strip()[:200])
+        _pop_stash()
+        return False
+
+    # 6. Push with lease using explicit origin + HEAD:<branch> refspec.
     try:
         push = _run(
             ["git", "push", "--force-with-lease", "origin", f"HEAD:{current}"],
