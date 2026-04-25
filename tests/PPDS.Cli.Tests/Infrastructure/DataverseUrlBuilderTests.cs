@@ -1,3 +1,4 @@
+using PPDS.Auth.Cloud;
 using PPDS.Cli.Infrastructure;
 using Xunit;
 
@@ -187,6 +188,74 @@ public class DataverseUrlBuilderTests
         Assert.Equal(
             $"https://make.powerautomate.com/environments/env-id-123/flows/{flowId}/details",
             url);
+    }
+
+    #endregion
+
+    #region Sovereign Cloud Tests
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerapps.com/environments/env-123/solutions")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://make.high.powerapps.us/environments/env-123/solutions")]
+    [InlineData(CloudEnvironment.China, "https://make.powerapps.cn/environments/env-123/solutions")]
+    public void BuildMakerPortalUrl_SovereignCloud_UsesCorrectDomain(
+        CloudEnvironment cloud, string expected)
+    {
+        var url = DataverseUrlBuilder.BuildMakerPortalUrl("env-123", cloud: cloud);
+
+        Assert.Equal(expected, url);
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerapps.com")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://make.high.powerapps.us")]
+    public void BuildSolutionMakerUrl_SovereignCloud_UsesCorrectDomain(
+        CloudEnvironment cloud, string expectedPrefix)
+    {
+        var solutionId = new Guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var url = DataverseUrlBuilder.BuildSolutionMakerUrl(
+            "https://myorg.crm.dynamics.com", solutionId, cloud);
+
+        Assert.StartsWith(expectedPrefix, url);
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerapps.com")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://make.apps.appsplatform.us")]
+    public void BuildEnvironmentVariableMakerUrl_SovereignCloud_UsesCorrectDomain(
+        CloudEnvironment cloud, string expectedPrefix)
+    {
+        var defId = new Guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var url = DataverseUrlBuilder.BuildEnvironmentVariableMakerUrl(
+            "https://myorg.crm.dynamics.com", defId, cloud);
+
+        Assert.StartsWith(expectedPrefix, url);
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerapps.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://make.gov.powerapps.us")]
+    public void BuildImportJobMakerUrl_SovereignCloud_UsesCorrectDomain(
+        CloudEnvironment cloud, string expectedPrefix)
+    {
+        var jobId = new Guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var url = DataverseUrlBuilder.BuildImportJobMakerUrl(
+            "https://myorg.crm.dynamics.com", jobId, cloud);
+
+        Assert.StartsWith(expectedPrefix, url);
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerautomate.com")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://make.high.powerautomate.us")]
+    [InlineData(CloudEnvironment.China, "https://make.powerautomate.cn")]
+    public void BuildFlowUrl_SovereignCloud_UsesCorrectDomain(
+        CloudEnvironment cloud, string expectedPrefix)
+    {
+        var flowId = new Guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var url = DataverseUrlBuilder.BuildFlowUrl("env-id-123", flowId, cloud);
+
+        Assert.StartsWith(expectedPrefix, url);
     }
 
     #endregion

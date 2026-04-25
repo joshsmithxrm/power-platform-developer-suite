@@ -155,6 +155,42 @@ public static class CloudEndpoints
     }
 
     /// <summary>
+    /// Gets the Power Apps Maker portal base URL for the specified cloud environment.
+    /// </summary>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The Maker portal base URL (no trailing slash).</returns>
+    public static string GetMakerPortalUrl(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://make.powerapps.com",
+            CloudEnvironment.UsGov => "https://make.gov.powerapps.us",
+            CloudEnvironment.UsGovHigh => "https://make.high.powerapps.us",
+            CloudEnvironment.UsGovDod => "https://make.apps.appsplatform.us",
+            CloudEnvironment.China => "https://make.powerapps.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
+    /// Gets the Power Automate Maker portal base URL for the specified cloud environment.
+    /// </summary>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The Flow portal base URL (no trailing slash).</returns>
+    public static string GetFlowPortalUrl(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://make.powerautomate.com",
+            CloudEnvironment.UsGov => "https://make.gov.powerautomate.us",
+            CloudEnvironment.UsGovHigh => "https://make.high.powerautomate.us",
+            CloudEnvironment.UsGovDod => "https://make.flow.appsplatform.us",
+            CloudEnvironment.China => "https://make.powerautomate.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
     /// Parses a cloud environment from a string value.
     /// </summary>
     /// <param name="value">The string value (case-insensitive).</param>

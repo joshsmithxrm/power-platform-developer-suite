@@ -495,6 +495,11 @@ def is_mutation(argv: list) -> tuple:
     verb = argv[2].lower()
     rest = argv[3:]
 
+    # 3-level commands: "metadata <noun> <verb>" has the noun at argv[2], verb at argv[3]
+    if sub == "metadata" and verb not in _MUTATION_VERBS and len(argv) >= 4:
+        verb = argv[3].lower()
+        rest = argv[4:]
+
     allowed = _READONLY_SUBCOMMANDS.get(sub)
     if allowed and ("*" in allowed or verb in allowed):
         return False, ""

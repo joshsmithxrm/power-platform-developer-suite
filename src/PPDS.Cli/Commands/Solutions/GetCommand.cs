@@ -83,7 +83,7 @@ public static class GetCommand
                 return ExitCodes.NotFoundError;
             }
 
-            var makerUrl = DataverseUrlBuilder.BuildSolutionMakerUrl(connectionInfo.EnvironmentUrl, solution.Id);
+            var makerUrl = DataverseUrlBuilder.BuildSolutionMakerUrl(connectionInfo.EnvironmentUrl, solution.Id, connectionInfo.Profile.Cloud);
 
             if (globalOptions.IsJsonMode)
             {
