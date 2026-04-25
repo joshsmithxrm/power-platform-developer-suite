@@ -189,8 +189,8 @@ python scripts/workflow-state.py set pr.monitor_launched "fallback: <reason>"
 
 Before reporting success, verify both output artifacts:
 
-1. **Monitor launched**: confirm `.workflow/pr-monitor.pid` exists and the process is running (`kill -0`). If missing, fail: `"⚠ Monitor PID file missing — launch failed"`.
-2. **Gemini review posted**: poll `gh pr view {N} --json comments` every 30s for up to 10 minutes. Look for a comment authored by the Gemini bot. If absent after timeout, fail: `"⚠ Gemini comment not posted within 10 min — re-push or investigate"`.
+1. **Monitor launched**: confirm `.workflow/pr-monitor.pid` exists and the process is running (`kill -0`). If missing AND no `fallback:` value was recorded in `pr.monitor_launched` (Step 5), fail: `"⚠ Monitor PID file missing — launch failed"`. If a fallback was recorded, this gate is satisfied by the manual triage path.
+2. **Gemini review posted**: poll `gh pr view {N} --json reviews,comments` every 30s for up to 5 minutes (matches `GEMINI_MAX_WAIT=300` in `scripts/pr_monitor.py`). Look for a review or comment authored by the Gemini bot — Gemini posts via the reviews endpoint, not just issue comments. If absent after timeout, fail: `"⚠ Gemini review not posted within 5 min — re-push or investigate"`.
 
 If EITHER artifact is missing after its check, do NOT declare `/pr` complete. Surface the diagnostic to the user and stop.
 

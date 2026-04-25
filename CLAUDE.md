@@ -20,7 +20,7 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Use Application Services for all persistent state — single code path for CLI / TUI / RPC.
 - Accept `IProgressReporter` for any operation likely to exceed 1 second.
 - Complete the shipping pipeline: `/gates` → `/verify` → `/pr`. Never stop after `/gates` or `/verify` — the work is not done until `/pr` creates the pull request.
-- On `scripts/pipeline.py` failure, recover via `python scripts/pipeline.py resume <stage>` or sequential `/gates` → `/verify` → `/pr` — never ad-hoc parallel debug. <!-- since: PR#956 rationale -->
+- On `scripts/pipeline.py` failure, recover via `python scripts/pipeline.py --resume` (or `--from <stage>`) or sequential `/gates` → `/verify` → `/pr` — never ad-hoc parallel debug. <!-- since: PR#956 rationale -->
 - Hard cap on simultaneous background TaskCreate jobs: ≤3. If a 4th is needed, stop and ask. <!-- since: PR#956 rationale -->
 - For any test/build failure, invoke `/debug` first; do not hypothesize without evidence. <!-- since: PR#956 rationale -->
 
