@@ -745,9 +745,10 @@ public class RpcMethodHandler : IDisposable
         string? assembly = null,
         string? package = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
 
@@ -918,6 +919,7 @@ public class RpcMethodHandler : IDisposable
         string type,
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -925,7 +927,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -985,9 +987,10 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginsMessagesResponse> PluginsMessagesAsync(
         string? filter = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1003,12 +1006,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginsEntityAttributesResponse> PluginsEntityAttributesAsync(
         string entityLogicalName,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entityLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1033,12 +1037,13 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool enabled,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1061,6 +1066,7 @@ public class RpcMethodHandler : IDisposable
         string content,
         string? solutionName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -1068,7 +1074,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(content))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1089,6 +1095,7 @@ public class RpcMethodHandler : IDisposable
         string content,
         string? solutionName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -1096,7 +1103,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(content))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1134,6 +1141,7 @@ public class RpcMethodHandler : IDisposable
         string? secondaryEntity = null,
         string? solutionName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(eventHandlerId) || !Guid.TryParse(eventHandlerId, out var typeId))
@@ -1145,7 +1153,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(stage))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'stage' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1194,6 +1202,7 @@ public class RpcMethodHandler : IDisposable
         string? entityAlias = null,
         string? messageName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(stepId) || !Guid.TryParse(stepId, out var parsedStepId))
@@ -1203,7 +1212,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(imageType))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'imageType' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1246,12 +1255,13 @@ public class RpcMethodHandler : IDisposable
         bool? canUseReadOnlyConnection = null,
         string? invocationSource = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1282,12 +1292,13 @@ public class RpcMethodHandler : IDisposable
         string? imageAttributes = null,
         string? name = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var imageId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1312,6 +1323,7 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool force = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -1319,7 +1331,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1357,6 +1369,7 @@ public class RpcMethodHandler : IDisposable
         string type,
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -1364,7 +1377,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
@@ -1481,9 +1494,10 @@ public class RpcMethodHandler : IDisposable
     public async Task<MetadataEntitiesResponse> MetadataEntitiesAsync(
         string? environmentUrl = null,
         bool includeIntersect = false,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var metadataService = sp.GetRequiredService<IMetadataQueryService>();
 
@@ -1513,9 +1527,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("metadata/globalOptionSets")]
     public async Task<MetadataGlobalOptionSetsResponse> MetadataGlobalOptionSetsAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var optionSets = await metadataService.GetGlobalOptionSetsAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -1535,6 +1550,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<MetadataGlobalOptionSetDetailResponse> MetadataGlobalOptionSetAsync(
         string name,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -1544,7 +1560,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'name' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var optionSet = await metadataService.GetOptionSetAsync(name, ct).ConfigureAwait(false);
@@ -1566,6 +1582,7 @@ public class RpcMethodHandler : IDisposable
         string logicalName,
         bool includeGlobalOptionSets = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(logicalName))
@@ -1575,7 +1592,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'logicalName' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var metadataService = sp.GetRequiredService<IMetadataQueryService>();
             var (entity, globalOptionSets) = await metadataService.GetEntityWithGlobalOptionSetsAsync(
@@ -1799,6 +1816,7 @@ public class RpcMethodHandler : IDisposable
         string? primaryAttributeDisplayName = null,
         int? primaryAttributeMaxLength = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -1812,7 +1830,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(ownershipType))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'ownershipType' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -1859,6 +1877,7 @@ public class RpcMethodHandler : IDisposable
         string? description = null,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -1866,7 +1885,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entityLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -1904,6 +1923,7 @@ public class RpcMethodHandler : IDisposable
         string entityLogicalName,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -1911,7 +1931,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entityLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -1961,6 +1981,7 @@ public class RpcMethodHandler : IDisposable
         string? trueLabel = null,
         string? falseLabel = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -1977,7 +1998,7 @@ public class RpcMethodHandler : IDisposable
         if (!Enum.TryParse<Authoring.SchemaColumnType>(columnType, ignoreCase: true, out var parsedColumnType))
             throw new RpcException(ErrorCodes.Validation.InvalidValue, $"Invalid column type '{columnType}'");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2034,6 +2055,7 @@ public class RpcMethodHandler : IDisposable
         int? maxLength = null,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2043,7 +2065,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(columnLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'columnLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2084,6 +2106,7 @@ public class RpcMethodHandler : IDisposable
         string columnLogicalName,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2093,7 +2116,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(columnLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'columnLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2133,6 +2156,7 @@ public class RpcMethodHandler : IDisposable
         string lookupDisplayName,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2148,7 +2172,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(lookupDisplayName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'lookupDisplayName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2192,6 +2216,7 @@ public class RpcMethodHandler : IDisposable
         bool dryRun = false,
         string? intersectEntitySchemaName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2203,7 +2228,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(schemaName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'schemaName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2243,6 +2268,7 @@ public class RpcMethodHandler : IDisposable
         string schemaName,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2250,7 +2276,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(schemaName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'schemaName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2288,6 +2314,7 @@ public class RpcMethodHandler : IDisposable
         bool dryRun = false,
         bool isMultiSelect = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2297,7 +2324,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(displayName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2337,6 +2364,7 @@ public class RpcMethodHandler : IDisposable
         string name,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2344,7 +2372,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(name))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2382,6 +2410,7 @@ public class RpcMethodHandler : IDisposable
         string[] keyAttributes,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2395,7 +2424,7 @@ public class RpcMethodHandler : IDisposable
         if (keyAttributes == null || keyAttributes.Length == 0)
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'keyAttributes' parameter is required and must not be empty");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2436,6 +2465,7 @@ public class RpcMethodHandler : IDisposable
         string keyLogicalName,
         bool dryRun = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionUniqueName))
@@ -2445,7 +2475,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(keyLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'keyLogicalName' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
@@ -2567,7 +2597,7 @@ public class RpcMethodHandler : IDisposable
             query = InjectTopAttribute(query, request.Top.Value);
         }
 
-        var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
+        var response = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -2606,7 +2636,7 @@ public class RpcMethodHandler : IDisposable
         }
 
         // Execute (or transpile-only) via SqlQueryService from the environment's service provider
-        var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
+        var response = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, profile, env, ct) =>
         {
             var service = sp.GetRequiredService<ISqlQueryService>();
 
@@ -2882,7 +2912,7 @@ public class RpcMethodHandler : IDisposable
         // Execute the query
         const int MaxExportRecords = 100_000;
 
-        var queryResponse = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
+        var queryResponse = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, ct) =>
         {
             // Use FetchXML directly if provided, otherwise transpile SQL via SqlQueryService
             string fetchXml;
@@ -2970,7 +3000,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'sql' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ISqlQueryService>();
 
@@ -3321,10 +3351,12 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
-    /// Executes an action with the active profile's credentials against a specific environment.
-    /// If environmentUrl is provided, uses it; otherwise falls back to the active profile's saved environment.
+    /// Executes an action with the specified (or active) profile's credentials against a specific environment.
+    /// If profileName is provided, resolves that profile by name or index; otherwise uses the active profile.
+    /// If environmentUrl is provided, uses it; otherwise falls back to the resolved profile's saved environment.
     /// </summary>
     private Task<T> WithProfileAndEnvironmentAsync<T>(
+        string? profileName,
         string? environmentUrl,
         Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
         CancellationToken cancellationToken,
@@ -3337,8 +3369,17 @@ public class RpcMethodHandler : IDisposable
             var store = _authServices.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
-            var profile = collection.ActiveProfile
-                ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+            AuthProfile profile;
+            if (!string.IsNullOrWhiteSpace(profileName))
+            {
+                profile = collection.GetByNameOrIndex(profileName)
+                    ?? throw new RpcException(ErrorCodes.Auth.ProfileNotFound, $"Profile '{profileName}' not found");
+            }
+            else
+            {
+                profile = collection.ActiveProfile
+                    ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+            }
 
             // Resolve environment: explicit URL wins, else profile's saved environment
             string resolvedUrl;
@@ -3378,11 +3419,13 @@ public class RpcMethodHandler : IDisposable
     /// correlation log line identifies the real RPC method, not this shim.
     /// </remarks>
     private Task<T> WithProfileAndEnvironmentAsync<T>(
+        string? profileName,
         string? environmentUrl,
         Func<IServiceProvider, CancellationToken, Task<T>> action,
         CancellationToken cancellationToken,
         [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
         => WithProfileAndEnvironmentAsync<T>(
+            profileName,
             environmentUrl,
             (sp, _, _, ct) => action(sp, ct),
             cancellationToken,
@@ -3607,9 +3650,10 @@ public class RpcMethodHandler : IDisposable
         string? filter = null,
         bool includeManaged = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
             var result = await solutionService.ListAsync(filter, includeManaged, cancellationToken: ct);
@@ -3650,6 +3694,7 @@ public class RpcMethodHandler : IDisposable
         string uniqueName,
         int? componentType = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(uniqueName))
@@ -3659,7 +3704,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'uniqueName' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
 
@@ -3705,9 +3750,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("importJobs/list")]
     public async Task<ImportJobsListResponse> ImportJobsListAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var importJobService = sp.GetRequiredService<IImportJobService>();
             var result = await importJobService.ListAsync(cancellationToken: ct);
@@ -3728,6 +3774,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<ImportJobsGetResponse> ImportJobsGetAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var importJobId))
@@ -3737,7 +3784,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'id' parameter must be a valid GUID");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var importJobService = sp.GetRequiredService<IImportJobService>();
 
@@ -3803,9 +3850,10 @@ public class RpcMethodHandler : IDisposable
         TraceFilterDto? filter = null,
         int top = 100,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var serviceFilter = MapTraceFilterFromDto(filter);
@@ -3827,6 +3875,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginTracesGetResponse> PluginTracesGetAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var traceId))
@@ -3836,7 +3885,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'id' parameter must be a valid GUID");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var trace = await traceService.GetAsync(traceId, ct)
@@ -3859,6 +3908,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginTracesTimelineResponse> PluginTracesTimelineAsync(
         string correlationId,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(correlationId) || !Guid.TryParse(correlationId, out var corrId))
@@ -3868,7 +3918,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'correlationId' parameter must be a valid GUID");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var nodes = await traceService.BuildTimelineAsync(corrId, ct);
@@ -3890,6 +3940,7 @@ public class RpcMethodHandler : IDisposable
         int? olderThanDays = null,
         TraceFilterDto? filter = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
@@ -3900,7 +3951,7 @@ public class RpcMethodHandler : IDisposable
         if (modeCount > 1)
             throw new RpcException(ErrorCodes.Validation.RequiredField, "Only one of 'ids', 'olderThanDays', or 'filter' may be provided per call");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             int deletedCount;
@@ -3946,9 +3997,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("pluginTraces/traceLevel")]
     public async Task<PluginTracesTraceLevelResponse> PluginTracesTraceLevelAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var settings = await traceService.GetSettingsAsync(ct);
@@ -3969,6 +4021,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginTracesSetTraceLevelResponse> PluginTracesSetTraceLevelAsync(
         string level,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(level))
@@ -3985,7 +4038,7 @@ public class RpcMethodHandler : IDisposable
                 $"Invalid trace level '{level}'. Valid values are: Off, Exception, All");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             await traceService.SetSettingsAsync(setting, ct);
@@ -4107,9 +4160,10 @@ public class RpcMethodHandler : IDisposable
         string? solutionId = null,
         string? environmentUrl = null,
         bool includeInactive = false,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
             var result = await connRefService.ListAsync(solutionName: solutionId, includeInactive: includeInactive, cancellationToken: ct);
@@ -4144,6 +4198,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<ConnectionReferencesGetResponse> ConnectionReferencesGetAsync(
         string logicalName,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(logicalName))
@@ -4153,7 +4208,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'logicalName' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
 
@@ -4193,9 +4248,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("connectionReferences/analyze")]
     public async Task<ConnectionReferencesAnalyzeResponse> ConnectionReferencesAnalyzeAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
             var analysis = await connRefService.AnalyzeAsync(cancellationToken: ct);
@@ -4300,9 +4356,10 @@ public class RpcMethodHandler : IDisposable
         string? solutionId = null,
         string? environmentUrl = null,
         bool includeInactive = false,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var envVarService = sp.GetRequiredService<IEnvironmentVariableService>();
             var result = await envVarService.ListAsync(solutionName: solutionId, includeInactive: includeInactive, cancellationToken: ct);
@@ -4324,6 +4381,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<EnvironmentVariablesGetResponse> EnvironmentVariablesGetAsync(
         string schemaName,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(schemaName))
@@ -4333,7 +4391,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'schemaName' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var envVarService = sp.GetRequiredService<IEnvironmentVariableService>();
 
@@ -4358,6 +4416,7 @@ public class RpcMethodHandler : IDisposable
         string schemaName,
         string value,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(schemaName))
@@ -4374,7 +4433,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'value' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var envVarService = sp.GetRequiredService<IEnvironmentVariableService>();
             var success = await envVarService.SetValueAsync(schemaName, value, ct);
@@ -4541,6 +4600,7 @@ public class RpcMethodHandler : IDisposable
         string solutionId,
         string filePath,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(solutionId))
@@ -4561,7 +4621,7 @@ public class RpcMethodHandler : IDisposable
         // webview message must not be able to read or overwrite files outside the workspace.
         var fullPath = ResolveWorkspacePath(filePath, nameof(filePath));
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var settingsService = sp.GetRequiredService<IDeploymentSettingsService>();
 
@@ -4654,6 +4714,7 @@ public class RpcMethodHandler : IDisposable
         string? solutionId = null,
         bool textOnly = true,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         Guid? parsedSolutionId = null;
@@ -4668,7 +4729,7 @@ public class RpcMethodHandler : IDisposable
             parsedSolutionId = sid;
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var webResourceService = sp.GetRequiredService<IWebResourceService>();
             var result = await webResourceService.ListAsync(parsedSolutionId, textOnly, ct);
@@ -4691,6 +4752,7 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool published = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
@@ -4700,7 +4762,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'id' parameter must be a valid GUID");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var webResourceService = sp.GetRequiredService<IWebResourceService>();
             var content = await webResourceService.GetContentAsync(resourceId, published, ct);
@@ -4729,6 +4791,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<WebResourcesGetModifiedOnResponse> WebResourcesGetModifiedOnAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
@@ -4738,7 +4801,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'id' parameter must be a valid GUID");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var webResourceService = sp.GetRequiredService<IWebResourceService>();
             var modifiedOn = await webResourceService.GetModifiedOnAsync(resourceId, ct);
@@ -4759,6 +4822,7 @@ public class RpcMethodHandler : IDisposable
         string id,
         string content,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
@@ -4775,7 +4839,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'content' parameter is required");
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             try
             {
@@ -4806,6 +4870,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<WebResourcesPublishResponse> WebResourcesPublishAsync(
         string[] ids,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (ids == null || ids.Length == 0)
@@ -4827,7 +4892,7 @@ public class RpcMethodHandler : IDisposable
             parsedIds.Add(parsed);
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             try
             {
@@ -4853,9 +4918,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("webResources/publishAll")]
     public async Task<WebResourcesPublishAllResponse> WebResourcesPublishAllAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             try
             {
@@ -4906,9 +4972,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("serviceEndpoints/list")]
     public async Task<ServiceEndpointsListResponse> ServiceEndpointsListAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IServiceEndpointService>();
             var endpoints = await service.ListAsync(ct);
@@ -4928,12 +4995,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<ServiceEndpointsGetResponse> ServiceEndpointsGetAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IServiceEndpointService>();
             var endpoint = await service.GetByIdAsync(endpointId, ct)
@@ -4969,6 +5037,7 @@ public class RpcMethodHandler : IDisposable
         string? messageFormat = null,
         string? userClaim = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -4976,7 +5045,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(contractType))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'contractType' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IServiceEndpointService>();
             Guid newId;
@@ -5035,12 +5104,13 @@ public class RpcMethodHandler : IDisposable
         string? authType = null,
         string? authValue = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IServiceEndpointService>();
             await service.UpdateAsync(
@@ -5061,12 +5131,13 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool force = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IServiceEndpointService>();
             await service.UnregisterAsync(endpointId, force, cancellationToken: ct);
@@ -5107,9 +5178,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("customApis/list")]
     public async Task<CustomApisListResponse> CustomApisListAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             var apis = await service.ListAsync(ct);
@@ -5129,12 +5201,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<CustomApisGetResponse> CustomApisGetAsync(
         string uniqueNameOrId,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(uniqueNameOrId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueNameOrId' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             var api = await service.GetAsync(uniqueNameOrId, ct)
@@ -5166,6 +5239,7 @@ public class RpcMethodHandler : IDisposable
         string? allowedProcessingStepType = null,
         List<CustomApiParameterDto>? parameters = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(uniqueName))
@@ -5175,7 +5249,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var pluginTypeGuid))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
 
@@ -5226,6 +5300,7 @@ public class RpcMethodHandler : IDisposable
         string? executePrivilegeName = null,
         string? allowedProcessingStepType = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
@@ -5239,7 +5314,7 @@ public class RpcMethodHandler : IDisposable
             pluginTypeGuid = ptg;
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             await service.UpdateAsync(
@@ -5267,12 +5342,13 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool force = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             await service.UnregisterAsync(apiId, force, cancellationToken: ct);
@@ -5297,6 +5373,7 @@ public class RpcMethodHandler : IDisposable
         string? logicalEntityName = null,
         bool isOptional = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiId) || !Guid.TryParse(apiId, out var apiGuid))
@@ -5310,7 +5387,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(direction))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'direction' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             var newId = await service.AddParameterAsync(
@@ -5340,6 +5417,7 @@ public class RpcMethodHandler : IDisposable
         string? displayName = null,
         string? description = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
@@ -5348,7 +5426,7 @@ public class RpcMethodHandler : IDisposable
         if (displayName == null && description == null)
             throw new RpcException(ErrorCodes.Validation.RequiredField, "At least one of 'displayName' or 'description' must be provided");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             await service.UpdateParameterAsync(
@@ -5368,12 +5446,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<CustomApisRemoveParameterResponse> CustomApisRemoveParameterAsync(
         string parameterId,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'parameterId' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
             await service.RemoveParameterAsync(paramGuid, ct);
@@ -5392,12 +5471,13 @@ public class RpcMethodHandler : IDisposable
         string? pluginTypeName = null,
         string? assemblyName = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(nameOrId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var customApiService = sp.GetRequiredService<ICustomApiService>();
 
@@ -5462,6 +5542,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<DataProvidersListResponse> DataProvidersListAsync(
         string? dataSourceId = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         Guid? dataSourceGuid = null;
@@ -5472,7 +5553,7 @@ public class RpcMethodHandler : IDisposable
             dataSourceGuid = dsGuid;
         }
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var providers = await service.ListDataProvidersAsync(dataSourceGuid, ct);
@@ -5492,12 +5573,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<DataProvidersGetResponse> DataProvidersGetAsync(
         string nameOrId,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(nameOrId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var provider = await service.GetDataProviderAsync(nameOrId, ct)
@@ -5524,6 +5606,7 @@ public class RpcMethodHandler : IDisposable
         string? updatePlugin = null,
         string? deletePlugin = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -5545,7 +5628,7 @@ public class RpcMethodHandler : IDisposable
         var updateGuid = ParseOptionalGuid(updatePlugin, "updatePlugin");
         var deleteGuid = ParseOptionalGuid(deletePlugin, "deletePlugin");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var newId = await service.RegisterDataProviderAsync(
@@ -5576,6 +5659,7 @@ public class RpcMethodHandler : IDisposable
         string? updatePlugin = null,
         string? deletePlugin = null,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var providerId))
@@ -5595,7 +5679,7 @@ public class RpcMethodHandler : IDisposable
         var updateGuid = ParseOptionalGuid(updatePlugin, "updatePlugin");
         var deleteGuid = ParseOptionalGuid(deletePlugin, "deletePlugin");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             await service.UpdateDataProviderAsync(
@@ -5620,12 +5704,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<DataProvidersUnregisterResponse> DataProvidersUnregisterAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var providerId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             await service.UnregisterDataProviderAsync(providerId, ct);
@@ -5657,9 +5742,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("dataSources/list")]
     public async Task<DataSourcesListResponse> DataSourcesListAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var sources = await service.ListDataSourcesAsync(ct);
@@ -5679,12 +5765,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<DataSourcesGetResponse> DataSourcesGetAsync(
         string nameOrId,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(nameOrId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var source = await service.GetDataSourceAsync(nameOrId, ct)
@@ -5705,12 +5792,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<DataSourcesRegisterResponse> DataSourcesRegisterAsync(
         string name,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var newId = await service.RegisterDataSourceAsync(
@@ -5729,6 +5817,7 @@ public class RpcMethodHandler : IDisposable
     public Task<DataSourcesUpdateResponse> DataSourcesUpdateAsync(
         string id,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         throw new RpcException(
@@ -5745,12 +5834,13 @@ public class RpcMethodHandler : IDisposable
         string id,
         bool force = false,
         string? environmentUrl = null,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var sourceId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             await service.UnregisterDataSourceAsync(sourceId, force, ct);
@@ -6682,6 +6772,7 @@ public class QuerySqlRequest
     [JsonPropertyName("showFetchXml")] public bool ShowFetchXml { get; set; }
     [JsonPropertyName("useTds")] public bool UseTds { get; set; }
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
     [JsonPropertyName("dmlSafety")] public DmlSafetyRpcOptions? DmlSafety { get; set; }
 }
 
@@ -6709,6 +6800,7 @@ public class QueryFetchRequest
     [JsonPropertyName("pagingCookie")] public string? PagingCookie { get; set; }
     [JsonPropertyName("count")] public bool Count { get; set; }
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
 }
 
 /// <summary>
@@ -6732,6 +6824,7 @@ public class QueryExportRequest
     [JsonPropertyName("includeHeaders")] public bool IncludeHeaders { get; set; } = true;
     [JsonPropertyName("top")] public int? Top { get; set; }
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
 }
 
 /// <summary>
@@ -6741,6 +6834,7 @@ public class QueryExplainRequest
 {
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
 }
 
 /// <summary>
