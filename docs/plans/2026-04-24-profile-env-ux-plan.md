@@ -354,7 +354,7 @@ Status Bar     Context        Command
 ## Verification Steps
 
 ### VS-01: Unified status bar displays correctly across all daemon states
-- [ ] Mechanical: `npm run ext:test -- --grep "PpdsStatusBar"` passes
+- [x] Mechanical: `npm run ext:test -- --grep "PpdsStatusBar"` passes
 - [ ] Manual: Start extension, verify status bar shows `$(check) PPDS: ProfileName · EnvName`
 - [ ] Manual: Stop daemon, verify status bar shows `$(error) PPDS`, click restarts daemon
 
@@ -369,8 +369,8 @@ Status Bar     Context        Command
 - [ ] Manual: Verify active profile has `$(check)` prefix, environment in description, identity in detail
 
 ### VS-04: Backward compatibility preserved
-- [ ] Mechanical: `npm run ext:test` passes (all existing tests)
-- [ ] Mechanical: `dotnet test PPDS.sln --filter "Category!=Integration" -v q` passes
+- [x] Mechanical: `npm run ext:test` passes (all existing tests)
+- [x] Mechanical: `dotnet test PPDS.sln --filter "Category!=Integration" -v q` passes
 
 ### VS-05: Device code attribution
 - [ ] Manual: With expired token, trigger re-auth from a panel using a non-active profile
