@@ -227,6 +227,10 @@ public static class ServiceRegistration
             sp.GetRequiredService<IShakedownGuard>(),
             sp.GetRequiredService<ILogger<WebResourceService>>()));
 
+        services.AddTransient<IWebResourceSyncService>(sp => new WebResourceSyncService(
+            sp.GetRequiredService<IWebResourceService>(),
+            sp.GetRequiredService<ILogger<WebResourceSyncService>>()));
+
         services.AddTransient<IEnvironmentVariableService>(sp => new EnvironmentVariableService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<IShakedownGuard>(),
