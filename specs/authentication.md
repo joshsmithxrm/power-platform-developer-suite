@@ -631,7 +631,7 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-16 | `BapEnvironmentService` skips environments without `linkedEnvironmentMetadata` (no Dataverse instance) | `BapEnvironmentServiceTests.DiscoverEnvironments_SkipsNonDataverseEnvironments` | ✅ |
 | AC-17 | `BapEnvironmentService` throws `PpdsException` with `Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | ✅ |
 | AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | ✅ |
-| AC-19 | BAP discovery returns environments for SPN with management app registration | Integration test (Category=Integration) | 🔲 |
+| AC-19 | BAP discovery returns environments for SPN with management app registration | `BapDiscoveryIntegrationTests.BapEnvironmentService_DiscoversEnvironments` (Category=Integration) | ✅ |
 | AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | ✅ |
 | AC-21 | `CertificateFileCredentialProvider` validates required fields (ApplicationId, CertificatePath, TenantId) and rejects invalid cert paths | `CertificateFileCredentialProviderTests` | ✅ |
 | AC-22 | `CertificateStoreCredentialProvider` validates required fields (ApplicationId, Thumbprint, TenantId) and rejects invalid inputs | `CertificateStoreCredentialProviderTests` | ✅ |
