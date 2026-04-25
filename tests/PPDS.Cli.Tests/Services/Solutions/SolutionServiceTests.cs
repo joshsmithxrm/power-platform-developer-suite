@@ -194,10 +194,10 @@ public class SolutionServiceTests
             BindingFlags.NonPublic | BindingFlags.Static);
         dictField.Should().NotBeNull("ComponentTypeNames dictionary should exist");
 
-        var dict = dictField!.GetValue(null) as Dictionary<int, string>;
-        dict.Should().NotBeNull();
+        var dict = dictField!.GetValue(null) as Dictionary<int, string>
+            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
         dict.Should().ContainKey(typeCode);
-        dict![typeCode].Should().Be(expectedName);
+        dict[typeCode].Should().Be(expectedName);
     }
 
     [Fact]
