@@ -85,7 +85,9 @@ Build five lists:
 - **Not started:** branches removed from the merged list by the divergence check — report as skipped
 - **Locked worktrees:** worktrees with `locked` attribute in porcelain output — but check for **stale locks** first (see below)
 
-**Stale git lock detection:** For each locked worktree, extract the PID from the lock reason (e.g., `locked claude agent agent-xxx (pid 43216)`). Check whether that PID is still running:
+**Stale git lock detection:** For each locked worktree, extract the PID from the lock reason (e.g., `locked claude agent agent-xxx (pid 43216)`). If the lock reason has no PID or no reason text at all, the lock is ambiguous — classify as locked and skip it (do not unlock).
+
+When a PID is present, check whether it is still running:
 
 ```bash
 # Windows
@@ -113,24 +115,24 @@ For each merged or squash-merged worktree (not locked, not the main worktree):
 
 **Zombie process detection:** Dead Claude agent sessions leave behind bash/shell processes stuck in `until ... sleep` loops polling for task output files that will never arrive. These hold filesystem locks on the worktree directory, causing `git worktree remove` and `rm -rf` to fail with "Permission denied" or "Device or resource busy."
 
-For each worktree about to be removed, search for processes referencing the worktree path:
+For each worktree about to be removed, search for processes whose command line contains the **full worktree path** (e.g., `.worktrees/profile-env-ux`, not just `profile-env-ux`) to avoid false matches on short directory names:
 
 ```bash
-# Windows
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*<worktree-dir-name>*' } | Select-Object ProcessId, Name"
+# Windows — use the full relative or absolute path in the -like pattern
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<full-worktree-path>*' } | Select-Object ProcessId, Name, CommandLine"
 
 # Unix
-pgrep -af '<worktree-dir-name>'
+pgrep -af '<full-worktree-path>'
 ```
 
-Kill any matching processes (exclude the current cleanup session's own PID):
+Report the matched processes before killing. Kill any matching processes (exclude the current cleanup session's own PID). Wait 2 seconds after killing to allow file handles to release before attempting removal:
 
 ```bash
 # Windows
 taskkill /PID <pid> /F
 
 # Unix
-kill <pid>
+kill -9 <pid>
 ```
 
 **Daemon shutdown:**
@@ -167,7 +169,7 @@ After removing merged worktrees, check for orphan directories — directories in
 
 3. For each directory in `.worktrees/` that does NOT appear in the registered worktree list:
    - **Guard:** Compare the directory's resolved absolute path against the main worktree path (the first `worktree` entry in `git worktree list --porcelain`). If they match, skip it — never remove the main worktree.
-   - **Kill zombie processes first:** Before attempting `rm -rf`, search for processes referencing the orphan directory name (same technique as step 4's zombie detection) and kill them. Orphan directories are the most common place where zombie processes block cleanup.
+   - **Kill zombie processes first:** Before attempting `rm -rf`, search for processes referencing the orphan's full path (same technique as step 4's zombie detection) and kill them. Wait 2 seconds after killing. Orphan directories are the most common place where zombie processes block cleanup.
    - If `--dry-run`: add to orphan report, do NOT delete
    - Otherwise: `rm -rf .worktrees/<name>`
    - On Windows, if the orphan is a junction/symlink, remove the link itself — do not follow into the target directory
