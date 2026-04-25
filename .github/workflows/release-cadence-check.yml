@@ -1,0 +1,115 @@
+name: Release Cadence Check
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  cadence-check:
+    name: Check release cadence
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Get latest release tag and date
+        id: tag-info
+        run: |
+          LAST_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/ | head -1)
+          LAST_TAG_DATE=$(git for-each-ref --sort=-creatordate --format='%(creatordate:iso-strict)' refs/tags/ | head -1)
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No release tags found; skipping cadence check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+            echo "last_tag_date=${LAST_TAG_DATE}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Count unreleased commits since last tag
+        id: commits
+        if: steps.tag-info.outputs.skip == 'false'
+        run: |
+          LAST_TAG="${{ steps.tag-info.outputs.last_tag }}"
+          UNRELEASED=$(git rev-list "${LAST_TAG}..HEAD" --count)
+          echo "unreleased=${UNRELEASED}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for existing open cadence-check issue
+        id: open-issue
+        if: steps.tag-info.outputs.skip == 'false'
+        run: |
+          OPEN_COUNT=$(gh issue list --label "release:cadence-check" --state open --json number | jq 'length')
+          echo "open_count=${OPEN_COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate cadence
+        id: evaluate
+        if: steps.tag-info.outputs.skip == 'false'
+        run: |
+          HAS_OPEN=""
+          if [ "${{ steps.open-issue.outputs.open_count }}" -gt "0" ]; then
+            HAS_OPEN="--has-open-check-in-issue"
+          fi
+
+          RESULT=$(python scripts/ci/check_release_cadence.py \
+            --last-release-date "${{ steps.tag-info.outputs.last_tag_date }}" \
+            --unreleased-commits "${{ steps.commits.outputs.unreleased }}" \
+            --last-release-tag   "${{ steps.tag-info.outputs.last_tag }}" \
+            ${HAS_OPEN})
+
+          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
+          echo "should_open=$(echo "${RESULT}" | jq -r '.should_open_issue')" >> "$GITHUB_OUTPUT"
+          echo "weeks=$(echo "${RESULT}" | jq -r '.weeks_since_release')" >> "$GITHUB_OUTPUT"
+          echo "commits=$(echo "${RESULT}" | jq -r '.unreleased_commits')" >> "$GITHUB_OUTPUT"
+          echo "reason=$(echo "${RESULT}" | jq -r '.reason')" >> "$GITHUB_OUTPUT"
+
+      - name: Open cadence check-in issue
+        if: >-
+          steps.tag-info.outputs.skip == 'false' &&
+          steps.evaluate.outputs.should_open == 'true'
+        run: |
+          WEEKS="${{ steps.evaluate.outputs.weeks }}"
+          COMMITS="${{ steps.evaluate.outputs.commits }}"
+          LAST_TAG="${{ steps.tag-info.outputs.last_tag }}"
+
+          TITLE=$(python scripts/ci/check_release_cadence.py \
+            --last-release-date "${{ steps.tag-info.outputs.last_tag_date }}" \
+            --unreleased-commits "${{ steps.commits.outputs.unreleased }}" \
+            --last-release-tag   "${LAST_TAG}" \
+            --format title)
+
+          BODY=$(python scripts/ci/check_release_cadence.py \
+            --last-release-date "${{ steps.tag-info.outputs.last_tag_date }}" \
+            --unreleased-commits "${{ steps.commits.outputs.unreleased }}" \
+            --last-release-tag   "${LAST_TAG}" \
+            --format body)
+
+          gh issue create \
+            --title "${TITLE}" \
+            --body  "${BODY}" \
+            --label "release:cadence-check"
+
+      - name: Log decision (no issue opened)
+        if: >-
+          steps.tag-info.outputs.skip == 'false' &&
+          steps.evaluate.outputs.should_open != 'true'
+        run: |
+          echo "No issue opened. Reason: ${{ steps.evaluate.outputs.reason }}"
+          echo "Weeks since release: ${{ steps.evaluate.outputs.weeks }}"
+          echo "Unreleased commits: ${{ steps.evaluate.outputs.commits }}"
