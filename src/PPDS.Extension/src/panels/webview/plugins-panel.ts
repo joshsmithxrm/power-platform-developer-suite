@@ -508,8 +508,7 @@ function renderNode(flatNode: FlatNode): HTMLElement {
     // Toggle arrow (if has children)
     if (flatNode.node.hasChildren || (flatNode.node.children && flatNode.node.children.length > 0)) {
         const toggle = document.createElement('span');
-        toggle.className = 'tree-toggle';
-        toggle.textContent = flatNode.expanded ? '\u25BC' : '\u25BA'; // ▼ or ►
+        toggle.className = `tree-toggle codicon ${flatNode.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`;
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleNode(flatNode);

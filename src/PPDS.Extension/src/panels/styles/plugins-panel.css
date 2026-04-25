@@ -143,17 +143,24 @@
 }
 
 .tree-toggle {
-    width: 16px;
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
-    color: var(--vscode-descriptionForeground);
+    font-size: 16px;
+    color: var(--vscode-foreground);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.tree-toggle:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
 
 .tree-toggle-spacer {
-    width: 16px;
+    width: 22px;
     flex-shrink: 0;
 }
 
@@ -393,6 +400,32 @@
     background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
 }
 
+/* ── Toolbar Buttons (plain <button> elements matching vscode-button secondary) */
+.toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    padding: 4px 11px;
+    font-size: 13px;
+    font-family: var(--vscode-font-family);
+    border-radius: 2px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 18px;
+}
+
+.toolbar-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.toolbar-btn:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
+}
+
 /* ── Register Dropdown ───────────────────────────────────────────── */
 .register-dropdown {
     position: relative;
@@ -402,22 +435,27 @@
 .register-dropdown-menu {
     position: absolute;
     top: 100%;
-    left: 0;
+    right: 0;
     z-index: 50;
-    min-width: 200px;
+    min-width: 220px;
     max-height: 300px;
     overflow-y: auto;
     background: var(--vscode-menu-background, var(--vscode-editor-background));
     border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     padding: 4px 0;
+    border-radius: 3px;
+}
+
+.register-dropdown-menu.hidden {
+    display: none;
 }
 
 .register-dropdown-item {
     display: block;
     width: 100%;
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 6px 14px;
+    font-size: 13px;
     text-align: left;
     background: none;
     border: none;
@@ -425,11 +463,17 @@
     cursor: pointer;
     font-family: var(--vscode-font-family);
     white-space: nowrap;
+    line-height: 20px;
 }
 
 .register-dropdown-item:hover {
     background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
     color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}
+
+.register-dropdown-item:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
 }
 
 /* ── Loading / Error States ──────────────────────────────────────── */
