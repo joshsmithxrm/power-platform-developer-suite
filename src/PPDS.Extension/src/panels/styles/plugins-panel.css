@@ -21,27 +21,7 @@
     font-family: var(--vscode-font-family);
 }
 
-/* ── Search Input ────────────────────────────────────────────────── */
-#search-input {
-    background: var(--vscode-input-background);
-    color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent);
-    padding: 4px 8px;
-    border-radius: 2px;
-    outline: none;
-    font-family: var(--vscode-font-family);
-    font-size: 12px;
-}
-
-#search-input:focus {
-    border-color: var(--vscode-focusBorder);
-}
-
-#search-input::placeholder {
-    color: var(--vscode-input-placeholderForeground);
-}
-
-/* ── Filter Bar ─────────────────────────────────────────────────── */
+/* ── Filter Bar ──────────────────────────────────��──────────────── */
 #filter-bar {
     display: flex;
     flex-flow: row wrap;
@@ -196,6 +176,12 @@
     color: var(--vscode-descriptionForeground);
     opacity: 0.7;
     white-space: nowrap;
+}
+
+.view-mode-group {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
 }
 
 /* ── View Mode Active State ──────────────────────────────────────── */

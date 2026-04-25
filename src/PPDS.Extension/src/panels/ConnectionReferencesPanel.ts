@@ -397,13 +397,13 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     <vscode-button id="analyze-btn" appearance="secondary" title="Analyze orphaned references">Analyze</vscode-button>
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings for connection references">Sync Deployment Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Connections in Maker Portal">Maker Portal</vscode-button>
+    <span class="toolbar-spacer"></span>
+    <input id="search-input" type="text" placeholder="Search connection references..." class="toolbar-search" />
     <div id="solution-filter-container" class="solution-filter-container"></div>
     <div class="toolbar-segmented" id="inactive-toggle" title="Active = enabled in Dataverse (statecode 0). 'All' includes deactivated references.">
         <button class="seg-btn seg-active" id="seg-active" data-value="active" title="Show only enabled connection references">Active Only</button>
         <button class="seg-btn" id="seg-all" data-value="all" title="Include deactivated connection references">All</button>
     </div>
-    <input id="search-input" type="text" placeholder="Search connection references..." class="toolbar-search" />
-    <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 

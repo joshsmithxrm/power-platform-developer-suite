@@ -233,6 +233,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="maker-portal-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
+    <span class="toolbar-spacer"></span>
     <input id="search-input" type="text" placeholder="Search solutions..." class="toolbar-search" />
     <div class="segmented-control" id="visibility-filter" title="Show visible solutions only, or all including internal">
         <button class="seg-btn active" data-value="visible">Visible</button>
@@ -248,7 +249,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         <option value="publisher">Sort: Publisher</option>
         <option value="modifiedOn">Sort: Modified</option>
     </select>
-    <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 

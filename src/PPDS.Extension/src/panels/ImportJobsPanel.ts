@@ -216,8 +216,8 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh import jobs">Refresh</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Solution History in Maker Portal">Maker Portal</vscode-button>
-    <input id="search-input" type="text" placeholder="Search import jobs..." title="Filter by solution name, status, created by" class="toolbar-search" />
     <span class="toolbar-spacer"></span>
+    <input id="search-input" type="text" placeholder="Search import jobs..." title="Filter by solution name, status, created by" class="toolbar-search" />
     ${getEnvironmentPickerHtml()}
 </div>
 

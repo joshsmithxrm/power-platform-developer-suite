@@ -348,29 +348,6 @@
     padding: 8px 0;
 }
 
-/* ── Toolbar Search ──────────────────────────────────────────── */
-.toolbar-search {
-    flex: 1;
-    min-width: 120px;
-    max-width: 300px;
-    background: var(--vscode-input-background);
-    color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent);
-    padding: 3px 8px;
-    border-radius: 2px;
-    font-size: 12px;
-    font-family: var(--vscode-font-family);
-    outline: none;
-}
-
-.toolbar-search:focus {
-    outline: 1px solid var(--vscode-focusBorder);
-}
-
-.toolbar-search::placeholder {
-    color: var(--vscode-input-placeholderForeground);
-}
-
 /* ── Active/All segmented toggle (V-16) ──────────────────────── */
 .toolbar-segmented {
     display: flex;
