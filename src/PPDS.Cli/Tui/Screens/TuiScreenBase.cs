@@ -94,14 +94,22 @@ internal abstract class TuiScreenBase : ITuiScreen
     /// <summary>
     /// Gets the service provider for this screen's profile and environment.
     /// </summary>
-    protected Task<ServiceProvider> GetProviderAsync(CancellationToken ct) =>
-        Session.GetServiceProviderAsync(EnvironmentUrl!, ProfileName, ct);
+    protected Task<ServiceProvider> GetProviderAsync(CancellationToken ct)
+    {
+        if (EnvironmentUrl is null)
+            throw new InvalidOperationException("Cannot get service provider: screen has no bound environment.");
+        return Session.GetServiceProviderAsync(EnvironmentUrl, ProfileName, ct);
+    }
 
     /// <summary>
     /// Gets the SQL query service for this screen's profile and environment.
     /// </summary>
-    protected Task<ISqlQueryService> GetSqlServiceAsync(CancellationToken ct) =>
-        Session.GetSqlQueryServiceAsync(EnvironmentUrl!, ProfileName, ct);
+    protected Task<ISqlQueryService> GetSqlServiceAsync(CancellationToken ct)
+    {
+        if (EnvironmentUrl is null)
+            throw new InvalidOperationException("Cannot get SQL query service: screen has no bound environment.");
+        return Session.GetSqlQueryServiceAsync(EnvironmentUrl, ProfileName, ct);
+    }
 
     /// <inheritdoc />
     public void OnActivated(IHotkeyRegistry hotkeyRegistry)
