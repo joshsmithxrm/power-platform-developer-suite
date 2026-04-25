@@ -961,7 +961,7 @@ describe('DaemonClient', () => {
 
             const mockToken = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
             const result = await client.environmentVariablesSyncDeploymentSettings(
-                'MySolution', '/test/file.json', undefined, mockToken as any,
+                'MySolution', '/test/file.json', undefined, undefined, mockToken as any,
             );
 
             expect(mockConnection.sendRequest).toHaveBeenCalledWith(

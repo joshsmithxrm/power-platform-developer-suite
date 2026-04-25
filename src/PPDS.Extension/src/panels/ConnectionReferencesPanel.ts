@@ -328,6 +328,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                             this.solutionFilter!,
                             uri.fsPath,
                             this.environmentUrl,
+                            this.profileName,
                             cts.token,
                         );
                     } finally {

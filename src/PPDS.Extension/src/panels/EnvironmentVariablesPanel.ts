@@ -312,6 +312,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                             this.solutionFilter!,
                             uri.fsPath,
                             this.environmentUrl,
+                            this.profileName,
                             cts.token,
                         );
                     } finally {
