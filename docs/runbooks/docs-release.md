@@ -53,7 +53,7 @@ Expected steps (in order):
 2. Build `PPDS.sln -c Release` into `artifacts/bin`
 3. Run all four generators against the built assemblies
 4. Compute surface-change summary (added / removed / modified public API vs the previous tag)
-5. Acquire GitHub App installation token (via `actions/create-github-app-token@v2`)
+5. Acquire GitHub App installation token (via `actions/create-github-app-token@v3`)
 6. **ppds-docs PR:** create branch `release/v1.1.0-ref-{run_id}` in ppds-docs, push generated markdown, open PR titled `chore(reference): regenerate for v1.1.0`
 7. **Rollover PR:** in this repo, move Unshipped entries to Shipped, open PR `chore(release): v1.1.0 baseline rollover`
 

@@ -68,7 +68,7 @@ The Phase 0 triage decides per type whether it's **customer-facing** (annotate f
 
 ## GitHub App setup (release workflow)
 
-The release workflow (`.github/workflows/docs-release.yml`) uses a GitHub App to open cross-repo PRs in ppds-docs. The workflow uses [`actions/create-github-app-token@v2`](https://github.com/actions/create-github-app-token) to mint short-lived installation tokens — no custom token logic needed.
+The release workflow (`.github/workflows/docs-release.yml`) uses a GitHub App to open cross-repo PRs in ppds-docs. The workflow uses [`actions/create-github-app-token@v3`](https://github.com/actions/create-github-app-token) to mint short-lived installation tokens — no custom token logic needed.
 
 Setup is a **one-time** step per repo admin:
 
