@@ -200,6 +200,56 @@ public class SolutionServiceTests
         dict![typeCode].Should().Be(expectedName);
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ComponentTypeNames_CoversAllGeneratedEnumValues()
+    {
+        var dictField = typeof(SolutionService).GetField(
+            "ComponentTypeNames",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        dictField.Should().NotBeNull();
+
+        var dict = dictField!.GetValue(null) as Dictionary<int, string>
+            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+
+        foreach (var value in Enum.GetValues<PPDS.Dataverse.Generated.componenttype>())
+        {
+            dict.Should().ContainKey((int)value,
+                $"ComponentTypeNames must contain generated enum value {value} ({(int)value})");
+            dict[(int)value].Should().NotBeNullOrWhiteSpace(
+                $"ComponentTypeNames[{(int)value}] must have a non-empty label");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ComponentTypeNames_IncludesModelDrivenApp()
+    {
+        var dictField = typeof(SolutionService).GetField(
+            "ComponentTypeNames",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        var dict = dictField!.GetValue(null) as Dictionary<int, string>
+            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+
+        dict.Should().ContainKey(80);
+        dict[80].Should().Be("Model-Driven App");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ComponentTypeNames_NoDuplicateEnumNameCollisions()
+    {
+        var dictField = typeof(SolutionService).GetField(
+            "ComponentTypeNames",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        var dict = dictField!.GetValue(null) as Dictionary<int, string>
+            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+
+        // Connector1 (372) should display as "Connector", not the auto-generated "Connector1"
+        dict.Should().ContainKey(372);
+        dict[372].Should().Be("Connector");
+    }
+
     // ─── H5: D4 fault-wrapping tests ────────────────────────────────────────────
 
     private static SolutionService CreateService(IDataverseConnectionPool pool)

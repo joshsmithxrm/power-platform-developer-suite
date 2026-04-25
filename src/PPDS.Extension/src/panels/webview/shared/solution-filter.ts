@@ -13,7 +13,7 @@ interface SolutionFilterOptions {
     storageKey?: string;
     /** If provided, the filter defaults to this ID instead of null (All). */
     defaultValue?: string;
-    /** If true, the "All Solutions" option is not shown. */
+    /** If true, the "(No filter)" option is not shown. */
     hideAll?: boolean;
 }
 
@@ -59,6 +59,13 @@ export class SolutionFilter {
         return this.selectedId;
     }
 
+    setSelectedId(id: string | null): void {
+        if (id === this.selectedId) return;
+        this.selectedId = id;
+        this.persist();
+        this.render();
+    }
+
     /**
      * Update the storage key suffix for per-environment persistence (CR-09).
      * Call this when the environment changes, before setSolutions().
@@ -83,7 +90,7 @@ export class SolutionFilter {
     private render(): void {
         let html = '<select class="solution-filter-select" title="Filter by solution">';
         if (!this.options.hideAll) {
-            html += '<option value="">' + escapeHtml('All Solutions') + '</option>';
+            html += '<option value="">' + escapeHtml('(No filter)') + '</option>';
         }
         for (const s of this.solutions) {
             const selected = s.id === this.selectedId ? ' selected' : '';

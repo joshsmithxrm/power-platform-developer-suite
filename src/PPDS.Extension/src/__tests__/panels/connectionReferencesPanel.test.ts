@@ -28,7 +28,7 @@ describe('ConnectionReferencesPanel message types', () => {
         expect(messages).toHaveLength(13);
     });
 
-    it('WebviewToHost filterBySolution accepts null for "All Solutions"', () => {
+    it('WebviewToHost filterBySolution accepts null for "(No filter)"', () => {
         const msg: ConnectionReferencesPanelWebviewToHost = {
             command: 'filterBySolution',
             solutionId: null,
