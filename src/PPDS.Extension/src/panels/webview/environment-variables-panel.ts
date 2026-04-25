@@ -51,6 +51,9 @@ inactiveToggle.addEventListener('click', () => {
     includeInactive = !includeInactive;
     inactiveToggleLabel.textContent = includeInactive ? 'All' : 'Active Only';
     inactiveToggle.classList.toggle('active', includeInactive);
+    inactiveToggle.title = includeInactive
+        ? 'Showing all variables including deactivated. Click to show active only.'
+        : 'Active = enabled in Dataverse (statecode 0). Toggle to include deactivated variables.';
     vscode.postMessage({ command: 'setIncludeInactive', includeInactive });
 });
 

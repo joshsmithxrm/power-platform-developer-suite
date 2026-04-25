@@ -399,7 +399,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings">Sync Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Environment Variables in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
-    <div class="toolbar-toggle" id="inactive-toggle" title="Toggle active/inactive variables">
+    <div class="toolbar-toggle" id="inactive-toggle" title="Active = enabled in Dataverse (statecode 0). Toggle to include deactivated variables.">
         <span id="inactive-toggle-label">Active Only</span>
     </div>
     <input id="search-input" type="text" placeholder="Search variables..." class="toolbar-search" />

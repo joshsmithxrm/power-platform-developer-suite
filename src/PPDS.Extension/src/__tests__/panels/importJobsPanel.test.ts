@@ -11,7 +11,7 @@ describe('ImportJobsPanel message types', () => {
         const messages: ImportJobsPanelWebviewToHost[] = [
             { command: 'ready' },
             { command: 'refresh' },
-            { command: 'selectJob', id: 'test-id' },
+            { command: 'viewImportLog', id: 'test-id' },
             { command: 'requestEnvironmentList' },
             { command: 'openInMaker' },
             { command: 'copyToClipboard', text: 'test' },
@@ -20,16 +20,21 @@ describe('ImportJobsPanel message types', () => {
         expect(messages).toHaveLength(7);
     });
 
+    it('viewImportLog is the only command for opening import logs (#891)', () => {
+        const msg: ImportJobsPanelWebviewToHost = { command: 'viewImportLog', id: 'job-1' };
+        expect(msg.command).toBe('viewImportLog');
+        expect(msg.id).toBe('job-1');
+    });
+
     it('HostToWebview covers all commands', () => {
         const messages: ImportJobsPanelHostToWebview[] = [
             { command: 'updateEnvironment', name: 'test', envType: null, envColor: null },
-            { command: 'importJobsLoaded', jobs: [] },
-            { command: 'importJobDetailLoaded', id: 'test', data: null },
+            { command: 'importJobsLoaded', jobs: [], totalCount: 0 },
             { command: 'loading' },
             { command: 'error', message: 'test' },
             { command: 'daemonReconnected' },
         ];
-        expect(messages).toHaveLength(6);
+        expect(messages).toHaveLength(5);
     });
 
     it('ImportJobViewDto has all required fields', () => {
