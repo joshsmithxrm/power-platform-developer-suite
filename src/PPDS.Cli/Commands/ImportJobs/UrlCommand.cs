@@ -78,7 +78,7 @@ public static class UrlCommand
                 return ExitCodes.NotFoundError;
             }
 
-            var makerUrl = DataverseUrlBuilder.BuildImportJobMakerUrl(connectionInfo.EnvironmentUrl, importJobId);
+            var makerUrl = DataverseUrlBuilder.BuildImportJobMakerUrl(connectionInfo.EnvironmentUrl, importJobId, connectionInfo.Profile.Cloud);
 
             if (globalOptions.IsJsonMode)
             {

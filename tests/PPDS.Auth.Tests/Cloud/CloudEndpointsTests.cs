@@ -204,4 +204,46 @@ public class CloudEndpointsTests
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerapps.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://make.gov.powerapps.us")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://make.high.powerapps.us")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://make.apps.appsplatform.us")]
+    [InlineData(CloudEnvironment.China, "https://make.powerapps.cn")]
+    public void GetMakerPortalUrl_ReturnsCorrectUrl(CloudEnvironment cloud, string expected)
+    {
+        var result = CloudEndpoints.GetMakerPortalUrl(cloud);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetMakerPortalUrl_InvalidCloud_Throws()
+    {
+        var act = () => CloudEndpoints.GetMakerPortalUrl((CloudEnvironment)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://make.powerautomate.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://make.gov.powerautomate.us")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://make.high.powerautomate.us")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://make.flow.appsplatform.us")]
+    [InlineData(CloudEnvironment.China, "https://make.powerautomate.cn")]
+    public void GetFlowPortalUrl_ReturnsCorrectUrl(CloudEnvironment cloud, string expected)
+    {
+        var result = CloudEndpoints.GetFlowPortalUrl(cloud);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetFlowPortalUrl_InvalidCloud_Throws()
+    {
+        var act = () => CloudEndpoints.GetFlowPortalUrl((CloudEnvironment)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

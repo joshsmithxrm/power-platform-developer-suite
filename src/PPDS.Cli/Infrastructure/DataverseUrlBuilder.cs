@@ -1,3 +1,5 @@
+using PPDS.Auth.Cloud;
+
 namespace PPDS.Cli.Infrastructure;
 
 /// <summary>
@@ -36,40 +38,44 @@ public static class DataverseUrlBuilder
     /// Builds a Power Apps Maker portal URL using a Power Platform environment ID directly.
     /// Used when the environment ID is available but the environment URL may not contain org name.
     /// </summary>
-    public static string BuildMakerPortalUrl(string environmentId, string? path = "/solutions")
+    public static string BuildMakerPortalUrl(string environmentId, string? path = "/solutions", CloudEnvironment cloud = CloudEnvironment.Public)
     {
+        var makerBase = CloudEndpoints.GetMakerPortalUrl(cloud);
         var trimmedPath = (path ?? "/solutions").TrimStart('/');
-        return $"https://make.powerapps.com/environments/{environmentId}/{trimmedPath}";
+        return $"{makerBase}/environments/{environmentId}/{trimmedPath}";
     }
 
     /// <summary>
     /// Builds the Power Apps Maker portal URL for a specific solution.
     /// </summary>
-    public static string BuildSolutionMakerUrl(string environmentUrl, Guid solutionId)
+    public static string BuildSolutionMakerUrl(string environmentUrl, Guid solutionId, CloudEnvironment cloud = CloudEnvironment.Public)
     {
+        var makerBase = CloudEndpoints.GetMakerPortalUrl(cloud);
         var uri = new Uri(environmentUrl);
         var orgName = uri.Host.Split('.')[0];
-        return $"https://make.powerapps.com/environments/Default-{orgName}/solutions/{solutionId}";
+        return $"{makerBase}/environments/Default-{orgName}/solutions/{solutionId}";
     }
 
     /// <summary>
     /// Builds the Power Apps Maker portal URL for an environment variable definition.
     /// </summary>
-    public static string BuildEnvironmentVariableMakerUrl(string environmentUrl, Guid definitionId)
+    public static string BuildEnvironmentVariableMakerUrl(string environmentUrl, Guid definitionId, CloudEnvironment cloud = CloudEnvironment.Public)
     {
+        var makerBase = CloudEndpoints.GetMakerPortalUrl(cloud);
         var uri = new Uri(environmentUrl);
         var orgName = uri.Host.Split('.')[0];
-        return $"https://make.powerapps.com/environments/Default-{orgName}/solutions/environmentvariables/{definitionId}";
+        return $"{makerBase}/environments/Default-{orgName}/solutions/environmentvariables/{definitionId}";
     }
 
     /// <summary>
     /// Builds the Power Apps Maker portal URL for an import job.
     /// </summary>
-    public static string BuildImportJobMakerUrl(string environmentUrl, Guid importJobId)
+    public static string BuildImportJobMakerUrl(string environmentUrl, Guid importJobId, CloudEnvironment cloud = CloudEnvironment.Public)
     {
+        var makerBase = CloudEndpoints.GetMakerPortalUrl(cloud);
         var uri = new Uri(environmentUrl);
         var orgName = uri.Host.Split('.')[0];
-        return $"https://make.powerapps.com/environments/Default-{orgName}/solutions/importjob/{importJobId}";
+        return $"{makerBase}/environments/Default-{orgName}/solutions/importjob/{importJobId}";
     }
 
     /// <summary>
@@ -85,8 +91,9 @@ public static class DataverseUrlBuilder
     /// Builds the Power Automate flow details URL.
     /// Note: This takes a Power Platform environment ID (GUID string), not an environment URL.
     /// </summary>
-    public static string BuildFlowUrl(string environmentId, Guid flowId)
+    public static string BuildFlowUrl(string environmentId, Guid flowId, CloudEnvironment cloud = CloudEnvironment.Public)
     {
-        return $"https://make.powerautomate.com/environments/{environmentId}/flows/{flowId}/details";
+        var flowBase = CloudEndpoints.GetFlowPortalUrl(cloud);
+        return $"{flowBase}/environments/{environmentId}/flows/{flowId}/details";
     }
 }

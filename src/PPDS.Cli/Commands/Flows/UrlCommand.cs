@@ -95,7 +95,7 @@ public static class UrlCommand
                 return ExitCodes.ValidationError;
             }
 
-            var makerUrl = DataverseUrlBuilder.BuildFlowUrl(connectionInfo.EnvironmentId, flow.Id);
+            var makerUrl = DataverseUrlBuilder.BuildFlowUrl(connectionInfo.EnvironmentId, flow.Id, connectionInfo.Profile.Cloud);
 
             if (globalOptions.IsJsonMode)
             {

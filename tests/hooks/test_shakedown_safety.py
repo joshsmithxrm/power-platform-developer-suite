@@ -894,6 +894,55 @@ class TestIsMutation:
         assert not is_mut
 
 
+class TestMetadataMutations:
+    """#870: 3-level metadata commands (metadata <noun> <verb>) must be detected as mutations."""
+
+    @pytest.mark.parametrize("argv", [
+        ["ppds", "metadata", "table", "create", "--solution", "s", "--name", "t"],
+        ["ppds", "metadata", "table", "update", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "table", "delete", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "column", "create", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "column", "update", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "column", "delete", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "relationship", "create", "--solution", "s"],
+        ["ppds", "metadata", "relationship", "delete", "--solution", "s"],
+        ["ppds", "metadata", "key", "create", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "key", "delete", "--solution", "s", "--entity", "t"],
+        ["ppds", "metadata", "choice", "create", "--solution", "s"],
+        ["ppds", "metadata", "choice", "update", "--solution", "s"],
+        ["ppds", "metadata", "choice", "delete", "--solution", "s"],
+    ])
+    def test_metadata_noun_verb_detected_as_mutation(self, argv):
+        is_mut, reason = hook.is_mutation(argv)
+        assert is_mut, f"argv={argv}: expected mutation but got is_mutation=False"
+        verb = argv[3]
+        assert verb in reason, f"reason should mention '{verb}': {reason}"
+
+    def test_metadata_publish_still_detected(self):
+        is_mut, reason = hook.is_mutation(["ppds", "metadata", "publish"])
+        assert is_mut
+        assert "publish" in reason
+
+    @pytest.mark.parametrize("argv", [
+        ["ppds", "metadata", "entities"],
+        ["ppds", "metadata", "entity", "account"],
+    ])
+    def test_metadata_readonly_not_mutation(self, argv):
+        is_mut, _ = hook.is_mutation(argv)
+        assert not is_mut, f"argv={argv}: should not be a mutation"
+
+    @pytest.mark.parametrize("cmd", [
+        "ppds metadata table create --solution s --name t",
+        "ppds metadata column delete --solution s --entity t --name c",
+        "ppds metadata choice update --solution s --name c",
+    ])
+    def test_metadata_mutations_blocked_during_shakedown(self, fake_profile_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+
+
 class TestLoadSafetyConfig:
     def test_load_from_settings(self, tmp_path, monkeypatch):
         project = tmp_path / "p"
