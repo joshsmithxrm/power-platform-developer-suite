@@ -131,6 +131,40 @@ public class MdxEscapeTests
     }
 
     [Fact]
+    public void Prose_EscapesCurlyBracesInProse()
+    {
+        var result = MdxEscape.Prose("options: [{\"label\": \"Active\"}]");
+
+        result.Should().Be("options: [\\{\"label\": \"Active\"\\}]");
+    }
+
+    [Fact]
+    public void Prose_PreservesCurlyBracesInFencedCode()
+    {
+        var input = "text\n```json\n{\"key\": \"val\"}\n```\nmore";
+
+        var result = MdxEscape.Prose(input);
+
+        result.Should().Be(input);
+    }
+
+    [Fact]
+    public void Prose_PreservesCurlyBracesInInlineCode()
+    {
+        var result = MdxEscape.Prose("use `{foo}` here");
+
+        result.Should().Be("use `{foo}` here");
+    }
+
+    [Fact]
+    public void Heading_EscapesCurlyBraces()
+    {
+        var result = MdxEscape.Heading("Dict{K, V}");
+
+        result.Should().Be("Dict\\{K, V\\}");
+    }
+
+    [Fact]
     public void InlineCode_Deterministic()
     {
         // AC-19 determinism: same input → byte-identical output on repeat calls.

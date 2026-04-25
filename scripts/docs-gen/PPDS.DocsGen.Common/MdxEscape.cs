@@ -6,9 +6,10 @@ namespace PPDS.DocsGen.Common;
 /// Shared utility used by all docs-gen generators to produce MDX-safe markdown.
 /// </summary>
 /// <remarks>
-/// MDX parses angle brackets as JSX. Any <c>&lt;</c> or <c>&gt;</c> in prose
-/// that is not already inside a fenced code block or inline-code span must be
-/// HTML-entity-encoded or strict-MDX will reject the document (see AC-23).
+/// MDX parses angle brackets as JSX and curly braces as expressions. Any
+/// <c>&lt;</c>, <c>&gt;</c>, <c>{</c>, or <c>}</c> in prose that is not
+/// already inside a fenced code block or inline-code span must be escaped or
+/// strict-MDX will reject the document (see AC-23).
 /// </remarks>
 public static class MdxEscape
 {
@@ -104,6 +105,12 @@ public static class MdxEscape
                 case '>':
                     sb.Append("&gt;");
                     break;
+                case '{':
+                    sb.Append("\\{");
+                    break;
+                case '}':
+                    sb.Append("\\}");
+                    break;
                 default:
                     sb.Append(c);
                     break;
@@ -123,16 +130,7 @@ public static class MdxEscape
     /// </summary>
     public static string Heading(string raw)
     {
-        if (string.IsNullOrEmpty(raw))
-        {
-            return raw;
-        }
-
-        // Replace & first to avoid double-escaping entities produced below.
-        return raw
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;");
+        return Prose(raw);
     }
 
     /// <summary>
