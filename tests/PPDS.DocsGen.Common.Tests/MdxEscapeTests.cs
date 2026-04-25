@@ -95,6 +95,42 @@ public class MdxEscapeTests
     }
 
     [Fact]
+    public void Heading_EscapesAngleBrackets()
+    {
+        var result = MdxEscape.Heading("GenericProcessor<TRequest, TResponse>");
+
+        result.Should().Be("GenericProcessor&lt;TRequest, TResponse&gt;");
+    }
+
+    [Fact]
+    public void Heading_EscapesAmpersandBeforeAngleBrackets()
+    {
+        var result = MdxEscape.Heading("A & B<C>");
+
+        result.Should().Be("A &amp; B&lt;C&gt;");
+    }
+
+    [Fact]
+    public void Heading_PassesThroughPlainText()
+    {
+        var result = MdxEscape.Heading("Widget");
+
+        result.Should().Be("Widget");
+    }
+
+    [Fact]
+    public void Heading_ReturnsEmptyForEmpty()
+    {
+        MdxEscape.Heading(string.Empty).Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public void Heading_ReturnsNullForNull()
+    {
+        MdxEscape.Heading(null!).Should().BeNull();
+    }
+
+    [Fact]
     public void InlineCode_Deterministic()
     {
         // AC-19 determinism: same input → byte-identical output on repeat calls.

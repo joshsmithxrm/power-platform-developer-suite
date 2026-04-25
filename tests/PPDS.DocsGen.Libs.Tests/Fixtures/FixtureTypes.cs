@@ -83,6 +83,44 @@ public sealed class ExternalDocsConsumer
 }
 
 /// <summary>
+/// Generic processor that exercises MDX angle-bracket escaping in headings
+/// and type references.
+/// </summary>
+/// <typeparam name="TRequest">The request type.</typeparam>
+/// <typeparam name="TResponse">The response type.</typeparam>
+public sealed class GenericProcessor<TRequest, TResponse>
+{
+    /// <summary>
+    /// Creates a new processor with the given handler.
+    /// </summary>
+    /// <param name="handler">A function that maps requests to responses.</param>
+    public GenericProcessor(Func<TRequest, TResponse> handler)
+    {
+        Handler = handler;
+    }
+
+    /// <summary>
+    /// The handler function.
+    /// </summary>
+    public Func<TRequest, TResponse> Handler { get; }
+
+    /// <summary>
+    /// Processes a single request.
+    /// </summary>
+    /// <param name="request">The request to process.</param>
+    /// <returns>The response produced by the handler.</returns>
+    public TResponse Process(TRequest request) => Handler(request);
+
+    /// <summary>
+    /// Processes a batch of requests and returns all responses.
+    /// </summary>
+    /// <param name="requests">The batch of requests.</param>
+    /// <returns>A list of responses.</returns>
+    public List<TResponse> ProcessBatch(IEnumerable<TRequest> requests) =>
+        requests.Select(Handler).ToList();
+}
+
+/// <summary>
 /// Possible states for a fixture widget.
 /// </summary>
 public enum WidgetState

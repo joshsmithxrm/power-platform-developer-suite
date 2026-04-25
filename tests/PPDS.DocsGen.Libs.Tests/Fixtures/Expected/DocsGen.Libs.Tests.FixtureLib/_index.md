@@ -13,6 +13,7 @@
 | Type | Summary |
 |------|---------|
 | [ExternalDocsConsumer](./ExternalDocsConsumer.md) | Exercises the &lt;inheritdoc /&gt; fallback path: the type-level summary |
+| [GenericProcessor&lt;TRequest, TResponse&gt;](./GenericProcessor`2.md) | Generic processor that exercises MDX angle-bracket escaping in headings |
 | [Widget](./Widget.md) | Simple widget implementation. Has a constructor and a couple of members. |
 
 ## Records

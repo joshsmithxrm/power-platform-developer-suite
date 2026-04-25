@@ -115,6 +115,27 @@ public static class MdxEscape
     }
 
     /// <summary>
+    /// Escapes <c>&lt;</c> and <c>&gt;</c> for use in markdown headings and
+    /// other single-line prose contexts where fenced/inline code blocks are
+    /// not expected. This is lighter-weight than <see cref="Prose"/> because
+    /// headings never contain fenced blocks or inline-code spans — only the
+    /// raw angle brackets need escaping.
+    /// </summary>
+    public static string Heading(string raw)
+    {
+        if (string.IsNullOrEmpty(raw))
+        {
+            return raw;
+        }
+
+        // Replace & first to avoid double-escaping entities produced below.
+        return raw
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;");
+    }
+
+    /// <summary>
     /// Canonical, deterministic inline-code wrapper (AC-19). For any given
     /// input, produces exactly one output string that parses correctly under
     /// CommonMark and MDX.
