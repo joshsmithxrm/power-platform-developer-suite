@@ -6,7 +6,7 @@ Governing spec: [`specs/docs-generation.md`](../../specs/docs-generation.md). Ge
 
 ## Prerequisites (one-time)
 
-- **GitHub App provisioned** — `ppds-docs-bot` installed on both `ppds` and `ppds-docs` repos. App ID + private key stored as `PPDS_DOCS_APP_ID` and `PPDS_DOCS_APP_PRIVATE_KEY` secrets in the ppds repo. See the generator README § "GitHub App setup" for the full procedure.
+- **GitHub App provisioned** — `ppds-docs-bot` installed on both `ppds` and `ppds-docs` repos. App ID stored as `PPDS_DOCS_APP_ID` variable, private key stored as `PPDS_DOCS_APP_PRIVATE_KEY` secret, docs repo stored as `PPDS_DOCS_REPO` variable in the ppds repo. See the generator README § "GitHub App setup" for the full procedure.
 - **Phase 0 baselines current** — every library in `src/PPDS.{Dataverse,Migration,Auth,Plugins}/` has a non-empty `PublicAPI.Shipped.txt` and an `Unshipped.txt` that either is empty or reflects the net-new public API since the last release.
 
 ## Release steps

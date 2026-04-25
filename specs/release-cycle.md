@@ -1,7 +1,7 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-04-24
+**Last Updated:** 2026-04-25
 **Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 

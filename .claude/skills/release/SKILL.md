@@ -305,7 +305,7 @@ Tags trigger different workflows:
 |---|---|---|
 | `Auth-v*`, `Dataverse-v*`, `Migration-v*`, `Query-v*`, `Mcp-v*`, `Plugins-v*` | `publish-nuget.yml` | NuGet.org packages |
 | `Cli-v*` | `publish-nuget.yml` + `release-cli.yml` | NuGet tool package + multi-platform binaries (win-x64/arm64, osx-x64/arm64, linux-x64) + draft GitHub release published |
-| `Extension-v*` | `extension-publish.yml` (auto-dispatches on tag push; channel inferred from odd/even minor) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). One target failing does not fail the rest. Manual override: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable`. |
+| `Extension-v*` | `extension-publish.yml` (auto-dispatches on tag push; channel inferred from odd/even minor) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). Manual override: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable`. |
 
 **Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
 

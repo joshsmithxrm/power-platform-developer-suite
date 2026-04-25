@@ -60,3 +60,15 @@ def test_publish_conditions_allow_push_events(workflow: dict) -> None:
     assert "github.event_name == 'push'" in workflow_text, (
         "Publish step conditions must allow push events"
     )
+
+
+def test_channel_inference_from_tag_version(workflow: dict) -> None:
+    """AC-14: Channel is inferred from tag version — odd minor = pre-release,
+    even minor = stable. The workflow must contain the MINOR % 2 arithmetic."""
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "MINOR % 2" in workflow_text, (
+        "Channel determination must use MINOR % 2 to infer odd/even convention"
+    )
+    assert "Extension-v" in workflow_text and "sed" in workflow_text, (
+        "Channel determination must parse minor version from Extension-v* tag"
+    )

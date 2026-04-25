@@ -20,7 +20,7 @@ All four emit deterministic, byte-identical output on repeat runs (AC-19). All t
 | [`PPDS.DocsGen.Common/`](./PPDS.DocsGen.Common/) | Shared C# library: `IReferenceGenerator`, `MdxEscape`, `BannerHelper` |
 | [`smoke/`](./smoke/) | CI tool — extracts fenced `csharp` blocks from ppds-docs guides, wraps in one of three forms (complete file / top-level statements / method body), compiles via Roslyn |
 | [`lint-extension-contributions.js`](./lint-extension-contributions.js) | Pre-commit check — every `contributes.commands` entry in the extension's `package.json` has `title` + `category` |
-| [`app-token/`](./app-token/) | C# console helper — mints a GitHub App installation token for cross-repo PR creation |
+| [`app-token/`](./app-token/) | C# console helper — mints a GitHub App installation token (superseded by `actions/create-github-app-token@v3` in the workflow; retained for local debugging) |
 | [`compute-rollover-diff.sh`](./compute-rollover-diff.sh) | Moves `PublicAPI.Unshipped.txt` entries to `PublicAPI.Shipped.txt` at release time |
 | [`check-open-rollover.sh`](./check-open-rollover.sh) | Aborts a release when a prior rollover PR is still open |
 | [`compute-surface-summary.sh`](./compute-surface-summary.sh) | Produces the release-PR body listing added/removed/modified public API |

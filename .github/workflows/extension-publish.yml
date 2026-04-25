@@ -132,6 +132,10 @@ jobs:
             # Infer channel from tag version: odd minor = pre-release, even minor = stable
             TAG="${{ github.ref_name }}"
             MINOR=$(echo "$TAG" | sed -E 's/Extension-v[0-9]+\.([0-9]+)\..*/\1/')
+            if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
+              echo "::error::Could not parse minor version from tag $TAG"
+              exit 1
+            fi
             if (( MINOR % 2 == 1 )); then
               echo "is_prerelease=true" >> $GITHUB_OUTPUT
             else
