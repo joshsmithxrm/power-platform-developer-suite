@@ -11,7 +11,7 @@ public sealed class ProfileCreationDialogStateTests
     [Fact]
     public void StateRecord_CapturesAllProperties()
     {
-        var methods = new List<string> { "Device Code", "Browser", "Client Secret" };
+        List<string> methods = ["Device Code", "Browser", "Client Secret"];
 
         var state = new ProfileCreationDialogState(
             Title: "Create Profile",

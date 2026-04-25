@@ -21,6 +21,8 @@ public sealed class PluginTraceFilterTests
         Assert.Null(filter.OperationType);
         Assert.Null(filter.CorrelationId);
         Assert.Null(filter.OrderBy);
+        Assert.Null(filter.CreatedAfter);
+        Assert.Null(filter.CreatedBefore);
     }
 
     [Fact]
