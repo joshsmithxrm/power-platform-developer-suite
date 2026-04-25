@@ -511,7 +511,7 @@ def _rebase_source_branch(worktree, pr_number, logger):
     # 2. Stash workflow state files that are routinely dirty in agent worktrees.
     #    Only stash known-safe paths — if other files are dirty the rebase
     #    should fail so the user is aware of unexpected uncommitted changes.
-    _STASHABLE = (".claude/state/", ".workflow/")
+    _STASHABLE = (".claude/state/", ".workflow/", ".retros/")
     stashed = False
     try:
         status = _run(["git", "status", "--porcelain"])

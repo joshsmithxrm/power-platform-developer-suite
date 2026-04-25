@@ -1490,6 +1490,36 @@ class TestUntrackedFilesDoNotBlockStash:
         stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
         assert len(stash_calls) == 0
 
+    def test_retros_dir_is_stashable(self, tmp_path):
+        """Modified .retros/ files are safe to stash (written by monitor retro step)."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout=" M .retros/summary.json\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) >= 1
+        assert ".retros/summary.json" in stash_calls[0]
+
 
 class TestDetectBaseBranch:
     """Regression: gh pr view argv must not include ``--`` before the PR number.
