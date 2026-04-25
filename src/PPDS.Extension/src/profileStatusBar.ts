@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { DaemonClient, DaemonState } from './daemonClient.js';
+import { withRpcTimeout } from './daemonClient.js';
 
 /**
  * Status bar item that shows the currently active authentication profile.
@@ -41,8 +42,10 @@ export class ProfileStatusBar implements vscode.Disposable {
      * Fetches the current active profile from the daemon and updates the
      * status bar text. Safe to call at any time — errors are swallowed.
      */
+    private static readonly RPC_TIMEOUT_MS = 10_000;
+
     refresh(): void {
-        void this.client.authList().then(result => {
+        void withRpcTimeout(this.client.authList(), ProfileStatusBar.RPC_TIMEOUT_MS, 'authList').then(result => {
             // activeProfile is the Name field which may be null for unnamed profiles.
             // Fall back to finding the active profile in the list by isActive flag.
             let name = result.activeProfile;

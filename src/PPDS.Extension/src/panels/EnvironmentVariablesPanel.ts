@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
@@ -9,6 +10,8 @@ import { getNonce } from './webviewUtils.js';
 import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { EnvironmentVariablesPanelWebviewToHost, EnvironmentVariablesPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
+
+const SYNC_TIMEOUT_MS = 60_000;
 
 export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVariablesPanelWebviewToHost, EnvironmentVariablesPanelHostToWebview> {
     private static instances: EnvironmentVariablesPanel[] = [];
@@ -283,21 +286,38 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             return;
         }
 
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Sync Deployment Settings — Save To',
+        });
+
+        if (!uri) return;
+
+        const cts = new CancellationTokenSource();
+        const timeout = setTimeout(() => cts.cancel(), SYNC_TIMEOUT_MS);
+
         try {
-            // Ask the user to select a file to sync (open existing or create new)
-            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const uri = await vscode.window.showSaveDialog({
-                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
-                filters: { 'JSON Files': ['json'] },
-                title: 'Sync Deployment Settings — Save To',
-            });
-
-            if (!uri) return;
-
-            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
-                this.solutionFilter,
-                uri.fsPath,
-                this.environmentUrl,
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Syncing deployment settings…',
+                    cancellable: true,
+                },
+                async (_progress, progressToken) => {
+                    const tokenDisposable = progressToken.onCancellationRequested(() => cts.cancel());
+                    try {
+                        return await this.daemon.environmentVariablesSyncDeploymentSettings(
+                            this.solutionFilter!,
+                            uri.fsPath,
+                            this.environmentUrl,
+                            cts.token,
+                        );
+                    } finally {
+                        tokenDisposable.dispose();
+                    }
+                },
             );
 
             this.postMessage({
@@ -307,8 +327,15 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 connectionRefs: result.connectionReferences,
             });
         } catch (error) {
+            if (cts.token.isCancellationRequested) {
+                this.postMessage({ command: 'error', message: 'Sync cancelled — the operation timed out or was cancelled by the user.' });
+                return;
+            }
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
+        } finally {
+            clearTimeout(timeout);
+            cts.dispose();
         }
     }
 
@@ -372,7 +399,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings">Sync Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Environment Variables in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
-    <div class="toolbar-toggle" id="inactive-toggle" title="Toggle active/inactive variables">
+    <div class="toolbar-toggle" id="inactive-toggle" title="Active = enabled in Dataverse (statecode 0). Toggle to include deactivated variables.">
         <span id="inactive-toggle-label">Active Only</span>
     </div>
     <input id="search-input" type="text" placeholder="Search variables..." class="toolbar-search" />

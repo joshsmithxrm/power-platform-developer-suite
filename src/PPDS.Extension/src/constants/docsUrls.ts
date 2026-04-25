@@ -7,6 +7,4 @@
 
 export const DOCS_URL = 'https://joshsmithxrm.github.io/ppds-docs/';
 
-// TODO(shakedown #8): Confirm whether a /plugin-registration/ subpath exists at the docs site
-// and update this constant to the specific page once confirmed.
-export const PLUGIN_REGISTRATION_DOCS_URL = `${DOCS_URL}plugin-registration/`;
+export const PLUGIN_REGISTRATION_DOCS_URL = DOCS_URL;

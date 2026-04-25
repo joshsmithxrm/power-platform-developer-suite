@@ -327,6 +327,124 @@ code --install-extension JoshSmithXRM.power-platform-developer-suite  # stable
 # Then open VS Code and verify the sidebar loads, the version matches, basic commands work
 ```
 
+## Patch Release Procedure
+
+For a single-package patch (the common case — one bug fix or security fix in one package),
+the full ceremony above is unnecessary. Use this abbreviated single-package flow instead. See
+`specs/release-cycle.md` for the policy that decides when a `release:patch` label warrants a
+patch release.
+
+**When to use:**
+
+- Exactly one package is affected (e.g., a bug in `PPDS.Query` only)
+- The change is a bug fix or security fix — not a feature
+- The merged PR is labeled `release:patch`
+
+For multi-package patches, or any patch that touches the Extension, fall back to the full
+ceremony above.
+
+**Steps (abbreviated):**
+
+1. Identify the affected package from the merged PR'"'"'s changed paths (the
+   `post-merge-release-check.yml` workflow does this automatically and opens an issue).
+2. Update **only that package'"'"'s CHANGELOG** — add a new `[X.Y.Z] - YYYY-MM-DD` entry under
+   `[Unreleased]`. Do not touch the other 7 CHANGELOGs.
+3. Open a tiny CHANGELOG-only PR, merge it, then pull main.
+4. Push **one tag** for the affected package only:
+   ```bash
+   git tag <Prefix>-v<X.Y.Z>
+   git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
+   ```
+5. Monitor the **single** `publish-nuget.yml` workflow run that fires for that tag.
+6. Verify the publish on NuGet.org (see Section 10 above for the verification commands).
+
+**No release PR is required for single-package patches** — the original fix PR is the audit
+trail. The CHANGELOG-only PR in step 3 provides the version-bump record.
+
+**Cross-reference:** for multi-package patches (rare) or any patch touching the Extension,
+follow the full ceremony in Sections 1–10 above. The abbreviated flow only applies when the
+blast radius is a single NuGet package.
+
+## Stabilization Branch
+
+Stabilization branches (`release/X.Y`) are an **escape hatch** — used only when active
+development for the next minor (`X.(Y+1)`) has started on `main` before `X.Y` has been
+verified and shipped. For a solo maintainer this should be the rare exception, not the
+default. The default is to tag from `main`.
+
+**When to create one:**
+
+- A milestone (`vX.Y.0`) is feature-complete on `main` but you need to keep merging
+  unrelated work for `vX.(Y+1).0` before the `vX.Y.0` release is verified
+- A stable release is soaking and you want to land bug fixes for it without freezing `main`
+
+**When NOT to create one:**
+
+- The common case: tag directly from `main`. No branch, no merge-back overhead.
+- Patches: use the abbreviated patch flow above instead.
+
+**How to create one:**
+
+```bash
+git checkout main && git pull
+git checkout -b release/X.Y main
+git push -u origin release/X.Y
+```
+
+Create the branch at the commit where the milestone is feature-complete — typically the
+merge commit of the last issue/PR in the milestone.
+
+**What goes on it:**
+
+- **Cherry-pick bug fixes only.** No new features, no refactors. Each cherry-pick should
+  reference the original commit on `main`:
+  ```bash
+  git checkout release/X.Y
+  git cherry-pick -x <commit-sha-from-main>
+  git push origin release/X.Y
+  ```
+- The `-x` flag preserves the original commit hash in the message — critical for the
+  merge-back step below.
+
+**How to tag from it:**
+
+Tags push from the stabilization branch, **not** from `main`:
+
+```bash
+git checkout release/X.Y
+git pull
+git tag <Prefix>-v<X.Y.Z>
+git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
+```
+
+The CI publish workflows fire from the tag — they don'"'"'t care which branch it points to.
+
+**How to merge back to main:**
+
+After the release publishes, merge the stabilization branch back into `main` so any
+fixes that were cherry-picked don'"'"'t drift:
+
+```bash
+git checkout main && git pull
+git merge --no-ff release/X.Y -m "merge: release/X.Y back into main after vX.Y.Z"
+# Resolve conflicts manually — favor main'"'"'s version for files that diverged
+git push origin main
+```
+
+If every commit on `release/X.Y` was cherry-picked from `main`, the merge is empty and you
+can simply delete the branch. If divergence happened (rare — usually only happens when a
+bug was fixed on the branch first and never on main), resolve conflicts case-by-case.
+
+**Cleanup:**
+
+```bash
+# Once main has all the fixes:
+git branch -d release/X.Y
+git push origin :release/X.Y
+```
+
+Do not keep stabilization branches around indefinitely — they'"'"'re intentionally short-lived.
+
 ## Known Gotchas
 
 ### Gotcha 1: `release-cli.yml` fails with HTTP 422 "tag_name was used by an immutable release"

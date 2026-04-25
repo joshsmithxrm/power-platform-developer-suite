@@ -120,16 +120,12 @@ const table = new DataTable<ImportJobViewDto>({
     emptyMessage: 'No import jobs found',
 });
 
-// ── Solution link click handler (IJ-01): delegated on content ──
+// ── Solution link default prevention (IJ-01) ──
+// Row click (onRowClick) already sends viewImportLog; this handler only
+// prevents the browser from following the anchor's href="#".
 content.addEventListener('click', (e) => {
     const link = (e.target as HTMLElement).closest<HTMLElement>('a.solution-link');
-    if (!link) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const id = link.dataset['id'];
-    if (id) {
-        vscode.postMessage({ command: 'viewImportLog', id });
-    }
+    if (link) e.preventDefault();
 });
 
 // ── Button handlers ──

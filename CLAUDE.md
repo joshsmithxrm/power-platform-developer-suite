@@ -18,6 +18,7 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 
 - Use Application Services for all persistent state — single code path for CLI / TUI / RPC.
 - Accept `IProgressReporter` for any operation likely to exceed 1 second.
+- Complete the shipping pipeline: `/gates` → `/verify` → `/pr`. Never stop after `/gates` or `/verify` — the work is not done until `/pr` creates the pull request.
 
 ## Testing
 

@@ -1,41 +1,61 @@
 {
   "version": 1,
-  "updated": "2026-04-21T05:42:33Z",
+  "updated": "2026-04-25T02:24:51Z",
   "open_work": [
     {
-      "session_id": "903eedac",
-      "started": "2026-04-20T18:48:32Z",
-      "branch": "feat/shakedown-guard",
-      "worktree": ".worktrees/shakedown-guard",
-      "issues": [],
-      "areas": [
-        "src/PPDS.Cli/Services",
-        ".claude/hooks",
-        ".claude/skills/shakedown"
+      "session_id": "7ce1ca2d",
+      "started": "2026-04-25T02:24:51Z",
+      "branch": "feat/profile-env-ux",
+      "worktree": ".worktrees/profile-env-ux",
+      "issues": [
+        887,
+        888,
+        903
       ],
-      "intent": "service-layer IShakedownGuard to close safety triad findings #6/#23/#37"
+      "areas": [
+        "extension"
+      ],
+      "intent": "Profile/environment UX redesign: status bar grouping, panel vs status bar, cmd palette filtering"
     },
     {
-      "session_id": "468161f6",
-      "started": "2026-04-20T23:36:50Z",
-      "branch": "feat/pipeline-ceiling",
-      "worktree": ".worktrees/pipeline-ceiling",
-      "issues": [],
-      "areas": [
-        "pipeline"
+      "session_id": "14ad7d38",
+      "started": "2026-04-25T02:24:51Z",
+      "branch": "feat/plugin-reg-styling",
+      "worktree": ".worktrees/plugin-reg-styling",
+      "issues": [
+        896,
+        897
       ],
-      "intent": "Raise HARD_CEILING to 7200s and add --max-stage-seconds override flag"
+      "areas": [
+        "extension"
+      ],
+      "intent": "Plugin Registration styling: unstyled buttons and collapse arrow sizing"
     },
     {
-      "session_id": "df895c3e",
-      "started": "2026-04-21T05:42:33Z",
-      "branch": "fix/pr-monitor-push-refspec",
-      "worktree": ".worktrees/pr-monitor-push-refspec",
-      "issues": [],
-      "areas": [
-        "pr-monitor"
+      "session_id": "c54fdb3d",
+      "started": "2026-04-25T02:24:51Z",
+      "branch": "feat/metadata-browser-config",
+      "worktree": ".worktrees/metadata-browser-config",
+      "issues": [
+        901
       ],
-      "intent": "fix pr-monitor git push missing explicit refspec \u2014 causes ready-flip skip when branch name differs from upstream"
+      "areas": [
+        "extension"
+      ],
+      "intent": "Metadata Browser: add entity configuration tab and global optionset details"
+    },
+    {
+      "session_id": "eb69b7d9",
+      "started": "2026-04-25T02:24:51Z",
+      "branch": "feat/docs-plugin-reg",
+      "worktree": ".worktrees/docs-plugin-reg",
+      "issues": [
+        900
+      ],
+      "areas": [
+        "extension"
+      ],
+      "intent": "Fix docs plugin-registration 404 page"
     }
   ]
 }

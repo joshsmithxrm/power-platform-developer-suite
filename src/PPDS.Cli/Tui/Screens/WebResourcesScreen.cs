@@ -370,8 +370,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             Application.MainLoop.Invoke(() =>
             {
-                // Build list with "All Solutions" option at top
-                var items = new List<string> { "(All Solutions)" };
+                var items = new List<string> { "(No filter)" };
                 items.AddRange(solutions.Select(s => $"{s.FriendlyName} ({s.UniqueName})"));
 
                 var listView = new ListView(items)

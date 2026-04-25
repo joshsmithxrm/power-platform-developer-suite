@@ -42,8 +42,8 @@ def _mock_pipeline_v8_helpers(monkeypatch):
 # AC-51: All hook commands use relative paths
 # ---------------------------------------------------------------------------
 class TestHookPaths:
-    def test_all_commands_use_relative_paths(self):
-        """AC-51: No ${CLAUDE_PROJECT_DIR} in any hook command string."""
+    def test_all_commands_use_absolute_paths(self):
+        """AC-51 (updated #906): All hook commands use $CLAUDE_PROJECT_DIR."""
         settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
         with open(settings_path, "r") as f:
             settings = json.load(f)
@@ -53,13 +53,10 @@ class TestHookPaths:
             for matcher_entry in matchers:
                 for hook in matcher_entry.get("hooks", []):
                     cmd = hook.get("command", "")
-                    assert "CLAUDE_PROJECT_DIR" not in cmd, (
-                        f"Hook command in {event_type} still uses "
-                        f"CLAUDE_PROJECT_DIR: {cmd}"
-                    )
                     if ".claude/hooks/" in cmd:
-                        assert cmd.startswith('python ".claude/hooks/'), (
-                            f"Hook command should use relative path: {cmd}"
+                        assert "$CLAUDE_PROJECT_DIR" in cmd, (
+                            f"Hook command in {event_type} uses a relative "
+                            f"path that breaks when CWD drifts: {cmd}"
                         )
 
 
@@ -139,6 +136,31 @@ class TestPipelineEnv:
 
         env_passed = mock_popen.call_args.kwargs.get("env", {})
         assert env_passed.get("PPDS_PIPELINE") == "1"
+        logger.close()
+
+    def test_claude_env_excludes_msys_no_pathconv(self, tmp_path):
+        """#910: MSYS_NO_PATHCONV must not propagate to claude subprocesses.
+
+        It suppresses MSYS path conversion for hooks, causing
+        $CLAUDE_PROJECT_DIR to resolve as C:\\c\\Users\\... instead of
+        C:\\Users\\... — breaking every hook invocation.
+        """
+        import pipeline
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        mock_proc = unittest.mock.MagicMock()
+        mock_proc.poll.return_value = 0
+        mock_proc.returncode = 0
+
+        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pipeline.run_claude(str(tmp_path), "test", logger, "test-stage")
+
+        env_passed = mock_popen.call_args.kwargs.get("env", {})
+        assert "MSYS_NO_PATHCONV" not in env_passed, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
         logger.close()
 
 
@@ -398,7 +420,7 @@ class TestStreamJsonOutput:
 # ---------------------------------------------------------------------------
 class TestHeartbeatMultiSignal:
     def test_heartbeat_multi_signal(self):
-        """AC-68: Heartbeat log contains git_changes and commits fields."""
+        """AC-68: Heartbeat log contains git_changes, commits, and children fields."""
         import pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -407,7 +429,7 @@ class TestHeartbeatMultiSignal:
             pipeline.log(
                 logger, "test", "HEARTBEAT",
                 elapsed="60s", pid=12345, output_bytes=1024,
-                git_changes=5, commits=3, activity="active",
+                git_changes=5, commits=3, children=2, activity="active",
             )
             logger.close()
 
@@ -417,6 +439,7 @@ class TestHeartbeatMultiSignal:
             assert "git_changes=5" in content
             assert "commits=3" in content
             assert "output_bytes=1024" in content
+            assert "children=2" in content
             assert "activity=active" in content
 
 
@@ -458,6 +481,95 @@ class TestActivityClassification:
         activity, idle = pipeline.classify_activity(100, 100, 3, 3, 2, 2, 2)
         assert activity == "stalled"
         assert idle == 3
+
+    def test_active_when_has_children(self):
+        """AC-147: Child processes count as liveness signal (#917)."""
+        import pipeline
+        activity, idle = pipeline.classify_activity(
+            100, 100, 3, 3, 2, 2, 4, has_children=True,
+        )
+        assert activity == "active"
+        assert idle == 0
+
+    def test_idle_when_no_children(self):
+        """AC-147: No children + no other activity = idle (default behavior)."""
+        import pipeline
+        activity, idle = pipeline.classify_activity(
+            100, 100, 3, 3, 2, 2, 1, has_children=False,
+        )
+        assert activity == "idle"
+        assert idle == 2
+
+    def test_children_prevent_stall_timeout(self):
+        """AC-147: Child processes prevent stall accumulation across beats."""
+        import pipeline
+        consecutive_idle = 0
+        for _ in range(pipeline.STALL_LIMIT + 2):
+            activity, consecutive_idle = pipeline.classify_activity(
+                100, 100, 3, 3, 2, 2, consecutive_idle, has_children=True,
+            )
+        assert consecutive_idle == 0
+        assert activity == "active"
+
+
+# ---------------------------------------------------------------------------
+# AC-147: Child process detection
+# ---------------------------------------------------------------------------
+class TestChildProcessDetection:
+    def test_returns_zero_when_no_children(self):
+        """AC-147: get_child_process_count returns 0 when subprocess finds none."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run") as mock_run:
+            mock_run.return_value = unittest.mock.Mock(
+                returncode=1, stdout="", stderr="",
+            )
+            assert pipeline.get_child_process_count(99999) == 0
+
+    def test_returns_count_on_unix(self):
+        """AC-147: get_child_process_count parses pgrep output on non-Windows."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run") as mock_run, \
+             unittest.mock.patch("pipeline.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            mock_run.return_value = unittest.mock.Mock(
+                returncode=0, stdout="1234\n5678\n",
+            )
+            assert pipeline.get_child_process_count(100) == 2
+
+    def test_returns_count_on_windows(self):
+        """AC-147: get_child_process_count parses wmic output on Windows."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run") as mock_run, \
+             unittest.mock.patch("pipeline.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            mock_run.return_value = unittest.mock.Mock(
+                returncode=0, stdout="ProcessId  \n1234  \n5678  \n",
+            )
+            assert pipeline.get_child_process_count(100) == 2
+
+    def test_handles_timeout_gracefully(self):
+        """AC-147: get_child_process_count returns 0 on subprocess timeout."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run",
+                                 side_effect=subprocess.TimeoutExpired("cmd", 5)):
+            assert pipeline.get_child_process_count(100) == 0
+
+    def test_wmic_no_instances_returns_zero(self):
+        """AC-147: wmic 'No Instance(s) Available.' is not counted as a child."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run") as mock_run, \
+             unittest.mock.patch("pipeline.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            mock_run.return_value = unittest.mock.Mock(
+                returncode=0,
+                stdout="No Instance(s) Available.\n",
+            )
+            assert pipeline.get_child_process_count(100) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2493,8 +2605,8 @@ class TestConvergeRunsOnPassWithFindings:
 # AC-123: Hook path resolution in worktrees
 # ---------------------------------------------------------------------------
 class TestHookPathResolution:
-    def test_hooks_use_relative_paths_that_work_in_worktrees(self):
-        """AC-123: Hook commands use relative paths that resolve in worktrees."""
+    def test_hooks_use_claude_project_dir(self):
+        """AC-123 (updated #906): Hook commands use $CLAUDE_PROJECT_DIR for CWD-safe resolution."""
         settings_path = os.path.join(REPO_ROOT, ".claude", "settings.json")
         with open(settings_path, "r") as f:
             settings = json.load(f)
@@ -2505,16 +2617,14 @@ class TestHookPathResolution:
                 for hook in matcher_entry.get("hooks", []):
                     cmd = hook.get("command", "")
                     if ".claude/hooks/" in cmd:
-                        # Verify it uses a simple relative path (no env var expansion)
-                        assert "CLAUDE_PROJECT_DIR" not in cmd, (
-                            f"Hook should not use CLAUDE_PROJECT_DIR: {cmd}"
+                        assert "$CLAUDE_PROJECT_DIR" in cmd, (
+                            f"Hook should use $CLAUDE_PROJECT_DIR: {cmd}"
                         )
-                        # Verify the hook file actually exists
-                        # Extract filename from command
                         parts = cmd.split('"')
                         for part in parts:
                             if ".claude/hooks/" in part:
-                                hook_path = os.path.join(REPO_ROOT, part)
+                                rel = part.replace("$CLAUDE_PROJECT_DIR/", "")
+                                hook_path = os.path.join(REPO_ROOT, rel)
                                 assert os.path.exists(hook_path), (
                                     f"Hook file not found: {hook_path}"
                                 )

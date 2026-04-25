@@ -949,4 +949,43 @@ describe('DaemonClient', () => {
             await expect(unconnectedClient.restart()).resolves.not.toThrow();
         });
     });
+
+    describe('environmentVariablesSyncDeploymentSettings', () => {
+        it('should pass cancellation token to sendRequest when provided', async () => {
+            const mockResult = {
+                filePath: '/test/deployment-settings.json',
+                environmentVariables: { added: 1, removed: 0, preserved: 2 },
+                connectionReferences: { added: 0, removed: 0, preserved: 1 },
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const mockToken = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
+            const result = await client.environmentVariablesSyncDeploymentSettings(
+                'MySolution', '/test/file.json', undefined, mockToken as any,
+            );
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(
+                'environmentVariables/syncDeploymentSettings',
+                { solutionId: 'MySolution', filePath: '/test/file.json' },
+                mockToken,
+            );
+            expect(result).toEqual(mockResult);
+        });
+
+        it('should not pass token when none provided', async () => {
+            const mockResult = {
+                filePath: '/test/deployment-settings.json',
+                environmentVariables: { added: 0, removed: 0, preserved: 0 },
+                connectionReferences: { added: 0, removed: 0, preserved: 0 },
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            await client.environmentVariablesSyncDeploymentSettings('MySolution', '/test/file.json');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(
+                'environmentVariables/syncDeploymentSettings',
+                { solutionId: 'MySolution', filePath: '/test/file.json' },
+            );
+        });
+    });
 });

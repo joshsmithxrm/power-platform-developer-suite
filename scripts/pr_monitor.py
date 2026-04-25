@@ -384,7 +384,6 @@ def run_triage(worktree, pr_number, comments, logger):
     )
 
     env = os.environ.copy()
-    env["MSYS_NO_PATHCONV"] = "1"
     env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree).resolve())
 
@@ -512,13 +511,16 @@ def _rebase_source_branch(worktree, pr_number, logger):
     # 2. Stash workflow state files that are routinely dirty in agent worktrees.
     #    Only stash known-safe paths — if other files are dirty the rebase
     #    should fail so the user is aware of unexpected uncommitted changes.
-    _STASHABLE = (".claude/state/", ".workflow/")
+    _STASHABLE = (".claude/state/", ".workflow/", ".retros/")
     stashed = False
     try:
         status = _run(["git", "status", "--porcelain"])
         if status.returncode == 0 and status.stdout.strip():
+            # Exclude untracked (??) files — they don't block rebase and
+            # shouldn't poison the safety check for modified files.
             dirty = [l.strip().split(maxsplit=1)[-1].strip('"')
-                     for l in status.stdout.strip().splitlines() if l.strip()]
+                     for l in status.stdout.strip().splitlines()
+                     if l.strip() and not l.strip().startswith("??")]
             safe = all(any(f.startswith(p) for p in _STASHABLE) for f in dirty)
             if safe and dirty:
                 stash = _run(["git", "stash", "push", "-m", "pr-monitor-rebase",
@@ -575,7 +577,23 @@ def _rebase_source_branch(worktree, pr_number, logger):
         _pop_stash()
         return False
 
-    # 5. Push with lease using explicit origin + HEAD:<branch> refspec.
+    # 5. Fetch the feature branch so the local tracking ref is current.
+    #    Without this, --force-with-lease rejects the push when another
+    #    process (e.g. the triage agent) has pushed to the remote since
+    #    this worktree last fetched.
+    try:
+        fetch_src = _run(["git", "fetch", "origin", "--", current])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("rebase", "FETCH_SOURCE_ERROR", reason=str(e), branch=current)
+        _pop_stash()
+        return False
+    if fetch_src.returncode != 0:
+        logger.log("rebase", "FETCH_SOURCE_ERROR", branch=current,
+                   stderr=fetch_src.stderr.strip()[:200])
+        _pop_stash()
+        return False
+
+    # 6. Push with lease using explicit origin + HEAD:<branch> refspec.
     try:
         push = _run(
             ["git", "push", "--force-with-lease", "origin", f"HEAD:{current}"],
@@ -770,7 +788,6 @@ def run_retro(worktree, logger):
         return "skipped"
 
     env = os.environ.copy()
-    env["MSYS_NO_PATHCONV"] = "1"
     env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree).resolve())
 
@@ -874,9 +891,20 @@ def run_notify(worktree, pr_number, logger, message=None):
 STEPS = ["ci", "gemini", "triage", "ready", "retro", "notify"]
 
 
+_SUCCESS_STATUSES = frozenset({"done", "pass"})
+
+
 def step_completed(result, step_name):
-    """Check if a step was already completed (for --resume)."""
-    return result.get("steps_completed", {}).get(step_name) is not None
+    """Check if a step completed successfully (for --resume).
+
+    Only terminal success statuses count. Failed/skipped/errored steps
+    are retried on resume — the conditions that caused the failure may
+    have changed (e.g. dirty files cleaned up, new commits pushed).
+    """
+    step = result.get("steps_completed", {}).get(step_name)
+    if step is None:
+        return False
+    return step.get("status") in _SUCCESS_STATUSES
 
 
 def mark_step(result, step_name, status):

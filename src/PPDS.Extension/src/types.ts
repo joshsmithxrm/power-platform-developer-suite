@@ -316,8 +316,24 @@ export interface MetadataEntityResponse {
 export interface MetadataEntityDetailDto extends MetadataEntitySummaryDto {
     primaryIdAttribute: string | null;
     primaryNameAttribute: string | null;
+    primaryImageAttribute: string | null;
     entitySetName: string | null;
+    logicalCollectionName: string | null;
+    pluralName: string | null;
     isActivity: boolean;
+    isActivityParty: boolean;
+    hasNotes: boolean;
+    hasActivities: boolean;
+    isValidForAdvancedFind: boolean;
+    isAuditEnabled: boolean;
+    changeTrackingEnabled: boolean;
+    isBusinessProcessEnabled: boolean;
+    isQuickCreateEnabled: boolean;
+    isDuplicateDetectionEnabled: boolean;
+    isValidForQueue: boolean;
+    isIntersect: boolean;
+    canCreateMultiple: boolean;
+    canUpdateMultiple: boolean;
     attributes: MetadataAttributeDto[];
     oneToManyRelationships: MetadataRelationshipDto[];
     manyToOneRelationships: MetadataRelationshipDto[];
@@ -402,6 +418,9 @@ export interface MetadataOptionSetDto {
     displayName: string | null;
     optionSetType: string;
     isGlobal: boolean;
+    isCustomOptionSet: boolean;
+    isManaged: boolean;
+    description: string | null;
     options: MetadataOptionValueDto[];
 }
 

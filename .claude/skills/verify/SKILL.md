@@ -249,6 +249,23 @@ python scripts/workflow-state.py set verify.{surface}_commit_ref "$(git rev-pars
 Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
 Surface key `workflow`: `/verify workflow` → writes `verify.workflow` (structural validation for process code).
 
+## Workflow Continuation — MANDATORY
+
+Verify is ONE step in the shipping pipeline — not the last one.
+
+After verify passes, check whether `/implement` is driving the pipeline:
+
+```bash
+python scripts/workflow-state.py get phase
+```
+
+- **If phase is `implementing`:** return verify results to the `/implement` orchestrator. It manages the remaining pipeline steps.
+- **Otherwise (standalone invocation):** proceed to `/pr` immediately. Do NOT stop after reporting verification results. Do NOT wait for the user to tell you what to do next.
+
+  The shipping pipeline is `/gates` → `/verify` → `/pr`. You are at step 2. Proceed to step 3.
+
+Exception: if verify FAILS, stop and fix the failures first. Re-run `/verify` after fixing, then proceed to `/pr`.
+
 ## Rules
 
 1. **Unit tests first** -- always. Don't waste interactive cycles on broken code.

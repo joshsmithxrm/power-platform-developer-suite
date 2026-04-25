@@ -76,13 +76,21 @@ describe('MetadataBrowserPanel message types', () => {
                 { command: 'updateEnvironment', name: 'dev', envType: 'Sandbox', envColor: '#00ff00' },
                 { command: 'entitiesLoaded', entities: [], intersectHiddenCount: 0 },
                 { command: 'globalChoicesLoaded', choices: [] },
-                { command: 'globalChoiceDetailLoaded', choice: { name: 'statuscode', displayName: 'Status', optionSetType: 'Picklist', isGlobal: true, options: [] } },
+                { command: 'globalChoiceDetailLoaded', choice: { name: 'statuscode', displayName: 'Status', optionSetType: 'Picklist', isGlobal: true, isCustomOptionSet: false, isManaged: true, description: null, options: [] } },
                 { command: 'entityDetailLoaded', entity: {
                     logicalName: 'account', schemaName: 'Account', displayName: 'Account',
                     isCustomEntity: false, isManaged: false, ownershipType: 'UserOwned',
                     objectTypeCode: 1, description: null,
                     primaryIdAttribute: 'accountid', primaryNameAttribute: 'name',
-                    entitySetName: 'accounts', isActivity: false,
+                    primaryImageAttribute: null, entitySetName: 'accounts',
+                    logicalCollectionName: 'accounts', pluralName: 'Accounts',
+                    isActivity: false, isActivityParty: false,
+                    hasNotes: true, hasActivities: true,
+                    isValidForAdvancedFind: true, isAuditEnabled: false,
+                    changeTrackingEnabled: false, isBusinessProcessEnabled: false,
+                    isQuickCreateEnabled: true, isDuplicateDetectionEnabled: true,
+                    isValidForQueue: false, isIntersect: false,
+                    canCreateMultiple: true, canUpdateMultiple: true,
                     attributes: [], oneToManyRelationships: [], manyToOneRelationships: [],
                     manyToManyRelationships: [], keys: [], privileges: [], globalOptionSets: [],
                 } },
@@ -199,6 +207,9 @@ describe('MetadataBrowserPanel message types', () => {
                 displayName: 'Status Reason',
                 optionSetType: 'Status',
                 isGlobal: true,
+                isCustomOptionSet: false,
+                isManaged: true,
+                description: 'Status reason for the record',
                 options: [
                     { value: 1, label: 'Active', color: '#00ff00', description: null },
                     { value: 2, label: 'Inactive', color: null, description: 'Record is inactive' },
@@ -206,6 +217,9 @@ describe('MetadataBrowserPanel message types', () => {
             };
             expect(dto.name).toBe('statuscode');
             expect(dto.isGlobal).toBe(true);
+            expect(dto.isCustomOptionSet).toBe(false);
+            expect(dto.isManaged).toBe(true);
+            expect(dto.description).toBe('Status reason for the record');
             expect(dto.options).toHaveLength(2);
             expect(dto.options[0].label).toBe('Active');
         });
@@ -216,6 +230,9 @@ describe('MetadataBrowserPanel message types', () => {
                 displayName: null,
                 optionSetType: 'Picklist',
                 isGlobal: false,
+                isCustomOptionSet: true,
+                isManaged: false,
+                description: null,
                 options: [],
             };
             expect(dto.options).toHaveLength(0);
@@ -235,8 +252,24 @@ describe('MetadataBrowserPanel message types', () => {
                 description: null,
                 primaryIdAttribute: 'accountid',
                 primaryNameAttribute: 'name',
+                primaryImageAttribute: 'entityimage',
                 entitySetName: 'accounts',
+                logicalCollectionName: 'accounts',
+                pluralName: 'Accounts',
                 isActivity: false,
+                isActivityParty: false,
+                hasNotes: true,
+                hasActivities: true,
+                isValidForAdvancedFind: true,
+                isAuditEnabled: true,
+                changeTrackingEnabled: false,
+                isBusinessProcessEnabled: false,
+                isQuickCreateEnabled: true,
+                isDuplicateDetectionEnabled: true,
+                isValidForQueue: false,
+                isIntersect: false,
+                canCreateMultiple: true,
+                canUpdateMultiple: true,
                 attributes: [
                     {
                         logicalName: 'name',
@@ -273,8 +306,14 @@ describe('MetadataBrowserPanel message types', () => {
             };
             expect(dto.primaryIdAttribute).toBe('accountid');
             expect(dto.primaryNameAttribute).toBe('name');
+            expect(dto.primaryImageAttribute).toBe('entityimage');
+            expect(dto.logicalCollectionName).toBe('accounts');
+            expect(dto.pluralName).toBe('Accounts');
             expect(dto.entitySetName).toBe('accounts');
             expect(dto.isActivity).toBe(false);
+            expect(dto.isAuditEnabled).toBe(true);
+            expect(dto.canCreateMultiple).toBe(true);
+            expect(dto.hasNotes).toBe(true);
             expect(dto.attributes).toHaveLength(1);
             expect(dto.attributes[0].isPrimaryName).toBe(true);
         });

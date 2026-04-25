@@ -34,7 +34,7 @@ public static class Program
     /// <summary>Target installation account — the token is minted for the
     /// app installation on this GitHub account/org's <c>ppds-docs</c> repo.
     /// </summary>
-    private const string TargetInstallationLogin = "ppds-docs";
+    private const string TargetInstallationLogin = "joshsmithxrm";
 
     /// <summary>
     /// Entry point.

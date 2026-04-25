@@ -1,0 +1,65 @@
+name: Milestone Release Check
+
+on:
+  milestone:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  check-milestone-completion:
+    name: Check milestone completion and open release issue
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Query merged PRs for milestone
+        env:
+          MILESTONE_TITLE: ${{ github.event.milestone.title }}
+        run: |
+          gh pr list \
+            --state merged \
+            --json number,title \
+            --search "milestone:\"$MILESTONE_TITLE\"" \
+            > merged_prs.json
+
+      - name: Run milestone completion check
+        id: completion_check
+        env:
+          MILESTONE_TITLE: ${{ github.event.milestone.title }}
+          MILESTONE_DESC: ${{ github.event.milestone.description }}
+        run: |
+          python scripts/ci/check_milestone_completion.py \
+            --milestone "$MILESTONE_TITLE" \
+            --description "$MILESTONE_DESC" \
+            --merged-prs merged_prs.json \
+            --out issue_body.md || true
+
+          if [ -s issue_body.md ]; then
+            echo "should_open_issue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_open_issue=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open release readiness issue
+        if: steps.completion_check.outputs.should_open_issue == 'true'
+        env:
+          MILESTONE_TITLE: ${{ github.event.milestone.title }}
+        run: |
+          gh issue create \
+            --title "Milestone $MILESTONE_TITLE complete — ready for release" \
+            --body-file issue_body.md \
+            --label "release:minor"

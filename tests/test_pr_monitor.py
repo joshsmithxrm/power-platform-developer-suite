@@ -1174,6 +1174,43 @@ class TestReplyDedupe:
             assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS
 
 
+class TestStepCompletedResumeLogic:
+    """Regression #929: failed steps must be retried on --resume.
+
+    step_completed() previously returned True for any recorded status,
+    including failures like 'rebase_failed' and 'error'. On resume,
+    this caused failed steps to be skipped instead of retried.
+    """
+
+    def test_done_is_completed(self):
+        result = {"steps_completed": {"ready": {"status": "done", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is True
+
+    def test_pass_is_completed(self):
+        result = {"steps_completed": {"ci": {"status": "pass", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ci") is True
+
+    def test_rebase_failed_is_not_completed(self):
+        result = {"steps_completed": {"ready": {"status": "rebase_failed", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_skipped_is_not_completed(self):
+        result = {"steps_completed": {"ready": {"status": "skipped", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_error_is_not_completed(self):
+        result = {"steps_completed": {"retro": {"status": "error", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "retro") is False
+
+    def test_missing_step_is_not_completed(self):
+        result = {"steps_completed": {}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_no_steps_completed_key(self):
+        result = {}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+
 class TestRebaseBeforeReady:
     """Meta-retro finding #6: rebase source branch before flipping ready."""
 
@@ -1202,15 +1239,18 @@ class TestRebaseBeforeReady:
         assert result is True
         # First call: gh pr view to detect base
         assert call_log[0][:3] == ["gh", "pr", "view"]
-        # Then fetch + rebase + rev-parse + push with explicit refspec
+        # Then fetch-base + status (stash check) + rebase + rev-parse
+        # + fetch-source (tracking ref update) + push
         assert call_log[1] == ["git", "fetch", "origin", "--", "main"]
-        assert call_log[2] == ["git", "rebase", "--", "origin/main"]
-        assert call_log[3] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
-        assert call_log[4] == [
+        assert call_log[2] == ["git", "status", "--porcelain"]
+        assert call_log[3] == ["git", "rebase", "--", "origin/main"]
+        assert call_log[4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        assert call_log[5] == ["git", "fetch", "origin", "--", "feature-branch"]
+        assert call_log[6] == [
             "git", "push", "--force-with-lease",
             "origin", "HEAD:feature-branch",
         ]
-        assert len(call_log) == 5  # no abort path
+        assert len(call_log) == 7  # no abort path
 
     def test_rebase_conflict_aborts_and_returns_false(self, tmp_path):
         """On rebase conflict: git rebase --abort is called; no push; returns False."""
@@ -1307,6 +1347,178 @@ class TestRebaseBeforeReady:
         # Must NOT have used main
         assert not any(
             c == ["git", "fetch", "origin", "--", "main"] for c in call_log)
+
+
+class TestStaleTrackingRef:
+    """Regression #929: fetch feature branch before push to avoid stale tracking ref.
+
+    After the triage agent pushes to the remote, the local tracking ref is
+    stale.  --force-with-lease compares the stale ref against the actual
+    remote and rejects the push.  The fix fetches the feature branch before
+    pushing.
+    """
+
+    def test_fetch_source_runs_before_push(self, tmp_path):
+        """The feature branch must be fetched between rev-parse and push."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/my-branch\n", stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        fetch_src = ["git", "fetch", "origin", "--", "feat/my-branch"]
+        assert fetch_src in call_log
+        fetch_idx = call_log.index(fetch_src)
+        push_idx = next(
+            i for i, c in enumerate(call_log) if c[:2] == ["git", "push"])
+        rev_parse_idx = next(
+            i for i, c in enumerate(call_log)
+            if c[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        assert rev_parse_idx < fetch_idx < push_idx
+
+    def test_fetch_source_failure_returns_false_and_does_not_push(self, tmp_path):
+        """If fetching the feature branch fails, no push and return False."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/stale\n", stderr="")
+            # Fail the source-branch fetch (but not the base-branch fetch)
+            if cmd == ["git", "fetch", "origin", "--", "feat/stale"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=128, stdout="",
+                    stderr="fatal: couldn't find remote ref feat/stale")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is False
+        assert not any(c[:2] == ["git", "push"] for c in call_log)
+
+
+class TestUntrackedFilesDoNotBlockStash:
+    """Regression #929: untracked files should not poison the stash safety check.
+
+    git status --porcelain emits ?? for untracked files.  These don't block
+    rebase, but if included in the dirty list they prevent stashing of
+    legitimately dirty (modified) files that DO block rebase.
+    """
+
+    def test_untracked_file_excluded_from_stash_safety_check(self, tmp_path):
+        """Modified .claude/state/ file is stashed even when an untracked .retros/ file exists."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout=" M .claude/state/in-flight-issues.json\n"
+                           "?? .retros/summary.md\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) >= 1
+        push_call = stash_calls[0]
+        assert push_call[:4] == ["git", "stash", "push", "-m"]
+        assert ".claude/state/in-flight-issues.json" in push_call
+        assert ".retros/summary.md" not in push_call
+
+    def test_only_untracked_files_skips_stash_entirely(self, tmp_path):
+        """When all dirty entries are untracked, no stash is needed."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout="?? .retros/summary.md\n"
+                           "?? some-other-untracked.txt\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) == 0
+
+    def test_retros_dir_is_stashable(self, tmp_path):
+        """Modified .retros/ files are safe to stash (written by monitor retro step)."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout=" M .retros/summary.json\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) >= 1
+        assert ".retros/summary.json" in stash_calls[0]
 
 
 class TestDetectBaseBranch:
@@ -1530,3 +1742,60 @@ class TestTriageLoopSkipsRepliedComments:
         # Round 1 + round 2 (new comment) = 2 triage calls. Round 3
         # has no unreplied comments so the loop exits.
         assert mock_triage.call_count == 2
+
+
+class TestMsysPathconvNotInherited:
+    """#910: MSYS_NO_PATHCONV must not propagate to claude subprocesses.
+
+    Setting MSYS_NO_PATHCONV=1 in the claude -p env suppresses MSYS path
+    conversion for ALL child processes, including hooks. Claude Code hooks
+    reference $CLAUDE_PROJECT_DIR which needs MSYS->Windows conversion
+    when passed to Python. Without conversion, /c/Users/... becomes
+    C:\\c\\Users\\... — a non-existent path.
+    """
+
+    def test_triage_env_excludes_msys_no_pathconv(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        comments = [{"id": 1, "user": "g", "path": "a.py", "line": 1, "body": "fix"}]
+
+        stage_dir = os.path.join(wt, ".workflow", "stages")
+        os.makedirs(stage_dir, exist_ok=True)
+        jsonl_path = os.path.join(stage_dir, "pr-monitor-triage.jsonl")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        def fake_wait(timeout=None):
+            with open(jsonl_path, "w") as f:
+                f.write(json.dumps({"type": "result", "result": "[]"}) + "\n")
+            return 0
+
+        mock_proc.wait.side_effect = fake_wait
+
+        with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pr_monitor.run_triage(wt, 42, comments, logger)
+
+        assert mock_popen.called, "subprocess.Popen was not called (check PPDS_SHAKEDOWN)"
+        env = mock_popen.call_args.kwargs.get("env", {})
+        assert "MSYS_NO_PATHCONV" not in env, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
+
+    def test_retro_env_excludes_msys_no_pathconv(self, tmp_path):
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        stage_dir = os.path.join(wt, ".workflow", "stages")
+        os.makedirs(stage_dir, exist_ok=True)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+
+        with patch("pr_monitor.subprocess.Popen", return_value=mock_proc) as mock_popen:
+            pr_monitor.run_retro(wt, logger)
+
+        assert mock_popen.called, "subprocess.Popen was not called (check PPDS_SHAKEDOWN)"
+        env = mock_popen.call_args.kwargs.get("env", {})
+        assert "MSYS_NO_PATHCONV" not in env, \
+            "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"

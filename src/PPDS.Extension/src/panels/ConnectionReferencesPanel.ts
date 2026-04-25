@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
@@ -12,6 +13,8 @@ import { assertNever } from './webview/shared/assert-never.js';
 
 /** Default Solution GUID — always present in every environment. */
 const DEFAULT_SOLUTION_ID = 'fd140aaf-4df4-11dd-bd17-0019b9312238';
+
+const SYNC_TIMEOUT_MS = 60_000;
 
 export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionReferencesPanelWebviewToHost, ConnectionReferencesPanelHostToWebview> {
     private static instances: ConnectionReferencesPanel[] = [];
@@ -299,20 +302,38 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             return;
         }
 
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Sync Deployment Settings \u2014 Save To',
+        });
+
+        if (!uri) return;
+
+        const cts = new CancellationTokenSource();
+        const timeout = setTimeout(() => cts.cancel(), SYNC_TIMEOUT_MS);
+
         try {
-            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const uri = await vscode.window.showSaveDialog({
-                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
-                filters: { 'JSON Files': ['json'] },
-                title: 'Sync Deployment Settings \u2014 Save To',
-            });
-
-            if (!uri) return;
-
-            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
-                this.solutionFilter,
-                uri.fsPath,
-                this.environmentUrl,
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Syncing deployment settings\u2026',
+                    cancellable: true,
+                },
+                async (_progress, progressToken) => {
+                    const tokenDisposable = progressToken.onCancellationRequested(() => cts.cancel());
+                    try {
+                        return await this.daemon.environmentVariablesSyncDeploymentSettings(
+                            this.solutionFilter!,
+                            uri.fsPath,
+                            this.environmentUrl,
+                            cts.token,
+                        );
+                    } finally {
+                        tokenDisposable.dispose();
+                    }
+                },
             );
 
             this.postMessage({
@@ -322,8 +343,15 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 connectionRefs: result.connectionReferences,
             });
         } catch (error) {
+            if (cts.token.isCancellationRequested) {
+                this.postMessage({ command: 'error', message: 'Sync cancelled \u2014 the operation timed out or was cancelled by the user.' });
+                return;
+            }
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
+        } finally {
+            clearTimeout(timeout);
+            cts.dispose();
         }
     }
 
@@ -370,9 +398,9 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings for connection references">Sync Deployment Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Connections in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
-    <div class="toolbar-segmented" id="inactive-toggle" title="Toggle active/all connection references">
-        <button class="seg-btn seg-active" id="seg-active" data-value="active">Active Only</button>
-        <button class="seg-btn" id="seg-all" data-value="all">All</button>
+    <div class="toolbar-segmented" id="inactive-toggle" title="Active = enabled in Dataverse (statecode 0). 'All' includes deactivated references.">
+        <button class="seg-btn seg-active" id="seg-active" data-value="active" title="Show only enabled connection references">Active Only</button>
+        <button class="seg-btn" id="seg-all" data-value="all" title="Include deactivated connection references">All</button>
     </div>
     <input id="search-input" type="text" placeholder="Search connection references..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
