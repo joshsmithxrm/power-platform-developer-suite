@@ -185,9 +185,20 @@ If the monitor fails to launch (e.g., `claude` command not found), fall back to 
 python scripts/workflow-state.py set pr.monitor_launched "fallback: <reason>"
 ```
 
-### 6. Present Summary and Return
+### 6. Completion Gate (MANDATORY) <!-- since: PR#956 rationale -->
 
-The monitor is now handling the lifecycle. Present status and return control to the user:
+Before reporting success, verify both output artifacts:
+
+1. **Monitor launched**: confirm `.workflow/pr-monitor.pid` exists and the process is running (`kill -0`). If missing, fail: `"⚠ Monitor PID file missing — launch failed"`.
+2. **Gemini review posted**: poll `gh pr view {N} --json comments` every 30s for up to 10 minutes. Look for a comment authored by the Gemini bot. If absent after timeout, fail: `"⚠ Gemini comment not posted within 10 min — re-push or investigate"`.
+
+If EITHER artifact is missing after its check, do NOT declare `/pr` complete. Surface the diagnostic to the user and stop.
+
+**Bypass:** pass `--skip-gemini-check` to skip Gemini polling (e.g., Gemini is known-down). Monitor verification is never skippable.
+
+### 7. Present Summary and Return
+
+The completion gate passed and the monitor is handling the lifecycle. Present status and return control to the user:
 
 ```
 PR created (draft): {url}
@@ -198,14 +209,15 @@ Monitor launched (PID {pid}) — handling:
   • Triage + threaded replies
   • Draft → ready conversion (after triage)
   • Retro + notification
+Gemini review: ✅ verified (comment posted)
 
 Check progress: /status
 Monitor log: .workflow/pr-monitor.log
 ```
 
-Do NOT wait for the monitor to finish. Do NOT do inline Gemini polling. The monitor handles everything asynchronously.
+Do NOT wait for the monitor to finish its full lifecycle. The completion gate already verified Gemini posted — the monitor handles triage, replies, and ready-flip from here.
 
-### 7. Post-Merge Cleanup Surfacing
+### 8. Post-Merge Cleanup Surfacing
 
 After the PR merges, the worktree and local branch are no longer needed.
 Cleanup itself is user-initiated — `/cleanup` deletes worktrees and local

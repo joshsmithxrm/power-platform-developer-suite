@@ -13,12 +13,16 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Write CLI status messages to `stdout` — use `Console.Error.WriteLine`. `stdout` is reserved for data.
 - Throw raw exceptions from Application Services — wrap in `PpdsException` with an `ErrorCode`.
 - Trust an agent research summary without reading the underlying code yourself.
+- Edit `PublicAPI.Unshipped.txt` during a rebase — accept `--theirs` and let it regenerate; manual edits produce phantom API-drift conflicts. <!-- since: PR#956 rationale -->
 
 ## ALWAYS
 
 - Use Application Services for all persistent state — single code path for CLI / TUI / RPC.
 - Accept `IProgressReporter` for any operation likely to exceed 1 second.
 - Complete the shipping pipeline: `/gates` → `/verify` → `/pr`. Never stop after `/gates` or `/verify` — the work is not done until `/pr` creates the pull request.
+- On `scripts/pipeline.py` failure, recover via `python scripts/pipeline.py resume <stage>` or sequential `/gates` → `/verify` → `/pr` — never ad-hoc parallel debug. <!-- since: PR#956 rationale -->
+- Hard cap on simultaneous background TaskCreate jobs: ≤3. If a 4th is needed, stop and ask. <!-- since: PR#956 rationale -->
+- For any test/build failure, invoke `/debug` first; do not hypothesize without evidence. <!-- since: PR#956 rationale -->
 
 ## Testing
 
