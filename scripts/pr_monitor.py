@@ -41,6 +41,8 @@ from triage_common import (
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
 CI_MAX_WAIT = 3600          # 60 minutes max for CI
+CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
+CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
@@ -198,6 +200,25 @@ def get_repo_slug(worktree):
     return _get_repo_slug(worktree, shakedown=bool(SHAKEDOWN))
 
 
+def _escalate_ci_no_checks(worktree, pr_number, logger, consecutive_errors,
+                           first_error_time):
+    """Fire a notification when CI checks are not being posted."""
+    elapsed = int(time.time() - first_error_time)
+    logger.log("ci", "ESCALATION",
+               consecutive_errors=consecutive_errors,
+               elapsed_since_first=f"{elapsed}s")
+    msg = (
+        f"PR #{pr_number} has had no CI checks reported for "
+        f">{elapsed}s after {consecutive_errors} polls. Investigate: "
+        f"(a) CI workflow posting, (b) branch protection rules, "
+        f"(c) workflow file syntax."
+    )
+    try:
+        run_notify(worktree, pr_number, logger, message=msg)
+    except Exception:  # noqa: BLE001 — fire-and-forget
+        logger.log("ci", "ESCALATION_NOTIFY_ERROR")
+
+
 def poll_ci(worktree, pr_number, logger):
     """Poll CI checks until all pass, any fail, or timeout.
 
@@ -208,6 +229,22 @@ def poll_ci(worktree, pr_number, logger):
         return "pass"
 
     start = time.time()
+    consecutive_errors = 0
+    first_error_time = None
+    escalated = False
+
+    def _track_error():
+        nonlocal consecutive_errors, first_error_time, escalated
+        consecutive_errors += 1
+        if first_error_time is None:
+            first_error_time = time.time()
+        if (not escalated
+                and consecutive_errors >= CI_ESCALATION_THRESHOLD
+                and time.time() - first_error_time >= CI_ESCALATION_MIN_ELAPSED):
+            _escalate_ci_no_checks(worktree, pr_number, logger,
+                                   consecutive_errors, first_error_time)
+            escalated = True
+
     while time.time() - start < CI_MAX_WAIT:
         try:
             result = subprocess.run(
@@ -217,11 +254,13 @@ def poll_ci(worktree, pr_number, logger):
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.log("ci", "POLL_ERROR", error=str(e))
+            _track_error()
             time.sleep(CI_POLL_INTERVAL)
             continue
 
         if result.returncode != 0:
             logger.log("ci", "POLL_ERROR", stderr=result.stderr.strip()[:200])
+            _track_error()
             time.sleep(CI_POLL_INTERVAL)
             continue
 
@@ -235,8 +274,16 @@ def poll_ci(worktree, pr_number, logger):
         if not checks:
             logger.log("ci", "NO_CHECKS_YET",
                        elapsed=f"{int(time.time() - start)}s")
+            _track_error()
             time.sleep(CI_POLL_INTERVAL)
             continue
+
+        # Checks found — reset error tracking and log recovery if escalated
+        if escalated:
+            logger.log("ci", "RECOVERED",
+                       ci_checks_posting=True, after_polls=consecutive_errors)
+        consecutive_errors = 0
+        first_error_time = None
 
         # `gh pr checks` returns `bucket` as the conclusion category:
         #   pass | fail | pending | skipping | cancel
