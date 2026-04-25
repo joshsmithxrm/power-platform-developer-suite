@@ -49,9 +49,18 @@ public sealed record WebResourceTrackingFile(
         }
 
         WebResourceTrackingFile? deserialized;
-        await using (var stream = File.OpenRead(path))
+        try
         {
+            await using var stream = File.OpenRead(path);
             deserialized = await JsonSerializer.DeserializeAsync<WebResourceTrackingFile>(stream, SerializerOptions, cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            // Don't leak internal type names from System.Text.Json into user-facing output.
+            throw new PpdsException(
+                ErrorCodes.Validation.SchemaInvalid,
+                $"Tracking file '{TrackingFileRelativePath}' in '{folder}' is corrupt or malformed. Re-run 'ppds webresources pull {folder}' to recreate it.",
+                ex);
         }
 
         if (deserialized is null)
@@ -70,7 +79,7 @@ public sealed record WebResourceTrackingFile(
         {
             throw new PpdsException(
                 ErrorCodes.Validation.SchemaInvalid,
-                $"Tracking file schema version {deserialized.Version} is invalid. Expected version 1 or later.");
+                $"Tracking file '{TrackingFileRelativePath}' in '{folder}' is missing or has an invalid 'version' field (expected 1). Re-run 'ppds webresources pull {folder}' to recreate it.");
         }
 
         // Rebuild Resources with OrdinalIgnoreCase so lookups match the comparer used at pull time.

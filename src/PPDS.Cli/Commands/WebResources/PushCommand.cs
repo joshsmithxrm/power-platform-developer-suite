@@ -15,9 +15,9 @@ public static class PushCommand
 {
     public static Command Create()
     {
-        var pathArgument = new Argument<string>("path")
+        var folderArgument = new Argument<string>("folder")
         {
-            Description = "Folder containing pulled web resources (must have .ppds/webresources.json)"
+            Description = "Folder previously populated by 'ppds webresources pull'"
         };
 
         var forceOption = new Option<bool>("--force")
@@ -37,7 +37,7 @@ public static class PushCommand
 
         var command = new Command("push", "Push locally-modified web resources back to Dataverse")
         {
-            pathArgument,
+            folderArgument,
             WebResourcesCommandGroup.ProfileOption,
             WebResourcesCommandGroup.EnvironmentOption,
             forceOption,
@@ -49,7 +49,7 @@ public static class PushCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var path = parseResult.GetValue(pathArgument)!;
+            var path = parseResult.GetValue(folderArgument)!;
             var profile = parseResult.GetValue(WebResourcesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(WebResourcesCommandGroup.EnvironmentOption);
             var force = parseResult.GetValue(forceOption);
@@ -74,6 +74,20 @@ public static class PushCommand
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+        // Validate filesystem preconditions before authenticating — avoids a wasted auth round-trip
+        // (and a misleading "Connected as ..." banner) when the user pointed push at a folder that
+        // hasn't been pulled yet.
+        try
+        {
+            ValidatePushTarget(path);
+        }
+        catch (PpdsException ex)
+        {
+            var error = ExceptionMapper.Map(ex, context: $"pushing web resources from '{path}'", debug: globalOptions.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
+        }
 
         try
         {
@@ -177,6 +191,38 @@ public static class PushCommand
             var error = ExceptionMapper.Map(ex, context: $"pushing web resources from '{path}'", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
+        }
+    }
+
+    /// <summary>
+    /// Cheap filesystem check executed before authenticating to Dataverse. Mirrors the
+    /// preconditions enforced by <see cref="WebResourceSyncService.PushAsync"/> so the user
+    /// gets the same error without paying for an auth round-trip.
+    /// </summary>
+    private static void ValidatePushTarget(string path)
+    {
+        var rootAbsolute = Path.GetFullPath(path);
+
+        if (File.Exists(rootAbsolute))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Path '{path}' is a file, not a folder. Pass the folder that contains the pulled web resources (the folder with the .ppds/webresources.json tracking file).");
+        }
+
+        if (!Directory.Exists(rootAbsolute))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.FileNotFound,
+                $"Folder '{path}' does not exist. Run 'ppds webresources pull {path}' first.");
+        }
+
+        var trackingPath = Path.Combine(rootAbsolute, WebResourceTrackingFile.TrackingFileRelativePath);
+        if (!File.Exists(trackingPath))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.FileNotFound,
+                $"Tracking file '{WebResourceTrackingFile.TrackingFileRelativePath}' not found in '{path}'. Run 'ppds webresources pull {path}' first.");
         }
     }
 

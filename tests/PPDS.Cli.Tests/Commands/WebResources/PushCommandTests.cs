@@ -17,10 +17,10 @@ public class PushCommandTests
     }
 
     [Fact]
-    public void Create_HasPathArgument()
+    public void Create_HasFolderArgument()
     {
         _command.Arguments.Should().ContainSingle();
-        _command.Arguments[0].Name.Should().Be("path");
+        _command.Arguments[0].Name.Should().Be("folder");
     }
 
     [Theory]

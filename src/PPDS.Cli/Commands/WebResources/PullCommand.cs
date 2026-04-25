@@ -28,7 +28,7 @@ public static class PullCommand
 
         var typeOption = new Option<string?>("--type", "-t")
         {
-            Description = "Filter by type: text, image, data, or specific (js, css, html, xml, png, etc.)"
+            Description = "Filter by type: text, image, data, or specific type (js, css, html, xml, png, etc.)"
         };
 
         var nameOption = new Option<string?>("--name")
