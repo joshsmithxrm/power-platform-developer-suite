@@ -269,8 +269,36 @@ def release_lock(lock_path):
         pass
 
 
+def get_child_process_count(pid):
+    """Count active child processes of a given PID."""
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["wmic", "process", "where", f"ParentProcessId={pid}",
+                 "get", "ProcessId"],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            if result.returncode == 0:
+                lines = [l.strip() for l in result.stdout.strip().splitlines()
+                         if l.strip().isdigit()]
+                return len(lines)
+        else:
+            result = subprocess.run(
+                ["pgrep", "-P", str(pid)],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            if result.returncode == 0:
+                return len(result.stdout.strip().splitlines())
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
+        pass
+    return 0
+
+
 def classify_activity(current_size, last_size, git_changes, last_git_changes,
-                      commits, last_commits, consecutive_idle):
+                      commits, last_commits, consecutive_idle, *,
+                      has_children=False):
     """Classify heartbeat activity based on multi-signal detection.
 
     Returns (activity_string, updated_consecutive_idle).
@@ -279,7 +307,7 @@ def classify_activity(current_size, last_size, git_changes, last_git_changes,
     git_grew = git_changes > last_git_changes
     commits_grew = commits > last_commits
 
-    if output_grew or git_grew or commits_grew:
+    if output_grew or git_grew or commits_grew or has_children:
         return "active", 0
     else:
         consecutive_idle += 1
@@ -452,12 +480,14 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
                     current_size = 0
 
                 git_changes, commits = get_git_activity(worktree_path)
+                child_count = get_child_process_count(proc.pid)
 
                 activity, consecutive_idle = classify_activity(
                     current_size, last_log_size,
                     git_changes, last_git_changes,
                     commits, last_commits,
                     consecutive_idle,
+                    has_children=child_count > 0,
                 )
 
                 last_log_size = current_size
@@ -467,7 +497,8 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
                 log(logger, stage, "HEARTBEAT",
                     elapsed=f"{int(elapsed)}s", pid=proc.pid,
                     output_bytes=current_size, git_changes=git_changes,
-                    commits=commits, activity=activity)
+                    commits=commits, children=child_count,
+                    activity=activity)
                 last_heartbeat = time.time()
 
                 # Stall timeout — kill after STALL_LIMIT consecutive idle heartbeats
