@@ -83,7 +83,25 @@ Build five lists:
 - **Squash-merged:** branches detected via the pruned-remote heuristic — with or without worktrees
 - **Active:** branches NOT merged, NOT squash-merged, NOT "not started"
 - **Not started:** branches removed from the merged list by the divergence check — report as skipped
-- **Locked worktrees:** worktrees with `locked` attribute in porcelain output — skip regardless of merge status
+- **Locked worktrees:** worktrees with `locked` attribute in porcelain output — but check for **stale locks** first (see below)
+
+**Stale git lock detection:** For each locked worktree, extract the PID from the lock reason (e.g., `locked claude agent agent-xxx (pid 43216)`). Check whether that PID is still running:
+
+```bash
+# Windows
+powershell -NoProfile -Command "Get-Process -Id <pid> -ErrorAction SilentlyContinue | Select-Object Id, ProcessName"
+
+# Unix
+kill -0 <pid> 2>/dev/null && echo "running" || echo "dead"
+```
+
+If the PID is **dead**, the lock is stale. Unlock it and reclassify:
+
+```bash
+git worktree unlock <worktree-path>
+```
+
+After unlocking, re-evaluate the worktree's branch against the merged/squash-merged lists and move it to the appropriate category for removal. If `--dry-run`, report the stale lock but do not unlock.
 
 ### 4. Remove Merged Worktrees
 
@@ -91,7 +109,31 @@ Process worktrees **one at a time, sequentially** — do NOT run removals in par
 
 For each merged or squash-merged worktree (not locked, not the main worktree):
 
-**Before removal, shut down any running daemons:**
+**Before removal, kill zombie shell processes and shut down daemons:**
+
+**Zombie process detection:** Dead Claude agent sessions leave behind bash/shell processes stuck in `until ... sleep` loops polling for task output files that will never arrive. These hold filesystem locks on the worktree directory, causing `git worktree remove` and `rm -rf` to fail with "Permission denied" or "Device or resource busy."
+
+For each worktree about to be removed, search for processes referencing the worktree path:
+
+```bash
+# Windows
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*<worktree-dir-name>*' } | Select-Object ProcessId, Name"
+
+# Unix
+pgrep -af '<worktree-dir-name>'
+```
+
+Kill any matching processes (exclude the current cleanup session's own PID):
+
+```bash
+# Windows
+taskkill /PID <pid> /F
+
+# Unix
+kill <pid>
+```
+
+**Daemon shutdown:**
 
 1. Search for `*-session.json` files in the worktree (e.g., `tests/PPDS.Tui.E2eTests/tools/.tui-verify-session.json`)
 2. For each session file found:
@@ -99,7 +141,7 @@ For each merged or squash-merged worktree (not locked, not the main worktree):
    - Send `POST http://localhost:{port}/shutdown` (timeout 5s)
    - If the HTTP request fails, kill the PID directly: `taskkill /PID {pid} /F` (Windows) or `kill {pid}` (Unix)
    - Delete the session file
-3. Proceed with worktree removal after daemons are shut down
+3. Proceed with worktree removal after zombies and daemons are shut down
 
 ```bash
 git worktree remove --force .worktrees/<name>
@@ -125,11 +167,12 @@ After removing merged worktrees, check for orphan directories — directories in
 
 3. For each directory in `.worktrees/` that does NOT appear in the registered worktree list:
    - **Guard:** Compare the directory's resolved absolute path against the main worktree path (the first `worktree` entry in `git worktree list --porcelain`). If they match, skip it — never remove the main worktree.
+   - **Kill zombie processes first:** Before attempting `rm -rf`, search for processes referencing the orphan directory name (same technique as step 4's zombie detection) and kill them. Orphan directories are the most common place where zombie processes block cleanup.
    - If `--dry-run`: add to orphan report, do NOT delete
    - Otherwise: `rm -rf .worktrees/<name>`
    - On Windows, if the orphan is a junction/symlink, remove the link itself — do not follow into the target directory
 
-4. If `rm -rf` fails (e.g., permission denied), log as failed in the report and continue with the next orphan.
+4. If `rm -rf` fails (e.g., permission denied) even after killing zombies, log as failed in the report and continue with the next orphan.
 
 ### 4c. Deregister In-Flight Entries
 
@@ -232,9 +275,21 @@ Present a summary:
 | .worktrees/wip | feature/wip | Locked |
 | .worktrees/prep | feature/prep | No divergent commits (not started) |
 
+### Stale Locks Recovered
+| Worktree | Branch | Lock PID | Action |
+|----------|--------|----------|--------|
+| .claude/worktrees/agent-xxx | docs/old-thing | 43216 (dead) | Unlocked → removed |
+
+### Zombie Processes Killed
+| PID | Worktree | Process |
+|-----|----------|---------|
+| 12345 | .worktrees/foo | bash.exe (stale until-loop) |
+
 ### Summary
 - Removed: N worktrees (N regular, N squash-merged), N branches
 - Orphans: N removed, N failed
+- Stale locks: N recovered
+- Zombies killed: N processes
 - Pruned: N remote refs
 - Rebased: N OK, N conflicts
 - Skipped: N locked, N not started
@@ -248,12 +303,13 @@ If `--dry-run` was specified, prefix the report title with `[DRY RUN]` and note 
 |-------|----------|
 | `merge --ff-only` fails on main | STOP — report that main has diverged, do not proceed |
 | `git remote prune origin` fails | Log warning, continue — classification will still work via `--merged` |
-| Worktree removal fails (Permission denied) | Log as "partially removed — directory locked by another process", continue with next worktree. Do NOT retry with `rm -rf`. |
+| Worktree removal fails (Permission denied) | Kill zombie processes referencing the worktree (step 4 zombie detection), then retry once. If still failing, log as "partially removed — directory locked by another process" and continue. Do NOT retry more than once. |
 | Worktree removal fails (other) | Log error, continue with next worktree |
 | `branch -d` fails (regular-merged) | Log error — branch may not actually be merged, skip it |
 | `branch -D` fails (squash-merged) | Log error — unexpected, report for manual investigation |
 | Rebase conflict | `git rebase --abort`, record in report, continue |
-| Locked worktree | Skip with note in report |
+| Locked worktree (PID alive) | Skip with note in report |
+| Locked worktree (PID dead) | Unlock with `git worktree unlock`, reclassify, proceed with removal |
 | Not on main branch | `git checkout main` before starting |
 | Branch has no remote tracking ref and is not in `--merged` | Classify as active — no signal to determine merge status |
 | `rm -rf` fails on orphan directory (permission denied) | Log as failed in report, continue with next orphan |
