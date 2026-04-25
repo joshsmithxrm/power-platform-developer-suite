@@ -346,6 +346,10 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             // Re-render status bar and hide the server-search banner if showing
             applySearchFilter();
             break;
+        case 'filterState':
+            solutionFilter.setSelectedId(msg.solutionId);
+            textOnlyCb.checked = msg.textOnly;
+            break;
         case 'loading':
             content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading web resources...</div></div>';
             statusText.textContent = 'Loading...';

@@ -1225,8 +1225,24 @@ traceLevelBtn.addEventListener('click', () => {
 traceLevelDropdown.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>('.trace-level-dropdown-item');
     if (target?.dataset.level) {
+        const level = target.dataset.level;
         traceLevelDropdown.style.display = 'none';
-        vscode.postMessage({ command: 'setTraceLevel', level: target.dataset.level });
+
+        // Optimistic UI update — show the new level immediately so the user
+        // gets instant feedback while the host round-trips to Dataverse.
+        traceLevelBtn.textContent = 'Trace Level: ' + level;
+        traceLevelIndicator.textContent = level;
+        traceLevelIndicator.className = level === 'Off'
+            ? 'trace-level-indicator trace-level-off'
+            : 'trace-level-indicator trace-level-on';
+        traceLevelIndicator.title = level === 'Off'
+            ? 'Trace level is Off — no new traces will be recorded'
+            : 'Trace level: ' + level;
+        traceLevelDropdown.querySelectorAll<HTMLElement>('.trace-level-dropdown-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.level === level);
+        });
+
+        vscode.postMessage({ command: 'setTraceLevel', level });
     }
 });
 
