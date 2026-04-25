@@ -7,13 +7,15 @@ description: Conduct a structured retrospective on recent work sessions. Use whe
 
 Structured, nine-phase analysis of recent work sessions. Splits the job into **mechanical extraction** (non-LLM, safe to dispatch as a subprocess) and **main-session judgment** (LLM reasoning over the extracted evidence — never delegated).
 
-Produces three artifacts per run:
+Artifacts vary by mode:
 
-- `.workflow/retro-findings.json` — machine-readable findings, consumed by `scripts/pipeline.py`.
+**Interactive mode** (user present):
 - `.retros/YYYY-MM-DD-summary.md` — executive synthesis for humans.
-- `.retros/YYYY-MM-DD-summary.html` — navigable dashboard (embedded Mermaid flow, searchable findings table).
+- `.retros/summary.json` — rolling cross-retro metrics (append-only).
 
-And updates `.retros/summary.json` + `.retros/findings-index.html` (cross-retro navigation).
+**Pipeline mode** (headless via `claude -p`):
+- `.workflow/retro-findings.json` — machine-readable findings, consumed by `scripts/pipeline.py`.
+- `.retros/summary.json` — rolling cross-retro metrics (append-only).
 
 ## Phase Registration (MUST run first)
 
@@ -63,8 +65,8 @@ Detect automatically based on context:
 5. DECISION PHASE               [plan-with-defaults UX]
 6. ROUTING                      [/backlog, /pr, /investigate]
 7. MONITOR & CONFIRM
-8. EXECUTIVE SYNTHESIS          [md + HTML artifacts]
-9. PERSIST                      [.retros/summary.json + index.html]
+8. EXECUTIVE SYNTHESIS          [md only in interactive; skipped in pipeline]
+9. PERSIST                      [summary.json only in interactive; + findings JSON in pipeline]
 ```
 
 ### Phase 1. Invoke
@@ -252,9 +254,9 @@ For each `DO NOW` row: verify it actually landed.
 
 Record per-row status (`landed` / `open` / `blocked`) into the decision log.
 
-### Phase 8. Executive Synthesis — md + HTML
+### Phase 8. Executive Synthesis
 
-Write both artifacts to `.retros/`:
+**Interactive mode: write 8a only. Skip 8b and 8c** — the conversation is the analysis; HTML artifacts have no consumer.
 
 **8a. `.retros/YYYY-MM-DD-summary.md`** — human-readable narrative. Sections:
 
@@ -290,7 +292,9 @@ python scripts/retro_html_generator.py --index --retros-dir .retros --out .retro
 
 ### Phase 9. Persist
 
-**9a. Write `.workflow/retro-findings.json`**. Schema:
+**Interactive mode: run 9b only. Skip 9a and 9c** — `retro-findings.json` is consumed by `pipeline.py` (headless only), and `findings-index.html` depends on it.
+
+**9a. Write `.workflow/retro-findings.json`** (pipeline mode only). Schema:
 
 ```json
 {
