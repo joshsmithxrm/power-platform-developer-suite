@@ -87,8 +87,8 @@ public class GitHubFederatedAuthenticationTests : LiveTestBase, IDisposable
         var act1 = () => new GitHubFederatedCredentialProvider(null!, "tenant");
         var act2 = () => new GitHubFederatedCredentialProvider("app", null!);
 
-        act1.Should().Throw<ArgumentNullException>().WithParameterName("applicationId");
-        act2.Should().Throw<ArgumentNullException>().WithParameterName("tenantId");
+        act1.Should().Throw<ArgumentException>().WithParameterName("applicationId");
+        act2.Should().Throw<ArgumentException>().WithParameterName("tenantId");
     }
 
     [Fact]

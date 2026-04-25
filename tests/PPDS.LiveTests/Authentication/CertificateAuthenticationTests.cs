@@ -113,9 +113,9 @@ public class CertificateAuthenticationTests : LiveTestBase, IDisposable
         var act2 = () => new CertificateFileCredentialProvider("app", null!, null, "tenant");
         var act3 = () => new CertificateFileCredentialProvider("app", "path", null, null!);
 
-        act1.Should().Throw<ArgumentNullException>().WithParameterName("applicationId");
-        act2.Should().Throw<ArgumentNullException>().WithParameterName("certificatePath");
-        act3.Should().Throw<ArgumentNullException>().WithParameterName("tenantId");
+        act1.Should().Throw<ArgumentException>().WithParameterName("applicationId");
+        act2.Should().Throw<ArgumentException>().WithParameterName("certificatePath");
+        act3.Should().Throw<ArgumentException>().WithParameterName("tenantId");
     }
 
     [Fact]
