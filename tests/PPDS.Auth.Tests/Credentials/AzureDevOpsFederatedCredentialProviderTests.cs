@@ -22,21 +22,29 @@ public class AzureDevOpsFederatedCredentialProviderTests
         provider.AccessToken.Should().BeNull();
     }
 
-    [Fact]
-    public void Constructor_NullApplicationId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidApplicationId_Throws(string? appId)
     {
-        var act = () => new AzureDevOpsFederatedCredentialProvider(null!, "tenant-id");
+        var act = () => new AzureDevOpsFederatedCredentialProvider(appId!, "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("ApplicationId"))
             .And.ParamName.Should().Be("applicationId");
     }
 
-    [Fact]
-    public void Constructor_NullTenantId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidTenantId_Throws(string? tenantId)
     {
-        var act = () => new AzureDevOpsFederatedCredentialProvider("app-id", null!);
+        var act = () => new AzureDevOpsFederatedCredentialProvider("app-id", tenantId!);
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("TenantId"))
             .And.ParamName.Should().Be("tenantId");
     }
 

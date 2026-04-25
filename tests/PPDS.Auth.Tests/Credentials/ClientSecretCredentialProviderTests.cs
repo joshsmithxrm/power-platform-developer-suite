@@ -25,30 +25,42 @@ public class ClientSecretCredentialProviderTests
         provider.AccessToken.Should().BeNull();
     }
 
-    [Fact]
-    public void Constructor_NullApplicationId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidApplicationId_Throws(string? appId)
     {
-        var act = () => new ClientSecretCredentialProvider(null!, "secret-value", "tenant-id");
+        var act = () => new ClientSecretCredentialProvider(appId!, "secret-value", "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("ApplicationId"))
             .And.ParamName.Should().Be("applicationId");
     }
 
-    [Fact]
-    public void Constructor_NullClientSecret_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidClientSecret_Throws(string? secret)
     {
-        var act = () => new ClientSecretCredentialProvider("app-id", null!, "tenant-id");
+        var act = () => new ClientSecretCredentialProvider("app-id", secret!, "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("ClientSecret"))
             .And.ParamName.Should().Be("clientSecret");
     }
 
-    [Fact]
-    public void Constructor_NullTenantId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidTenantId_Throws(string? tenantId)
     {
-        var act = () => new ClientSecretCredentialProvider("app-id", "secret-value", null!);
+        var act = () => new ClientSecretCredentialProvider("app-id", "secret-value", tenantId!);
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("TenantId"))
             .And.ParamName.Should().Be("tenantId");
     }
 

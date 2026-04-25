@@ -41,30 +41,42 @@ public class CertificateFileCredentialProviderTests
         provider.Identity.Should().Be("app-id");
     }
 
-    [Fact]
-    public void Constructor_NullApplicationId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidApplicationId_Throws(string? appId)
     {
-        var act = () => new CertificateFileCredentialProvider(null!, "/path/to/cert.pfx", null, "tenant-id");
+        var act = () => new CertificateFileCredentialProvider(appId!, "/path/to/cert.pfx", null, "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("ApplicationId"))
             .And.ParamName.Should().Be("applicationId");
     }
 
-    [Fact]
-    public void Constructor_NullCertificatePath_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidCertificatePath_Throws(string? certPath)
     {
-        var act = () => new CertificateFileCredentialProvider("app-id", null!, null, "tenant-id");
+        var act = () => new CertificateFileCredentialProvider("app-id", certPath!, null, "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("CertificatePath"))
             .And.ParamName.Should().Be("certificatePath");
     }
 
-    [Fact]
-    public void Constructor_NullTenantId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidTenantId_Throws(string? tenantId)
     {
-        var act = () => new CertificateFileCredentialProvider("app-id", "/path/to/cert.pfx", null, null!);
+        var act = () => new CertificateFileCredentialProvider("app-id", "/path/to/cert.pfx", null, tenantId!);
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("TenantId"))
             .And.ParamName.Should().Be("tenantId");
     }
 

@@ -26,36 +26,48 @@ public class CertificateStoreCredentialProviderTests
         provider.AccessToken.Should().BeNull();
     }
 
-    [Fact]
-    public void Constructor_NullApplicationId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidApplicationId_Throws(string? appId)
     {
         if (!IsWindows) return;
 
-        var act = () => new CertificateStoreCredentialProvider(null!, "AABBCCDDEE", "tenant-id");
+        var act = () => new CertificateStoreCredentialProvider(appId!, "AABBCCDDEE", "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("ApplicationId"))
             .And.ParamName.Should().Be("applicationId");
     }
 
-    [Fact]
-    public void Constructor_NullThumbprint_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidThumbprint_Throws(string? thumbprint)
     {
         if (!IsWindows) return;
 
-        var act = () => new CertificateStoreCredentialProvider("app-id", null!, "tenant-id");
+        var act = () => new CertificateStoreCredentialProvider("app-id", thumbprint!, "tenant-id");
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("Thumbprint"))
             .And.ParamName.Should().Be("thumbprint");
     }
 
-    [Fact]
-    public void Constructor_NullTenantId_Throws()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_WithInvalidTenantId_Throws(string? tenantId)
     {
         if (!IsWindows) return;
 
-        var act = () => new CertificateStoreCredentialProvider("app-id", "AABBCCDDEE", null!);
+        var act = () => new CertificateStoreCredentialProvider("app-id", "AABBCCDDEE", tenantId!);
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
+            .Where(ex => ex.Message.Contains("TenantId"))
             .And.ParamName.Should().Be("tenantId");
     }
 

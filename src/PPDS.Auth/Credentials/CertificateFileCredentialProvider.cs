@@ -63,10 +63,17 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
         string tenantId,
         CloudEnvironment cloud = CloudEnvironment.Public)
     {
-        _applicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
-        _certificatePath = certificatePath ?? throw new ArgumentNullException(nameof(certificatePath));
+        if (string.IsNullOrWhiteSpace(applicationId))
+            throw new ArgumentException("ApplicationId is required and cannot be empty.", nameof(applicationId));
+        if (string.IsNullOrWhiteSpace(certificatePath))
+            throw new ArgumentException("CertificatePath is required and cannot be empty.", nameof(certificatePath));
+        if (string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("TenantId is required and cannot be empty.", nameof(tenantId));
+
+        _applicationId = applicationId;
+        _certificatePath = certificatePath;
         _certificatePassword = certificatePassword;
-        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        _tenantId = tenantId;
         _cloud = cloud;
     }
 
