@@ -163,6 +163,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 this.solutionFilter ?? undefined,
                 this.environmentUrl,
                 this.includeInactive,
+                this.profileName,
             );
 
             this.postMessage({
@@ -195,7 +196,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private async loadEnvironmentVariableDetail(schemaName: string): Promise<void> {
         try {
-            const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl);
+            const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl, this.profileName);
             const v = result.variable;
             this.postMessage({
                 command: 'environmentVariableDetailLoaded',
@@ -222,7 +223,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private async startEditVariable(schemaName: string): Promise<void> {
         try {
-            const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl);
+            const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl, this.profileName);
             const v = result.variable;
             this.postMessage({
                 command: 'editVariableDialog',
@@ -239,7 +240,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private async saveEnvironmentVariable(schemaName: string, value: string): Promise<void> {
         try {
-            const result = await this.daemon.environmentVariablesSet(schemaName, value, this.environmentUrl);
+            const result = await this.daemon.environmentVariablesSet(schemaName, value, this.environmentUrl, this.profileName);
             this.postMessage({ command: 'variableSaved', schemaName, success: result.success });
             await this.loadEnvironmentVariables();
         } catch (error) {
@@ -253,6 +254,8 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             const result = await this.daemon.environmentVariablesList(
                 this.solutionFilter ?? undefined,
                 this.environmentUrl,
+                undefined,
+                this.profileName,
             );
 
             const settings = {
@@ -312,6 +315,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                             this.solutionFilter!,
                             uri.fsPath,
                             this.environmentUrl,
+                            this.profileName,
                             cts.token,
                         );
                     } finally {
@@ -341,7 +345,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private async loadSolutionList(): Promise<void> {
         try {
-            const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl);
+            const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl, undefined, this.profileName);
             this.postMessage({
                 command: 'solutionListLoaded',
                 solutions: result.solutions.map(s => ({

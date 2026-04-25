@@ -950,6 +950,7 @@ describe('DaemonClient', () => {
         });
     });
 
+    // AC-16, AC-17, AC-18: profileName parameter is positional and optional
     describe('environmentVariablesSyncDeploymentSettings', () => {
         it('should pass cancellation token to sendRequest when provided', async () => {
             const mockResult = {
@@ -961,7 +962,7 @@ describe('DaemonClient', () => {
 
             const mockToken = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
             const result = await client.environmentVariablesSyncDeploymentSettings(
-                'MySolution', '/test/file.json', undefined, mockToken as any,
+                'MySolution', '/test/file.json', undefined, undefined, mockToken as any,
             );
 
             expect(mockConnection.sendRequest).toHaveBeenCalledWith(

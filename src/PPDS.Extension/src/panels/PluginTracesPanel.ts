@@ -179,7 +179,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     private async loadTraces(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const result = await this.daemon.pluginTracesList(this.currentFilter, undefined, this.environmentUrl);
+            const result = await this.daemon.pluginTracesList(this.currentFilter, undefined, this.environmentUrl, this.profileName);
 
             const traces: PluginTraceViewDto[] = result.traces.map(t => ({
                 id: t.id,
@@ -213,7 +213,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 
     private async loadTraceDetail(id: string): Promise<void> {
         try {
-            const result = await this.daemon.pluginTracesGet(id, this.environmentUrl);
+            const result = await this.daemon.pluginTracesGet(id, this.environmentUrl, this.profileName);
             const t = result.trace;
             const trace: PluginTraceDetailViewDto = {
                 id: t.id,
@@ -254,7 +254,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 
     private async loadTimeline(correlationId: string): Promise<void> {
         try {
-            const result = await this.daemon.pluginTracesTimeline(correlationId, this.environmentUrl);
+            const result = await this.daemon.pluginTracesTimeline(correlationId, this.environmentUrl, this.profileName);
             const mapNodes = (nodes: typeof result.nodes): TimelineNodeViewDto[] =>
                 nodes.map(n => ({
                     traceId: n.traceId,
@@ -284,7 +284,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         if (confirm !== 'Delete') return;
 
         try {
-            const result = await this.daemon.pluginTracesDelete(ids, undefined, this.environmentUrl);
+            const result = await this.daemon.pluginTracesDelete(ids, undefined, this.environmentUrl, this.profileName);
             this.postMessage({ command: 'deleteComplete', deletedCount: result.deletedCount });
             await this.loadTraces();
         } catch (error) {
@@ -302,7 +302,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         if (confirm !== 'Delete') return;
 
         try {
-            const result = await this.daemon.pluginTracesDelete(undefined, days, this.environmentUrl);
+            const result = await this.daemon.pluginTracesDelete(undefined, days, this.environmentUrl, this.profileName);
             this.postMessage({ command: 'deleteComplete', deletedCount: result.deletedCount });
             await this.loadTraces();
         } catch (error) {
@@ -313,7 +313,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 
     private async loadTraceLevel(): Promise<void> {
         try {
-            const result = await this.daemon.pluginTracesTraceLevel(this.environmentUrl);
+            const result = await this.daemon.pluginTracesTraceLevel(this.environmentUrl, this.profileName);
             this.postMessage({ command: 'traceLevelLoaded', level: result.level, levelValue: result.levelValue });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -332,7 +332,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         }
 
         try {
-            await this.daemon.pluginTracesSetTraceLevel(level, this.environmentUrl);
+            await this.daemon.pluginTracesSetTraceLevel(level, this.environmentUrl, this.profileName);
             await this.loadTraceLevel();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);

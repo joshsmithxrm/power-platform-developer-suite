@@ -636,8 +636,9 @@ envPickerBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'requestEnvironmentList' });
 });
 
-function updateEnvironmentDisplay(name: string | null): void {
-    envPickerName.textContent = name || 'No environment';
+function updateEnvironmentDisplay(profileName: string | undefined, name: string | null): void {
+    const env = name || 'No environment';
+    envPickerName.textContent = profileName ? `${profileName} · ${env}` : env;
 }
 
 loadMoreBtn.addEventListener('click', () => {
@@ -852,7 +853,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
             manualOverride = false;
             break;
         case 'updateEnvironment':
-            updateEnvironmentDisplay(msg.name);
+            updateEnvironmentDisplay(msg.profileName, msg.name);
             currentEnvironmentUrl = msg.url || null;
             {
                 const toolbar = document.querySelector('.toolbar');

@@ -180,6 +180,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 this.solutionFilter ?? undefined,
                 this.environmentUrl,
                 this.includeInactive,
+                this.profileName,
             );
 
             // Check if request was aborted before we got the result
@@ -216,7 +217,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
 
     private async loadConnectionReferenceDetail(logicalName: string): Promise<void> {
         try {
-            const result = await this.daemon.connectionReferencesGet(logicalName, this.environmentUrl);
+            const result = await this.daemon.connectionReferencesGet(logicalName, this.environmentUrl, this.profileName);
             const ref = result.reference;
             this.postMessage({
                 command: 'connectionReferenceDetailLoaded',
@@ -255,7 +256,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     private async runAnalysis(): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const result = await this.daemon.connectionReferencesAnalyze(this.environmentUrl);
+            const result = await this.daemon.connectionReferencesAnalyze(this.environmentUrl, this.profileName);
             this.postMessage({
                 command: 'analyzeResult',
                 result: {
@@ -281,7 +282,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
 
     private async loadSolutionList(): Promise<void> {
         try {
-            const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl);
+            const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl, undefined, this.profileName);
             this.postMessage({
                 command: 'solutionListLoaded',
                 solutions: result.solutions.map(s => ({
@@ -328,6 +329,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                             this.solutionFilter!,
                             uri.fsPath,
                             this.environmentUrl,
+                            this.profileName,
                             cts.token,
                         );
                     } finally {

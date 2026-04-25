@@ -23,10 +23,14 @@ export function registerProfileCommands(
 ): void {
 
     // ── Device Code Handler (registered once, not per createProfile call) ─
-    daemonClient.onDeviceCode(({ userCode, verificationUrl, message }) => {
+    daemonClient.onDeviceCode(({ userCode, verificationUrl, message, profileName }) => {
         void (async (): Promise<void> => {
+            const baseMessage = message || `Enter code: ${userCode}`;
+            const display = profileName
+                ? `Profile "${profileName}" needs re-authentication. ${baseMessage}`
+                : baseMessage;
             const action = await vscode.window.showInformationMessage(
-                message || `Enter code: ${userCode}`,
+                display,
                 { modal: false },
                 'Open Browser', 'Copy Code'
             );
@@ -82,21 +86,21 @@ export function registerProfileCommands(
                     return;
                 }
 
-                const items: ProfileQuickPickItem[] = result.profiles.map(p => ({
-                    label: p.name ?? `Profile ${p.index}`,
-                    description: p.identity ?? undefined,
-                    detail: p.environment
-                        ? `${p.environment.displayName} (${p.authMethod})`
-                        : (p.authMethod ?? undefined),
-                    picked: p.isActive,
-                    profile: p,
-                }));
+                const items: ProfileQuickPickItem[] = result.profiles.map(p => {
+                    const baseName = p.name ?? `Profile ${p.index}`;
+                    return {
+                        label: p.isActive ? `$(check) ${baseName}` : baseName,
+                        description: p.environment?.displayName ?? undefined,
+                        detail: p.identity
+                            ? `${p.identity} · ${p.authMethod}`
+                            : p.authMethod,
+                        profile: p,
+                    };
+                });
 
                 const selected = await vscode.window.showQuickPick(items, {
                     title: 'Authentication Profiles',
-                    placeHolder: result.activeProfile
-                        ? `Active: ${result.activeProfile}`
-                        : 'No active profile',
+                    placeHolder: 'Select a profile to switch',
                     ignoreFocusOut: true,
                 });
 
@@ -105,7 +109,8 @@ export function registerProfileCommands(
                         const p = selected.profile;
                         await daemonClient.authSelect(p.name ? { name: p.name } : { index: p.index });
                         refreshProfiles();
-                        vscode.window.showInformationMessage(`Switched to profile: ${selected.label}`);
+                        const switchedTo = p.name ?? `Profile ${p.index}`;
+                        vscode.window.showInformationMessage(`Switched to profile: ${switchedTo}`);
                     } catch (error) {
                         const message = error instanceof Error ? error.message : String(error);
                         void showErrorWithReport(`Failed to switch profile: ${message}`);

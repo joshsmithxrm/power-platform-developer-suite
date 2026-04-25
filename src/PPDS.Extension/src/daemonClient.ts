@@ -534,13 +534,14 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists available Dataverse environments (discovered + configured), optionally filtered.
      */
-    async envList(filter?: string, forceRefresh?: boolean): Promise<EnvListResponse> {
+    async envList(filter?: string, forceRefresh?: boolean, profileName?: string): Promise<EnvListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (filter !== undefined) params.filter = filter;
         if (forceRefresh) params.forceRefresh = true;
-        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}${forceRefresh ? ' (force refresh)' : ''}...`);
+        if (profileName !== undefined) params.profileName = profileName;
+        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}${forceRefresh ? ' (force refresh)' : ''}${profileName ? ` profile="${profileName}"` : ''}...`);
         const result = await this.connection!.sendRequest<EnvListResponse>('env/list', params);
         this.log.debug(`Got ${result.environments.length} environments`);
 
@@ -595,6 +596,7 @@ export class DaemonClient implements vscode.Disposable {
         label?: string;
         type?: string;
         color?: string;
+        profileName?: string;
     }): Promise<EnvConfigSetResponse> {
         await this.ensureConnected();
 
@@ -626,6 +628,7 @@ export class DaemonClient implements vscode.Disposable {
     async querySql(params: {
         sql: string;
         environmentUrl?: string;
+        profileName?: string;
         top?: number;
         page?: number;
         pagingCookie?: string;
@@ -651,6 +654,7 @@ export class DaemonClient implements vscode.Disposable {
     async queryFetch(params: {
         fetchXml: string;
         environmentUrl?: string;
+        profileName?: string;
         top?: number;
         page?: number;
         pagingCookie?: string;
@@ -673,7 +677,7 @@ export class DaemonClient implements vscode.Disposable {
      * Uses quiet (non-logging) transport to avoid flooding the output channel
      * on every keystroke.
      */
-    async queryComplete(params: { sql: string; cursorOffset: number; language?: string }): Promise<QueryCompleteResponse> {
+    async queryComplete(params: { sql: string; cursorOffset: number; language?: string; environmentUrl?: string; profileName?: string }): Promise<QueryCompleteResponse> {
         return this.sendRequestQuiet(RPC_QUERY_COMPLETE, params);
     }
 
@@ -714,6 +718,7 @@ export class DaemonClient implements vscode.Disposable {
         sql: string;
         fetchXml?: string;
         environmentUrl?: string;
+        profileName?: string;
         format?: string;
         includeHeaders?: boolean;
         top?: number;
@@ -730,7 +735,7 @@ export class DaemonClient implements vscode.Disposable {
      * Since Dataverse SQL is transpiled to FetchXML, the transpiled FetchXML
      * serves as the execution plan.
      */
-    async queryExplain(params: { sql: string; environmentUrl?: string }): Promise<QueryExplainResponse> {
+    async queryExplain(params: { sql: string; environmentUrl?: string; profileName?: string }): Promise<QueryExplainResponse> {
         await this.ensureConnected();
         this.log.debug('Calling query/explain...');
         const result = await this.connection!.sendRequest(RPC_QUERY_EXPLAIN, params);
@@ -815,7 +820,7 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists solutions in the active Dataverse environment.
      */
-    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string, includeInternal?: boolean): Promise<SolutionsListResponse> {
+    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string, includeInternal?: boolean, profileName?: string): Promise<SolutionsListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
@@ -827,6 +832,9 @@ export class DaemonClient implements vscode.Disposable {
         }
         if (environmentUrl !== undefined) {
             params.environmentUrl = environmentUrl;
+        }
+        if (profileName !== undefined) {
+            params.profileName = profileName;
         }
         if (includeInternal !== undefined) {
             params.includeInternal = includeInternal;
@@ -842,7 +850,7 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists components for a specific solution.
      */
-    async solutionsComponents(uniqueName: string, componentType?: number, environmentUrl?: string): Promise<SolutionComponentsResponse> {
+    async solutionsComponents(uniqueName: string, componentType?: number, environmentUrl?: string, profileName?: string): Promise<SolutionComponentsResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { uniqueName };
@@ -851,6 +859,9 @@ export class DaemonClient implements vscode.Disposable {
         }
         if (environmentUrl !== undefined) {
             params.environmentUrl = environmentUrl;
+        }
+        if (profileName !== undefined) {
+            params.profileName = profileName;
         }
 
         this.log.debug(`Calling solutions/components for "${uniqueName}"...`);
@@ -862,12 +873,13 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Import Jobs ─────────────────────────────────────────────────────────
 
-    async importJobsList(top?: number, environmentUrl?: string): Promise<ImportJobsListResponse> {
+    async importJobsList(top?: number, environmentUrl?: string, profileName?: string): Promise<ImportJobsListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (top !== undefined) params.top = top;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling importJobs/list...');
         const result = await this.connection!.sendRequest<ImportJobsListResponse>('importJobs/list', params);
@@ -876,11 +888,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async importJobsGet(id: string, environmentUrl?: string): Promise<ImportJobsGetResponse> {
+    async importJobsGet(id: string, environmentUrl?: string, profileName?: string): Promise<ImportJobsGetResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling importJobs/get for ${id}...`);
         const result = await this.connection!.sendRequest<ImportJobsGetResponse>('importJobs/get', params);
@@ -892,11 +905,12 @@ export class DaemonClient implements vscode.Disposable {
     // ── Plugin Traces ─────────────────────────────────────────────────────────
     // ── Connection References ───────────────────────────────────────────────
 
-    async connectionReferencesList(solutionId?: string, environmentUrl?: string, includeInactive = false): Promise<ConnectionReferencesListResponse> {
+    async connectionReferencesList(solutionId?: string, environmentUrl?: string, includeInactive = false, profileName?: string): Promise<ConnectionReferencesListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         if (includeInactive) params.includeInactive = true;
         this.log.info('Calling connectionReferences/list...');
         const result = await this.connection!.sendRequest<ConnectionReferencesListResponse>('connectionReferences/list', params);
@@ -904,29 +918,32 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async connectionReferencesGet(logicalName: string, environmentUrl?: string): Promise<ConnectionReferencesGetResponse> {
+    async connectionReferencesGet(logicalName: string, environmentUrl?: string, profileName?: string): Promise<ConnectionReferencesGetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { logicalName };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling connectionReferences/get for ${logicalName}...`);
         return await this.connection!.sendRequest<ConnectionReferencesGetResponse>('connectionReferences/get', params);
     }
 
-    async connectionReferencesAnalyze(environmentUrl?: string): Promise<ConnectionReferencesAnalyzeResponse> {
+    async connectionReferencesAnalyze(environmentUrl?: string, profileName?: string): Promise<ConnectionReferencesAnalyzeResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling connectionReferences/analyze...');
         return await this.connection!.sendRequest<ConnectionReferencesAnalyzeResponse>('connectionReferences/analyze', params);
     }
 
     // ── Environment Variables ───────────────────────────────────────────────
 
-    async environmentVariablesList(solutionId?: string, environmentUrl?: string, includeInactive?: boolean): Promise<EnvironmentVariablesListResponse> {
+    async environmentVariablesList(solutionId?: string, environmentUrl?: string, includeInactive?: boolean, profileName?: string): Promise<EnvironmentVariablesListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         if (includeInactive !== undefined) params.includeInactive = includeInactive;
         this.log.info('Calling environmentVariables/list...');
         const result = await this.connection!.sendRequest<EnvironmentVariablesListResponse>('environmentVariables/list', params);
@@ -934,28 +951,31 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async environmentVariablesSyncDeploymentSettings(solutionId: string, filePath: string, environmentUrl?: string, token?: CancellationToken): Promise<EnvironmentVariablesSyncDeploymentSettingsResponse> {
+    async environmentVariablesSyncDeploymentSettings(solutionId: string, filePath: string, environmentUrl?: string, profileName?: string, token?: CancellationToken): Promise<EnvironmentVariablesSyncDeploymentSettingsResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { solutionId, filePath };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling environmentVariables/syncDeploymentSettings...');
         return token
             ? await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params, token)
             : await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params);
     }
 
-    async environmentVariablesGet(schemaName: string, environmentUrl?: string): Promise<EnvironmentVariablesGetResponse> {
+    async environmentVariablesGet(schemaName: string, environmentUrl?: string, profileName?: string): Promise<EnvironmentVariablesGetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { schemaName };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling environmentVariables/get for ${schemaName}...`);
         return await this.connection!.sendRequest<EnvironmentVariablesGetResponse>('environmentVariables/get', params);
     }
 
-    async environmentVariablesSet(schemaName: string, value: string, environmentUrl?: string): Promise<EnvironmentVariablesSetResponse> {
+    async environmentVariablesSet(schemaName: string, value: string, environmentUrl?: string, profileName?: string): Promise<EnvironmentVariablesSetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { schemaName, value };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling environmentVariables/set for ${schemaName}...`);
         return await this.connection!.sendRequest<EnvironmentVariablesSetResponse>('environmentVariables/set', params);
     }
@@ -966,12 +986,14 @@ export class DaemonClient implements vscode.Disposable {
         solutionId?: string,
         textOnly = true,
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ resources: WebResourceInfoDto[]; totalCount: number; filtersApplied?: string[] }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { textOnly };
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling webResources/list...');
         const result = await this.connection!.sendRequest<{ resources: WebResourceInfoDto[]; totalCount: number; filtersApplied?: string[] }>('webResources/list', params);
@@ -984,11 +1006,13 @@ export class DaemonClient implements vscode.Disposable {
         id: string,
         published = false,
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ resource: WebResourceDetailDto | null }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { id, published };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling webResources/get for ${id}...`);
         const result = await this.connection!.sendRequest<{ resource: WebResourceDetailDto | null }>('webResources/get', params);
@@ -1000,11 +1024,13 @@ export class DaemonClient implements vscode.Disposable {
     async webResourcesGetModifiedOn(
         id: string,
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ modifiedOn: string | null }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling webResources/getModifiedOn for ${id}...`);
         const result = await this.connection!.sendRequest<{ modifiedOn: string | null }>('webResources/getModifiedOn', params);
@@ -1017,11 +1043,13 @@ export class DaemonClient implements vscode.Disposable {
         id: string,
         content: string,
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ success: boolean }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { id, content };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling webResources/update for ${id}...`);
         const result = await this.connection!.sendRequest<{ success: boolean }>('webResources/update', params);
@@ -1033,11 +1061,13 @@ export class DaemonClient implements vscode.Disposable {
     async webResourcesPublish(
         ids: string[],
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ publishedCount: number }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { ids };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling webResources/publish for ${ids.length} resources...`);
         const result = await this.connection!.sendRequest<{ publishedCount: number }>('webResources/publish', params);
@@ -1048,11 +1078,13 @@ export class DaemonClient implements vscode.Disposable {
 
     async webResourcesPublishAll(
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<{ success: boolean }> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling webResources/publishAll...');
         const result = await this.connection!.sendRequest<{ success: boolean }>('webResources/publishAll', params);
@@ -1063,13 +1095,14 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Schema ──────────────────────────────────────────────────────────────
 
-    async pluginTracesList(filter?: TraceFilterDto, top?: number, environmentUrl?: string): Promise<PluginTracesListResponse> {
+    async pluginTracesList(filter?: TraceFilterDto, top?: number, environmentUrl?: string, profileName?: string): Promise<PluginTracesListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (filter !== undefined) params.filter = filter;
         if (top !== undefined) params.top = top;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling pluginTraces/list...');
         const result = await this.connection!.sendRequest<PluginTracesListResponse>('pluginTraces/list', params);
@@ -1078,11 +1111,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async pluginTracesGet(id: string, environmentUrl?: string): Promise<PluginTracesGetResponse> {
+    async pluginTracesGet(id: string, environmentUrl?: string, profileName?: string): Promise<PluginTracesGetResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling pluginTraces/get for ${id}...`);
         const result = await this.connection!.sendRequest<PluginTracesGetResponse>('pluginTraces/get', params);
@@ -1091,11 +1125,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async pluginTracesTimeline(correlationId: string, environmentUrl?: string): Promise<PluginTracesTimelineResponse> {
+    async pluginTracesTimeline(correlationId: string, environmentUrl?: string, profileName?: string): Promise<PluginTracesTimelineResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { correlationId };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling pluginTraces/timeline for ${correlationId}...`);
         const result = await this.connection!.sendRequest<PluginTracesTimelineResponse>('pluginTraces/timeline', params);
@@ -1104,13 +1139,14 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async pluginTracesDelete(ids?: string[], olderThanDays?: number, environmentUrl?: string): Promise<PluginTracesDeleteResponse> {
+    async pluginTracesDelete(ids?: string[], olderThanDays?: number, environmentUrl?: string, profileName?: string): Promise<PluginTracesDeleteResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (ids !== undefined) params.ids = ids;
         if (olderThanDays !== undefined) params.olderThanDays = olderThanDays;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling pluginTraces/delete...');
         const result = await this.connection!.sendRequest<PluginTracesDeleteResponse>('pluginTraces/delete', params);
@@ -1119,11 +1155,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async pluginTracesTraceLevel(environmentUrl?: string): Promise<PluginTracesTraceLevelResponse> {
+    async pluginTracesTraceLevel(environmentUrl?: string, profileName?: string): Promise<PluginTracesTraceLevelResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info('Calling pluginTraces/traceLevel...');
         const result = await this.connection!.sendRequest<PluginTracesTraceLevelResponse>('pluginTraces/traceLevel', params);
@@ -1132,11 +1169,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async pluginTracesSetTraceLevel(level: string, environmentUrl?: string): Promise<PluginTracesSetTraceLevelResponse> {
+    async pluginTracesSetTraceLevel(level: string, environmentUrl?: string, profileName?: string): Promise<PluginTracesSetTraceLevelResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { level };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.info(`Calling pluginTraces/setTraceLevel with level=${level}...`);
         const result = await this.connection!.sendRequest<PluginTracesSetTraceLevelResponse>('pluginTraces/setTraceLevel', params);
@@ -1147,11 +1185,12 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Metadata ────────────────────────────────────────────────────────────
 
-    async metadataEntities(environmentUrl?: string, includeIntersect = false): Promise<MetadataEntitiesResponse> {
+    async metadataEntities(environmentUrl?: string, includeIntersect = false, profileName?: string): Promise<MetadataEntitiesResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { includeIntersect };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.debug('Calling metadata/entities...');
         const result = await this.connection!.sendRequest<MetadataEntitiesResponse>(
@@ -1163,11 +1202,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async metadataGlobalOptionSets(environmentUrl?: string): Promise<MetadataGlobalOptionSetsResponse> {
+    async metadataGlobalOptionSets(environmentUrl?: string, profileName?: string): Promise<MetadataGlobalOptionSetsResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.debug('Calling metadata/globalOptionSets...');
         const result = await this.connection!.sendRequest<MetadataGlobalOptionSetsResponse>(
@@ -1179,11 +1219,12 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    async metadataGlobalOptionSet(name: string, environmentUrl?: string): Promise<MetadataGlobalOptionSetDetailResponse> {
+    async metadataGlobalOptionSet(name: string, environmentUrl?: string, profileName?: string): Promise<MetadataGlobalOptionSetDetailResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { name };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.debug(`Calling metadata/globalOptionSet for "${name}"...`);
         const result = await this.connection!.sendRequest<MetadataGlobalOptionSetDetailResponse>(
@@ -1199,11 +1240,13 @@ export class DaemonClient implements vscode.Disposable {
         logicalName: string,
         includeGlobalOptionSets = false,
         environmentUrl?: string,
+        profileName?: string,
     ): Promise<MetadataEntityResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { logicalName, includeGlobalOptionSets };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
 
         this.log.debug(`Calling metadata/entity for "${logicalName}"...`);
         const result = await this.connection!.sendRequest<MetadataEntityResponse>(
@@ -1217,347 +1260,388 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Metadata Authoring ─────────────────────────────────────────────────
 
-    async metadataCreateTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateTable(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createTable...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createTable', rpcParams);
     }
 
-    async metadataUpdateTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataUpdateTable(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/updateTable...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/updateTable', rpcParams);
     }
 
-    async metadataDeleteTable(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+    async metadataDeleteTable(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataDeleteResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/deleteTable...');
         return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteTable', rpcParams);
     }
 
-    async metadataCreateColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateColumn(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createColumn...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createColumn', rpcParams);
     }
 
-    async metadataUpdateColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataUpdateColumn(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/updateColumn...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/updateColumn', rpcParams);
     }
 
-    async metadataDeleteColumn(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+    async metadataDeleteColumn(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataDeleteResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/deleteColumn...');
         return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteColumn', rpcParams);
     }
 
-    async metadataCreateOneToMany(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateOneToMany(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createOneToMany...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createOneToMany', rpcParams);
     }
 
-    async metadataCreateManyToMany(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateManyToMany(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createManyToMany...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createManyToMany', rpcParams);
     }
 
-    async metadataDeleteRelationship(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+    async metadataDeleteRelationship(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataDeleteResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/deleteRelationship...');
         return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteRelationship', rpcParams);
     }
 
-    async metadataCreateGlobalChoice(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateGlobalChoice(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createGlobalChoice...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createGlobalChoice', rpcParams);
     }
 
-    async metadataDeleteGlobalChoice(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+    async metadataDeleteGlobalChoice(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataDeleteResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/deleteGlobalChoice...');
         return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteGlobalChoice', rpcParams);
     }
 
-    async metadataCreateKey(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataAuthoringResult> {
+    async metadataCreateKey(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataAuthoringResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/createKey...');
         return await this.connection!.sendRequest<MetadataAuthoringResult>('metadata/createKey', rpcParams);
     }
 
-    async metadataDeleteKey(params: Record<string, unknown>, environmentUrl?: string): Promise<MetadataDeleteResult> {
+    async metadataDeleteKey(params: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<MetadataDeleteResult> {
         await this.ensureConnected();
         const rpcParams: Record<string, unknown> = { ...params };
         if (environmentUrl !== undefined) rpcParams.environmentUrl = environmentUrl;
+        if (profileName !== undefined) rpcParams.profileName = profileName;
         this.log.info('Calling metadata/deleteKey...');
         return await this.connection!.sendRequest<MetadataDeleteResult>('metadata/deleteKey', rpcParams);
     }
 
     // ── Plugins ─────────────────────────────────────────────────────────────
 
-    async pluginsList(environmentUrl?: string): Promise<PluginsListResponse> {
+    async pluginsList(environmentUrl?: string, profileName?: string): Promise<PluginsListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/list...');
         return await this.connection!.sendRequest<PluginsListResponse>('plugins/list', params);
     }
 
-    async pluginsGet(type: string, id: string, environmentUrl?: string): Promise<PluginsGetResponse> {
+    async pluginsGet(type: string, id: string, environmentUrl?: string, profileName?: string): Promise<PluginsGetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { type, id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/get for ${type} ${id}...`);
         return await this.connection!.sendRequest<PluginsGetResponse>('plugins/get', params);
     }
 
-    async pluginsMessages(filter?: string, environmentUrl?: string): Promise<PluginsMessagesResponse> {
+    async pluginsMessages(filter?: string, environmentUrl?: string, profileName?: string): Promise<PluginsMessagesResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (filter !== undefined) params.filter = filter;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/messages...');
         return await this.connection!.sendRequest<PluginsMessagesResponse>('plugins/messages', params);
     }
 
-    async pluginsEntityAttributes(entityLogicalName: string, environmentUrl?: string): Promise<PluginsEntityAttributesResponse> {
+    async pluginsEntityAttributes(entityLogicalName: string, environmentUrl?: string, profileName?: string): Promise<PluginsEntityAttributesResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { entityLogicalName };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/entityAttributes for ${entityLogicalName}...`);
         return await this.connection!.sendRequest<PluginsEntityAttributesResponse>('plugins/entityAttributes', params);
     }
 
-    async pluginsToggleStep(id: string, enabled: boolean, environmentUrl?: string): Promise<PluginsToggleStepResponse> {
+    async pluginsToggleStep(id: string, enabled: boolean, environmentUrl?: string, profileName?: string): Promise<PluginsToggleStepResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id, enabled };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/toggleStep for ${id} enabled=${enabled}...`);
         return await this.connection!.sendRequest<PluginsToggleStepResponse>('plugins/toggleStep', params);
     }
 
-    async pluginsRegisterAssembly(content: string, solutionName?: string, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+    async pluginsRegisterAssembly(content: string, solutionName?: string, environmentUrl?: string, profileName?: string): Promise<PluginsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { content };
         if (solutionName !== undefined) params.solutionName = solutionName;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/registerAssembly...');
         return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerAssembly', params);
     }
 
-    async pluginsRegisterPackage(content: string, solutionName?: string, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+    async pluginsRegisterPackage(content: string, solutionName?: string, environmentUrl?: string, profileName?: string): Promise<PluginsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { content };
         if (solutionName !== undefined) params.solutionName = solutionName;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/registerPackage...');
         return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerPackage', params);
     }
 
-    async pluginsRegisterStep(config: Record<string, unknown>, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+    async pluginsRegisterStep(config: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<PluginsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { ...config };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/registerStep...');
         return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerStep', params);
     }
 
-    async pluginsRegisterImage(config: Record<string, unknown>, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+    async pluginsRegisterImage(config: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<PluginsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { ...config };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling plugins/registerImage...');
         return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerImage', params);
     }
 
-    async pluginsUpdateStep(id: string, updates: Record<string, unknown>, environmentUrl?: string): Promise<PluginsUpdateResponse> {
+    async pluginsUpdateStep(id: string, updates: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<PluginsUpdateResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id, ...updates };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/updateStep for ${id}...`);
         return await this.connection!.sendRequest<PluginsUpdateResponse>('plugins/updateStep', params);
     }
 
-    async pluginsUpdateImage(id: string, updates: Record<string, unknown>, environmentUrl?: string): Promise<PluginsUpdateResponse> {
+    async pluginsUpdateImage(id: string, updates: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<PluginsUpdateResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id, ...updates };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/updateImage for ${id}...`);
         return await this.connection!.sendRequest<PluginsUpdateResponse>('plugins/updateImage', params);
     }
 
-    async pluginsUnregister(type: string, id: string, force?: boolean, environmentUrl?: string): Promise<PluginsUnregisterResponse> {
+    async pluginsUnregister(type: string, id: string, force?: boolean, environmentUrl?: string, profileName?: string): Promise<PluginsUnregisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { type, id };
         if (force !== undefined) params.force = force;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/unregister for ${type} ${id}...`);
         return await this.connection!.sendRequest<PluginsUnregisterResponse>('plugins/unregister', params);
     }
 
-    async pluginsDownloadBinary(type: string, id: string, environmentUrl?: string): Promise<PluginsDownloadResponse> {
+    async pluginsDownloadBinary(type: string, id: string, environmentUrl?: string, profileName?: string): Promise<PluginsDownloadResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { type, id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling plugins/downloadBinary for ${type} ${id}...`);
         return await this.connection!.sendRequest<PluginsDownloadResponse>('plugins/downloadBinary', params);
     }
 
     // ── Service Endpoints ────────────────────────────────────────────────────
 
-    async serviceEndpointsList(environmentUrl?: string): Promise<ServiceEndpointsListResponse> {
+    async serviceEndpointsList(environmentUrl?: string, profileName?: string): Promise<ServiceEndpointsListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling serviceEndpoints/list...');
         return await this.connection!.sendRequest<ServiceEndpointsListResponse>('serviceEndpoints/list', params);
     }
 
-    async serviceEndpointsGet(id: string, environmentUrl?: string): Promise<ServiceEndpointsGetResponse> {
+    async serviceEndpointsGet(id: string, environmentUrl?: string, profileName?: string): Promise<ServiceEndpointsGetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling serviceEndpoints/get for ${id}...`);
         return await this.connection!.sendRequest<ServiceEndpointsGetResponse>('serviceEndpoints/get', params);
     }
 
-    async serviceEndpointsRegister(fields: Record<string, unknown>, environmentUrl?: string): Promise<ServiceEndpointsRegisterResponse> {
+    async serviceEndpointsRegister(fields: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<ServiceEndpointsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { ...fields };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling serviceEndpoints/register...');
         return await this.connection!.sendRequest<ServiceEndpointsRegisterResponse>('serviceEndpoints/register', params);
     }
 
-    async serviceEndpointsUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<ServiceEndpointsRegisterResponse> {
+    async serviceEndpointsUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<ServiceEndpointsRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id, ...fields };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling serviceEndpoints/update for ${id}...`);
         return await this.connection!.sendRequest<ServiceEndpointsRegisterResponse>('serviceEndpoints/update', params);
     }
 
-    async serviceEndpointsUnregister(id: string, force?: boolean, environmentUrl?: string): Promise<{ success: boolean }> {
+    async serviceEndpointsUnregister(id: string, force?: boolean, environmentUrl?: string, profileName?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id };
         if (force !== undefined) params.force = force;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling serviceEndpoints/unregister for ${id}...`);
         return await this.connection!.sendRequest<{ success: boolean }>('serviceEndpoints/unregister', params);
     }
 
     // ── Custom APIs ──────────────────────────────────────────────────────────
 
-    async customApisList(environmentUrl?: string): Promise<CustomApisListResponse> {
+    async customApisList(environmentUrl?: string, profileName?: string): Promise<CustomApisListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling customApis/list...');
         return await this.connection!.sendRequest<CustomApisListResponse>('customApis/list', params);
     }
 
-    async customApisGet(uniqueNameOrId: string, environmentUrl?: string): Promise<CustomApisGetResponse> {
+    async customApisGet(uniqueNameOrId: string, environmentUrl?: string, profileName?: string): Promise<CustomApisGetResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { uniqueNameOrId };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/get for ${uniqueNameOrId}...`);
         return await this.connection!.sendRequest<CustomApisGetResponse>('customApis/get', params);
     }
 
-    async customApisRegister(fields: Record<string, unknown>, environmentUrl?: string): Promise<CustomApisRegisterResponse> {
+    async customApisRegister(fields: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<CustomApisRegisterResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { ...fields };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling customApis/register...');
         return await this.connection!.sendRequest<CustomApisRegisterResponse>('customApis/register', params);
     }
 
-    async customApisUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<{ success: boolean }> {
+    async customApisUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id, ...fields };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/update for ${id}...`);
         return await this.connection!.sendRequest<{ success: boolean }>('customApis/update', params);
     }
 
-    async customApisUnregister(id: string, force?: boolean, environmentUrl?: string): Promise<{ success: boolean }> {
+    async customApisUnregister(id: string, force?: boolean, environmentUrl?: string, profileName?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { id };
         if (force !== undefined) params.force = force;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/unregister for ${id}...`);
         return await this.connection!.sendRequest<{ success: boolean }>('customApis/unregister', params);
     }
 
-    async customApisAddParameter(apiId: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<{ id: string }> {
+    async customApisAddParameter(apiId: string, fields: Record<string, unknown>, environmentUrl?: string, profileName?: string): Promise<{ id: string }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { apiId, ...fields };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/addParameter for api ${apiId}...`);
         return await this.connection!.sendRequest<{ id: string }>('customApis/addParameter', params);
     }
 
-    async customApisUpdateParameter(parameterId: string, displayName?: string, description?: string, environmentUrl?: string): Promise<{ success: boolean }> {
+    async customApisUpdateParameter(parameterId: string, displayName?: string, description?: string, environmentUrl?: string, profileName?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { parameterId };
         if (displayName !== undefined) params.displayName = displayName;
         if (description !== undefined) params.description = description;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/updateParameter for ${parameterId}...`);
         return await this.connection!.sendRequest<{ success: boolean }>('customApis/updateParameter', params);
     }
 
-    async customApisRemoveParameter(parameterId: string, environmentUrl?: string): Promise<{ success: boolean }> {
+    async customApisRemoveParameter(parameterId: string, environmentUrl?: string, profileName?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { parameterId };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info(`Calling customApis/removeParameter for ${parameterId}...`);
         return await this.connection!.sendRequest<{ success: boolean }>('customApis/removeParameter', params);
     }
 
     // ── Data Providers ───────────────────────────────────────────────────────
 
-    async dataProvidersList(dataSourceId?: string, environmentUrl?: string): Promise<DataProvidersListResponse> {
+    async dataProvidersList(dataSourceId?: string, environmentUrl?: string, profileName?: string): Promise<DataProvidersListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (dataSourceId !== undefined) params.dataSourceId = dataSourceId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling dataProviders/list...');
         return await this.connection!.sendRequest<DataProvidersListResponse>('dataProviders/list', params);
     }
 
-    async dataSourcesList(environmentUrl?: string): Promise<DataSourcesListResponse> {
+    async dataSourcesList(environmentUrl?: string, profileName?: string): Promise<DataSourcesListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling dataSources/list...');
         return await this.connection!.sendRequest<DataSourcesListResponse>('dataSources/list', params);
     }
@@ -1568,7 +1652,7 @@ export class DaemonClient implements vscode.Disposable {
      * Registers a handler for device code authentication notifications.
      * The daemon sends these when interactive browser-based auth is required.
      */
-    onDeviceCode(handler: (params: { userCode: string; verificationUrl: string; message: string }) => void): void {
+    onDeviceCode(handler: (params: { userCode: string; verificationUrl: string; message: string; profileName?: string }) => void): void {
         const method = 'auth/deviceCode';
         if (this.connection) {
             this.connection.onNotification(method, handler);

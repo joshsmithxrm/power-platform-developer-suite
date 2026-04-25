@@ -213,7 +213,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
 
     private async loadSolutionList(): Promise<void> {
         try {
-            const result = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
+            const result = await this.daemon.solutionsList(undefined, true, this.environmentUrl, undefined, this.profileName);
             const solutions = result.solutions.map(s => ({
                 id: s.id,
                 uniqueName: s.uniqueName,
@@ -253,6 +253,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 this.solutionId ?? undefined,
                 this.textOnly,
                 this.environmentUrl,
+                this.profileName,
             );
 
             // WR-23: Store in cache before streaming to webview.
@@ -368,7 +369,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
 
     private async publishSelected(ids: string[]): Promise<void> {
         try {
-            const result = await this.daemon.webResourcesPublish(ids, this.environmentUrl);
+            const result = await this.daemon.webResourcesPublish(ids, this.environmentUrl, this.profileName);
             this.postMessage({
                 command: 'publishResult',
                 count: result.publishedCount,
@@ -393,7 +394,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
 
         try {
             this.postMessage({ command: 'loading' });
-            await this.daemon.webResourcesPublishAll(this.environmentUrl);
+            await this.daemon.webResourcesPublishAll(this.environmentUrl, this.profileName);
             await this.loadWebResources();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
