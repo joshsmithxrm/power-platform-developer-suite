@@ -28,13 +28,14 @@ public static class WebResourcesCommandGroup
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("webresources", "Manage Dataverse web resources: list, get, url, publish, pull");
+        var command = new Command("webresources", "Manage Dataverse web resources: list, get, url, publish, pull, push");
 
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());
         command.Subcommands.Add(UrlCommand.Create());
         command.Subcommands.Add(PublishAliasCommand.Create());
         command.Subcommands.Add(PullCommand.Create());
+        command.Subcommands.Add(PushCommand.Create());
 
         return command;
     }
