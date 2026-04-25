@@ -339,7 +339,7 @@ public static class SqlCommand
         }
     }
 
-    private static int DmlExitCode(QueryResult result)
+    internal static int DmlExitCode(QueryResult result)
     {
         // DmlExecuteNode always yields exactly one row with exactly two columns:
         // affected_rows and failed_rows. Guard on that shape so a SELECT with a
