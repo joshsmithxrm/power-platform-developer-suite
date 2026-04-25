@@ -178,25 +178,25 @@ Status Bar     Context        Command
 **Depends-on:** Chunk 2
 **Mode:** alongside
 
-- [ ] Step 1: Create `src/PPDS.Extension/src/ppdsStatusBar.ts`. Export class `PpdsStatusBar implements vscode.Disposable`. Constructor takes `DaemonClient`. Creates a single `vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50)`.
+- [x] Step 1: Create `src/PPDS.Extension/src/ppdsStatusBar.ts`. Export class `PpdsStatusBar implements vscode.Disposable`. Constructor takes `DaemonClient`. Creates a single `vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50)`.
 
-- [ ] Step 2: Implement state-dependent display. Subscribe to `client.onDidChangeState` and `client.onDidReconnect`. State transitions:
+- [x] Step 2: Implement state-dependent display. Subscribe to `client.onDidChangeState` and `client.onDidReconnect`. State transitions:
   - `ready`: fetch profile via `client.authList()` with 10s timeout. Set text to `$(check) PPDS: {name} · {envDisplayName}` if profile has env, `$(check) PPDS: {name}` if no env, `$(check) PPDS: No profile` if no active profile. Set command to `ppds.listProfiles`. Clear error background.
   - `starting` / `reconnecting`: text `$(sync~spin) PPDS`, tooltip `PPDS Daemon: Starting/Reconnecting...`, command `ppds.restartDaemon`, clear error background.
   - `error`: text `$(error) PPDS`, tooltip `PPDS Daemon: Disconnected — click to restart`, command `ppds.restartDaemon`, set `statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground')`.
   - `stopped`: text `$(circle-slash) PPDS`, tooltip `PPDS Daemon: Stopped`, command `ppds.restartDaemon`, clear error background.
 
-- [ ] Step 3: Implement rich tooltip for ready state. Set `statusBarItem.tooltip` to a `vscode.MarkdownString` with profile name, environment name, auth method, and daemon state. For non-ready states, use plain string tooltips.
+- [x] Step 3: Implement rich tooltip for ready state. Set `statusBarItem.tooltip` to a `vscode.MarkdownString` with profile name, environment name, auth method, and daemon state. For non-ready states, use plain string tooltips.
 
-- [ ] Step 4: Expose a `refresh()` method (public) so external callers (e.g., profile commands after switching) can trigger a re-fetch. Follow same pattern as existing `ProfileStatusBar.refresh()`.
+- [x] Step 4: Expose a `refresh()` method (public) so external callers (e.g., profile commands after switching) can trigger a re-fetch. Follow same pattern as existing `ProfileStatusBar.refresh()`.
 
-- [ ] Step 5: Implement `dispose()` — dispose all subscriptions and the status bar item. Follow `R1` and `R3` from constitution.
+- [x] Step 5: Implement `dispose()` — dispose all subscriptions and the status bar item. Follow `R1` and `R3` from constitution.
 
-- [ ] Step 6: Write unit tests in `src/PPDS.Extension/src/__tests__/ppdsStatusBar.test.ts`. Test each state transition (ready with profile+env, ready with profile only, ready with no profile, starting, reconnecting, error, stopped). Test click command varies by state. Test refresh fetches profile. Mock `DaemonClient` following existing test patterns.
+- [x] Step 6: Write unit tests in `src/PPDS.Extension/src/__tests__/ppdsStatusBar.test.ts`. Test each state transition (ready with profile+env, ready with profile only, ready with no profile, starting, reconnecting, error, stopped). Test click command varies by state. Test refresh fetches profile. Mock `DaemonClient` following existing test patterns.
 
-- [ ] Step 7: Run `npm run ext:test` to verify tests pass.
+- [x] Step 7: Run `npm run ext:test` to verify tests pass.
 
-- [ ] Step 8: Commit: `feat(extension): create unified PpdsStatusBar replacing DaemonStatusBar + ProfileStatusBar`
+- [x] Step 8: Commit: `feat(extension): create unified PpdsStatusBar replacing DaemonStatusBar + ProfileStatusBar`
 
 ### Task 3.2 — Wire PpdsStatusBar in Extension Activation (ACs: AC-01)
 

@@ -29,8 +29,7 @@ import { WebResourcesPanel } from './panels/WebResourcesPanel.js';
 import { PluginsPanel } from './panels/PluginsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
-import { DaemonStatusBar } from './daemonStatusBar.js';
-import { ProfileStatusBar } from './profileStatusBar.js';
+import { PpdsStatusBar } from './ppdsStatusBar.js';
 import { showErrorWithReport } from './utils/errorNotify.js';
 import { logCommand, newClientCorrelationId } from './utils/structuredLog.js';
 
@@ -194,13 +193,9 @@ export function activate(context: vscode.ExtensionContext): void {
     const client = daemonClient; // Local const for type narrowing in closures
     context.subscriptions.push(client);
 
-    // ── Daemon Status Bar ────────────────────────────────────────────
-    const statusBar = new DaemonStatusBar(client);
+    // ── Unified PPDS Status Bar ──────────────────────────────────────
+    const statusBar = new PpdsStatusBar(client);
     context.subscriptions.push(statusBar);
-
-    // ── Profile Status Bar ───────────────────────────────────────────
-    const profileStatusBar = new ProfileStatusBar(client);
-    context.subscriptions.push(profileStatusBar);
 
     // ── Virtual Document Provider (EXPLAIN output) ────────────────────
     const explainProvider = new ExplainDocumentProvider();
@@ -306,7 +301,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // ── Profile Commands ────────────────────────────────────────────────
-    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); profileStatusBar.refresh(); });
+    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); statusBar.refresh(); });
 
     // ── Environment Commands (tree context menu) ────────────────────────
     context.subscriptions.push(
