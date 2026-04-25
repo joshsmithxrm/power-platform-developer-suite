@@ -108,7 +108,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _deviceCodeCallback = deviceCodeCallback;
 
         // Create presenter (contains all query orchestration logic, Terminal.Gui-free)
-        _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty);
+        _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty, ProfileName);
 
         // Query input area
         _queryFrame = new FrameView("Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")

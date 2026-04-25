@@ -785,7 +785,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         }
 
         var displayName = _session.CurrentEnvironmentDisplayName;
-        using var dialog = new EnvironmentDetailsDialog(_session, url, displayName);
+        var profileName = (_currentScreen as TuiScreenBase)?.ProfileName;
+        using var dialog = new EnvironmentDetailsDialog(_session, url, displayName, profileName);
         Application.Run(dialog);
     }
 
@@ -877,38 +878,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
                     profile.Identity,
                     profile.EnvironmentUrl,
                     profile.EnvironmentName);
-            }
-
-            _statusBar.Refresh();
-        });
-    }
-
-    private async Task SetActiveProfileWithEnvironmentAsync(ProfileSummary profile, string? environmentUrl, string? environmentName)
-    {
-        await _session.SetActiveProfileAsync(
-            profile.DisplayIdentifier,
-            environmentUrl,
-            environmentName);
-
-        Application.MainLoop?.Invoke(() =>
-        {
-            // Update the active tab's profile binding
-            var activeIndex = _tabManager.ActiveIndex;
-            if (activeIndex >= 0)
-            {
-                if (_currentScreen is TuiScreenBase screenBase)
-                {
-                    screenBase.ProfileName = profile.DisplayIdentifier;
-                    screenBase.EnvironmentUrl = environmentUrl;
-                    screenBase.EnvironmentDisplayName = environmentName;
-                }
-
-                _tabManager.UpdateTabProfile(
-                    activeIndex,
-                    profile.DisplayIdentifier,
-                    profile.Identity,
-                    environmentUrl,
-                    environmentName);
             }
 
             _statusBar.Refresh();
