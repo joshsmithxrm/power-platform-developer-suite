@@ -104,7 +104,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             _statusLabel.Text = $"Loading {filterLabel}web resources...";
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var service = provider.GetRequiredService<IWebResourceService>();
 
             // Stale reference check: verify persisted solution still exists (first load only)
@@ -207,7 +207,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IWebResourceService>();
 
             var content = await service.GetContentAsync(resource.Id, false, ScreenCancellation);
@@ -288,7 +288,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             _statusLabel.Text = $"Publishing {resource.Name}...";
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IWebResourceService>();
 
             var count = await service.PublishAsync([resource.Id], ScreenCancellation);
@@ -329,7 +329,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             _statusLabel.Text = "Publishing all customizations...";
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IWebResourceService>();
 
             await service.PublishAllAsync(ScreenCancellation);
@@ -362,7 +362,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
             var solutionsResult = await solutionService.ListAsync(cancellationToken: ScreenCancellation);

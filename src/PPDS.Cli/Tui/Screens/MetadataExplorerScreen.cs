@@ -323,7 +323,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var result = await service.CreateTableAsync(request, reporter, ScreenCancellation);
 
@@ -360,7 +360,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var result = await service.CreateColumnAsync(request, reporter, ScreenCancellation);
 
@@ -403,7 +403,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.CreateOneToManyAsync(request, reporter, ScreenCancellation);
 
@@ -429,7 +429,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.CreateManyToManyAsync(request, reporter, ScreenCancellation);
 
@@ -466,7 +466,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var result = await service.CreateGlobalChoiceAsync(request, reporter, ScreenCancellation);
 
@@ -506,7 +506,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var result = await service.CreateKeyAsync(request, reporter, ScreenCancellation);
 
@@ -581,7 +581,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.UpdateColumnAsync(request, reporter, ScreenCancellation);
 
@@ -607,7 +607,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.UpdateGlobalChoiceAsync(request, reporter, ScreenCancellation);
 
@@ -710,7 +710,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.DeleteColumnAsync(request, reporter, ScreenCancellation);
 
@@ -755,7 +755,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.DeleteRelationshipAsync(request, reporter, ScreenCancellation);
 
@@ -804,7 +804,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.DeleteKeyAsync(request, reporter, ScreenCancellation);
 
@@ -856,7 +856,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         try
         {
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             await service.DeleteGlobalChoiceAsync(request, reporter, ScreenCancellation);
 
@@ -908,7 +908,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 _statusLabel.Text = "Loading entities...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var metadataService = provider.GetRequiredService<IMetadataQueryService>();
             var entities = await metadataService.GetEntitiesAsync(cancellationToken: ct);
 
@@ -949,7 +949,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 _statusLabel.Text = $"Loading {logicalName}...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var metadataService = provider.GetRequiredService<IMetadataQueryService>();
 
             var (entity, globalOptionSets) = await metadataService.GetEntityWithGlobalOptionSetsAsync(

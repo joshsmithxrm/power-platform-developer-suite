@@ -69,7 +69,7 @@ internal sealed class ImportJobsScreen : TuiScreenBase
             _statusLabel.Text = "Loading import jobs...";
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IImportJobService>();
 
             var result = await service.ListAsync(cancellationToken: ScreenCancellation);
@@ -129,7 +129,7 @@ internal sealed class ImportJobsScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IImportJobService>();
 
             var data = await service.GetDataAsync(job.Id, ScreenCancellation);
