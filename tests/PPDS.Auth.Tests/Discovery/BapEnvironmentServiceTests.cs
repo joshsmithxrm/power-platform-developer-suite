@@ -114,7 +114,7 @@ public class BapEnvironmentServiceTests
     [InlineData("Sandbox", 5)]
     [InlineData("Developer", 6)]
     [InlineData("Trial", 11)]
-    [InlineData("Default", 12)]
+    [InlineData("Default", -1)]
     public async Task DiscoverEnvironments_MapsEnvironmentSku(string sku, int expectedOrgType)
     {
         var json = $@"{{ ""value"": [{{ ""name"": ""env-1"", ""properties"": {{ ""displayName"": ""Test"", ""environmentSku"": ""{sku}"", ""linkedEnvironmentMetadata"": {{ ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" }} }} }}] }}";

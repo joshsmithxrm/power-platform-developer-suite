@@ -332,7 +332,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
             "Sandbox" => 5,
             "Developer" => 6,
             "Trial" => 11,
-            "Default" => 12,
+            "Default" => -1,
             _ => 0
         };
     }
