@@ -38,6 +38,8 @@ Refresh | Panel Actions | Maker Portal | spacer | Search | Filters/Toggles | Sor
 - **Sort** — `<select class="toolbar-select">` when present
 - **EnvPicker** — always last (`${getEnvironmentPickerHtml()}`)
 
+Tool-type panels (e.g., Data Explorer) may substitute their primary action for Refresh and omit Search.
+
 Shared CSS classes (defined in `shared.css`, not in panel CSS):
 - `.toolbar-search` — search input styling
 - `.toolbar-checkbox` — label+checkbox toggle in toolbar

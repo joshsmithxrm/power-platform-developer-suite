@@ -171,22 +171,6 @@
     outline: 1px solid var(--vscode-focusBorder);
 }
 
-/* ── Text-only toggle ──────────────────────────────────────────────────── */
-
-.text-only-toggle {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.text-only-toggle input[type="checkbox"] {
-    cursor: pointer;
-}
-
 /* ── Publish button ────────────────────────────────────────────────────── */
 
 .publish-btn[disabled] {

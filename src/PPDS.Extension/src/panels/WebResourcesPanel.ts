@@ -449,7 +449,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         <span class="solution-filter-label">Solution:</span>
         <div id="solution-filter-container"></div>
     </div>
-    <label class="text-only-toggle" title="Show only text-based web resources (JS, CSS, HTML, XML)">
+    <label class="toolbar-checkbox" title="Show only text-based web resources (JS, CSS, HTML, XML)">
         <input type="checkbox" id="text-only-cb" checked>
         Text only
     </label>
