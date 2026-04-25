@@ -112,6 +112,11 @@ namespace PPDS.Migration.Schema
 
                 if (entitySchema != null)
                 {
+                    if (options.EntityFilters?.TryGetValue(entityName, out var fetchXmlFilter) == true)
+                    {
+                        entitySchema.FetchXmlFilter = fetchXmlFilter;
+                    }
+
                     entitySchemas.Add(entitySchema);
                 }
             }

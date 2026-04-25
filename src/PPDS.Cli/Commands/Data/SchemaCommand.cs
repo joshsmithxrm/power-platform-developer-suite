@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Services.Data;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
@@ -59,6 +60,11 @@ public static class SchemaCommand
             AllowMultipleArgumentsPerToken = true
         };
 
+        var filterOption = new Option<string[]?>("--filter")
+        {
+            Description = "SQL-like filter per entity. Format: entity:expression (e.g., \"account:statecode = 0\"). Repeatable."
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
         {
             Description = "Output format",
@@ -87,6 +93,7 @@ public static class SchemaCommand
             disablePluginsOption,
             includeAttributesOption,
             excludeAttributesOption,
+            filterOption,
             outputFormatOption,
             verboseOption,
             debugOption
@@ -102,6 +109,7 @@ public static class SchemaCommand
             var disablePlugins = parseResult.GetValue(disablePluginsOption);
             var includeAttributes = parseResult.GetValue(includeAttributesOption);
             var excludeAttributes = parseResult.GetValue(excludeAttributesOption);
+            var filters = parseResult.GetValue(filterOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
@@ -112,10 +120,11 @@ public static class SchemaCommand
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var outputWriter = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+
             if (entityList.Count == 0)
             {
-                var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
-                writer.WriteError(new StructuredError(
+                outputWriter.WriteError(new StructuredError(
                     ErrorCodes.Validation.RequiredField,
                     "No entities specified.",
                     Target: "--entities"));
@@ -125,10 +134,22 @@ public static class SchemaCommand
             var includeAttrList = ParseAttributeList(includeAttributes);
             var excludeAttrList = ParseAttributeList(excludeAttributes);
 
+            Dictionary<string, string>? entityFilters = null;
+            if (filters is { Length: > 0 })
+            {
+                var entitySet = new HashSet<string>(entityList, StringComparer.OrdinalIgnoreCase);
+
+                var result = ParseAndTranspileFilters(filters, entitySet, outputWriter);
+                if (result == null)
+                    return ExitCodes.InvalidArguments;
+
+                entityFilters = result;
+            }
+
             return await ExecuteAsync(
                 profile, environment, entityList, output,
                 includeAuditFields, disablePlugins,
-                includeAttrList, excludeAttrList,
+                includeAttrList, excludeAttrList, entityFilters,
                 outputFormat, verbose, debug, cancellationToken);
         });
 
@@ -147,6 +168,63 @@ public static class SchemaCommand
             .ToList();
     }
 
+    internal static Dictionary<string, string>? ParseAndTranspileFilters(
+        string[] filters,
+        HashSet<string> entitySet,
+        IOutputWriter writer)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var filter in filters)
+        {
+            var colonIndex = filter.IndexOf(':');
+            if (colonIndex <= 0 || colonIndex >= filter.Length - 1)
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Invalid filter format: \"{filter}\". Expected entity:expression (e.g., \"account:statecode = 0\").",
+                    Target: "--filter"));
+                return null;
+            }
+
+            var entityName = filter[..colonIndex].Trim();
+            var expression = filter[(colonIndex + 1)..].Trim();
+
+            if (!entitySet.Contains(entityName))
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Filter entity \"{entityName}\" is not in the --entities list.",
+                    Target: "--filter"));
+                return null;
+            }
+
+            if (result.ContainsKey(entityName))
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Duplicate filter for entity \"{entityName}\". Specify one --filter per entity; combine conditions with AND/OR.",
+                    Target: "--filter"));
+                return null;
+            }
+
+            try
+            {
+                result[entityName] = FilterTranspiler.TranspileToFetchXmlFilter(entityName, expression);
+            }
+            catch (PpdsException ex)
+            {
+                writer.WriteError(new StructuredError(
+                    ex.ErrorCode,
+                    ex.Message,
+                    Target: "--filter"));
+                return null;
+            }
+        }
+
+        return result;
+    }
+
     private static async Task<int> ExecuteAsync(
         string? profile,
         string? environment,
@@ -156,6 +234,7 @@ public static class SchemaCommand
         bool disablePlugins,
         List<string>? includeAttributes,
         List<string>? excludeAttributes,
+        Dictionary<string, string>? entityFilters,
         OutputFormat outputFormat,
         bool verbose,
         bool debug,
@@ -199,7 +278,8 @@ public static class SchemaCommand
                 IncludeAuditFields = includeAuditFields,
                 DisablePluginsByDefault = disablePlugins,
                 IncludeAttributes = includeAttributes,
-                ExcludeAttributes = excludeAttributes
+                ExcludeAttributes = excludeAttributes,
+                EntityFilters = entityFilters
             };
 
             var schema = await generator.GenerateAsync(
