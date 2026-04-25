@@ -3,30 +3,33 @@ name: Build
 on:
   push:
     branches: [main]
-    paths:
-      - '**.cs'
-      - '**.csproj'
-      - '**.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'nuget.config'
-      - 'src/PPDS.Extension/**'
   pull_request:
     branches: [main]
-    paths:
-      - '**.cs'
-      - '**.csproj'
-      - '**.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'nuget.config'
-      - 'src/PPDS.Extension/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**.cs'
+              - '**.csproj'
+              - '**.sln'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'nuget.config'
+              - 'src/PPDS.Extension/**'
+
   # Dependency review for PRs - checks for vulnerabilities in dependency changes
   dependency-review:
     runs-on: ubuntu-latest
@@ -44,6 +47,8 @@ jobs:
           deny-licenses: ''
 
   build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
 
     steps:
@@ -113,6 +118,8 @@ jobs:
 
   # Extension build (TypeScript)
   extension:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -174,11 +181,15 @@ jobs:
   # Gate job for branch protection
   build-status:
     runs-on: ubuntu-latest
-    needs: [build, extension]
+    needs: [changes, build, extension]
     if: always()
     steps:
       - name: Check build status
         run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Changes detection failed: ${{ needs.changes.result }}"
+            exit 1
+          fi
           if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \
              [[ "${{ needs.extension.result }}" == "success" || "${{ needs.extension.result }}" == "skipped" ]]; then
             echo "Build passed"
