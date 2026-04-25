@@ -29,6 +29,7 @@ Options:
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -336,7 +337,7 @@ def auto_commit_stranded(worktree_path, stage, logger, *,
         return False
     try:
         dirty = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=worktree_path, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=10,
         )
@@ -1695,7 +1696,12 @@ def main():
                 resume_parts.extend(["--spec", source_rel, "--branch", branch])
             resume_parts.extend(["--from", resume_stage,
                                  "--worktree", worktree_path])
-            resume_cmd = " ".join(resume_parts)
+            if args.dry_run:
+                resume_parts.append("--dry-run")
+            if args.max_stage_seconds is not None:
+                resume_parts.extend(["--max-stage-seconds",
+                                     str(args.max_stage_seconds)])
+            resume_cmd = shlex.join(resume_parts)
             log(logger, "pipeline", "RESUME_HINT", command=resume_cmd)
 
             last_output = _read_last_lines(worktree_path, _failed_log_stage, 50)
