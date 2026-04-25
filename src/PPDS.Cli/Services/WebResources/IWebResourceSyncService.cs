@@ -85,12 +85,14 @@ public sealed record ErrorResource(string Name, string Error);
 /// <param name="Pushed">Resources successfully uploaded (or that would be in dry-run).</param>
 /// <param name="Conflicts">Conflicts detected: server modifiedOn differs from tracked.</param>
 /// <param name="Skipped">Resources skipped (unchanged, binary, missing, etc.).</param>
+/// <param name="Errors">Resources that errored during the push (per-item upload, refresh, or publish failures).</param>
 /// <param name="DryRun">True if this was a dry-run (no mutations applied).</param>
 /// <param name="PublishedCount">Number of resources published (only when Publish=true and not DryRun).</param>
 public sealed record PushResult(
     IReadOnlyList<PushedResource> Pushed,
     IReadOnlyList<ConflictResource> Conflicts,
     IReadOnlyList<SkippedResource> Skipped,
+    IReadOnlyList<ErrorResource> Errors,
     bool DryRun,
     int PublishedCount);
 

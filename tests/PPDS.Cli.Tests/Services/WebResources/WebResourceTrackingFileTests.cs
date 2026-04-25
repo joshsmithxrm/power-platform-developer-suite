@@ -95,17 +95,19 @@ public class WebResourceTrackingFileTests : IDisposable
         hash.Should().StartWith("sha256:");
         hash.Length.Should().Be("sha256:".Length + 64);
 
+        var modifiedOn = new DateTime(2026, 4, 20, 14, 22, 0, DateTimeKind.Utc);
+        var pulledAt = new DateTime(2026, 4, 25, 10, 30, 0, DateTimeKind.Utc);
         var trackingFile = new WebResourceTrackingFile(
             Version: 1,
             EnvironmentUrl: "https://x",
             Solution: null,
             StripPrefix: false,
-            PulledAt: DateTime.UtcNow,
+            PulledAt: pulledAt,
             Resources: new Dictionary<string, TrackedResource>
             {
                 ["new_/sample.js"] = new TrackedResource(
                     Id: Guid.NewGuid(),
-                    ModifiedOn: DateTime.UtcNow,
+                    ModifiedOn: modifiedOn,
                     Hash: hash,
                     LocalPath: "sample.js",
                     WebResourceType: 3),
@@ -114,7 +116,7 @@ public class WebResourceTrackingFileTests : IDisposable
         await WebResourceTrackingFile.WriteAsync(_folder, trackingFile);
         var roundTripped = await WebResourceTrackingFile.ReadAsync(_folder);
         roundTripped!.Resources["new_/sample.js"].Hash.Should().Be(hash);
-        roundTripped.Resources["new_/sample.js"].ModifiedOn.Should().BeCloseTo(trackingFile.PulledAt, TimeSpan.FromSeconds(1));
+        roundTripped.Resources["new_/sample.js"].ModifiedOn.Should().Be(modifiedOn);
     }
 
     [Fact]

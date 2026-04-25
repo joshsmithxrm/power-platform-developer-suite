@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Services.WebResources;
 
@@ -47,8 +48,34 @@ public sealed record WebResourceTrackingFile(
             return null;
         }
 
-        await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<WebResourceTrackingFile>(stream, SerializerOptions, cancellationToken);
+        WebResourceTrackingFile? deserialized;
+        await using (var stream = File.OpenRead(path))
+        {
+            deserialized = await JsonSerializer.DeserializeAsync<WebResourceTrackingFile>(stream, SerializerOptions, cancellationToken);
+        }
+
+        if (deserialized is null)
+        {
+            return null;
+        }
+
+        if (deserialized.Version > CurrentVersion)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.SchemaInvalid,
+                $"Tracking file schema version {deserialized.Version} is newer than supported version {CurrentVersion}. Update the PPDS CLI.");
+        }
+
+        if (deserialized.Version < 1)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.SchemaInvalid,
+                $"Tracking file schema version {deserialized.Version} is invalid. Expected version 1 or later.");
+        }
+
+        // Rebuild Resources with OrdinalIgnoreCase so lookups match the comparer used at pull time.
+        var resources = new Dictionary<string, TrackedResource>(deserialized.Resources, StringComparer.OrdinalIgnoreCase);
+        return deserialized with { Resources = resources };
     }
 
     /// <summary>
@@ -63,8 +90,23 @@ public sealed record WebResourceTrackingFile(
             Directory.CreateDirectory(directory);
         }
 
-        await using var stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, trackingFile, SerializerOptions, cancellationToken);
+        // Atomic write: serialize to a sibling .tmp file then rename, so a crash
+        // mid-serialize cannot leave the canonical tracking file truncated or corrupt.
+        var tempPath = path + ".tmp";
+        try
+        {
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, trackingFile, SerializerOptions, cancellationToken);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tempPath); } catch { /* best effort */ }
+            throw;
+        }
     }
 
     /// <summary>

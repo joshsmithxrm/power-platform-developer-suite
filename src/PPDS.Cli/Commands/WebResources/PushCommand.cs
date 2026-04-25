@@ -101,13 +101,24 @@ public static class PushCommand
                 DryRun: dryRun,
                 Publish: publish);
 
-            var result = await sync.PushAsync(pushOptions, progress: null, cancellationToken);
+            IOperationProgress? progress = globalOptions.IsJsonMode ? null : new StderrOperationProgress();
+            var result = await sync.PushAsync(pushOptions, progress, cancellationToken);
 
             if (result.Conflicts.Count > 0)
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(BuildOutput(path, result));
+                    var conflictError = new StructuredError(
+                        ErrorCodes.WebResource.Conflict,
+                        $"Push blocked: {result.Conflicts.Count} resource(s) have changed on the server since last pull. Run 'ppds webresources pull {path}' to fetch latest changes, or use --force to push anyway.",
+                        null,
+                        path);
+                    writer.WriteResult(new CommandResult<PushOutput>
+                    {
+                        Success = false,
+                        Data = BuildOutput(path, result),
+                        Error = conflictError,
+                    });
                 }
                 else
                 {
@@ -141,15 +152,25 @@ public static class PushCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Pushed {result.Pushed.Count} web resource(s) ({result.Skipped.Count} skipped)");
+                    Console.Error.WriteLine($"Pushed {result.Pushed.Count} web resource(s) ({result.Skipped.Count} skipped, {result.Errors.Count} errors)");
                     if (publish)
                     {
                         Console.Error.WriteLine($"Published {result.PublishedCount} web resource(s)");
                     }
                 }
+
+                if (result.Errors.Count > 0)
+                {
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("Errors:");
+                    foreach (var err in result.Errors)
+                    {
+                        Console.Error.WriteLine($"  {err.Name}: {err.Error}");
+                    }
+                }
             }
 
-            return ExitCodes.Success;
+            return result.Errors.Count > 0 ? ExitCodes.PartialSuccess : ExitCodes.Success;
         }
         catch (Exception ex)
         {
@@ -172,6 +193,7 @@ public static class PushCommand
             ServerModifiedOn = c.ServerModifiedOn,
         }).ToList(),
         Skipped = result.Skipped.Select(s => new SkippedOutput { Name = s.Name, Reason = s.Reason }).ToList(),
+        Errors = result.Errors.Select(e => new ErrorOutput { Name = e.Name, Error = e.Error }).ToList(),
     };
 
     #region Output Models
@@ -195,6 +217,9 @@ public static class PushCommand
 
         [JsonPropertyName("skipped")]
         public List<SkippedOutput> Skipped { get; set; } = [];
+
+        [JsonPropertyName("errors")]
+        public List<ErrorOutput> Errors { get; set; } = [];
     }
 
     private sealed class PushedOutput
@@ -225,6 +250,15 @@ public static class PushCommand
 
         [JsonPropertyName("reason")]
         public string Reason { get; set; } = string.Empty;
+    }
+
+    private sealed class ErrorOutput
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("error")]
+        public string Error { get; set; } = string.Empty;
     }
 
     #endregion

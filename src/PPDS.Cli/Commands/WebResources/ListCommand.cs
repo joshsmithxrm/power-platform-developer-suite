@@ -14,29 +14,6 @@ namespace PPDS.Cli.Commands.WebResources;
 /// </summary>
 public static class ListCommand
 {
-    /// <summary>
-    /// Type shortcut mappings. "text" and "image" expand to multiple type codes.
-    /// Individual types map to their type code.
-    /// </summary>
-    private static readonly Dictionary<string, int[]> TypeMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["text"] = [1, 2, 3, 4, 9, 11, 12],     // HTML, CSS, JS, XML, XSL, SVG, RESX
-        ["image"] = [5, 6, 7, 10, 11],            // PNG, JPG, GIF, ICO, SVG
-        ["data"] = [4, 12],                        // XML, RESX
-        ["html"] = [1],
-        ["css"] = [2],
-        ["js"] = [3], ["javascript"] = [3],
-        ["xml"] = [4],
-        ["png"] = [5],
-        ["jpg"] = [6], ["jpeg"] = [6],
-        ["gif"] = [7],
-        ["xap"] = [8],
-        ["xsl"] = [9], ["xslt"] = [9],
-        ["ico"] = [10],
-        ["svg"] = [11],
-        ["resx"] = [12],
-    };
-
     public static Command Create()
     {
         var namePatternArgument = new Argument<string?>("name-pattern")
@@ -104,11 +81,11 @@ public static class ListCommand
         int[]? typeCodes = null;
         if (type != null)
         {
-            if (!TypeMap.TryGetValue(type, out typeCodes))
+            if (!WebResourceTypeMap.TryGetCodes(type, out typeCodes))
             {
                 var error = new StructuredError(
                     ErrorCodes.Validation.InvalidValue,
-                    $"Unknown type '{type}'. Supported: text, image, data, js, css, html, xml, png, jpg, gif, svg, ico, xsl, resx",
+                    $"Unknown type '{type}'. Supported: {WebResourceTypeMap.SupportedAliases}",
                     null,
                     type);
                 writer.WriteError(error);

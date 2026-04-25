@@ -248,7 +248,7 @@ Download web resources from Dataverse to a local folder with tracking metadata.
 
 ##### Push Command
 
-**`ppds webresources push <path> [--solution <name>] [--force] [--dry-run] [--publish]`**
+**`ppds webresources push <path> [--force] [--dry-run] [--publish]`**
 
 Upload modified web resources from a local folder back to Dataverse with conflict detection.
 
@@ -256,7 +256,6 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 - `<path>` — folder containing pulled web resources (must have `.ppds/webresources.json`)
 
 **Options:**
-- `--solution <name>` — override solution scope for `--publish` (default: solution from tracking file). Does not affect content upload — `UpdateContentAsync` is solution-independent.
 - `--force` — skip conflict detection (push even if server has changed) and skip environment URL validation
 - `--dry-run` — preview what would be pushed without making changes (per dry-run convention)
 - `--publish` — publish all successfully pushed web resources after upload
@@ -456,7 +455,7 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 
 | Date | Change |
 |------|--------|
-| 2026-04-25 | Added pull/push workflow specification (#161, #162): IWebResourceSyncService, tracking file, pull/push CLI commands, ACs 34–55. Post-review fixes: path traversal protection, TOCTOU documentation, binary type scope, environment URL validation, tracking file merge semantics, deleted file handling |
+| 2026-04-25 | Added pull/push workflow specification (#161, #162): IWebResourceSyncService, tracking file, pull/push CLI commands, ACs 34–55. Post-review fixes: path traversal protection, TOCTOU documentation, binary type scope, environment URL validation, tracking file merge semantics, deleted file handling. Dropped `--solution` from `push` because both `UpdateContentAsync` and `PublishAsync` are solution-independent — the option had nowhere to plumb through and would have been dead code. |
 | 2026-03-23 | Added CLI surface (list, get, url), name resolution, publish alias; removed "offline editing" from non-goals (deferred to post-v1) |
 | 2026-03-18 | Extracted from panel-parity.md per SL1 |
 

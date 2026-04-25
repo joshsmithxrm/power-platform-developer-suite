@@ -88,6 +88,13 @@ public class WebResourceSyncServiceTests : IDisposable
     }
 
     /// <summary>AC-WR-38: parallel downloads — multiple GetContentAsync calls observed concurrently.</summary>
+    // SUGGESTION: This already uses the deterministic counter pattern requested
+    // (FakeWebResourceService.GetContentAsync increments/decrements _currentParallel via
+    // Interlocked and tracks PeakConcurrency). The 80ms latency only ensures the in-flight
+    // window overlaps during the run; the assertion observes concurrency directly, not
+    // wall-clock time. BeGreaterThan(1) is the loosest claim we can make without coupling
+    // to thread-pool scheduling (the service's MaxParallelism is intentionally an upper
+    // bound, not a guarantee of how many slots fill at any instant on small inputs).
     [Fact]
     public async Task PullDownloadsInParallel()
     {
@@ -139,25 +146,31 @@ public class WebResourceSyncServiceTests : IDisposable
         (await File.ReadAllTextAsync(localFile)).Should().Be("server-side update");
     }
 
-    /// <summary>AC-WR-41: type-code and name-pattern filters apply in the service (Constitution A1).</summary>
+    /// <summary>AC-WR-41: type-code filter applies in the service (Constitution A1).</summary>
     [Fact]
-    public async Task PullFiltersResources()
+    public async Task PullFiltersByTypeCode()
     {
         _fake.AddText("new_/scripts/app.js", "x");      // type 3
         _fake.AddText("new_/scripts/util.js", "x");     // type 3
         _fake.AddText("new_/styles/site.css", "x", type: 2);
 
-        // Type filter only (only JS)
-        var jsResult = await _service.PullAsync(PullOpts(typeCodes: [3]), null);
-        jsResult.Pulled.Should().HaveCount(2);
+        var result = await _service.PullAsync(PullOpts(typeCodes: [3]), null);
 
-        // Reset state
-        Directory.Delete(_folder, recursive: true);
-        Directory.CreateDirectory(_folder);
+        result.Pulled.Should().HaveCount(2);
+        result.Pulled.Should().OnlyContain(p => p.Name.EndsWith(".js"));
+    }
 
-        // Name pattern only
-        var nameResult = await _service.PullAsync(PullOpts(namePattern: "util"), null);
-        nameResult.Pulled.Should().ContainSingle(p => p.Name == "new_/scripts/util.js");
+    /// <summary>AC-WR-41: name-pattern filter applies in the service (Constitution A1).</summary>
+    [Fact]
+    public async Task PullFiltersByNamePattern()
+    {
+        _fake.AddText("new_/scripts/app.js", "x");
+        _fake.AddText("new_/scripts/util.js", "x");
+        _fake.AddText("new_/styles/site.css", "x", type: 2);
+
+        var result = await _service.PullAsync(PullOpts(namePattern: "util"), null);
+
+        result.Pulled.Should().ContainSingle(p => p.Name == "new_/scripts/util.js");
     }
 
     /// <summary>AC-WR-51: resources whose computed path escapes the workspace are rejected.</summary>
@@ -292,6 +305,10 @@ public class WebResourceSyncServiceTests : IDisposable
 
         var result = await _service.PushAsync(PushOpts(publish: true), null);
 
+        // Make precision-loss bugs in tracking-file ModifiedOn round-trip fail visibly:
+        // if any conflict were spuriously detected, the affected resource would not be uploaded
+        // and the publish counts below would silently disagree with intent.
+        result.Conflicts.Should().BeEmpty();
         result.PublishedCount.Should().Be(1);
         _fake.PublishCalls.Should().ContainSingle();
         _fake.PublishCalls[0].Should().HaveCount(1);
@@ -367,6 +384,33 @@ public class WebResourceSyncServiceTests : IDisposable
 
         await act.Should().ThrowAsync<PPDS.Cli.Infrastructure.Errors.PpdsException>()
             .Where(ex => ex.ErrorCode == PPDS.Cli.Infrastructure.Errors.ErrorCodes.Validation.FileNotFound);
+    }
+
+    /// <summary>R2: PullAsync threads CancellationToken through the call chain — pre-cancelled token aborts.</summary>
+    [Fact]
+    public async Task PullAsyncRespectsCancellationToken()
+    {
+        _fake.AddText("new_/scripts/app.js", "x");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await _service.PullAsync(PullOpts(), null, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>R2: PushAsync threads CancellationToken through the call chain — pre-cancelled token aborts.</summary>
+    [Fact]
+    public async Task PushAsyncRespectsCancellationToken()
+    {
+        _fake.AddText("new_/scripts/app.js", "v1");
+        await _service.PullAsync(PullOpts(), null);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await _service.PushAsync(PushOpts(), null, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }
 
@@ -446,6 +490,7 @@ internal sealed class FakeWebResourceService : IWebResourceService
 
     public Task<ListResult<WebResourceInfo>> ListAsync(Guid? solutionId = null, bool textOnly = false, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var items = _byName.Values
             .Select(s => new WebResourceInfo(s.Id, s.Name, null, s.Type, false, null, DateTime.UtcNow, null, s.ModifiedOn))
             .Where(i => !textOnly || i.IsTextType)

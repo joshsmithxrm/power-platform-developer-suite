@@ -14,29 +14,6 @@ namespace PPDS.Cli.Commands.WebResources;
 /// </summary>
 public static class PullCommand
 {
-    /// <summary>
-    /// Type shortcuts shared with <see cref="ListCommand"/>. Duplicated locally to avoid
-    /// exposing internal listcommand state; the small duplication is preferable to coupling.
-    /// </summary>
-    private static readonly Dictionary<string, int[]> TypeMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["text"] = [1, 2, 3, 4, 9, 11, 12],
-        ["image"] = [5, 6, 7, 10, 11],
-        ["data"] = [4, 12],
-        ["html"] = [1],
-        ["css"] = [2],
-        ["js"] = [3], ["javascript"] = [3],
-        ["xml"] = [4],
-        ["png"] = [5],
-        ["jpg"] = [6], ["jpeg"] = [6],
-        ["gif"] = [7],
-        ["xap"] = [8],
-        ["xsl"] = [9], ["xslt"] = [9],
-        ["ico"] = [10],
-        ["svg"] = [11],
-        ["resx"] = [12],
-    };
-
     public static Command Create()
     {
         var folderArgument = new Argument<string>("folder")
@@ -66,7 +43,7 @@ public static class PullCommand
 
         var forceOption = new Option<bool>("--force")
         {
-            Description = "Overwrite local files even when they differ from the last pulled version (hash mismatch)"
+            Description = "Overwrite local files even when they have been edited since the last pull"
         };
 
         var command = new Command("pull", "Pull web resources to a local folder with tracking metadata")
@@ -118,11 +95,11 @@ public static class PullCommand
         int[]? typeCodes = null;
         if (type != null)
         {
-            if (!TypeMap.TryGetValue(type, out typeCodes))
+            if (!WebResourceTypeMap.TryGetCodes(type, out typeCodes))
             {
                 writer.WriteError(new StructuredError(
                     ErrorCodes.Validation.InvalidValue,
-                    $"Unknown type '{type}'. Supported: text, image, data, js, css, html, xml, png, jpg, gif, svg, ico, xsl, resx",
+                    $"Unknown type '{type}'. Supported: {WebResourceTypeMap.SupportedAliases}",
                     null,
                     type));
                 return ExitCodes.InvalidArguments;
@@ -175,7 +152,8 @@ public static class PullCommand
                 StripPrefix: stripPrefix,
                 Force: force);
 
-            var result = await sync.PullAsync(pullOptions, progress: null, cancellationToken);
+            IOperationProgress? progress = globalOptions.IsJsonMode ? null : new StderrOperationProgress();
+            var result = await sync.PullAsync(pullOptions, progress, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {

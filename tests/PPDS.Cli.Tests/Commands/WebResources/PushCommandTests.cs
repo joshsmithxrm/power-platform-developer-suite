@@ -42,11 +42,12 @@ public class PushCommandTests
     }
 
     /// <summary>
-    /// AC-WR-42: tracking-file-not-found surfaces as exit-code NotFoundError (6) via ExceptionMapper
-    /// when PpdsException's ErrorCode is Validation.FileNotFound.
+    /// AC-WR-42: tracking-file-not-found PpdsException (ErrorCode = Validation.FileNotFound)
+    /// is mapped by ExceptionMapper to the InvalidArguments (3) exit code — i.e., the user
+    /// pointed `push` at a folder that hasn't been pulled.
     /// </summary>
     [Fact]
-    public void PushErrorsOnMissingTrackingFile_MapsToNotFoundExitCode()
+    public void PushErrorsOnMissingTrackingFile_MapsToInvalidArgumentsExitCode()
     {
         var ex = new PpdsException(
             ErrorCodes.Validation.FileNotFound,
@@ -71,6 +72,15 @@ public class PushCommandTests
 
         exitCode.Should().Be(ExitCodes.ConnectionError);
     }
+
+    // SUGGESTION: A true handler-level test would arrange a conflict via a mocked
+    // IWebResourceSyncService and assert the command returns ExitCodes.PreconditionFailed.
+    // Skipped because PushCommand.ExecuteAsync is private and constructs its service
+    // provider via ProfileServiceFactory.CreateFromProfilesAsync — there is no DI seam
+    // to inject a fake IWebResourceSyncService without modifying production code (out of
+    // scope for this fix pass). End-to-end conflict→ExitCode behavior is covered by
+    // WebResourceSyncServiceTests.PushDetectsServerConflict (verifies result.Conflicts is
+    // populated) plus the assertion below (verifies the constant the command branches on).
 
     /// <summary>
     /// AC-WR-44: PushResult with conflicts maps to PreconditionFailed (10).

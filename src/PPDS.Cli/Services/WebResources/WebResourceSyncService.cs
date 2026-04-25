@@ -14,6 +14,11 @@ public class WebResourceSyncService : IWebResourceSyncService
     private const int DefaultDownloadParallelism = 8;
     private const int DefaultUploadParallelism = 4;
 
+    // Path comparisons must be case-sensitive on POSIX, case-insensitive on Windows.
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
     private readonly IWebResourceService _webResourceService;
     private readonly ILogger<WebResourceSyncService> _logger;
 
@@ -58,9 +63,9 @@ public class WebResourceSyncService : IWebResourceSyncService
         var rootAbsolute = Path.GetFullPath(options.Folder);
         Directory.CreateDirectory(rootAbsolute);
 
-        var existingTracking = options.Force
-            ? null
-            : await WebResourceTrackingFile.ReadAsync(rootAbsolute, cancellationToken);
+        // Always read existing tracking — Force only governs the local-hash check below.
+        // Skipping the read would erase out-of-scope entries on a partial pull.
+        var existingTracking = await WebResourceTrackingFile.ReadAsync(rootAbsolute, cancellationToken);
 
         var pulled = new List<PulledResource>();
         var skipped = new List<SkippedResource>();
@@ -72,6 +77,12 @@ public class WebResourceSyncService : IWebResourceSyncService
         var processable = new List<(WebResourceInfo Resource, string LocalPath, string AbsolutePath)>();
         foreach (var resource in filtered)
         {
+            if (IsUnsafeResourceName(resource.Name))
+            {
+                errors.Add(new ErrorResource(resource.Name, ErrorCodes.Validation.PathOutsideWorkspace));
+                continue;
+            }
+
             var localPath = ComputeLocalPath(resource.Name, options.StripPrefix, resource.FileExtension);
             var absolutePath = Path.GetFullPath(Path.Combine(rootAbsolute, localPath));
             if (!IsDescendantOf(absolutePath, rootAbsolute))
@@ -82,7 +93,7 @@ public class WebResourceSyncService : IWebResourceSyncService
             processable.Add((resource, localPath, absolutePath));
         }
 
-        // Local-modification check (skip when --force)
+        // Local-modification check (skipped on hash mismatch unless --force).
         var toDownload = new List<(WebResourceInfo Resource, string LocalPath, string AbsolutePath, bool IsNew)>();
         foreach (var (resource, localPath, absolutePath) in processable)
         {
@@ -94,12 +105,21 @@ public class WebResourceSyncService : IWebResourceSyncService
             }
 
             var existsLocally = File.Exists(absolutePath);
-            if (existingTracking != null && existsLocally && existingTracking.Resources.TryGetValue(resource.Name, out var prior))
+            if (!options.Force && existsLocally)
             {
-                var localHash = await WebResourceTrackingFile.ComputeHashAsync(absolutePath, cancellationToken);
-                if (!string.Equals(localHash, prior.Hash, StringComparison.OrdinalIgnoreCase))
+                if (existingTracking != null && existingTracking.Resources.TryGetValue(resource.Name, out var prior))
                 {
-                    skipped.Add(new SkippedResource(resource.Name, "locally modified"));
+                    var localHash = await WebResourceTrackingFile.ComputeHashAsync(absolutePath, cancellationToken);
+                    if (!string.Equals(localHash, prior.Hash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        skipped.Add(new SkippedResource(resource.Name, "locally modified"));
+                        continue;
+                    }
+                }
+                else
+                {
+                    // Untracked local file present (no prior tracking entry). Don't clobber.
+                    skipped.Add(new SkippedResource(resource.Name, "untracked local file exists"));
                     continue;
                 }
             }
@@ -184,21 +204,28 @@ public class WebResourceSyncService : IWebResourceSyncService
                 resource.WebResourceType);
         }
 
-        // Merge: locally modified (skipped) entries retain prior tracking; resources no longer
-        // returned by the server are pruned. Errored entries also retain prior tracking when present.
-        var skippedNames = skipped.Select(s => s.Name)
-            .Concat(errors.Select(e => e.Name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+        // Merge semantics. Two distinct cases for an entry already in tracking:
+        //   1. Present on the server but filtered out by --name/--type (out of scope): the pull
+        //      never queried it ⇒ preserve the prior entry untouched.
+        //   2. Present on the server and in scope: freshly downloaded entries win; skipped or
+        //      errored entries retain their prior tracking.
+        //   3. Absent from the server entirely: prune (resource was deleted or moved).
         if (existingTracking != null)
         {
-            var serverNames = filtered.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var serverNames = listResult.Items.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var inScopeNames = filtered.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, prior) in existingTracking.Resources)
             {
-                if (!serverNames.Contains(name)) continue; // pruned
-                if (newResourceEntries.ContainsKey(name)) continue; // already replaced
-                if (skippedNames.Contains(name))
+                if (newResourceEntries.ContainsKey(name)) continue; // already replaced by fresh entry
+                if (!serverNames.Contains(name)) continue;          // pruned (no longer on server)
+                if (inScopeNames.Contains(name))
                 {
+                    // In-scope and not freshly downloaded ⇒ skipped or errored ⇒ retain prior.
+                    newResourceEntries[name] = prior;
+                }
+                else
+                {
+                    // Out-of-scope (filtered out) ⇒ untouched by this pull ⇒ preserve prior entry.
                     newResourceEntries[name] = prior;
                 }
             }
@@ -252,6 +279,7 @@ public class WebResourceSyncService : IWebResourceSyncService
         }
 
         var skipped = new List<SkippedResource>();
+        var errors = new List<ErrorResource>();
         var pendingUpload = new List<(string Name, TrackedResource Tracked, string AbsolutePath, string Content)>();
 
         // Phase 1: detect local modifications (hash compare). Build the set of upload candidates.
@@ -284,14 +312,15 @@ public class WebResourceSyncService : IWebResourceSyncService
             pendingUpload.Add((name, entry, absolutePath, content));
         }
 
-        // Phase 2: server modifiedOn check (parallel, R2).
+        // Phase 2: server modifiedOn check (parallel, R2). Per-item failures are recorded so a
+        // single transient error does not abort the whole push (D4 — wrap, don't propagate raw).
         progress?.ReportStatus($"Checking {pendingUpload.Count} resource(s) for server conflicts...");
         var conflicts = new List<ConflictResource>();
         if (!options.Force && pendingUpload.Count > 0)
         {
             using var conflictSemaphore = new SemaphoreSlim(DefaultUploadParallelism);
             var serverModifiedOnByName = new Dictionary<string, DateTime?>();
-            var lockObj = new object();
+            var fetchLock = new object();
 
             async Task FetchOneAsync((string Name, TrackedResource Tracked, string AbsolutePath, string Content) item)
             {
@@ -299,9 +328,17 @@ public class WebResourceSyncService : IWebResourceSyncService
                 try
                 {
                     var serverModified = await _webResourceService.GetModifiedOnAsync(item.Tracked.Id, cancellationToken);
-                    lock (lockObj)
+                    lock (fetchLock)
                     {
                         serverModifiedOnByName[item.Name] = serverModified;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to query modifiedOn for web resource {Name}", item.Name);
+                    lock (fetchLock)
+                    {
+                        errors.Add(new ErrorResource(item.Name, ex.Message));
                     }
                 }
                 finally
@@ -311,6 +348,10 @@ public class WebResourceSyncService : IWebResourceSyncService
             }
 
             await Task.WhenAll(pendingUpload.Select(FetchOneAsync));
+
+            // Drop items whose conflict-check errored: don't upload without a baseline.
+            var erroredNames = errors.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            pendingUpload = pendingUpload.Where(u => !erroredNames.Contains(u.Name)).ToList();
 
             foreach (var item in pendingUpload)
             {
@@ -328,6 +369,7 @@ public class WebResourceSyncService : IWebResourceSyncService
                     Pushed: [],
                     Conflicts: conflicts,
                     Skipped: skipped,
+                    Errors: errors,
                     DryRun: options.DryRun,
                     PublishedCount: 0);
             }
@@ -341,11 +383,14 @@ public class WebResourceSyncService : IWebResourceSyncService
                 Pushed: pushedDryRun,
                 Conflicts: [],
                 Skipped: skipped,
+                Errors: errors,
                 DryRun: true,
                 PublishedCount: 0);
         }
 
-        // Phase 3: parallel uploads (R2).
+        // Phase 3: parallel uploads (R2). Per-item exceptions are recorded so partial successes
+        // still flow into the tracking refresh below — otherwise tracking goes stale and the
+        // next push falsely flags successful uploads as conflicts.
         progress?.ReportStatus($"Uploading {pendingUpload.Count} resource(s)...");
         var pushed = new List<PushedResource>();
         var uploadedIds = new List<Guid>();
@@ -373,6 +418,14 @@ public class WebResourceSyncService : IWebResourceSyncService
                     progress?.ReportProgress(done, pendingUpload.Count, item.Name);
                 }
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Failed to upload web resource {Name}", item.Name);
+                lock (uploadLock)
+                {
+                    errors.Add(new ErrorResource(item.Name, ex.Message));
+                }
+            }
             finally
             {
                 uploadSemaphore.Release();
@@ -385,10 +438,21 @@ public class WebResourceSyncService : IWebResourceSyncService
         if (options.Publish && uploadedIds.Count > 0)
         {
             progress?.ReportStatus($"Publishing {uploadedIds.Count} resource(s)...");
-            publishedCount = await _webResourceService.PublishAsync(uploadedIds, cancellationToken);
+            try
+            {
+                publishedCount = await _webResourceService.PublishAsync(uploadedIds, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Record but do not throw — successful uploads still need tracking refresh.
+                _logger.LogWarning(ex, "Publish failed for {Count} uploaded web resource(s)", uploadedIds.Count);
+                errors.Add(new ErrorResource("(publish)", ex.Message));
+            }
         }
 
-        // Phase 4: refresh tracking — re-query modifiedOn for uploaded resources, swap in new hashes.
+        // Phase 4: refresh tracking — re-query modifiedOn for uploaded resources, swap in new
+        // hashes. Per-item refresh failures fall back to the prior tracked modifiedOn so the
+        // tracking file at least stays consistent with what we sent.
         if (uploadedIds.Count > 0)
         {
             using var refreshSemaphore = new SemaphoreSlim(DefaultUploadParallelism);
@@ -406,6 +470,14 @@ public class WebResourceSyncService : IWebResourceSyncService
                         refreshedModifiedOn[kv.Key] = modified;
                     }
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to refresh modifiedOn for {Name}", kv.Key);
+                    lock (refreshLock)
+                    {
+                        errors.Add(new ErrorResource(kv.Key, ex.Message));
+                    }
+                }
                 finally
                 {
                     refreshSemaphore.Release();
@@ -414,27 +486,39 @@ public class WebResourceSyncService : IWebResourceSyncService
 
             await Task.WhenAll(uploadedKeys.Select(RefreshOneAsync));
 
-            var updatedResources = new Dictionary<string, TrackedResource>(tracking.Resources, StringComparer.OrdinalIgnoreCase);
-            foreach (var (name, (_, tracked)) in uploadedKeys)
+            try
             {
-                var newHash = uploadedHashes[name];
-                refreshedModifiedOn.TryGetValue(name, out var newModified);
-                updatedResources[name] = tracked with
+                var updatedResources = new Dictionary<string, TrackedResource>(tracking.Resources, StringComparer.OrdinalIgnoreCase);
+                foreach (var (name, (_, tracked)) in uploadedKeys)
                 {
-                    Hash = newHash,
-                    ModifiedOn = newModified ?? tracked.ModifiedOn,
-                };
-            }
+                    var newHash = uploadedHashes[name];
+                    refreshedModifiedOn.TryGetValue(name, out var newModified);
+                    updatedResources[name] = tracked with
+                    {
+                        Hash = newHash,
+                        ModifiedOn = newModified ?? tracked.ModifiedOn,
+                    };
+                }
 
-            var updatedTracking = tracking with { Resources = updatedResources };
-            await WebResourceTrackingFile.WriteAsync(rootAbsolute, updatedTracking, cancellationToken);
+                var updatedTracking = tracking with { Resources = updatedResources };
+                await WebResourceTrackingFile.WriteAsync(rootAbsolute, updatedTracking, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Tracking write failed after successful uploads — surface as a structured error.
+                throw new PpdsException(
+                    ErrorCodes.Operation.PartialFailure,
+                    $"Uploaded {pushed.Count} resource(s) but failed to update the local tracking file. The next push may falsely detect a conflict; re-run 'ppds webresources pull' to recover.",
+                    ex);
+            }
         }
 
-        progress?.ReportComplete($"Pushed {pushed.Count} resource(s) ({skipped.Count} skipped)");
+        progress?.ReportComplete($"Pushed {pushed.Count} resource(s) ({skipped.Count} skipped, {errors.Count} errors)");
         return new PushResult(
             Pushed: pushed,
             Conflicts: [],
             Skipped: skipped,
+            Errors: errors,
             DryRun: false,
             PublishedCount: publishedCount);
     }
@@ -460,12 +544,25 @@ public class WebResourceSyncService : IWebResourceSyncService
     {
         var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var normalizedCandidate = candidate;
-        if (string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalizedCandidate, normalizedRoot, PathComparison))
         {
             return true;
         }
         var prefix = normalizedRoot + Path.DirectorySeparatorChar;
-        return normalizedCandidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        return normalizedCandidate.StartsWith(prefix, PathComparison);
+    }
+
+    /// <summary>
+    /// Rejects names that could resolve to a path outside the workspace even before
+    /// <see cref="ComputeLocalPath"/> normalizes them — drive letters, UNC prefixes, rooted paths.
+    /// </summary>
+    private static bool IsUnsafeResourceName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return true;
+        if (name.Contains(':')) return true;            // C:\evil, file://...
+        if (name.Contains(@"\\")) return true;          // UNC \\server\share
+        if (Path.IsPathRooted(name)) return true;       // /etc/passwd on POSIX, etc.
+        return false;
     }
 
     private static string ComputeLocalPath(string resourceName, bool stripPrefix, string fileExtension)
@@ -502,7 +599,8 @@ public class WebResourceSyncService : IWebResourceSyncService
 
     private static string SanitizeName(string name)
     {
-        // Defense in depth: collapse leading separators, reject obvious traversal attempts.
+        // Defense in depth: collapse leading separators. Names with rooted/UNC/drive-letter
+        // forms are rejected upstream by IsUnsafeResourceName.
         return name.TrimStart('/', '\\');
     }
 }
