@@ -6,7 +6,7 @@ Governing spec: [`specs/docs-generation.md`](../../specs/docs-generation.md). Ge
 
 ## Prerequisites (one-time)
 
-- **GitHub App provisioned** — `ppds-docs-bot` installed on both `ppds` and `ppds-docs` repos. App ID + private key stored as `PPDS_DOCS_APP_ID` and `PPDS_DOCS_APP_PRIVATE_KEY` secrets in the ppds repo. See the generator README § "GitHub App setup" for the full procedure.
+- **GitHub App provisioned** — `ppds-docs-bot` installed on both `ppds` and `ppds-docs` repos. App ID stored as `PPDS_DOCS_APP_ID` variable, private key stored as `PPDS_DOCS_APP_PRIVATE_KEY` secret, docs repo stored as `PPDS_DOCS_REPO` variable in the ppds repo. See the generator README § "GitHub App setup" for the full procedure.
 - **Phase 0 baselines current** — every library in `src/PPDS.{Dataverse,Migration,Auth,Plugins}/` has a non-empty `PublicAPI.Shipped.txt` and an `Unshipped.txt` that either is empty or reflects the net-new public API since the last release.
 
 ## Release steps
@@ -53,7 +53,7 @@ Expected steps (in order):
 2. Build `PPDS.sln -c Release` into `artifacts/bin`
 3. Run all four generators against the built assemblies
 4. Compute surface-change summary (added / removed / modified public API vs the previous tag)
-5. Acquire GitHub App installation token (via `scripts/docs-gen/app-token/`)
+5. Acquire GitHub App installation token (via `actions/create-github-app-token@v3`)
 6. **ppds-docs PR:** create branch `release/v1.1.0-ref-{run_id}` in ppds-docs, push generated markdown, open PR titled `chore(reference): regenerate for v1.1.0`
 7. **Rollover PR:** in this repo, move Unshipped entries to Shipped, open PR `chore(release): v1.1.0 baseline rollover`
 

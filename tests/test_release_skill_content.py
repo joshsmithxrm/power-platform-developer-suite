@@ -1,9 +1,10 @@
-"""Tests for /release skill content (AC-06, AC-07).
+"""Tests for /release skill content (AC-06, AC-07, AC-13, AC-16).
 
 These verify that the /release skill SKILL.md file documents the
-single-package patch flow and the stabilization branch escape hatch.
-The SKILL.md file IS the canonical runbook — when it changes, these
-tests catch regressions in the documented process.
+single-package patch flow, the stabilization branch escape hatch,
+the security review gate for stable releases, and the unified tag
+convention. The SKILL.md file IS the canonical runbook — when it
+changes, these tests catch regressions in the documented process.
 
 Run with: python -m pytest tests/test_release_skill_content.py -v
 """
@@ -90,4 +91,47 @@ def test_stabilization_branch_appears_before_known_gotchas(skill_text: str) -> N
     assert gotchas_idx > 0, "Known Gotchas section missing"
     assert stab_idx < gotchas_idx, (
         "Stabilization Branch should appear before Known Gotchas"
+    )
+
+
+def test_security_review_gate_documented(skill_text: str) -> None:
+    """AC-13: SKILL.md enforces security review gate for stable releases.
+
+    The prerequisite and pre-merge verification sections must require a
+    security review artifact (docs/qa/security-review-*.md) for stable
+    releases (vX.Y.0) and explicitly exempt patches/prereleases.
+    """
+    lowered = skill_text.lower()
+    assert "security review" in lowered, (
+        "SKILL.md should mention security review"
+    )
+    assert "security-review" in lowered, (
+        "SKILL.md should reference the /security-review artifact path"
+    )
+    assert "docs/qa/security-review" in skill_text, (
+        "SKILL.md should specify the artifact path docs/qa/security-review-*.md"
+    )
+    assert "enforced" in lowered or "cannot proceed" in lowered, (
+        "SKILL.md should use enforcement language (not just 'should')"
+    )
+    assert "patch" in lowered, (
+        "SKILL.md should mention that patches are exempt from the gate"
+    )
+
+
+def test_unified_tag_convention_documented(skill_text: str) -> None:
+    """AC-16: SKILL.md documents the unified v* tag convention alongside
+    per-package tags.
+    """
+    assert "Unified v* Tag" in skill_text or "unified tag" in skill_text.lower(), (
+        "SKILL.md should have a section documenting the unified v* tag"
+    )
+    assert "docs-release.yml" in skill_text, (
+        "SKILL.md should reference docs-release.yml as the workflow triggered by unified tags"
+    )
+    assert "per-package" in skill_text.lower(), (
+        "SKILL.md should contrast unified tags with per-package tags"
+    )
+    assert "v1.1.0" in skill_text or "vX.Y.0" in skill_text, (
+        "SKILL.md should show an example of a unified tag"
     )
