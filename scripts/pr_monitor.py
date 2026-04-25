@@ -962,11 +962,12 @@ def run_monitor(worktree, pr_number, resume=False):
 
             if ci_status == "fail":
                 result["status"] = "ci_failed"
-                _step_notify(worktree, pr_number, logger, result)
                 write_result(worktree, result)
-                logger.log("monitor", "ABORT", reason="CI failed")
-                logger.close()
-                return 1
+                _notify_terminal(worktree, pr_number, logger,
+                                 f"PR #{pr_number} CI failed — "
+                                 f"continuing to triage")
+                logger.log("monitor", "CI_FAILED_CONTINUE",
+                           reason="CI failed, proceeding to Gemini/triage")
 
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
@@ -1029,12 +1030,15 @@ def run_monitor(worktree, pr_number, resume=False):
 
             if ci_status == "fail":
                 result["status"] = "ci_failed"
-                _step_notify(worktree, pr_number, logger, result)
                 write_result(worktree, result)
-                logger.log("monitor", "ABORT",
-                           reason=f"CI failed after triage round {triage_iteration}")
-                logger.close()
-                return 1
+                _notify_terminal(
+                    worktree, pr_number, logger,
+                    f"PR #{pr_number} CI failed after triage round "
+                    f"{triage_iteration}")
+                logger.log("monitor", "CI_FAILED_CONTINUE",
+                           reason=f"CI failed after triage round "
+                           f"{triage_iteration}, exiting triage loop")
+                break
 
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
@@ -1072,6 +1076,15 @@ def run_monitor(worktree, pr_number, resume=False):
                        round=triage_iteration, comments=len(comments))
             inline_count = len(comments)
 
+        # Triage-complete notification when CI was failing (#860)
+        if result.get("ci_result") == "fail" and result.get("triage_summary"):
+            total = sum(len(s.get("results", []))
+                        for s in result["triage_summary"])
+            _notify_terminal(
+                worktree, pr_number, logger,
+                f"PR #{pr_number} triage complete — "
+                f"{total} item(s) triaged (CI still failing)")
+
         # ---- Step 4: Mark PR ready ----
         if not (resume and step_completed(result, "ready")):
             _step_ready(worktree, pr_number, logger, result)
@@ -1083,6 +1096,13 @@ def run_monitor(worktree, pr_number, resume=False):
         # ---- Step 6: Notify ----
         if not (resume and step_completed(result, "notify")):
             _step_notify(worktree, pr_number, logger, result)
+
+        if result.get("ci_result") == "fail":
+            result["status"] = "ci_failed"
+            write_result(worktree, result)
+            logger.log("monitor", "COMPLETE_CI_FAILED", pr=pr_number)
+            logger.close()
+            return 1
 
         result["status"] = "complete"
         write_result(worktree, result)

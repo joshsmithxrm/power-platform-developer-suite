@@ -86,25 +86,119 @@ class TestCiFailure:
         assert result == "fail"
 
     def test_ci_failure_triggers_notify_in_monitor(self, tmp_path):
-        """run_monitor writes status=ci_failed and calls notify on CI failure."""
+        """run_monitor writes status=ci_failed, continues to triage, and
+        still returns exit code 1 (#860)."""
         wt = _make_worktree(tmp_path)
 
-        checks_fail = [
-            {"name": "build", "state": "COMPLETED", "bucket": "fail"},
-        ]
-
-        with patch("pr_monitor.subprocess.run", return_value=_gh_checks_json(checks_fail)), \
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify") as mock_notify:
             exit_code = pr_monitor.run_monitor(wt, 99, resume=False)
 
         assert exit_code == 1
         result = pr_monitor.read_result(wt)
         assert result["status"] == "ci_failed"
-        mock_notify.assert_called_once()
-        # Verify worktree and PR number are passed to notification
-        notify_args = mock_notify.call_args
-        assert notify_args[0][0] == wt, "run_notify must receive worktree path"
-        assert notify_args[0][1] == 99, "run_notify must receive PR number"
+        # CI-fail notification + final notification (#860: no longer aborts)
+        assert mock_notify.call_count >= 1
+        # First call is the CI-fail terminal notification
+        first_call = mock_notify.call_args_list[0]
+        assert first_call[0][0] == wt, "run_notify must receive worktree path"
+        assert first_call[0][1] == 99, "run_notify must receive PR number"
+        assert "CI failed" in first_call[1].get("message", "")
+
+
+class TestCiFailContinuesToTriage:
+    """#860: CI failure must not abort triage — Gemini comments are still triaged."""
+
+    def test_ci_fail_then_gemini_comment_is_triaged(self, tmp_path):
+        """AC-4: CI fails, Gemini posts a comment, monitor triages it."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        gemini_comment = {
+            "id": 7001, "user": "gemini-code-assist[bot]",
+            "path": "src/Risky.cs", "line": 42,
+            "body": "File.Create race condition — use SetUnixFileMode",
+        }
+        triage_result = [{
+            "id": 7001, "action": "acknowledged",
+            "description": "security finding acknowledged",
+        }]
+
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments",
+                   return_value=[gemini_comment]), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor.run_triage", return_value=triage_result) as mock_triage, \
+             patch("pr_monitor._post_replies_common"), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 858, resume=False)
+
+        assert exit_code == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ci_failed"
+
+        # AC-1: triage ran despite CI failure
+        mock_triage.assert_called_once()
+
+        # AC-3: CI-fail notification AND triage-complete notification
+        notify_messages = [
+            c[1].get("message", "") for c in mock_notify.call_args_list
+            if c[1].get("message")
+        ]
+        assert any("CI failed" in m for m in notify_messages), \
+            "CI-fail notification missing"
+        assert any("triage complete" in m for m in notify_messages), \
+            "triage-complete notification missing"
+
+        # AC-2: ready-flip was NOT performed (CI is failing)
+        assert result["steps_completed"].get("ready", {}).get("status") == "skipped"
+
+    def test_ci_fail_no_gemini_comments_still_completes(self, tmp_path):
+        """CI fails with no Gemini comments — triage is skipped, status=ci_failed."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 100, resume=False)
+
+        assert exit_code == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ci_failed"
+        assert result["triage_summary"] == []
+
+    def test_ci_fail_ready_flip_gated(self, tmp_path):
+        """AC-2: ready-flip is correctly gated on CI passing, no regression of #834."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"), \
+             patch("pr_monitor.mark_pr_ready") as mock_ready:
+            exit_code = pr_monitor.run_monitor(wt, 101, resume=False)
+
+        assert exit_code == 1
+        mock_ready.assert_not_called()
+
+    def test_gemini_timeout_still_applies_on_ci_fail(self, tmp_path):
+        """AC-5: existing Gemini-review timeout still applies when CI fails."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]) as mock_gemini, \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 102, resume=False)
+
+        assert exit_code == 1
+        # poll_gemini_comments was called (not skipped), proving
+        # the Gemini wait phase ran even though CI failed.
+        mock_gemini.assert_called_once()
 
 
 class TestCiTimeout:
