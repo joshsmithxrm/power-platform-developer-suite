@@ -2,7 +2,6 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using PPDS.Cli.Commands.Query;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Tests.Mocks;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Query.Parsing;
@@ -326,9 +325,7 @@ public class SqlCommandStructureTests
 }
 
 /// <summary>
-/// Tests for SQL command DML exit code logic and error handling.
-/// Uses <see cref="FakeSqlQueryService"/> to validate the command layer
-/// without executing real queries.
+/// Tests for SQL command DML exit code logic and error mapping.
 /// </summary>
 [Trait("Category", "Unit")]
 public class SqlCommandTests
@@ -366,7 +363,7 @@ public class SqlCommandTests
         // DmlExitCode returns Success when Records.Count != 1
         Assert.NotEqual(1, result.Records.Count);
         // The exit code would be ExitCodes.Success (0)
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
     }
 
@@ -393,7 +390,7 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
     }
 
@@ -420,7 +417,7 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.PartialSuccess, exitCode);
     }
 
@@ -447,7 +444,7 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Failure, exitCode);
     }
 
@@ -472,7 +469,7 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
     }
 
@@ -499,7 +496,7 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
     }
 
@@ -508,7 +505,7 @@ public class SqlCommandTests
     {
         var result = QueryResult.Empty("account");
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
     }
 
@@ -535,42 +532,13 @@ public class SqlCommandTests
             Count = 1
         };
 
-        var exitCode = ComputeDmlExitCode(result);
+        var exitCode = SqlCommand.DmlExitCode(result);
         Assert.Equal(ExitCodes.Success, exitCode);
-    }
-
-    /// <summary>
-    /// Mirrors the private <c>DmlExitCode</c> logic in <see cref="SqlCommand"/>
-    /// to enable unit testing without reflection.
-    /// </summary>
-    private static int ComputeDmlExitCode(QueryResult result)
-    {
-        if (result.Records.Count != 1)
-            return ExitCodes.Success;
-
-        var row = result.Records[0];
-        if (row.Count != 2 ||
-            !row.TryGetValue("failed_rows", out var fq) ||
-            !row.TryGetValue("affected_rows", out var sq))
-            return ExitCodes.Success;
-
-        if (fq.Value is not long failed || failed == 0)
-            return ExitCodes.Success;
-
-        var succeeded = sq.Value is long s && s > 0;
-        return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
     }
 
     #endregion
 
     #region Error Handling
-
-    [Fact]
-    public void ErrorHandling_QueryParseException_MapsToInvalidArgumentsExitCode()
-    {
-        var exitCode = ExitCodes.InvalidArguments;
-        Assert.Equal(3, exitCode);
-    }
 
     [Fact]
     public void ErrorHandling_QueryParseException_ProducesStructuredError()
@@ -614,29 +582,6 @@ public class SqlCommandTests
 
         Assert.Equal(QueryErrorCode.ExecutionFailed, error.Code);
         Assert.Contains("Execution failed", error.Message);
-    }
-
-    [Fact]
-    public async Task ErrorHandling_FakeSqlQueryService_PropagatesQueryParseException()
-    {
-        var fake = new FakeSqlQueryService();
-        fake.ExceptionToThrow = new QueryParseException("Invalid SQL syntax");
-
-        await Assert.ThrowsAsync<QueryParseException>(
-            () => fake.ExecuteAsync(new PPDS.Cli.Services.Query.SqlQueryRequest { Sql = "NOT VALID" }));
-    }
-
-    [Fact]
-    public async Task ErrorHandling_FakeSqlQueryService_PropagatesQueryExecutionException()
-    {
-        var fake = new FakeSqlQueryService();
-        fake.ExceptionToThrow = new QueryExecutionException(
-            QueryErrorCode.DmlBlocked, "DML blocked by safety guard");
-
-        var ex = await Assert.ThrowsAsync<QueryExecutionException>(
-            () => fake.ExecuteAsync(new PPDS.Cli.Services.Query.SqlQueryRequest { Sql = "DELETE FROM account" }));
-
-        Assert.Equal(QueryErrorCode.DmlBlocked, ex.ErrorCode);
     }
 
     #endregion
