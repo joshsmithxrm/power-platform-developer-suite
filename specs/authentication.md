@@ -632,12 +632,12 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-17 | `BapEnvironmentService` throws `PpdsException` with `Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | 🔲 |
 | AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | 🔲 |
 | AC-19 | BAP discovery returns environments for SPN with management app registration | Integration test (Category=Integration) | 🔲 |
-| AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | 🔲 |
-| AC-21 | `CertificateFileCredentialProvider` validates required fields (ApplicationId, CertificatePath, TenantId) and rejects invalid cert paths | `CertificateFileCredentialProviderTests` | 🔲 |
-| AC-22 | `CertificateStoreCredentialProvider` validates required fields (ApplicationId, Thumbprint, TenantId) and rejects invalid inputs | `CertificateStoreCredentialProviderTests` | 🔲 |
-| AC-23 | `ManagedIdentityCredentialProvider` constructs with optional ClientId and sets correct AuthMethod | `ManagedIdentityCredentialProviderTests` | 🔲 |
-| AC-24 | `GitHubFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `GitHubFederatedCredentialProviderTests` | 🔲 |
-| AC-25 | `AzureDevOpsFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `AzureDevOpsFederatedCredentialProviderTests` | 🔲 |
+| AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | ✅ |
+| AC-21 | `CertificateFileCredentialProvider` validates required fields (ApplicationId, CertificatePath, TenantId) and rejects invalid cert paths | `CertificateFileCredentialProviderTests` | ✅ |
+| AC-22 | `CertificateStoreCredentialProvider` validates required fields (ApplicationId, Thumbprint, TenantId) and rejects invalid inputs | `CertificateStoreCredentialProviderTests` | ✅ |
+| AC-23 | `ManagedIdentityCredentialProvider` constructs with optional ClientId and sets correct AuthMethod | `ManagedIdentityCredentialProviderTests` | ✅ |
+| AC-24 | `GitHubFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `GitHubFederatedCredentialProviderTests` | ✅ |
+| AC-25 | `AzureDevOpsFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `AzureDevOpsFederatedCredentialProviderTests` | ✅ |
 | AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.NonInteractive_RoutesToBapDiscovery` | 🔲 |
 | AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_RoutesToGlobalDiscovery` | 🔲 |
 | AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlProvided_SkipsDiscovery` | 🔲 |

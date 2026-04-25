@@ -1,1 +1,16 @@
 #nullable enable
+const PPDS.Auth.AuthErrorCodes.BapApiError = "Auth.BapApiError" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiForbidden = "Auth.BapApiForbidden" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiTimeout = "Auth.BapApiTimeout" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiUnauthorized = "Auth.BapApiUnauthorized" -> string!
+const PPDS.Auth.AuthErrorCodes.EnvironmentNotFound = "Auth.EnvironmentNotFound" -> string!
+PPDS.Auth.AuthErrorCodes
+PPDS.Auth.Discovery.BapEnvironmentService
+PPDS.Auth.Discovery.BapEnvironmentService.BapEnvironmentService(System.Net.Http.HttpClient! httpClient, string! bapApiUrl, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>! tokenProvider) -> void
+PPDS.Auth.Discovery.BapEnvironmentService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
+PPDS.Auth.Discovery.IEnvironmentDiscoveryService
+PPDS.Auth.Discovery.IEnvironmentDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
+static PPDS.Auth.Cloud.CloudEndpoints.GetBapApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetFlowPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetMakerPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Discovery.BapEnvironmentService.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null) -> PPDS.Auth.Discovery.BapEnvironmentService!
