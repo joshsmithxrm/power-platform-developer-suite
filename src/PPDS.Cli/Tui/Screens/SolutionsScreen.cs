@@ -127,7 +127,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
                 _statusLabel.Text = "Loading solutions...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var service = provider.GetRequiredService<ISolutionService>();
 
             var includeManaged = _managedCheckBox.Checked;
@@ -242,7 +242,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<ISolutionService>();
 
             var components = await service.GetComponentsAsync(solution.Id, cancellationToken: ScreenCancellation);

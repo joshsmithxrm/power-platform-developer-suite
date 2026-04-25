@@ -84,7 +84,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             });
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
 
             // Stale filter check: verify persisted solution still exists (first load only)
             if (_solutionFilter != null && !_staleFilterChecked)
@@ -220,7 +220,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IConnectionReferenceService>();
 
             var flows = await service.GetFlowsUsingAsync(cr.LogicalName, ScreenCancellation);
@@ -339,7 +339,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                 _statusLabel.Text = "Analyzing connection references...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IConnectionReferenceService>();
 
             var analysis = await service.AnalyzeAsync(
@@ -455,7 +455,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
             var solutionsResult = await solutionService.ListAsync(

@@ -57,15 +57,27 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 
             if (_tabManager.TabCount == 0) return;
 
+            // Determine if multiple profiles are in use — show profile prefix only when needed
+            var profileNames = _tabManager.Tabs
+                .Select(t => t.ProfileName)
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var showProfile = profileNames.Count > 1;
+
             var xPos = 0;
             for (int i = 0; i < _tabManager.Tabs.Count; i++)
             {
                 var tab = _tabManager.Tabs[i];
                 var index = i; // Capture for closure
                 var envLabel = _themeService.GetEnvironmentLabelForUrl(tab.EnvironmentUrl);
-                var text = string.IsNullOrEmpty(envLabel)
-                    ? $" {i + 1}: {tab.Screen.Title} "
-                    : $" {i + 1}: {tab.Screen.Title} [{envLabel}] ";
+                var contextParts = new List<string>();
+                if (showProfile && !string.IsNullOrEmpty(tab.ProfileName))
+                    contextParts.Add(tab.ProfileName);
+                if (!string.IsNullOrEmpty(envLabel))
+                    contextParts.Add(envLabel);
+                var context = contextParts.Count > 0 ? $" [{string.Join(" / ", contextParts)}]" : "";
+                var text = $" {i + 1}: {tab.Screen.Title}{context} ";
 
                 var isActive = i == _tabManager.ActiveIndex;
                 // Active tabs get bracket markers for clear visual distinction

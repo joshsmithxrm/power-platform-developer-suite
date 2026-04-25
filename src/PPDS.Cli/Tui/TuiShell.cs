@@ -112,11 +112,14 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Hide splash if still showing
         HideSplash();
 
-        // Add screen as a new tab — AddTab fires ActiveTabChanged,
-        // which calls OnActiveTabChanged to handle activation.
-        var envUrl = (screen as TuiScreenBase)?.EnvironmentUrl ?? _session.CurrentEnvironmentUrl;
-        var envName = _session.CurrentEnvironmentDisplayName;
-        _tabManager.AddTab(screen, envUrl, envName);
+        // Capture profile and environment from the screen (set at construction)
+        var screenBase = screen as TuiScreenBase;
+        var envUrl = screenBase?.EnvironmentUrl ?? _session.CurrentEnvironmentUrl;
+        var envName = screenBase?.EnvironmentDisplayName ?? _session.CurrentEnvironmentDisplayName;
+        var profileName = screenBase?.ProfileName ?? _session.DefaultProfileName;
+        var profileIdentity = _session.CurrentProfileIdentity;
+
+        _tabManager.AddTab(screen, envUrl, envName, profileName, profileIdentity);
     }
 
     private void OnScreenCloseRequested()
@@ -197,7 +200,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _contentArea.Add(_currentScreen.Content);
         _currentScreen.OnActivated(_hotkeyRegistry);
 
-        // Sync status bar to reflect this tab's environment
+        // Sync status bar to reflect this tab's profile and environment
+        _session.UpdateDisplayedProfile(activeTab.ProfileName, activeTab.ProfileIdentity);
         _session.UpdateDisplayedEnvironment(activeTab.EnvironmentUrl, activeTab.EnvironmentDisplayName);
 
         RebuildMenuBar();
@@ -689,7 +693,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.SelectedProfile != null)
         {
-            _errorService.FireAndForget(SetActiveProfileAsync(dialog.SelectedProfile), "SwitchProfile");
+            _errorService.FireAndForget(
+                SetActiveProfileForTabAsync(dialog.SelectedProfile),
+                "SwitchProfile");
         }
         else if (dialog.CreateNewSelected)
         {
@@ -779,7 +785,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         }
 
         var displayName = _session.CurrentEnvironmentDisplayName;
-        using var dialog = new EnvironmentDetailsDialog(_session, url, displayName);
+        var profileName = (_currentScreen as TuiScreenBase)?.ProfileName;
+        using var dialog = new EnvironmentDetailsDialog(_session, url, displayName, profileName);
         Application.Run(dialog);
     }
 
@@ -832,19 +839,18 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             var envUrl = dialog.SelectedEnvironmentUrl ?? dialog.CreatedProfile.EnvironmentUrl;
             var envName = dialog.SelectedEnvironmentName ?? dialog.CreatedProfile.EnvironmentName;
 
-            // Prompt to configure the environment if unconfigured
             if (envUrl != null)
             {
                 PromptToConfigureIfNeeded(envUrl, envName, discoveredType: null);
             }
 
             _errorService.FireAndForget(
-                SetActiveProfileWithEnvironmentAsync(dialog.CreatedProfile, envUrl, envName),
+                SetActiveProfileForTabAsync(dialog.CreatedProfile),
                 "ProfileCreation");
         }
     }
 
-    private async Task SetActiveProfileAsync(ProfileSummary profile)
+    private async Task SetActiveProfileForTabAsync(ProfileSummary profile)
     {
         await _session.SetActiveProfileAsync(
             profile.DisplayIdentifier,
@@ -853,19 +859,27 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         Application.MainLoop?.Invoke(() =>
         {
-            _statusBar.Refresh();
-        });
-    }
+            // Update the active tab's profile binding
+            var activeIndex = _tabManager.ActiveIndex;
+            if (activeIndex >= 0)
+            {
+                // Update the screen's profile and environment
+                if (_currentScreen is TuiScreenBase screenBase)
+                {
+                    screenBase.ProfileName = profile.DisplayIdentifier;
+                    screenBase.EnvironmentUrl = profile.EnvironmentUrl;
+                    screenBase.EnvironmentDisplayName = profile.EnvironmentName;
+                }
 
-    private async Task SetActiveProfileWithEnvironmentAsync(ProfileSummary profile, string? environmentUrl, string? environmentName)
-    {
-        await _session.SetActiveProfileAsync(
-            profile.DisplayIdentifier,
-            environmentUrl,
-            environmentName);
+                // Update tab info
+                _tabManager.UpdateTabProfile(
+                    activeIndex,
+                    profile.DisplayIdentifier,
+                    profile.Identity,
+                    profile.EnvironmentUrl,
+                    profile.EnvironmentName);
+            }
 
-        Application.MainLoop?.Invoke(() =>
-        {
             _statusBar.Refresh();
         });
     }

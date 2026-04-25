@@ -53,8 +53,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void AddTab_MultipleTabs_LastIsActive()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
 
         Assert.Equal(2, _manager.TabCount);
         Assert.Equal(1, _manager.ActiveIndex);
@@ -63,8 +63,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void ActivateTab_SwitchesActive()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
 
         _manager.ActivateTab(0);
 
@@ -74,9 +74,9 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void CloseTab_RemovesAndActivatesAdjacent()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
-        _manager.AddTab(new StubScreen(_session), "https://qa.crm4.dynamics.com", "QA");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://qa.crm4.dynamics.com", "QA", "TestProfile");
 
         _manager.ActivateTab(1); // PROD active
         _manager.CloseTab(1);    // Close PROD
@@ -89,8 +89,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void CloseTab_LastTab_ActivatesPrevious()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
 
         _manager.ActivateTab(1); // PROD active
         _manager.CloseTab(1);    // Close last tab
@@ -102,7 +102,7 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void CloseTab_OnlyTab_NoActive()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
         _manager.CloseTab(0);
 
         Assert.Equal(0, _manager.TabCount);
@@ -124,9 +124,9 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void ActivateNext_Cycles()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
-        _manager.AddTab(new StubScreen(_session), "https://qa.crm4.dynamics.com", "QA");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://qa.crm4.dynamics.com", "QA", "TestProfile");
         _manager.ActivateTab(0);
 
         _manager.ActivateNext();
@@ -142,8 +142,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void ActivatePrevious_Cycles()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
         _manager.ActivateTab(0);
 
         _manager.ActivatePrevious(); // Wraps
@@ -156,7 +156,7 @@ public sealed class TabManagerTests : IDisposable
         var count = 0;
         _manager.TabsChanged += () => count++;
 
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
         _manager.CloseTab(0);
 
         Assert.Equal(2, count);
@@ -168,8 +168,8 @@ public sealed class TabManagerTests : IDisposable
         var count = 0;
         _manager.ActiveTabChanged += () => count++;
 
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
         _manager.ActivateTab(0);
 
         Assert.True(count >= 3); // Add activates + explicit switch
@@ -178,8 +178,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void CaptureState_ReflectsTabs()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
 
         var state = _manager.CaptureState();
 
@@ -195,8 +195,8 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void FindTabByEnvironment_ReturnsIndex_WhenTabExists()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
 
         Assert.Equal(0, _manager.FindTabByEnvironment("https://dev.crm.dynamics.com"));
         Assert.Equal(1, _manager.FindTabByEnvironment("https://prod.crm.dynamics.com"));
@@ -205,7 +205,7 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void FindTabByEnvironment_CaseInsensitive()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
 
         Assert.Equal(0, _manager.FindTabByEnvironment("https://DEV.CRM.DYNAMICS.COM"));
     }
@@ -213,7 +213,7 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void FindTabByEnvironment_ReturnsNegativeOne_WhenNotFound()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
 
         Assert.Equal(-1, _manager.FindTabByEnvironment("https://prod.crm.dynamics.com"));
     }
@@ -221,7 +221,7 @@ public sealed class TabManagerTests : IDisposable
     [Fact]
     public void FindTabByEnvironment_ReturnsNegativeOne_WhenNull()
     {
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
 
         Assert.Equal(-1, _manager.FindTabByEnvironment(null));
     }
@@ -232,7 +232,7 @@ public sealed class TabManagerTests : IDisposable
         var themeService = new ConfigurableThemeService();
         using var manager = new TabManager(themeService);
 
-        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG", "TestProfile");
         Assert.Equal(EnvironmentColor.Green, manager.Tabs[0].EnvironmentColor);
 
         // Change what the theme service returns
@@ -249,7 +249,7 @@ public sealed class TabManagerTests : IDisposable
     {
         var themeService = new ConfigurableThemeService();
         using var manager = new TabManager(themeService);
-        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG", "TestProfile");
 
         var fired = false;
         manager.TabsChanged += () => fired = true;
@@ -265,7 +265,7 @@ public sealed class TabManagerTests : IDisposable
     {
         var themeService = new ConfigurableThemeService();
         using var manager = new TabManager(themeService);
-        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG", "TestProfile");
 
         var fired = false;
         manager.TabsChanged += () => fired = true;
@@ -280,6 +280,85 @@ public sealed class TabManagerTests : IDisposable
     public void RefreshTabColors_NoTabs_NoErrors()
     {
         _manager.RefreshTabColors(); // Should not throw
+    }
+
+    [Fact]
+    public void AddTab_StoresProfileName()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "DevProfile", "josh@contoso.com");
+
+        Assert.Equal("DevProfile", _manager.ActiveTab?.ProfileName);
+        Assert.Equal("josh@contoso.com", _manager.ActiveTab?.ProfileIdentity);
+    }
+
+    [Fact]
+    public void AddTab_DifferentProfiles_IndependentTabs()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "ProfileA", "user-a@contoso.com");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "ProfileB", "user-b@contoso.com");
+
+        Assert.Equal("ProfileB", _manager.Tabs[1].ProfileName);
+        Assert.Equal("ProfileA", _manager.Tabs[0].ProfileName);
+    }
+
+    [Fact]
+    public void UpdateTabProfile_ChangesProfileAndEnvironment()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "OldProfile", "old@contoso.com");
+
+        _manager.UpdateTabProfile(0, "NewProfile", "new@contoso.com", "https://prod.crm.dynamics.com", "PROD");
+
+        Assert.Equal("NewProfile", _manager.Tabs[0].ProfileName);
+        Assert.Equal("new@contoso.com", _manager.Tabs[0].ProfileIdentity);
+        Assert.Equal("https://prod.crm.dynamics.com", _manager.Tabs[0].EnvironmentUrl);
+        Assert.Equal("PROD", _manager.Tabs[0].EnvironmentDisplayName);
+    }
+
+    [Fact]
+    public void UpdateTabProfile_FiresTabsChanged()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        var fired = false;
+        _manager.TabsChanged += () => fired = true;
+
+        _manager.UpdateTabProfile(0, "NewProfile", null, "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void UpdateTabProfile_ActiveTab_FiresActiveTabChanged()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        var fired = false;
+        _manager.ActiveTabChanged += () => fired = true;
+
+        _manager.UpdateTabProfile(0, "NewProfile", null, "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void UpdateTabProfile_InactiveTab_DoesNotFireActiveTabChanged()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "TestProfile");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD", "TestProfile");
+        var fired = false;
+        _manager.ActiveTabChanged += () => fired = true;
+
+        _manager.UpdateTabProfile(0, "NewProfile", null, "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public void CaptureState_IncludesProfileName()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV", "MyProfile");
+
+        var state = _manager.CaptureState();
+
+        Assert.Equal("MyProfile", state.Tabs[0].ProfileName);
     }
 
     private sealed class StubScreen : TuiScreenBase

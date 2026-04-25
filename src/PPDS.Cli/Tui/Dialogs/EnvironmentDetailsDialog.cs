@@ -20,6 +20,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     private readonly string _environmentUrl;
     private readonly string? _environmentDisplayName;
     private readonly ITuiThemeService _themeService;
+    private readonly string? _profileName;
     private readonly CancellationTokenSource _cancellationSource = new();
     private bool _disposed;
 
@@ -43,12 +44,14 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     public EnvironmentDetailsDialog(
         InteractiveSession session,
         string environmentUrl,
-        string? environmentDisplayName = null) : base("View Organization Info", session)
+        string? environmentDisplayName = null,
+        string? profileName = null) : base("View Organization Info", session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _errorService = session.GetErrorService();
         _environmentUrl = environmentUrl ?? throw new ArgumentNullException(nameof(environmentUrl));
         _environmentDisplayName = environmentDisplayName;
+        _profileName = profileName;
         _themeService = session.GetThemeService();
 
         Width = Dim.Percent(80);
@@ -180,7 +183,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var provider = await _session.GetServiceProviderAsync(_environmentUrl, cancellationToken);
+        var provider = await _session.GetServiceProviderAsync(_environmentUrl, _profileName, cancellationToken);
         var pool = provider.GetRequiredService<IDataverseConnectionPool>();
 
         cancellationToken.ThrowIfCancellationRequested();
