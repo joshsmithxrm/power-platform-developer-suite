@@ -1,6 +1,8 @@
 using System;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 
@@ -12,8 +14,8 @@ namespace PPDS.Auth.Discovery;
 /// <remarks>
 /// Resolution strategy:
 /// 1. If identifier looks like a URL → Try direct Dataverse connection first
-/// 2. If not a URL OR direct connection fails → Try Global Discovery (interactive profiles only)
-/// 3. For service principals without a URL → Return helpful error
+/// 2. If not a URL + interactive auth → Try Global Discovery
+/// 3. If not a URL + service principal → Try BAP Environment Discovery
 /// </remarks>
 public sealed class EnvironmentResolutionService : IDisposable
 {
@@ -72,18 +74,13 @@ public sealed class EnvironmentResolutionService : IDisposable
 
             // Fall through to Global Discovery for interactive profiles
         }
-        else
+        else if (!CanUseGlobalDiscovery(_profile.AuthMethod))
         {
-            // Not a URL - need Global Discovery to resolve by name/ID
-            if (!CanUseGlobalDiscovery(_profile.AuthMethod))
-            {
-                return EnvironmentResolutionResult.Failed(
-                    "Service principals require a full environment URL (e.g., https://org.crm.dynamics.com). " +
-                    "Name-based resolution requires Global Discovery which is only available for user authentication.");
-            }
+            // Not a URL + non-interactive auth → try BAP Environment Discovery
+            return await TryBapDiscoveryAsync(identifier, cancellationToken);
         }
 
-        // Try Global Discovery
+        // Try Global Discovery (interactive auth)
         return await TryGlobalDiscoveryAsync(identifier, cancellationToken);
     }
 
@@ -182,6 +179,58 @@ public sealed class EnvironmentResolutionService : IDisposable
         catch (Exception ex)
         {
             return EnvironmentResolutionResult.Failed($"Global Discovery failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Attempts to resolve environment via BAP Environment Discovery (for service principals).
+    /// </summary>
+    private async Task<EnvironmentResolutionResult> TryBapDiscoveryAsync(
+        string identifier,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var service = BapEnvironmentService.FromProfile(_profile, _credentialStore);
+            var environments = await service.DiscoverEnvironmentsAsync(cancellationToken);
+
+            DiscoveredEnvironment? resolved;
+            try
+            {
+                resolved = EnvironmentResolver.Resolve(environments, identifier);
+            }
+            catch (AmbiguousMatchException ex)
+            {
+                return EnvironmentResolutionResult.Failed(ex.Message);
+            }
+
+            if (resolved == null)
+            {
+                return EnvironmentResolutionResult.Failed(
+                    $"Environment '{identifier}' not found. Use 'ppds env list' to see available environments.");
+            }
+
+            var envInfo = new EnvironmentInfo
+            {
+                Url = resolved.ApiUrl,
+                DisplayName = resolved.FriendlyName,
+                UniqueName = resolved.UniqueName,
+                EnvironmentId = resolved.EnvironmentId,
+                OrganizationId = resolved.Id.ToString(),
+                Type = resolved.EnvironmentType,
+                Region = resolved.Region
+            };
+
+            return EnvironmentResolutionResult.Succeeded(envInfo, ResolutionMethod.BapDiscovery);
+        }
+        catch (AuthenticationException ex) when (ex.ErrorCode == AuthErrorCodes.BapApiForbidden)
+        {
+            return EnvironmentResolutionResult.Failed(
+                $"BAP API access denied. {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return EnvironmentResolutionResult.Failed($"BAP Environment Discovery failed: {ex.Message}");
         }
     }
 
@@ -333,5 +382,10 @@ public enum ResolutionMethod
     /// <summary>
     /// Resolved via Global Discovery Service.
     /// </summary>
-    GlobalDiscovery
+    GlobalDiscovery,
+
+    /// <summary>
+    /// Resolved via BAP Environment Discovery (service principal).
+    /// </summary>
+    BapDiscovery
 }

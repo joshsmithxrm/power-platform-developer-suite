@@ -14,3 +14,4 @@ static PPDS.Auth.Cloud.CloudEndpoints.GetBapApiUrl(PPDS.Auth.Cloud.CloudEnvironm
 static PPDS.Auth.Cloud.CloudEndpoints.GetFlowPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetMakerPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Discovery.BapEnvironmentService.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null) -> PPDS.Auth.Discovery.BapEnvironmentService!
+PPDS.Auth.Discovery.ResolutionMethod.BapDiscovery = 2 -> PPDS.Auth.Discovery.ResolutionMethod
