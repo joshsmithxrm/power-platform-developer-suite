@@ -1,8 +1,1 @@
 #nullable enable
-PPDS.Auth.Profiles.ProfileEncryption
-const PPDS.Auth.Profiles.ProfileEncryption.AllowCleartextEnvVar = "PPDS_ALLOW_CLEARTEXT" -> string!
-static PPDS.Auth.Profiles.ProfileEncryption.AllowCleartext.get -> bool
-static PPDS.Auth.Profiles.ProfileEncryption.AllowCleartext.set -> void
-static PPDS.Auth.Profiles.ProfileEncryption.Decrypt(string? encryptedValue) -> string!
-static PPDS.Auth.Profiles.ProfileEncryption.Encrypt(string? value) -> string!
-static PPDS.Auth.Profiles.ProfileEncryption.IsEncrypted(string? value) -> bool

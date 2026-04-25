@@ -474,6 +474,7 @@ PPDS.Auth.Profiles.ProfileCollection.SetActiveByIndex(int index) -> void
 PPDS.Auth.Profiles.ProfileCollection.SetActiveByName(string! name) -> void
 PPDS.Auth.Profiles.ProfileCollection.Version.get -> int
 PPDS.Auth.Profiles.ProfileCollection.Version.set -> void
+PPDS.Auth.Profiles.ProfileEncryption
 PPDS.Auth.Profiles.ProfilePaths
 PPDS.Auth.Profiles.ProfileResolver
 PPDS.Auth.Profiles.ProfileStore
@@ -546,6 +547,7 @@ const PPDS.Auth.EnvironmentVariableAuth.ClientSecretVar = "PPDS_CLIENT_SECRET" -
 const PPDS.Auth.EnvironmentVariableAuth.CloudVar = "PPDS_CLOUD" -> string!
 const PPDS.Auth.EnvironmentVariableAuth.EnvironmentUrlVar = "PPDS_ENVIRONMENT_URL" -> string!
 const PPDS.Auth.EnvironmentVariableAuth.TenantIdVar = "PPDS_TENANT_ID" -> string!
+const PPDS.Auth.Profiles.ProfileEncryption.AllowCleartextEnvVar = "PPDS_ALLOW_CLEARTEXT" -> string!
 const PPDS.Auth.Profiles.ProfilePaths.AppName = "PPDS" -> string!
 const PPDS.Auth.Profiles.ProfilePaths.ConfigDirEnvVar = "PPDS_CONFIG_DIR" -> string!
 const PPDS.Auth.Profiles.ProfilePaths.CredentialCacheFileName = "ppds.credentials.dat" -> string!
@@ -613,6 +615,11 @@ static PPDS.Auth.Pooling.ConnectionResolver.ParseProfileString(string? profileSt
 static PPDS.Auth.Pooling.ProfileConnectionSource.FromProfile(PPDS.Auth.Profiles.AuthProfile! profile, int maxPoolSize = 52, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null, System.Func<System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>?, PPDS.Auth.Credentials.PreAuthDialogResult>? beforeInteractiveAuth = null, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, System.Action<PPDS.Auth.Profiles.AuthProfile!>? onProfileUpdated = null) -> PPDS.Auth.Pooling.ProfileConnectionSource!
 static PPDS.Auth.Profiles.EnvironmentConfig.NormalizeUrl(string! url) -> string!
 static PPDS.Auth.Profiles.EnvironmentInfo.Create(string! url, string! displayName) -> PPDS.Auth.Profiles.EnvironmentInfo!
+static PPDS.Auth.Profiles.ProfileEncryption.AllowCleartext.get -> bool
+static PPDS.Auth.Profiles.ProfileEncryption.AllowCleartext.set -> void
+static PPDS.Auth.Profiles.ProfileEncryption.Decrypt(string? encryptedValue) -> string!
+static PPDS.Auth.Profiles.ProfileEncryption.Encrypt(string? value) -> string!
+static PPDS.Auth.Profiles.ProfileEncryption.IsEncrypted(string? value) -> bool
 static PPDS.Auth.Profiles.ProfilePaths.CredentialCacheFile.get -> string!
 static PPDS.Auth.Profiles.ProfilePaths.DataDirectory.get -> string!
 static PPDS.Auth.Profiles.ProfilePaths.EnsureDirectoryExists() -> void
