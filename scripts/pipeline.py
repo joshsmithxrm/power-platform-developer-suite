@@ -281,7 +281,7 @@ def get_child_process_count(pid):
             )
             if result.returncode == 0:
                 lines = [l.strip() for l in result.stdout.strip().splitlines()
-                         if l.strip() and l.strip() != "ProcessId"]
+                         if l.strip().isdigit()]
                 return len(lines)
         else:
             result = subprocess.run(

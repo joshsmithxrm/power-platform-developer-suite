@@ -558,6 +558,19 @@ class TestChildProcessDetection:
                                  side_effect=subprocess.TimeoutExpired("cmd", 5)):
             assert pipeline.get_child_process_count(100) == 0
 
+    def test_wmic_no_instances_returns_zero(self):
+        """AC-147: wmic 'No Instance(s) Available.' is not counted as a child."""
+        import pipeline
+
+        with unittest.mock.patch("pipeline.subprocess.run") as mock_run, \
+             unittest.mock.patch("pipeline.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            mock_run.return_value = unittest.mock.Mock(
+                returncode=0,
+                stdout="No Instance(s) Available.\n",
+            )
+            assert pipeline.get_child_process_count(100) == 0
+
 
 # ---------------------------------------------------------------------------
 # AC-70: JSONL post-processing
