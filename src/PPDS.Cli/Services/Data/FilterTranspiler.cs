@@ -61,12 +61,7 @@ public static class FilterTranspiler
         if (filterElements.Count == 1)
             return filterElements[0].ToString(SaveOptions.DisableFormatting);
 
-        var combined = new XElement("filter", new XAttribute("type", "and"));
-        foreach (var f in filterElements)
-        {
-            foreach (var child in f.Elements())
-                combined.Add(child);
-        }
+        var combined = new XElement("filter", new XAttribute("type", "and"), filterElements);
         return combined.ToString(SaveOptions.DisableFormatting);
     }
 }
