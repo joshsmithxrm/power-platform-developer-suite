@@ -34,8 +34,9 @@ const envPickerName = document.getElementById('env-picker-name') as HTMLElement;
 envPickerBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'requestEnvironmentList' });
 });
-function updateEnvironmentDisplay(name: string | null): void {
-    envPickerName.textContent = name || 'No environment';
+function updateEnvironmentDisplay(profileName: string | undefined, name: string | null): void {
+    const env = name || 'No environment';
+    envPickerName.textContent = profileName ? `${profileName} · ${env}` : env;
 }
 
 // ── Visibility filter segmented control ──
@@ -262,7 +263,7 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
     if (!msg || typeof msg !== 'object' || !('command' in msg)) return;
     switch (msg.command) {
         case 'updateEnvironment':
-            updateEnvironmentDisplay(msg.name);
+            updateEnvironmentDisplay(msg.profileName, msg.name);
             {
                 const toolbar = document.querySelector('.toolbar');
                 if (toolbar) {

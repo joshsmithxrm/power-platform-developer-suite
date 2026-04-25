@@ -59,9 +59,10 @@ if (envPickerBtn) {
     });
 }
 
-function updateEnvironment(msg: { name: string; envType: string | null; envColor: string | null }): void {
+function updateEnvironment(msg: { name: string; profileName?: string; envType: string | null; envColor: string | null }): void {
     if (envPickerName) {
-        envPickerName.textContent = msg.name || 'No environment';
+        const env = msg.name || 'No environment';
+        envPickerName.textContent = msg.profileName ? `${msg.profileName} · ${env}` : env;
     }
     const toolbar = document.querySelector('.toolbar');
     if (toolbar) {
