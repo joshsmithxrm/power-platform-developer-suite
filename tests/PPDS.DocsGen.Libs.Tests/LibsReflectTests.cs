@@ -158,4 +158,35 @@ public sealed class LibsReflectTests
             if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task RelativePaths_DoNotIncludeOutputDirectoryPrefix()
+    {
+        // Regression: RelativePath used to include "docs/reference/libraries/" which caused
+        // path duplication when Program.cs did Path.Combine(outputRoot, file.RelativePath)
+        // with --output set to "artifacts/docs/reference/libraries".
+        var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-relpath-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = await RunAsync(outputRoot);
+
+            result.Files.Should().NotBeEmpty("at least one file should be generated");
+
+            foreach (var file in result.Files)
+            {
+                file.RelativePath.Should().NotStartWith("docs/",
+                    $"RelativePath must be relative to the output directory, not include site-level prefix — got '{file.RelativePath}'");
+                file.RelativePath.Should().NotStartWith("/",
+                    $"RelativePath must not be absolute — got '{file.RelativePath}'");
+                Path.IsPathRooted(file.RelativePath).Should().BeFalse(
+                    $"RelativePath must not be rooted — got '{file.RelativePath}'");
+                file.RelativePath.Should().StartWith("DocsGen.Libs.Tests.FixtureLib/",
+                    $"RelativePath must start with the package directory — got '{file.RelativePath}'");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
+        }
+    }
 }
