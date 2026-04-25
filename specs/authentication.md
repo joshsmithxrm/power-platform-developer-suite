@@ -638,7 +638,7 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-23 | `ManagedIdentityCredentialProvider` constructs with optional ClientId and sets correct AuthMethod | `ManagedIdentityCredentialProviderTests` | ✅ |
 | AC-24 | `GitHubFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `GitHubFederatedCredentialProviderTests` | ✅ |
 | AC-25 | `AzureDevOpsFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `AzureDevOpsFederatedCredentialProviderTests` | ✅ |
-| AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.NonInteractive_NameIdentifier_RoutesBapNotGds` | ✅ |
+| AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.SpnAuth_NameIdentifier_RoutesBapDiscovery` | ✅ |
 | AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_SupportsGlobalDiscovery` | ✅ |
 | AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlIdentifier_AttemptsDirectConnection` | ✅ |
 | AC-29 | BAP-discovered environments resolve by name case-insensitively matching FriendlyName or UniqueName | `EnvironmentResolverTests.Resolve_ByFriendlyNameCaseInsensitive_ReturnsEnvironment`, `Resolve_ByUniqueNameCaseInsensitive_ReturnsEnvironment` | ✅ |
