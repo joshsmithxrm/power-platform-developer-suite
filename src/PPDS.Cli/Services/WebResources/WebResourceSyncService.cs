@@ -14,10 +14,15 @@ public class WebResourceSyncService : IWebResourceSyncService
     private const int DefaultDownloadParallelism = 8;
     private const int DefaultUploadParallelism = 4;
 
-    // Path comparisons must be case-sensitive on POSIX, case-insensitive on Windows.
-    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+    // Path comparisons must be case-insensitive on Windows and macOS (default APFS/HFS+ are
+    // case-insensitive), case-sensitive on Linux/other POSIX.
+    private static readonly bool PathsAreCaseInsensitive = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
+    private static readonly StringComparison PathComparison = PathsAreCaseInsensitive
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
+    private static readonly StringComparer PathComparer = PathsAreCaseInsensitive
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 
     private readonly IWebResourceService _webResourceService;
     private readonly ILogger<WebResourceSyncService> _logger;
@@ -75,7 +80,7 @@ public class WebResourceSyncService : IWebResourceSyncService
         // Per-resource path resolution + traversal validation up front so we can
         // skip downloads for invalid entries without occupying a download slot.
         var processable = new List<(WebResourceInfo Resource, string LocalPath, string AbsolutePath)>();
-        var pathClaims = new Dictionary<string, string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var pathClaims = new Dictionary<string, string>(PathComparer);
         foreach (var resource in filtered)
         {
             if (IsUnsafeResourceName(resource.Name))
