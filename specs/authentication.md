@@ -1,7 +1,7 @@
 # Authentication
 
-**Status:** Implemented (env var auth: draft)
-**Last Updated:** 2026-03-26
+**Status:** Implemented (BAP discovery: draft, env var auth: draft)
+**Last Updated:** 2026-04-25
 **Code:** [src/PPDS.Auth/](../src/PPDS.Auth/)
 **Surfaces:** All
 
@@ -84,7 +84,8 @@ The authentication system provides secure credential management, multi-method au
 | `ISecureCredentialStore` | Platform-native secret storage (DPAPI, Keychain, libsecret) |
 | `ProfileStore` | Persists profile collection to JSON file |
 | `ProfileResolver` | Resolves profile by name, index, or environment variable |
-| `GlobalDiscoveryService` | Discovers accessible Dataverse environments |
+| `GlobalDiscoveryService` | Discovers accessible Dataverse environments (interactive users only) |
+| `BapEnvironmentService` | Discovers environments via BAP API (service principals) |
 | `ProfileConnectionSource` | Bridges profiles to connection pool (IConnectionSource) |
 | `CloudEndpoints` | Cloud-specific URLs (Public, GCC, GCCHigh, DoD, China) |
 
@@ -123,12 +124,38 @@ The authentication system provides secure credential management, multi-method au
 3. **Build connection string**: ConnectionStringBuilder with credentials
 4. **Create ServiceClient**: Direct instantiation (SDK handles token internally)
 
-**Environment Discovery:**
+**Environment Discovery (Interactive — Global Discovery):**
 
 1. **Create GlobalDiscoveryService**: From profile with user-delegated auth method
 2. **Authenticate**: Interactive or silent via MSAL public client
 3. **Call Discovery API**: ServiceClient.DiscoverOnlineOrganizationsAsync
 4. **Map results**: DiscoveredEnvironment with Id, Name, Url, Region, Type
+
+**Environment Discovery (SPN — BAP API):**
+
+1. **Create BapEnvironmentService**: From profile with confidential-client auth (ClientSecret, CertificateFile, CertificateStore). MSAL `IConfidentialClientApplication` is required; federated, managed-identity, and ROPC flows are not supported by this service today.
+2. **Acquire token**: MSAL confidential client with scope `https://api.bap.microsoft.com/.default`
+3. **Call BAP API**: `GET {CloudEndpoints.GetBapApiUrl(cloud)}/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2020-10-01`
+4. **Map results**: Parse JSON response to `DiscoveredEnvironment`:
+   - `name` → `EnvironmentId`
+   - `properties.linkedEnvironmentMetadata.friendlyName` → `FriendlyName` (fallback: `properties.displayName` if missing)
+   - `properties.linkedEnvironmentMetadata.instanceUrl` → `ApiUrl`
+   - `properties.linkedEnvironmentMetadata.uniqueName` → `UniqueName`
+   - `properties.linkedEnvironmentMetadata.domainName` → `UrlName`
+   - `properties.linkedEnvironmentMetadata.resourceId` → `Id` (Guid)
+   - `properties.linkedEnvironmentMetadata.instanceState` → `State` (map "Ready" → 0, other → 1)
+   - `properties.azureRegion` → `Region`
+   - `properties.environmentSku` → `OrganizationType` (map "Production" → 0, "Sandbox" → 5, "Developer" → 6, "Trial" → 11, "Default" → -1, unknown/missing → -2 to avoid silent re-classification as Production)
+   - `properties.tenantId` → `TenantId`
+5. **Return**: Same `DiscoveredEnvironment` type as Global Discovery
+
+**Environment Resolution Strategy:**
+
+1. **URL provided** → direct connection (no discovery needed)
+2. **Name/ID + interactive auth** (InteractiveBrowser, DeviceCode) → Global Discovery Service
+3. **Name/ID + confidential-client auth** (ClientSecret, CertificateFile, CertificateStore) → BAP Environment Service
+4. **Name/ID + any other auth method** (UsernamePassword, ManagedIdentity, GitHubFederated, AzureDevOpsFederated) → returns a helpful error directing the caller to provide a full environment URL or switch to a supported auth method (no name-based discovery available today)
+5. **Name matching**: case-insensitive match on `FriendlyName` or `UniqueName`; exact match preferred, partial match throws `AmbiguousMatchException` if multiple candidates
 
 **Environment Variable Authentication (Stateless):**
 
@@ -141,7 +168,8 @@ The authentication system provides secure credential management, multi-method au
 ### Constraints
 
 - Global Discovery only supports interactive methods (no service principals)
-- Service principals must use full environment URLs (cannot discover by name)
+- BAP API requires SPN to be registered as a Power Platform management application via `New-PowerAppManagementApp` (one-time admin setup)
+- BAP API only returns environments with linked Dataverse instances (`linkedEnvironmentMetadata` present); default/non-Dataverse environments are excluded from name resolution
 - MSAL cache persistence requires write access to data directory
 - Linux CI environments may require plaintext fallback (`--allow-cleartext-cache`)
 
@@ -155,6 +183,11 @@ The authentication system provides secure credential management, multi-method au
 | UsernamePassword profile | Requires Username | `Auth.InvalidCredentials` |
 | Federated profile | Requires ApplicationId, TenantId | `Auth.InvalidCredentials` |
 | ManagedIdentity profile | No required fields (ApplicationId optional for user-assigned) | - |
+| BAP API 403 | SPN not registered as management app | `Auth.BapApiForbidden` |
+| BAP API 401 | Invalid or expired SPN token | `Auth.BapApiUnauthorized` |
+| BAP API timeout | Network timeout calling BAP endpoint | `Auth.BapApiTimeout` |
+| BAP API other error | 429, 5xx, or unexpected status | `Auth.BapApiError` |
+| BAP name not found | No environment matches provided name | `Auth.EnvironmentNotFound` |
 
 ---
 
@@ -222,6 +255,20 @@ public interface IGlobalDiscoveryService
         CancellationToken cancellationToken = default);
 }
 ```
+
+### IEnvironmentDiscoveryService
+
+Shared interface for environment discovery, implemented by both `GlobalDiscoveryService` (interactive) and `BapEnvironmentService` (non-interactive). Both `IGlobalDiscoveryService` and the new `BapEnvironmentService` implement this interface, so consumers that don't care about the discovery method can depend on the shared contract.
+
+```csharp
+public interface IEnvironmentDiscoveryService
+{
+    Task<IReadOnlyList<DiscoveredEnvironment>> DiscoverEnvironmentsAsync(
+        CancellationToken cancellationToken = default);
+}
+```
+
+`BapEnvironmentService` ([`Discovery/BapEnvironmentService.cs`](../src/PPDS.Auth/Discovery/BapEnvironmentService.cs)) implements `IEnvironmentDiscoveryService` using `HttpClient` with a bearer token acquired via MSAL `IConfidentialClientApplication` (scope: `https://api.bap.microsoft.com/.default`). Parses the BAP JSON response and maps to the same `DiscoveredEnvironment` type used by `GlobalDiscoveryService`.
 
 ### AuthProfile
 
@@ -458,6 +505,26 @@ clientCts.CancelAfter(TimeSpan.FromSeconds(60));
 - Positive: Clear error messages on timeout
 - Negative: May fail on slow networks (rare)
 
+### Why BAP API Alongside Global Discovery?
+
+**Context:** Service principals cannot resolve environment names to URLs because Global Discovery Service (`globaldisco.crm.dynamics.com`) requires delegated (user-present) permissions. SPNs must provide full environment URLs, making CI/CD configuration harder — operators need to know `https://orgcabef92d.crm.dynamics.com` instead of just `PPDS Demo - Dev`.
+
+**Decision:** Add `BapEnvironmentService` as a separate discovery service using the BAP API (`api.bap.microsoft.com`), which supports application (client_credentials) authentication. Keep `GlobalDiscoveryService` unchanged for interactive users.
+
+**Alternatives considered:**
+- Extend `GlobalDiscoveryService` to handle both flows: Violates SRP — the service currently owns MSAL public client auth and the SDK's `DiscoverOnlineOrganizationsAsync`. BAP uses HttpClient with a confidential client. Mixing both in one class creates two unrelated auth paths.
+- Common `IEnvironmentDiscoveryService` with factory: Both services share `IEnvironmentDiscoveryService` for consumers that don't care about the method. No factory needed — the caller (resolution strategy) picks the right implementation based on auth method. The shared interface avoids two redundant interface definitions with identical signatures.
+- Use Power Platform API (`api.powerplatform.com`) instead of BAP: The new API uses RBAC and is more granular, but `api.bap.microsoft.com` is the GA path with simpler setup (`New-PowerAppManagementApp`). Can migrate later if needed.
+
+**Prerequisites:** SPN must be registered as a Power Platform management application. This is a one-time tenant-admin action via `New-PowerAppManagementApp -ApplicationId {appId}` (PowerShell) or the BAP `adminApplications` REST endpoint. Without registration, the BAP API returns 403.
+
+**Consequences:**
+- Positive: SPNs can use `--environment "QA"` instead of full URLs
+- Positive: No changes to existing Global Discovery flow
+- Positive: Same `DiscoveredEnvironment` return type — consumers don't care which discovery method was used
+- Negative: One-time admin registration step required per SPN
+- Negative: BAP API only returns environments with linked Dataverse instances
+
 ---
 
 ## Extension Points
@@ -498,6 +565,7 @@ public class MyCredentialProvider : ICredentialProvider
 2. **Add endpoints** to each method in `CloudEndpoints`:
    - `GetAuthorityBaseUrl()`
    - `GetGlobalDiscoveryUrl()`
+   - `GetBapApiUrl()`
    - `GetPowerAppsApiUrl()`
    - etc.
 
@@ -559,6 +627,26 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-14a | Vendored credential store round-trips a secret via Windows Credential Manager (DPAPI) | `NativeCredentialStoreInteropTests.Windows_RoundTripsSecret` (CI: `windows-latest`) | 🔲 (flips ✅ on green CI matrix) |
 | AC-14b | Vendored credential store round-trips a secret via macOS Keychain | `NativeCredentialStoreInteropTests.MacOS_RoundTripsSecret` (CI: `macos-latest`) | 🔲 (flips ✅ on green CI matrix) |
 | AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 (flips ✅ on green CI matrix) |
+| AC-15 | `BapEnvironmentService.DiscoverEnvironmentsAsync` returns environments with correct FriendlyName, ApiUrl, UniqueName, EnvironmentId, Region, State, and OrganizationType from BAP API JSON | `BapEnvironmentServiceTests.DiscoverEnvironments_MapsJsonToDiscoveredEnvironments` | ✅ |
+| AC-16 | `BapEnvironmentService` skips environments without `linkedEnvironmentMetadata` (no Dataverse instance) | `BapEnvironmentServiceTests.DiscoverEnvironments_SkipsNonDataverseEnvironments` | ✅ |
+| AC-17 | `BapEnvironmentService` throws `AuthenticationException` with `ErrorCode = Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | ✅ |
+| AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | ✅ |
+| AC-19 | BAP discovery returns environments for SPN with management app registration | `BapDiscoveryIntegrationTests.BapEnvironmentService_DiscoversEnvironments` (Category=Integration) | ✅ |
+| AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | ✅ |
+| AC-21 | `CertificateFileCredentialProvider` validates required fields (ApplicationId, CertificatePath, TenantId) and rejects invalid cert paths | `CertificateFileCredentialProviderTests` | ✅ |
+| AC-22 | `CertificateStoreCredentialProvider` validates required fields (ApplicationId, Thumbprint, TenantId) and rejects invalid inputs | `CertificateStoreCredentialProviderTests` | ✅ |
+| AC-23 | `ManagedIdentityCredentialProvider` constructs with optional ClientId and sets correct AuthMethod | `ManagedIdentityCredentialProviderTests` | ✅ |
+| AC-24 | `GitHubFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `GitHubFederatedCredentialProviderTests` | ✅ |
+| AC-25 | `AzureDevOpsFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `AzureDevOpsFederatedCredentialProviderTests` | ✅ |
+| AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.SpnAuth_NameIdentifier_RoutesBapDiscovery` | ✅ |
+| AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_SupportsGlobalDiscovery` | ✅ |
+| AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlIdentifier_AttemptsDirectConnection` | ✅ |
+| AC-29 | BAP-discovered environments resolve by name case-insensitively matching FriendlyName or UniqueName | `EnvironmentResolverTests.Resolve_ByFriendlyNameCaseInsensitive_ReturnsEnvironment`, `Resolve_ByUniqueNameCaseInsensitive_ReturnsEnvironment` | ✅ |
+| AC-30 | BAP API 401 response throws `AuthenticationException` with `ErrorCode = Auth.BapApiUnauthorized` | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnUnauthorized` | ✅ |
+| AC-31 | BAP API 5xx / unexpected status throws `AuthenticationException` with `ErrorCode = Auth.BapApiError` (status code included in the message) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnServerError` | ✅ |
+| AC-32 | BAP API request that times out (non-cancelled `TaskCanceledException`) throws `AuthenticationException` with `ErrorCode = Auth.BapApiTimeout` wrapping the inner timeout | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnTimeout` | ✅ |
+| AC-33 | BAP API request whose `CancellationToken` is already cancelled propagates `OperationCanceledException` (no swallow into `Auth.BapApiTimeout`) | `BapEnvironmentServiceTests.DiscoverEnvironments_PropagatesCancellation_WhenTokenCancelled` | ✅ |
+| AC-34 | `EnvironmentResolutionResult.Failed` carries a structured `ErrorCode`; "name not found" branches set `Auth.EnvironmentNotFound` and the message lists the available names | `EnvironmentResolutionTests.EnvironmentNotFoundMessage_ListsAvailableNames`, `EnvironmentResolutionResultTests.Failed_PreservesErrorCode` | ✅ |
 
 ### Edge Cases
 
@@ -574,6 +662,14 @@ public class MyCredentialProvider : ICredentialProvider
 | Env vars set + `--profile` flag | Both present | Env vars win (highest priority) |
 | `PPDS_ENVIRONMENT_URL` missing scheme | `myorg.crm.dynamics.com` | `PpdsException` with `Auth.InvalidEnvironmentUrl` — must be full URL with `https://` |
 | Env var values are whitespace | `PPDS_CLIENT_ID=" "` | Treated as not set (trimmed) |
+| BAP API 403 (SPN not registered) | SPN without management app registration | `AuthenticationException` with `ErrorCode = Auth.BapApiForbidden` and guidance to run `New-PowerAppManagementApp` |
+| BAP API returns no Dataverse environments | All environments are default/non-Dataverse | Empty list returned (no match possible) |
+| BAP API exact name matches multiple | Two environments with identical FriendlyName "QA" | First exact match returned (rare — BAP returns deterministic order) |
+| BAP API partial name matches multiple | Input "QA" matches "QA Dev" and "QA Test" | `AmbiguousMatchException` listing matching environment names |
+| BAP API network timeout | Endpoint unreachable | `AuthenticationException` with `ErrorCode = Auth.BapApiTimeout` wrapping inner `TaskCanceledException` |
+| BAP API 401 (invalid token) | Expired or malformed SPN token | `AuthenticationException` with `ErrorCode = Auth.BapApiUnauthorized` |
+| BAP API 429/5xx (transient) | Rate limited or server error | `AuthenticationException` with `ErrorCode = Auth.BapApiError` including status code |
+| BAP name not found | `--environment "Staging"` but no match | `EnvironmentResolutionResult.Failed` with `ErrorCode = Auth.EnvironmentNotFound`; the message lists the available environment names |
 
 ### Test Examples
 
@@ -639,6 +735,7 @@ public void CloudEndpoints_ReturnsCorrectAuthority_ForEachCloud()
 
 | Date | Change |
 |------|--------|
+| 2026-04-25 | Added BAP Environment Service for SPN name-based environment resolution (#99); added credential provider unit test ACs (#133) |
 | 2026-04-18 | Vendored `microsoft/git-credential-manager` storage code into `src/PPDS.Auth/Internal/CredentialStore/`; removed `Devlooped.CredentialManager` dependency and its OSMFEULA-licensed binary distribution |
 | 2026-03-26 | Added environment variable authentication (stateless auth via PPDS_CLIENT_ID/SECRET/TENANT_ID/ENVIRONMENT_URL) |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |

@@ -102,8 +102,14 @@ public class CloudEndpointsTests
     [InlineData("USGOV", CloudEnvironment.UsGov)]
     [InlineData("usgov", CloudEnvironment.UsGov)]
     [InlineData("USGOVHIGH", CloudEnvironment.UsGovHigh)]
+    [InlineData("usgovhigh", CloudEnvironment.UsGovHigh)]
+    [InlineData("UsGovHigh", CloudEnvironment.UsGovHigh)]
     [InlineData("USGOVDOD", CloudEnvironment.UsGovDod)]
+    [InlineData("usgovdod", CloudEnvironment.UsGovDod)]
+    [InlineData("UsGovDod", CloudEnvironment.UsGovDod)]
     [InlineData("CHINA", CloudEnvironment.China)]
+    [InlineData("china", CloudEnvironment.China)]
+    [InlineData("China", CloudEnvironment.China)]
     public void Parse_ValidValue_ReturnsCorrectCloud(string value, CloudEnvironment expected)
     {
         var result = CloudEndpoints.Parse(value);
@@ -243,6 +249,27 @@ public class CloudEndpointsTests
     public void GetFlowPortalUrl_InvalidCloud_Throws()
     {
         var act = () => CloudEndpoints.GetFlowPortalUrl((CloudEnvironment)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://api.bap.microsoft.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://gov.api.bap.microsoft.us")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://high.api.bap.microsoft.us")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://api.bap.appsplatform.us")]
+    [InlineData(CloudEnvironment.China, "https://api.bap.partner.microsoftonline.cn")]
+    public void GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud(CloudEnvironment cloud, string expected)
+    {
+        var result = CloudEndpoints.GetBapApiUrl(cloud);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetBapApiUrl_InvalidCloud_Throws()
+    {
+        var act = () => CloudEndpoints.GetBapApiUrl((CloudEnvironment)999);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }

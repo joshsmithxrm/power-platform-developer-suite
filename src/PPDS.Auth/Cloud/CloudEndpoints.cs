@@ -77,6 +77,25 @@ public static class CloudEndpoints
     }
 
     /// <summary>
+    /// Gets the BAP (Business Application Platform) API base URL for the specified cloud environment.
+    /// Used for environment discovery via the admin API when Global Discovery is not available.
+    /// </summary>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The BAP API base URL.</returns>
+    public static string GetBapApiUrl(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://api.bap.microsoft.com",
+            CloudEnvironment.UsGov => "https://gov.api.bap.microsoft.us",
+            CloudEnvironment.UsGovHigh => "https://high.api.bap.microsoft.us",
+            CloudEnvironment.UsGovDod => "https://api.bap.appsplatform.us",
+            CloudEnvironment.China => "https://api.bap.partner.microsoftonline.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
     /// Gets the Azure.Identity authority host URI for the specified cloud environment.
     /// </summary>
     /// <param name="cloud">The cloud environment.</param>

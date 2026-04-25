@@ -88,8 +88,8 @@ public class AzureDevOpsFederatedAuthenticationTests : LiveTestBase, IDisposable
         var act1 = () => new AzureDevOpsFederatedCredentialProvider(null!, "tenant");
         var act2 = () => new AzureDevOpsFederatedCredentialProvider("app", null!);
 
-        act1.Should().Throw<ArgumentNullException>().WithParameterName("applicationId");
-        act2.Should().Throw<ArgumentNullException>().WithParameterName("tenantId");
+        act1.Should().Throw<ArgumentException>().WithParameterName("applicationId");
+        act2.Should().Throw<ArgumentException>().WithParameterName("tenantId");
     }
 
     [Fact]

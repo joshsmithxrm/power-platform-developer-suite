@@ -16,6 +16,7 @@ namespace PPDS.Auth.Tests;
 ///   Bug C — AuthenticationOutput writing to stdout instead of stderr
 ///   Bug D — VerifyPersistence running on every CreateAndRegisterCacheAsync invocation
 /// </summary>
+[Collection("AuthenticationOutput")]
 public class Finding7AuthBugTests
 {
     // -------------------------------------------------------------------------

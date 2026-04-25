@@ -76,9 +76,16 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
                 "Use certificate file authentication (--certificate-path) on other platforms.");
         }
 
-        _applicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
-        _thumbprint = thumbprint ?? throw new ArgumentNullException(nameof(thumbprint));
-        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        if (string.IsNullOrWhiteSpace(applicationId))
+            throw new ArgumentException("ApplicationId is required and cannot be empty.", nameof(applicationId));
+        if (string.IsNullOrWhiteSpace(thumbprint))
+            throw new ArgumentException("Thumbprint is required and cannot be empty.", nameof(thumbprint));
+        if (string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("TenantId is required and cannot be empty.", nameof(tenantId));
+
+        _applicationId = applicationId;
+        _thumbprint = thumbprint;
+        _tenantId = tenantId;
         _storeName = storeName;
         _storeLocation = storeLocation;
         _cloud = cloud;
