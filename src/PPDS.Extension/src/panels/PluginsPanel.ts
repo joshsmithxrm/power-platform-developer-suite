@@ -154,8 +154,8 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // plugins/list now returns all domain data in a single consolidated call
             const [pluginsResult, dataProvidersResult] = await Promise.all([
-                this.daemon.pluginsList(this.environmentUrl),
-                this.daemon.dataProvidersList(undefined, this.environmentUrl),
+                this.daemon.pluginsList(this.environmentUrl, this.profileName),
+                this.daemon.dataProvidersList(undefined, this.environmentUrl, this.profileName),
             ]);
 
             // Collect assembly names that already appear under a package to avoid duplication
@@ -304,7 +304,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             const colonIdx = nodeId.indexOf(':');
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
 
-            const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
+            const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl, this.profileName);
             // Map type to property name ('type' nodeType maps to 'pluginType' property)
             const propName = nodeType === 'type' ? 'pluginType' : nodeType;
             const entity = (result as unknown as Record<string, unknown>)[propName] as Record<string, unknown> | undefined;
@@ -343,16 +343,16 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             let entity: Record<string, unknown>;
 
             if (nodeType === 'customApi') {
-                const result = await this.daemon.customApisGet(id, this.environmentUrl);
+                const result = await this.daemon.customApisGet(id, this.environmentUrl, this.profileName);
                 entity = result.api as unknown as Record<string, unknown>;
             } else if (nodeType === 'serviceEndpoint' || nodeType === 'webhook') {
-                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl);
+                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl, this.profileName);
                 entity = result.endpoint as unknown as Record<string, unknown>;
             } else if (nodeType === 'dataSource' || nodeType === 'dataProvider') {
                 // No dedicated get endpoint — skip detail load
                 return;
             } else {
-                const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
+                const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl, this.profileName);
                 // Extract entity from type-specific property
                 entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? {};
             }
@@ -369,12 +369,12 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `${enabled ? 'Enabling' : 'Disabling'} step...` },
                 async () => {
-                    await this.daemon.pluginsToggleStep(id, enabled, this.environmentUrl);
+                    await this.daemon.pluginsToggleStep(id, enabled, this.environmentUrl, this.profileName);
                 }
             );
 
             // Reload detail for the updated node to get fresh state
-            const result = await this.daemon.pluginsGet('step', id, this.environmentUrl);
+            const result = await this.daemon.pluginsGet('step', id, this.environmentUrl, this.profileName);
             const entity = result.step;
             this.postMessage({
                 command: 'nodeUpdated',
@@ -405,7 +405,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `Unregistering ${entityType}...` },
                 async () => {
-                    await this.daemon.pluginsUnregister(entityType, id, force, this.environmentUrl);
+                    await this.daemon.pluginsUnregister(entityType, id, force, this.environmentUrl, this.profileName);
                 }
             );
             this.postMessage({ command: 'nodeRemoved', nodeId: id });
@@ -421,7 +421,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
         try {
             const result = await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: 'Downloading binary...' },
-                async () => this.daemon.pluginsDownloadBinary(entityType, id, this.environmentUrl)
+                async () => this.daemon.pluginsDownloadBinary(entityType, id, this.environmentUrl, this.profileName)
             );
 
             const uri = await vscode.window.showSaveDialog({
@@ -452,6 +452,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                                 String(fields['content'] ?? ''),
                                 fields['solutionName'] !== undefined ? String(fields['solutionName']) : undefined,
                                 this.environmentUrl,
+                                this.profileName,
                             );
                             break;
                         case 'package':
@@ -459,19 +460,20 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                                 String(fields['content'] ?? ''),
                                 fields['solutionName'] !== undefined ? String(fields['solutionName']) : undefined,
                                 this.environmentUrl,
+                                this.profileName,
                             );
                             break;
                         case 'step':
-                            await this.daemon.pluginsRegisterStep(fields, this.environmentUrl);
+                            await this.daemon.pluginsRegisterStep(fields, this.environmentUrl, this.profileName);
                             break;
                         case 'image':
-                            await this.daemon.pluginsRegisterImage(fields, this.environmentUrl);
+                            await this.daemon.pluginsRegisterImage(fields, this.environmentUrl, this.profileName);
                             break;
                         case 'serviceEndpoint':
-                            await this.daemon.serviceEndpointsRegister(fields, this.environmentUrl);
+                            await this.daemon.serviceEndpointsRegister(fields, this.environmentUrl, this.profileName);
                             break;
                         case 'customApi':
-                            await this.daemon.customApisRegister(fields, this.environmentUrl);
+                            await this.daemon.customApisRegister(fields, this.environmentUrl, this.profileName);
                             break;
                         default:
                             throw new Error(`Unknown entity type for registration: ${entityType}`);
@@ -500,19 +502,20 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                                 String(fields['content'] ?? ''),
                                 fields['solutionName'] !== undefined ? String(fields['solutionName']) : undefined,
                                 this.environmentUrl,
+                                this.profileName,
                             );
                             break;
                         case 'step':
-                            await this.daemon.pluginsUpdateStep(id, fields, this.environmentUrl);
+                            await this.daemon.pluginsUpdateStep(id, fields, this.environmentUrl, this.profileName);
                             break;
                         case 'image':
-                            await this.daemon.pluginsUpdateImage(id, fields, this.environmentUrl);
+                            await this.daemon.pluginsUpdateImage(id, fields, this.environmentUrl, this.profileName);
                             break;
                         case 'serviceEndpoint':
-                            await this.daemon.serviceEndpointsUpdate(id, fields, this.environmentUrl);
+                            await this.daemon.serviceEndpointsUpdate(id, fields, this.environmentUrl, this.profileName);
                             break;
                         case 'customApi':
-                            await this.daemon.customApisUpdate(id, fields, this.environmentUrl);
+                            await this.daemon.customApisUpdate(id, fields, this.environmentUrl, this.profileName);
                             break;
                         default:
                             throw new Error(`Unknown entity type for update: ${entityType}`);
@@ -523,13 +526,13 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             // Reload detail for the updated node, routing through the correct endpoint
             let updatedEntity: Record<string, unknown> | null;
             if (entityType === 'customApi') {
-                const result = await this.daemon.customApisGet(id, this.environmentUrl);
+                const result = await this.daemon.customApisGet(id, this.environmentUrl, this.profileName);
                 updatedEntity = result.api as unknown as Record<string, unknown>;
             } else if (entityType === 'serviceEndpoint') {
-                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl);
+                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl, this.profileName);
                 updatedEntity = result.endpoint as unknown as Record<string, unknown>;
             } else {
-                const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl);
+                const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl, this.profileName);
                 updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
             }
             this.postMessage({

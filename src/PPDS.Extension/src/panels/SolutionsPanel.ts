@@ -143,7 +143,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private async loadSolutions(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl, this.includeInternal);
+            const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl, this.includeInternal, this.profileName);
 
             this.postMessage({
                 command: 'solutionsLoaded',
@@ -178,7 +178,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private async loadComponents(uniqueName: string): Promise<void> {
         try {
             this.postMessage({ command: 'componentsLoading', uniqueName });
-            const result = await this.daemon.solutionsComponents(uniqueName, undefined, this.environmentUrl);
+            const result = await this.daemon.solutionsComponents(uniqueName, undefined, this.environmentUrl, this.profileName);
 
             // Group components by type name using the shared utility
             // (mirrors `PPDS.Cli.Services.SolutionComponentGrouper`).

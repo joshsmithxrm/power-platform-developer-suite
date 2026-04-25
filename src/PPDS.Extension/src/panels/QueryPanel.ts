@@ -10,7 +10,7 @@ import { queryDefaultTop } from '../utils/config.js';
 
 import { getNonce } from './webviewUtils.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml, showContextPicker } from './environmentPicker.js';
 import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -147,6 +147,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         sql: message.sql,
                         cursorOffset: message.cursorOffset,
                         language: message.language,
+                        environmentUrl: this.environmentUrl,
+                        profileName: this.profileName,
                     });
                     this.postMessage({ command: 'completionResult', requestId, items: result.items });
                 } catch (err) {
@@ -178,6 +180,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         const result = await this.daemon.queryExplain({
                             sql,
                             environmentUrl: this.environmentUrl ?? undefined,
+                            profileName: this.profileName,
                         });
                         converted = result.fetchXml ?? result.plan;
                     } else {
@@ -212,8 +215,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 }
                 break;
             case 'requestEnvironmentList': {
-                const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
+                const env = await showContextPicker(this.daemon, this.profileName, this.environmentUrl);
                 if (env) {
+                    this.profileName = env.profileName;
                     this.environmentUrl = env.url;
                     this.environmentDisplayName = env.displayName;
                     this.environmentType = env.type;
@@ -228,7 +232,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                         this.environmentColor = null;
                     }
-                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: this.environmentType, envColor: this.environmentColor });
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, profileName: this.profileName, envType: this.environmentType, envColor: this.environmentColor });
                     this.updatePanelTitle(this.panelId, QueryPanel.instances.length > 1);
                 }
                 break;
@@ -261,13 +265,14 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private async initEnvironment(): Promise<void> {
         // Always fetch profile name for the title
         try {
-            const who = await this.daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName;
+            const list = await this.daemon.authList();
+            const active = list.profiles.find(p => p.isActive);
+            this.profileName = active?.name ?? (active ? `Profile ${active.index}` : list.activeProfile ?? undefined);
+            if (!this.environmentUrl && active?.environment) {
+                this.environmentUrl = active.environment.url;
+                this.environmentDisplayName = active.environment.displayName;
             }
-            this.environmentType = who.environment?.type ?? null;
+            this.environmentType = null;
         } catch (err) {
             // eslint-disable-next-line no-console -- expected when no profile is active
             console.debug(`[PPDS] initEnvironment: ${err instanceof Error ? err.message : String(err)}`);
@@ -303,9 +308,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             let result: QueryResultResponse;
             if (language === 'xml') {
-                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl }, token);
+                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl, profileName: this.profileName }, token);
             } else {
-                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl, dmlSafety: { isConfirmed } }, token);
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl, profileName: this.profileName, dmlSafety: { isConfirmed } }, token);
             }
             this.lastSql = sql;
             this.lastUseTds = tds;
@@ -363,7 +368,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async showFetchXml(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
+            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl, profileName: this.profileName });
             if (result.plan) {
                 const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
                 if (ExplainDocumentProvider.instance) {
@@ -381,7 +386,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async explainQuery(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
+            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl, profileName: this.profileName });
             const language = result.format === 'fetchxml' ? 'xml' : 'plaintext';
             const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
             if (ExplainDocumentProvider.instance) {
@@ -409,6 +414,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     page,
                     pagingCookie,
                     environmentUrl: this.environmentUrl,
+                    profileName: this.profileName,
                 });
             } else {
                 result = await this.daemon.querySql({
@@ -417,6 +423,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     pagingCookie,
                     useTds: this.lastUseTds,
                     environmentUrl: this.environmentUrl,
+                    profileName: this.profileName,
                 });
             }
 
@@ -524,6 +531,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             format,
             includeHeaders,
             environmentUrl: this.environmentUrl,
+            profileName: this.profileName,
         };
         if (this.lastLanguage === 'xml') {
             params.fetchXml = this.lastSql!;

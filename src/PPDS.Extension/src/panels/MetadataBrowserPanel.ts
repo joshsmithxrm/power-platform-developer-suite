@@ -147,7 +147,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 
     private async loadEntities(isRetry = false): Promise<void> {
         try {
-            const result = await this.daemon.metadataEntities(this.environmentUrl, this.includeIntersect);
+            const result = await this.daemon.metadataEntities(this.environmentUrl, this.includeIntersect, this.profileName);
 
             this.postMessage({
                 command: 'entitiesLoaded',
@@ -175,7 +175,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 
     private async loadGlobalChoices(isRetry = false): Promise<void> {
         try {
-            const result = await this.daemon.metadataGlobalOptionSets(this.environmentUrl);
+            const result = await this.daemon.metadataGlobalOptionSets(this.environmentUrl, this.profileName);
             this.postMessage({
                 command: 'globalChoicesLoaded',
                 choices: result.optionSets,
@@ -193,7 +193,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     private async loadGlobalChoiceDetail(name: string, isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'globalChoiceDetailLoading', name });
-            const result = await this.daemon.metadataGlobalOptionSet(name, this.environmentUrl);
+            const result = await this.daemon.metadataGlobalOptionSet(name, this.environmentUrl, this.profileName);
             this.postMessage({
                 command: 'globalChoiceDetailLoaded',
                 choice: result.optionSet,
@@ -212,7 +212,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     private async loadEntityDetail(logicalName: string, isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'entityDetailLoading', logicalName });
-            const result = await this.daemon.metadataEntity(logicalName, true, this.environmentUrl);
+            const result = await this.daemon.metadataEntity(logicalName, true, this.environmentUrl, this.profileName);
             this.postMessage({
                 command: 'entityDetailLoaded',
                 entity: result.entity,
@@ -243,7 +243,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 
         try {
             const params = { solutionUniqueName, schemaName, displayName, pluralDisplayName, description, ownershipType };
-            const result = await this.daemon.metadataCreateTable(params, this.environmentUrl);
+            const result = await this.daemon.metadataCreateTable(params, this.environmentUrl, this.profileName);
             this.postMessage({ command: 'authoringResult', result });
             if (result.success) {
                 vscode.window.showInformationMessage(`Table '${result.logicalName ?? schemaName}' created successfully.`);
@@ -270,6 +270,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             const result = await this.daemon.metadataDeleteTable(
                 { solutionUniqueName, entityLogicalName },
                 this.environmentUrl,
+                this.profileName,
             );
             this.postMessage({ command: 'deleteResult', result });
             if (result.success) {
@@ -300,7 +301,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 
         try {
             const params = { solutionUniqueName, entityLogicalName, schemaName, displayName, description, columnType };
-            const result = await this.daemon.metadataCreateColumn(params, this.environmentUrl);
+            const result = await this.daemon.metadataCreateColumn(params, this.environmentUrl, this.profileName);
             this.postMessage({ command: 'authoringResult', result });
             if (result.success) {
                 vscode.window.showInformationMessage(`Column '${result.logicalName ?? schemaName}' created successfully.`);
@@ -327,6 +328,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             const result = await this.daemon.metadataDeleteColumn(
                 { solutionUniqueName, entityLogicalName, columnLogicalName },
                 this.environmentUrl,
+                this.profileName,
             );
             this.postMessage({ command: 'deleteResult', result });
             if (result.success) {

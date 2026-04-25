@@ -34,7 +34,7 @@ export type QueryPanelWebviewToHost =
 /** Messages the extension host sends to the Query Panel webview. */
 export type QueryPanelHostToWebview =
     | { command: 'loadQuery'; sql: string }
-    | { command: 'updateEnvironment'; name: string; url: string | null; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; url: string | null; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'executionStarted' }
     | { command: 'queryResult'; data: QueryResultResponse }
     | { command: 'queryCancelled' }
@@ -91,7 +91,7 @@ export type SolutionsPanelWebviewToHost =
 
 /** Messages the extension host sends to the Solutions Panel webview. */
 export type SolutionsPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'solutionsLoaded'; solutions: SolutionViewDto[]; totalCount: number; filtersApplied: string[] }
     | { command: 'componentsLoading'; uniqueName: string }
     | { command: 'componentsLoaded'; uniqueName: string; groups: ComponentGroupDto[] }
@@ -127,7 +127,7 @@ export type ImportJobsPanelWebviewToHost =
 
 /** Messages the extension host sends to the Import Jobs Panel webview. */
 export type ImportJobsPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'importJobsLoaded'; jobs: ImportJobViewDto[]; totalCount: number }
     | { command: 'loading' }
     | { command: 'error'; message: string }
@@ -239,7 +239,7 @@ export type PluginTracesPanelWebviewToHost =
 
 /** Messages the extension host sends to the Plugin Traces Panel webview. */
 export type PluginTracesPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'tracesLoaded'; traces: PluginTraceViewDto[]; totalCount: number }
     | { command: 'traceDetailLoaded'; trace: PluginTraceDetailViewDto }
     | { command: 'timelineLoaded'; nodes: TimelineNodeViewDto[] }
@@ -281,7 +281,7 @@ export type MetadataBrowserPanelWebviewToHost =
 
 /** Messages the extension host sends to the Metadata Browser Panel webview. */
 export type MetadataBrowserPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'entitiesLoaded'; entities: MetadataEntityViewDto[]; intersectHiddenCount: number }
     | { command: 'globalChoicesLoaded'; choices: MetadataGlobalChoiceSummaryDto[] }
     | { command: 'globalChoiceDetailLoaded'; choice: MetadataOptionSetDto }
@@ -356,7 +356,7 @@ export type ConnectionReferencesPanelWebviewToHost =
 
 /** Messages the extension host sends to the Connection References Panel webview. */
 export type ConnectionReferencesPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'loading' }
     | { command: 'connectionReferencesLoaded'; references: ConnectionReferenceViewDto[]; totalCount: number; filtersApplied: string[] }
     | { command: 'connectionReferenceDetailLoaded'; detail: ConnectionReferenceDetailViewDto; environmentId: string | null }
@@ -414,7 +414,7 @@ export type EnvironmentVariablesPanelWebviewToHost =
 
 /** Messages the extension host sends to the Environment Variables Panel webview. */
 export type EnvironmentVariablesPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'loading' }
     | { command: 'environmentVariablesLoaded'; variables: EnvironmentVariableViewDto[]; totalCount: number; filtersApplied: string[] }
     | { command: 'environmentVariableDetailLoaded'; detail: EnvironmentVariableDetailViewDto }
@@ -446,7 +446,7 @@ export type WebResourcesPanelWebviewToHost =
 
 /** Messages the extension host sends to the Web Resources Panel webview. */
 export type WebResourcesPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
     | { command: 'webResourcesLoaded'; resources: WebResourceInfoDto[]; requestId: number; totalCount: number }
     | { command: 'webResourcesPage'; resources: WebResourceInfoDto[]; requestId: number; loadedSoFar: number; totalCount: number }
@@ -479,7 +479,7 @@ export type PluginsPanelWebviewToHost =
 
 /** Messages the extension host sends to the Plugins Panel webview. */
 export type PluginsPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'updateEnvironment'; name: string; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'treeLoaded'; data: PluginTreeData }
     | { command: 'childrenLoaded'; parentId: string; children: PluginTreeNode[] }
     | { command: 'nodeUpdated'; node: PluginTreeNode }

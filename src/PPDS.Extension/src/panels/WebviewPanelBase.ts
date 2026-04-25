@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 
-import { showEnvironmentPicker } from './environmentPicker.js';
+import { showContextPicker } from './environmentPicker.js';
 
 /**
  * Base class for webview panels with safe messaging, lifecycle management,
@@ -124,7 +124,7 @@ export abstract class WebviewPanelBase<
         try {
             const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
             const targetUrl = normalise(this.environmentUrl);
-            const envResult = await daemon.envList();
+            const envResult = await daemon.envList(undefined, undefined, this.profileName);
             const match = envResult.environments.find(
                 e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
             );
@@ -155,15 +155,17 @@ export abstract class WebviewPanelBase<
      */
     protected async initializePanel(daemon: DaemonClient, panelId: number, multipleInstances: boolean): Promise<void> {
         try {
-            const who = await daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
+            const list = await daemon.authList();
+            const active = list.profiles.find(p => p.isActive);
+            this.profileName = active?.name ?? (active ? `Profile ${active.index}` : list.activeProfile ?? undefined);
+            const env = active?.environment ?? null;
+            if (!this.environmentUrl && env?.url) {
+                this.environmentUrl = env.url;
+                this.environmentDisplayName = env.displayName || env.url;
             }
-            this.environmentType = who.environment?.type ?? null;
-            if (who.environment?.environmentId) {
-                this.environmentId = who.environment.environmentId;
+            this.environmentType = null;
+            if (env?.environmentId) {
+                this.environmentId = env.environmentId;
             } else {
                 this.environmentId = await this.resolveEnvironmentId(daemon);
             }
@@ -184,6 +186,7 @@ export abstract class WebviewPanelBase<
             this.postMessage({
                 command: 'updateEnvironment',
                 name: this.environmentDisplayName ?? 'No environment',
+                profileName: this.profileName,
                 envType: this.environmentType,
                 envColor: this.environmentColor,
             } as unknown as TOutgoing);
@@ -199,9 +202,10 @@ export abstract class WebviewPanelBase<
      * Called from subclass `handleMessage` when receiving 'requestEnvironmentList'.
      */
     protected async handleEnvironmentPickerClick(daemon: DaemonClient, panelId: number, multipleInstances: boolean): Promise<void> {
-        const result = await showEnvironmentPicker(daemon, this.environmentUrl);
+        const result = await showContextPicker(daemon, this.profileName, this.environmentUrl);
         if (!result) return;
 
+        this.profileName = result.profileName;
         this.environmentUrl = result.url;
         this.environmentDisplayName = result.displayName;
         this.environmentType = result.type;
@@ -219,6 +223,7 @@ export abstract class WebviewPanelBase<
         this.postMessage({
             command: 'updateEnvironment',
             name: result.displayName,
+            profileName: this.profileName,
             envType: this.environmentType,
             envColor: this.environmentColor,
         } as unknown as TOutgoing);

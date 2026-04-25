@@ -233,11 +233,11 @@ Status Bar     Context        Command
 **Depends-on:** Chunk 2
 **Mode:** alongside
 
-- [ ] Step 1: Read current `environmentPicker.ts` to understand the existing `showEnvironmentPicker` function signature and return type. It returns `{ url: string; displayName: string; type: string | null } | undefined`.
+- [x] Step 1: Read current `environmentPicker.ts` to understand the existing `showEnvironmentPicker` function signature and return type. It returns `{ url: string; displayName: string; type: string | null } | undefined`.
 
-- [ ] Step 2: Create a new exported function `showContextPicker(daemon: DaemonClient, currentProfileName?: string, currentUrl?: string)` that returns `Promise<{ profileName: string; url: string; displayName: string; type: string | null } | undefined>`. This replaces `showEnvironmentPicker` with profile awareness.
+- [x] Step 2: Create a new exported function `showContextPicker(daemon: DaemonClient, currentProfileName?: string, currentUrl?: string)` that returns `Promise<{ profileName: string; url: string; displayName: string; type: string | null } | undefined>`. This replaces `showEnvironmentPicker` with profile awareness.
 
-- [ ] Step 3: Implement `showContextPicker`:
+- [x] Step 3: Implement `showContextPicker`:
   a. Call `daemon.authList()` to get all profiles.
   b. For each profile, call `daemon.envList(undefined, undefined, p.name ?? p.index.toString())` in parallel using `Promise.allSettled`. If a call fails, fall back to the profile's saved environment from `authList` response.
   c. Build `QuickPickItem[]` array: for each profile, add a `{ label: profileName + (isActive ? ' (active)' : ''), kind: vscode.QuickPickItemKind.Separator }` entry, then for each environment under that profile add `{ label: isCurrent ? '$(check) ' + friendlyName : friendlyName, description: isCurrent ? 'current' : undefined, detail: env.apiUrl + (env.region ? ' (' + env.region + ')' : ''), profileName, url: env.apiUrl, displayName: env.friendlyName, type: env.type ?? null }`.
@@ -246,11 +246,11 @@ Status Bar     Context        Command
   f. If `__manual__` selected, show input box for URL (reuse existing validation logic), then ask which profile to use with that URL (secondary quick pick of profile names).
   g. Return `{ profileName, url, displayName, type }`.
 
-- [ ] Step 4: Update `getEnvironmentPickerHtml()` to show `ProfileName · EnvName` instead of just the environment name. Change the button text template: `<span id="env-picker-name">Loading...</span>` is updated by the webview when it receives `updateEnvironment` — this already works, just the label format changes in the host.
+- [x] Step 4: Update `getEnvironmentPickerHtml()` to show `ProfileName · EnvName` instead of just the environment name. Change the button text template: `<span id="env-picker-name">Loading...</span>` is updated by the webview when it receives `updateEnvironment` — this already works, just the label format changes in the host.
 
-- [ ] Step 5: Keep `showEnvironmentPicker` as a deprecated wrapper that calls `showContextPicker` and strips `profileName` from the result, for any callers that haven't been updated yet. Mark with `@deprecated`.
+- [x] Step 5: Keep `showEnvironmentPicker` as a deprecated wrapper that calls `showContextPicker` and strips `profileName` from the result, for any callers that haven't been updated yet. Mark with `@deprecated`.
 
-- [ ] Step 6: Commit: `feat(extension): grouped profile+environment context picker replacing environment-only picker`
+- [x] Step 6: Commit: `feat(extension): grouped profile+environment context picker replacing environment-only picker`
 
 ### Task 4.2 — Update WebviewPanelBase for Per-Panel Profile (ACs: AC-12, AC-14, AC-15, AC-23, AC-24, AC-25, AC-29)
 
@@ -258,28 +258,25 @@ Status Bar     Context        Command
 **Depends-on:** Task 4.1
 **Mode:** alongside
 
-- [ ] Step 1: Read `WebviewPanelBase.ts` lines 29-35 (shared environment state) and lines 156-226 (initializePanel + handleEnvironmentPickerClick).
+- [x] Step 1: Read `WebviewPanelBase.ts` lines 29-35 (shared environment state) and lines 156-226 (initializePanel + handleEnvironmentPickerClick).
 
-- [ ] Step 2: The `profileName` field already exists (line 35). Verify it's being used correctly. Update `initializePanel` (line 156): instead of calling `daemon.authWho()` (which always returns the active profile), call `daemon.authList()` and find the active profile to set `this.profileName`. This ensures the profile name is set from the list response, which includes all profile metadata.
+- [x] Step 2: The `profileName` field already exists (line 35). Verify it's being used correctly. Update `initializePanel` (line 156): instead of calling `daemon.authWho()` (which always returns the active profile), call `daemon.authList()` and find the active profile to set `this.profileName`. This ensures the profile name is set from the list response, which includes all profile metadata.
 
-- [ ] Step 3: Update `handleEnvironmentPickerClick` (line 201): replace `showEnvironmentPicker(daemon, this.environmentUrl)` with `showContextPicker(daemon, this.profileName, this.environmentUrl)`. On result, update both `this.profileName` and `this.environmentUrl`. Update import.
+- [x] Step 3: Update `handleEnvironmentPickerClick` (line 201): replace `showEnvironmentPicker(daemon, this.environmentUrl)` with `showContextPicker(daemon, this.profileName, this.environmentUrl)`. On result, update both `this.profileName` and `this.environmentUrl`. Update import.
 
-- [ ] Step 4: Update `updatePanelTitle` — it already uses `this.profileName` in the title format `profileName · envName — PanelLabel`. No change needed here, but verify the title updates correctly after a context picker switch.
+- [x] Step 4: Update `updatePanelTitle` — it already uses `this.profileName` in the title format `profileName · envName — PanelLabel`. No change needed here, but verify the title updates correctly after a context picker switch.
 
-- [ ] Step 5: Update the `updateEnvironment` message posted to the webview (line 184-189) to include `profileName` so the webview can display it in the context picker button text. Add `profileName: this.profileName` to the message payload. Update the shared message type in `src/PPDS.Extension/src/panels/webview/shared/message-types.ts` if needed.
+- [x] Step 5: Update the `updateEnvironment` message posted to the webview (line 184-189) to include `profileName` so the webview can display it in the context picker button text. Add `profileName: this.profileName` to the message payload. Update the shared message type in `src/PPDS.Extension/src/panels/webview/shared/message-types.ts` if needed.
 
-- [ ] Step 6: Update `resolveEnvironmentId` (line 122): change `await daemon.envList()` to `await daemon.envList(undefined, undefined, this.profileName)` so environment ID resolution uses the panel's profile, not the active profile's discovery cache.
+- [x] Step 6: Update `resolveEnvironmentId` (line 122): change `await daemon.envList()` to `await daemon.envList(undefined, undefined, this.profileName)` so environment ID resolution uses the panel's profile, not the active profile's discovery cache.
 
-- [ ] Step 7: **QueryPanel-specific updates** (`QueryPanel.ts`). QueryPanel bypasses the base class `initializePanel`/`handleEnvironmentPickerClick` with its own flows:
-  a. Update `initEnvironment()` (line 261): replace `daemon.authWho()` with `daemon.authList()` + find active profile, matching the base class `initializePanel` change in Step 2. Set `this.profileName` from the active profile.
-  b. Update `requestEnvironmentList` handler (line 214): replace `showEnvironmentPicker(this.daemon, this.environmentUrl)` with `showContextPicker(this.daemon, this.profileName, this.environmentUrl)`. On result, set `this.profileName = env.profileName` in addition to the existing `this.environmentUrl = env.url`.
-  c. Add `profileName: this.profileName` to all QueryPanel RPC calls that pass `environmentUrl`: `queryFetch` (line 306), `querySql` (line 308), `queryExplain` (lines 178, 366, 384), `queryFetch`/`querySql` in `loadMore` (lines 407-419), `queryExport` via `buildExportParams` (line 521-533). For `queryComplete` (line 146): add both `environmentUrl: this.environmentUrl` and `profileName: this.profileName` to the params object — note that `queryComplete` currently omits `environmentUrl`, so adding it here is a deliberate correction to ensure completions resolve against the panel's target environment rather than defaulting to the active profile's environment.
+- [x] Step 7: **QueryPanel-specific updates** (`QueryPanel.ts`). QueryPanel bypasses the base class `initializePanel`/`handleEnvironmentPickerClick` with its own flows.
 
-- [ ] Step 8: **Standard panel subclass updates** — for each panel that uses `handleEnvironmentPickerClick` from the base class: verify no individual changes needed (base class handles picker+init). Then update each panel's `handleMessage` and data-loading methods to pass `this.profileName` alongside `this.environmentUrl` on daemon RPC calls. The pattern for positional-param methods is to append `this.profileName` as the last argument; for object-param methods add `profileName: this.profileName` to the params object. Panels to update: `SolutionsPanel`, `ImportJobsPanel`, `PluginTracesPanel`, `ConnectionReferencesPanel`, `EnvironmentVariablesPanel`, `WebResourcesPanel`, `MetadataBrowserPanel`, `PluginsPanel`.
+- [x] Step 8: **Standard panel subclass updates** — for each panel that uses `handleEnvironmentPickerClick` from the base class: verify no individual changes needed (base class handles picker+init). Then update each panel's `handleMessage` and data-loading methods to pass `this.profileName` alongside `this.environmentUrl` on daemon RPC calls.
 
-- [ ] Step 9: Run `npm run ext:test` to verify no regressions.
+- [x] Step 9: Run `npm run ext:test` to verify no regressions.
 
-- [ ] Step 10: Commit: `feat(extension): per-panel profile binding in WebviewPanelBase and all panel subclasses`
+- [x] Step 10: Commit: `feat(extension): per-panel profile binding in WebviewPanelBase and all panel subclasses`
 
 ---
 

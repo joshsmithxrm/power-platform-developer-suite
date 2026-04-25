@@ -124,7 +124,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
     private async loadImportJobs(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const result = await this.daemon.importJobsList(undefined, this.environmentUrl);
+            const result = await this.daemon.importJobsList(undefined, this.environmentUrl, this.profileName);
 
             this.postMessage({
                 command: 'importJobsLoaded',
@@ -160,7 +160,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
      */
     private async openImportLog(id: string): Promise<void> {
         try {
-            const result = await this.daemon.importJobsGet(id, this.environmentUrl);
+            const result = await this.daemon.importJobsGet(id, this.environmentUrl, this.profileName);
             const raw = result.job.data;
             if (!raw) {
                 void vscode.window.showInformationMessage('No import log data available for this job.');
