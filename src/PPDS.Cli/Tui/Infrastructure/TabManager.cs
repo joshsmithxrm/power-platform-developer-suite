@@ -37,16 +37,51 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
     /// <summary>
     /// Adds a new tab and makes it active.
     /// </summary>
-    public void AddTab(ITuiScreen screen, string? environmentUrl, string? environmentDisplayName = null)
+    public void AddTab(
+        ITuiScreen screen,
+        string? environmentUrl,
+        string? environmentDisplayName = null,
+        string? profileName = null,
+        string? profileIdentity = null)
     {
         var envType = _themeService.DetectEnvironmentType(environmentUrl);
         var envColor = _themeService.GetResolvedColor(environmentUrl);
-        var tab = new TabInfo(screen, environmentUrl, environmentDisplayName, envType, envColor);
+        var tab = new TabInfo(screen, environmentUrl, environmentDisplayName, envType, envColor, profileName, profileIdentity);
         _tabs.Add(tab);
         _activeIndex = _tabs.Count - 1;
 
         TabsChanged?.Invoke();
         ActiveTabChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Updates the profile and environment of the tab at the given index.
+    /// Used when the user switches profile within a tab.
+    /// </summary>
+    public void UpdateTabProfile(
+        int index,
+        string? profileName,
+        string? profileIdentity,
+        string? environmentUrl,
+        string? environmentDisplayName)
+    {
+        if (index < 0 || index >= _tabs.Count) return;
+
+        var tab = _tabs[index];
+        var envType = _themeService.DetectEnvironmentType(environmentUrl);
+        var envColor = _themeService.GetResolvedColor(environmentUrl);
+        _tabs[index] = tab with
+        {
+            ProfileName = profileName,
+            ProfileIdentity = profileIdentity,
+            EnvironmentUrl = environmentUrl,
+            EnvironmentDisplayName = environmentDisplayName,
+            EnvironmentType = envType,
+            EnvironmentColor = envColor
+        };
+        TabsChanged?.Invoke();
+        if (index == _activeIndex)
+            ActiveTabChanged?.Invoke();
     }
 
     /// <summary>
@@ -154,7 +189,8 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
             EnvironmentUrl: t.EnvironmentUrl,
             EnvironmentType: t.EnvironmentType,
             EnvironmentColor: t.EnvironmentColor,
-            IsActive: i == _activeIndex
+            IsActive: i == _activeIndex,
+            ProfileName: t.ProfileName
         )).ToList();
 
         return new TabManagerState(
@@ -183,4 +219,6 @@ internal sealed record TabInfo(
     string? EnvironmentUrl,
     string? EnvironmentDisplayName,
     EnvironmentType EnvironmentType,
-    EnvironmentColor EnvironmentColor);
+    EnvironmentColor EnvironmentColor,
+    string? ProfileName,
+    string? ProfileIdentity);

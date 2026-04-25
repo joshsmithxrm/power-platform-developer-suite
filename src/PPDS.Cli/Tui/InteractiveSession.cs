@@ -48,6 +48,8 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private readonly ConcurrentDictionary<string, ServiceProvider> _providers = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeEnvironmentUrl;
     private string? _activeEnvironmentDisplayName;
+    private string? _displayedProfileName;
+    private string? _displayedProfileIdentity;
     private bool _disposed;
     private readonly EnvironmentConfigStore _envConfigStore;
     private readonly EnvironmentConfigService _envConfigService;
@@ -87,14 +89,22 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public string? CurrentEnvironmentDisplayName => _activeEnvironmentDisplayName;
 
     /// <summary>
-    /// Gets the current profile name, or null if using the active profile.
+    /// Gets the currently displayed profile name (reflects the active tab's profile).
+    /// Falls back to the session default profile if no tab-specific override is set.
     /// </summary>
-    public string? CurrentProfileName => string.IsNullOrEmpty(_profileName) ? null : _profileName;
+    public string? CurrentProfileName =>
+        !string.IsNullOrEmpty(_displayedProfileName) ? _displayedProfileName :
+        !string.IsNullOrEmpty(_profileName) ? _profileName : null;
 
     /// <summary>
-    /// Gets the identity for the current profile (username or app ID), or null if unavailable.
+    /// Gets the session default profile name, used for creating new tabs.
     /// </summary>
-    public string? CurrentProfileIdentity { get; private set; }
+    public string? DefaultProfileName => string.IsNullOrEmpty(_profileName) ? null : _profileName;
+
+    /// <summary>
+    /// Gets the identity for the currently displayed profile (username or app ID), or null if unavailable.
+    /// </summary>
+    public string? CurrentProfileIdentity => _displayedProfileIdentity;
 
     /// <summary>
     /// Gets the environment configuration service for label, type, and color resolution.
@@ -170,7 +180,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _profileResolutionService = new ProfileResolutionService(envConfigs.Environments);
 
         // Set the identity for status bar display
-        CurrentProfileIdentity = profile.IdentityDisplay;
+        _displayedProfileIdentity = profile.IdentityDisplay;
 
         // If using active profile (no explicit name specified), update _profileName
         // so CurrentProfileName returns the actual profile name instead of null
@@ -213,9 +223,28 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
+    /// Updates the displayed profile without changing the session default.
+    /// Use this when switching tabs to sync the status bar with the active tab's profile.
+    /// </summary>
+    /// <param name="profileName">The profile name to display.</param>
+    /// <param name="profileIdentity">The profile identity (username or app ID) to display.</param>
+    public void UpdateDisplayedProfile(string? profileName, string? profileIdentity)
+    {
+        if (_displayedProfileName == profileName && _displayedProfileIdentity == profileIdentity)
+            return;
+
+        _displayedProfileName = profileName;
+        _displayedProfileIdentity = profileIdentity;
+        ProfileChanged?.Invoke(profileName);
+    }
+
+    /// <summary>
     /// Notifies listeners that environment configuration has changed.
     /// </summary>
     public void NotifyConfigChanged() => ConfigChanged?.Invoke();
+
+    private static string ProviderKey(string profileName, string environmentUrl) =>
+        $"{profileName}\0{environmentUrl}";
 
     /// <summary>
     /// Switches to a new environment, updating the profile and warming the new connection.
@@ -251,22 +280,40 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets or creates a service provider for the specified environment.
-    /// If the environment changes, the existing provider is disposed and a new one is created.
+    /// Gets or creates a service provider for the specified environment using the session's default profile.
     /// </summary>
     /// <param name="environmentUrl">The environment URL to connect to.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The service provider with connection pool.</returns>
-    public async Task<ServiceProvider> GetServiceProviderAsync(
+    public Task<ServiceProvider> GetServiceProviderAsync(
         string environmentUrl,
         CancellationToken cancellationToken = default)
     {
+        return GetServiceProviderAsync(environmentUrl, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets or creates a service provider for the specified profile and environment.
+    /// Providers are cached by (profileName, environmentUrl) — different profiles get independent providers.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL to connect to.</param>
+    /// <param name="profileName">Profile name (null to use the session's default profile).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The service provider with connection pool.</returns>
+    public async Task<ServiceProvider> GetServiceProviderAsync(
+        string environmentUrl,
+        string? profileName,
+        CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        var resolvedProfile = !string.IsNullOrEmpty(profileName) ? profileName : _profileName;
+        var cacheKey = ProviderKey(resolvedProfile, environmentUrl);
+
         // Fast path: already cached
-        if (_providers.TryGetValue(environmentUrl, out var existing))
+        if (_providers.TryGetValue(cacheKey, out var existing))
         {
-            TuiDebugLog.Log($"Reusing existing provider for {environmentUrl}");
+            TuiDebugLog.Log($"Reusing existing provider for {environmentUrl} (profile={resolvedProfile})");
             return existing;
         }
 
@@ -275,22 +322,22 @@ internal sealed class InteractiveSession : IAsyncDisposable
         try
         {
             // Double-check after lock
-            if (_providers.TryGetValue(environmentUrl, out existing))
+            if (_providers.TryGetValue(cacheKey, out existing))
             {
                 return existing;
             }
 
-            TuiDebugLog.Log($"Creating new provider for {environmentUrl}, profile={_profileName}");
+            TuiDebugLog.Log($"Creating new provider for {environmentUrl}, profile={resolvedProfile}");
 
             var provider = await _serviceProviderFactory.CreateAsync(
-                string.IsNullOrEmpty(_profileName) ? null : _profileName,
+                string.IsNullOrEmpty(resolvedProfile) ? null : resolvedProfile,
                 environmentUrl,
                 _deviceCodeCallback,
                 _beforeInteractiveAuth,
                 cancellationToken).ConfigureAwait(false);
 
-            _providers[environmentUrl] = provider;
-            TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");
+            _providers[cacheKey] = provider;
+            TuiDebugLog.Log($"Provider created successfully for {environmentUrl} (profile={resolvedProfile})");
 
             // Fire-and-forget metadata preload so IntelliSense has entity names ready
             var cachedMetadata = provider.GetService<ICachedMetadataProvider>();
@@ -324,28 +371,41 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the SQL query service for the specified environment.
+    /// Gets the SQL query service for the specified environment using the session's default profile.
+    /// </summary>
+    public Task<ISqlQueryService> GetSqlQueryServiceAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        return GetSqlQueryServiceAsync(environmentUrl, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the SQL query service for the specified profile and environment.
     /// The underlying connection pool is reused across calls.
     /// </summary>
     /// <param name="environmentUrl">The environment URL to connect to.</param>
+    /// <param name="profileName">Profile name (null to use the session's default profile).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The SQL query service.</returns>
     public async Task<ISqlQueryService> GetSqlQueryServiceAsync(
         string environmentUrl,
-        CancellationToken cancellationToken = default)
+        string? profileName,
+        CancellationToken cancellationToken)
     {
-        var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+        var provider = await GetServiceProviderAsync(environmentUrl, profileName, cancellationToken).ConfigureAwait(false);
         var service = provider.GetRequiredService<ISqlQueryService>();
 
         // Wire cross-environment support: [LABEL].entity resolves via profile labels
         if (service is SqlQueryService concrete && _profileResolutionService != null)
         {
+            var capturedProfile = profileName;
             concrete.RemoteExecutorFactory = label =>
             {
                 var config = _profileResolutionService.ResolveByLabel(label);
                 if (config?.Url == null) return null;
 #pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
-                var remoteProvider = GetServiceProviderAsync(config.Url).GetAwaiter().GetResult();
+                var remoteProvider = GetServiceProviderAsync(config.Url, capturedProfile, CancellationToken.None).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
                 return remoteProvider.GetRequiredService<IQueryExecutor>();
             };
@@ -424,15 +484,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Invalidates cached providers. If <paramref name="environmentUrl"/> is specified,
-    /// only that provider is disposed. Otherwise all providers are disposed.
+    /// Invalidates cached providers. Supports filtering by environment URL, profile name, or both.
+    /// If neither is specified, all providers are disposed.
     /// </summary>
-    /// <param name="environmentUrl">Optional URL to invalidate a specific provider.</param>
+    /// <param name="environmentUrl">Optional URL to filter by environment.</param>
+    /// <param name="profileName">Optional profile name to filter by profile.</param>
     /// <param name="caller">Automatically populated with caller method name.</param>
     /// <param name="filePath">Automatically populated with caller file path.</param>
     /// <param name="lineNumber">Automatically populated with caller line number.</param>
     public async Task InvalidateAsync(
         string? environmentUrl = null,
+        string? profileName = null,
         [CallerMemberName] string? caller = null,
         [CallerFilePath] string? filePath = null,
         [CallerLineNumber] int lineNumber = 0)
@@ -442,14 +504,29 @@ internal sealed class InteractiveSession : IAsyncDisposable
         {
             var fileName = filePath != null ? Path.GetFileName(filePath) : "unknown";
 
-            if (environmentUrl != null)
+            if (environmentUrl != null || profileName != null)
             {
-                // Invalidate specific environment
-                if (_providers.TryRemove(environmentUrl, out var provider))
+                // Invalidate matching providers
+                var keysToRemove = _providers.Keys.Where(key =>
                 {
-                    TuiDebugLog.Log($"Invalidating provider for {environmentUrl} (from {caller} at {fileName}:{lineNumber})");
-                    await provider.DisposeAsync().ConfigureAwait(false);
-                    TuiDebugLog.Log($"Provider for {environmentUrl} invalidated");
+                    var sepIndex = key.IndexOf('\0');
+                    var keyProfile = sepIndex >= 0 ? key[..sepIndex] : string.Empty;
+                    var keyEnv = sepIndex >= 0 ? key[(sepIndex + 1)..] : key;
+
+                    var profileMatch = profileName == null ||
+                        string.Equals(keyProfile, profileName, StringComparison.OrdinalIgnoreCase);
+                    var envMatch = environmentUrl == null ||
+                        string.Equals(keyEnv, environmentUrl, StringComparison.OrdinalIgnoreCase);
+                    return profileMatch && envMatch;
+                }).ToList();
+
+                foreach (var key in keysToRemove)
+                {
+                    if (_providers.TryRemove(key, out var provider))
+                    {
+                        TuiDebugLog.Log($"Invalidating provider {key} (from {caller} at {fileName}:{lineNumber})");
+                        await provider.DisposeAsync().ConfigureAwait(false);
+                    }
                 }
             }
             else
@@ -493,30 +570,37 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// The authentication flow (browser, device code) will be triggered as needed.
     /// </para>
     /// </remarks>
+    /// <param name="profileName">Profile name to re-authenticate (null for session default).</param>
+    /// <param name="environmentUrl">Environment URL to re-authenticate (null for displayed environment).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">Thrown if no environment is currently configured.</exception>
-    public async Task InvalidateAndReauthenticateAsync(CancellationToken cancellationToken = default)
+    public async Task InvalidateAndReauthenticateAsync(
+        string? profileName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_activeEnvironmentUrl))
+        var resolvedEnv = environmentUrl ?? _activeEnvironmentUrl;
+        if (string.IsNullOrEmpty(resolvedEnv))
         {
             throw new InvalidOperationException("Cannot re-authenticate: no environment is currently configured.");
         }
 
-        var environmentUrl = _activeEnvironmentUrl;
+        var resolvedProfile = !string.IsNullOrEmpty(profileName) ? profileName : _profileName;
 
-        TuiDebugLog.Log($"Re-authenticating session for {environmentUrl}...");
+        TuiDebugLog.Log($"Re-authenticating for {resolvedEnv} (profile={resolvedProfile})...");
 
-        // Invalidate the specific environment's provider
-        await InvalidateAsync(environmentUrl).ConfigureAwait(false);
+        // Invalidate the specific (profile, environment) provider
+        await InvalidateAsync(resolvedEnv, resolvedProfile).ConfigureAwait(false);
 
         // Create a new service provider - this will trigger authentication
-        await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+        await GetServiceProviderAsync(resolvedEnv, resolvedProfile, cancellationToken).ConfigureAwait(false);
 
         TuiDebugLog.Log("Re-authentication complete");
     }
 
     /// <summary>
-    /// Switches to a different profile, invalidating the connection pool and optionally re-warming.
+    /// Switches to a different profile. Updates the session default and the displayed profile.
+    /// Providers are cached per (profile, environment) so no invalidation is needed.
     /// </summary>
     /// <param name="profileName">The new profile name.</param>
     /// <param name="environmentUrl">The environment URL for re-warming (optional).</param>
@@ -532,13 +616,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
         TuiDebugLog.Log($"Switching to profile: {profileName}");
 
-        // Update the profile name for future service provider creation
+        // Update the session default profile for future tabs
         _profileName = profileName;
 
         // Load profile to get identity for status bar display
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = collection.GetByNameOrIndex(profileName);
-        CurrentProfileIdentity = profile?.IdentityDisplay;
+        var identity = profile?.IdentityDisplay;
+
+        // Update displayed profile (for status bar)
+        _displayedProfileName = profileName;
+        _displayedProfileIdentity = identity;
 
         // Persist environment selection to profile if provided
         if (!string.IsNullOrWhiteSpace(environmentUrl))
@@ -551,29 +639,23 @@ internal sealed class InteractiveSession : IAsyncDisposable
         // Notify listeners of profile change
         ProfileChanged?.Invoke(_profileName);
 
-        // Profile change invalidates ALL cached providers since credentials differ
-        await InvalidateAsync().ConfigureAwait(false);
-
         // Update display name if provided
         if (environmentDisplayName != null)
         {
             _activeEnvironmentDisplayName = environmentDisplayName;
         }
 
-        // Re-warm with new profile credentials if environment is known
+        // Pre-warm with new profile credentials if environment is known
         if (!string.IsNullOrWhiteSpace(environmentUrl))
         {
-            // Set URL immediately so it's available to consumers
             _activeEnvironmentUrl = environmentUrl;
 
-            TuiDebugLog.Log($"Re-warming connection for {environmentDisplayName ?? environmentUrl}");
+            TuiDebugLog.Log($"Pre-warming connection for {environmentDisplayName ?? environmentUrl} (profile={profileName})");
 
-            // Notify listeners synchronously (like SetEnvironmentAsync does)
             EnvironmentChanged?.Invoke(environmentUrl, environmentDisplayName);
 
-            // Then warm pool asynchronously
             GetErrorService().FireAndForget(
-                GetServiceProviderAsync(environmentUrl, cancellationToken),
+                GetServiceProviderAsync(environmentUrl, profileName, cancellationToken),
                 "WarmAfterProfileSwitch");
         }
     }

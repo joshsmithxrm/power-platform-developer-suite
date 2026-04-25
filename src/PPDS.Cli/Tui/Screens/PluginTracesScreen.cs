@@ -108,7 +108,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
                 _statusLabel.Text = "Loading plugin traces...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
             var tracesResult = await service.ListAsync(filter: _currentFilter, cancellationToken: ct);
@@ -329,7 +329,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
             var detail = await service.GetAsync(trace.Id, ScreenCancellation);
@@ -437,7 +437,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
             var timeline = await service.BuildTimelineAsync(trace.CorrelationId.Value, ScreenCancellation);
@@ -513,7 +513,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
                 _statusLabel.Text = "Deleting traces...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
             int deletedCount;
@@ -558,7 +558,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
             var settings = await service.GetSettingsAsync(ScreenCancellation);

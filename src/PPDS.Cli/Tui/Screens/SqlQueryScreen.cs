@@ -108,7 +108,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _deviceCodeCallback = deviceCodeCallback;
 
         // Create presenter (contains all query orchestration logic, Terminal.Gui-free)
-        _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty);
+        _presenter = new SqlQueryPresenter(session, EnvironmentUrl ?? string.Empty, ProfileName);
 
         // Query input area
         _queryFrame = new FrameView("Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
@@ -636,7 +636,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         TuiDebugLog.Log($"ResolveLanguageServiceAsync starting for {EnvironmentUrl}");
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             TuiDebugLog.Log("Service provider obtained, resolving ISqlLanguageService...");
             var langService = provider.GetService<ISqlLanguageService>();
             if (langService != null)
@@ -724,7 +724,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// </summary>
     private async Task HandleReauthAndRetryAsync()
     {
-        await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
+        await Session.InvalidateAndReauthenticateAsync(ProfileName, EnvironmentUrl, ScreenCancellation);
 
         TuiDebugLog.Log("Re-authentication successful, retrying query");
 
@@ -843,7 +843,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private async Task ShowFetchXmlDialogAsync(string sql)
     {
         // Caller guarantees EnvironmentUrl is non-null before calling this method
-        var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+        var provider = await GetProviderAsync(ScreenCancellation);
         var sqlQueryService = provider.GetRequiredService<ISqlQueryService>();
 
         var fetchXml = sqlQueryService.TranspileSql(sql);
@@ -885,7 +885,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     {
         try
         {
-            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = await GetSqlServiceAsync(ScreenCancellation);
             var plan = await service.ExplainAsync(sql, ScreenCancellation);
 
             Application.MainLoop?.Invoke(() => ShowPlanDialog(plan, 0));

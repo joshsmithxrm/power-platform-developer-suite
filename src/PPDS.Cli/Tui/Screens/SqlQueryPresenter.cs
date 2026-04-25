@@ -20,6 +20,7 @@ internal sealed class SqlQueryPresenter : IDisposable
 
     private readonly InteractiveSession _session;
     private readonly string _environmentUrl;
+    private readonly string? _profileName;
 
     // State fields moved from SqlQueryScreen
     private string? _lastSql;
@@ -98,10 +99,11 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     public event Action<QueryResult>? PageLoaded;
 
-    public SqlQueryPresenter(InteractiveSession session, string environmentUrl)
+    public SqlQueryPresenter(InteractiveSession session, string environmentUrl, string? profileName = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _environmentUrl = environmentUrl ?? throw new ArgumentNullException(nameof(environmentUrl));
+        _profileName = profileName;
     }
 
     public void ToggleTds()
@@ -161,7 +163,7 @@ internal sealed class SqlQueryPresenter : IDisposable
         {
             TuiDebugLog.Log($"Getting SQL query service for URL: {_environmentUrl}");
 
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, queryCt);
+            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
 
             // AC-13: capture and reset DML confirmation flag
@@ -292,7 +294,7 @@ internal sealed class SqlQueryPresenter : IDisposable
 
         try
         {
-            var provider = await _session.GetServiceProviderAsync(_environmentUrl, queryCt);
+            var provider = await _session.GetServiceProviderAsync(_environmentUrl, _profileName, queryCt);
             var executor = provider.GetRequiredService<IQueryExecutor>();
 
             var result = await executor.ExecuteFetchXmlAsync(fetchXml, cancellationToken: queryCt);
@@ -354,7 +356,7 @@ internal sealed class SqlQueryPresenter : IDisposable
         {
             if (_lastExecutionUsedFetchXml)
             {
-                var provider = await _session.GetServiceProviderAsync(_environmentUrl, cancellationToken);
+                var provider = await _session.GetServiceProviderAsync(_environmentUrl, _profileName, cancellationToken);
                 var executor = provider.GetRequiredService<IQueryExecutor>();
 
                 var result = await executor.ExecuteFetchXmlAsync(
@@ -370,7 +372,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             }
             else
             {
-                var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, cancellationToken);
+                var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, cancellationToken);
 
                 var request = new SqlQueryRequest
                 {
@@ -424,7 +426,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     {
         try
         {
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, CancellationToken.None);
+            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, CancellationToken.None);
             var plan = await service.ExplainAsync(sql, CancellationToken.None);
             _lastExecutionPlan = plan;
         }

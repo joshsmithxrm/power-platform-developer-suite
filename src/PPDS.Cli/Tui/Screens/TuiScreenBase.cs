@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 
@@ -51,13 +53,19 @@ internal abstract class TuiScreenBase : ITuiScreen
     /// The environment URL this screen is bound to.
     /// Screens can operate independently on different environments.
     /// </summary>
-    public string? EnvironmentUrl { get; protected set; }
+    public string? EnvironmentUrl { get; internal set; }
 
     /// <summary>
     /// The display name of the environment this screen is bound to.
     /// Captured at construction time so it stays stable across session environment changes.
     /// </summary>
-    public string? EnvironmentDisplayName { get; protected set; }
+    public string? EnvironmentDisplayName { get; internal set; }
+
+    /// <summary>
+    /// The profile name this screen is bound to.
+    /// Each tab can independently target a different profile.
+    /// </summary>
+    public string? ProfileName { get; internal set; }
 
     /// <summary>
     /// Cancellation token that fires when the screen is closed or disposed.
@@ -71,6 +79,7 @@ internal abstract class TuiScreenBase : ITuiScreen
         ErrorService = session.GetErrorService();
         EnvironmentUrl = environmentUrl ?? session.CurrentEnvironmentUrl;
         EnvironmentDisplayName = session.CurrentEnvironmentDisplayName;
+        ProfileName = session.DefaultProfileName;
 
         Content = new View
         {
@@ -80,6 +89,26 @@ internal abstract class TuiScreenBase : ITuiScreen
             Height = Dim.Fill(),
             ColorScheme = TuiColorPalette.Default
         };
+    }
+
+    /// <summary>
+    /// Gets the service provider for this screen's profile and environment.
+    /// </summary>
+    protected Task<ServiceProvider> GetProviderAsync(CancellationToken ct)
+    {
+        if (EnvironmentUrl is null)
+            throw new InvalidOperationException("Cannot get service provider: screen has no bound environment.");
+        return Session.GetServiceProviderAsync(EnvironmentUrl, ProfileName, ct);
+    }
+
+    /// <summary>
+    /// Gets the SQL query service for this screen's profile and environment.
+    /// </summary>
+    protected Task<ISqlQueryService> GetSqlServiceAsync(CancellationToken ct)
+    {
+        if (EnvironmentUrl is null)
+            throw new InvalidOperationException("Cannot get SQL query service: screen has no bound environment.");
+        return Session.GetSqlQueryServiceAsync(EnvironmentUrl, ProfileName, ct);
     }
 
     /// <inheritdoc />

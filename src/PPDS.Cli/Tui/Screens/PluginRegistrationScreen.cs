@@ -140,7 +140,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                 _tree.ClearObjects();
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
+            var provider = await GetProviderAsync(ct);
             var regService = provider.GetRequiredService<IPluginRegistrationService>();
             var endpointService = provider.GetRequiredService<IServiceEndpointService>();
             var customApiService = provider.GetRequiredService<ICustomApiService>();
@@ -304,7 +304,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var regService = provider.GetRequiredService<IPluginRegistrationService>();
             var dataProviderService = provider.GetRequiredService<IDataProviderService>();
             var options = new PluginListOptions(
@@ -658,7 +658,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                     : $"Enabling step: {step.Name}...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var regService = provider.GetRequiredService<IPluginRegistrationService>();
 
             if (step.IsEnabled)
@@ -767,7 +767,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                 _statusLabel.Text = $"Unregistering {entityLabel}: {selected.DisplayName}...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var regService = provider.GetRequiredService<IPluginRegistrationService>();
             var endpointService = provider.GetRequiredService<IServiceEndpointService>();
             var customApiService = provider.GetRequiredService<ICustomApiService>();
@@ -863,7 +863,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                 _statusLabel.Text = $"Downloading {selected.DisplayName}...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var regService = provider.GetRequiredService<IPluginRegistrationService>();
 
             byte[] content;

@@ -84,7 +84,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             });
             Application.Refresh();
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
 
             // Validate persisted solution filter still exists (first load only)
@@ -404,7 +404,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
 
             var result = await service.SetValueAsync(schemaName, value, ScreenCancellation);
@@ -443,7 +443,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 _statusLabel.Text = "Exporting environment variables...";
             });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
 
             var export = await service.ExportAsync(
@@ -539,7 +539,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
     {
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
             var solutionsResult = await solutionService.ListAsync(

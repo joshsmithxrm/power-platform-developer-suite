@@ -293,7 +293,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var exporter = provider.GetRequiredService<IExporter>();
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -340,7 +340,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var importer = provider.GetRequiredService<IImporter>();
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -416,7 +416,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
 
         try
         {
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await GetProviderAsync(ScreenCancellation);
             var dataReader = provider.GetRequiredService<ICmtDataReader>();
             var graphBuilder = provider.GetRequiredService<IDependencyGraphBuilder>();
             var planBuilder = provider.GetRequiredService<IExecutionPlanBuilder>();

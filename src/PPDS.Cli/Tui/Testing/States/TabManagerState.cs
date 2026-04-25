@@ -14,4 +14,5 @@ public sealed record TabSummary(
     string? EnvironmentUrl,
     EnvironmentType EnvironmentType,
     EnvironmentColor EnvironmentColor,
-    bool IsActive);
+    bool IsActive,
+    string? ProfileName);
