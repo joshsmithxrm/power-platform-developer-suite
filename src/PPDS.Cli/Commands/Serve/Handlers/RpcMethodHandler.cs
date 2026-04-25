@@ -68,11 +68,10 @@ public class RpcMethodHandler : IDisposable
     private long _heartbeatCount;
     private JsonRpc? _rpc;
 
-    // Discovery cache for env/list — uses Volatile.Read/Write for lock-free thread safety.
-    // The list is written BEFORE the expiry so a concurrent reader never sees a new expiry with
-    // a stale/null list.
-    private List<EnvironmentInfo>? _discoveredEnvCache;
-    private long _discoveredEnvCacheExpiry = DateTime.MinValue.Ticks;
+    // Discovery cache for env/list — keyed by profile name so each profile's discovered
+    // environments are cached independently. ConcurrentDictionary provides thread-safe
+    // reads and writes without explicit locking.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (List<EnvironmentInfo> environments, long expiry)> _envCacheByProfile = new();
     private static readonly TimeSpan DiscoveryCacheTtl = TimeSpan.FromMinutes(5);
 
     /// <summary>
@@ -385,28 +384,34 @@ public class RpcMethodHandler : IDisposable
     public async Task<EnvListResponse> EnvListAsync(
         string? filter = null,
         bool forceRefresh = false,
+        string? profileName = null,
         CancellationToken cancellationToken = default)
     {
         var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
-        var profile = collection.ActiveProfile;
-        if (profile == null)
+        AuthProfile? profile;
+        if (!string.IsNullOrWhiteSpace(profileName))
         {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+            profile = collection.GetByNameOrIndex(profileName)
+                ?? throw new RpcException(ErrorCodes.Auth.ProfileNotFound, $"Profile '{profileName}' not found");
+        }
+        else
+        {
+            profile = collection.ActiveProfile
+                ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
         }
 
         var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
+        var profileKey = profile.Name ?? profile.DisplayIdentifier;
 
-        // 1. Get discovered environments (cached, unless forceRefresh)
+        // 1. Get discovered environments (cached per profile, unless forceRefresh)
         List<EnvironmentInfo> discovered;
-        // Read expiry first, then list — mirrors the write order (list before expiry)
-        // so if we see a non-expired expiry the list is guaranteed to be the matching value.
-        var cachedExpiry = Volatile.Read(ref _discoveredEnvCacheExpiry);
-        var cachedList = Volatile.Read(ref _discoveredEnvCache);
-        if (!forceRefresh && cachedList != null && DateTime.UtcNow.Ticks < cachedExpiry)
+        if (!forceRefresh
+            && _envCacheByProfile.TryGetValue(profileKey, out var cached)
+            && DateTime.UtcNow.Ticks < cached.expiry)
         {
-            discovered = cachedList;
+            discovered = cached.environments;
         }
         else
         {
@@ -437,15 +442,12 @@ public class RpcMethodHandler : IDisposable
                 // Discovery may fail for SPNs or when offline — continue with configured only
                 _logger.LogDebug(ex, "Environment discovery failed, using configured environments only");
             }
-            // Write list BEFORE expiry — a concurrent reader checks expiry first,
-            // so it will never see a fresh expiry paired with a stale/null list.
-            Volatile.Write(ref _discoveredEnvCache, discovered);
-            Volatile.Write(ref _discoveredEnvCacheExpiry, (DateTime.UtcNow + DiscoveryCacheTtl).Ticks);
+            _envCacheByProfile[profileKey] = (discovered, (DateTime.UtcNow + DiscoveryCacheTtl).Ticks);
         }
 
         // 2. Get configured environments from environments.json and tag discovered envs with profile
         var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
-        var profileName = profile.Name ?? profile.DisplayIdentifier;
+        var resolvedProfileName = profileKey;
 
         // Tag all discovered environments with this profile in environments.json
         foreach (var env in discovered)
@@ -453,7 +455,7 @@ public class RpcMethodHandler : IDisposable
             await configStore.SaveConfigAsync(
                 env.ApiUrl,
                 discoveredType: env.Type,
-                profileName: profileName,
+                profileName: resolvedProfileName,
                 ct: cancellationToken);
         }
 
@@ -476,7 +478,7 @@ public class RpcMethodHandler : IDisposable
                 existing.Source = "both";
                 if (config.Label != null) existing.FriendlyName = config.Label;
             }
-            else if (config.Profiles.Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            else if (config.Profiles.Contains(resolvedProfileName, StringComparer.OrdinalIgnoreCase))
             {
                 // Only in config but linked to this profile — add with source "configured"
                 merged.Add(new EnvironmentInfo
@@ -556,7 +558,9 @@ public class RpcMethodHandler : IDisposable
         profile.Environment = resolved;
         await store.SaveAsync(collection, cancellationToken);
 
-        Volatile.Write(ref _discoveredEnvCache, (List<EnvironmentInfo>?)null); // Invalidate env list cache
+        // Invalidate the active profile's env list cache; other profiles' caches remain valid.
+        var activeProfileKey = profile.Name ?? profile.DisplayIdentifier;
+        _envCacheByProfile.TryRemove(activeProfileKey, out _);
 
         return new EnvSelectResponse
         {

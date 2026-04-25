@@ -103,17 +103,17 @@ Status Bar     Context        Command
 **Depends-on:** Task 1.1
 **Mode:** alongside
 
-- [ ] Step 1: Read `RpcMethodHandler.cs` lines 71-76 to locate the existing discovery cache fields: `_discoveredEnvCache` (`List<EnvironmentInfo>?`) and `_discoveredEnvCacheExpiry` (`long`). Also read `EnvListAsync` (search for `[JsonRpcMethod("env/list")]`) to understand the current cache logic.
+- [x] Step 1: Read `RpcMethodHandler.cs` lines 71-76 to locate the existing discovery cache fields: `_discoveredEnvCache` (`List<EnvironmentInfo>?`) and `_discoveredEnvCacheExpiry` (`long`). Also read `EnvListAsync` (search for `[JsonRpcMethod("env/list")]`) to understand the current cache logic.
 
-- [ ] Step 2: Replace the two scalar cache fields with a `ConcurrentDictionary<string, (List<EnvironmentInfo> environments, long expiry)> _envCacheByProfile = new()`. The key is the profile's `Name ?? DisplayIdentifier` string (same key the pool manager uses).
+- [x] Step 2: Replace the two scalar cache fields with a `ConcurrentDictionary<string, (List<EnvironmentInfo> environments, long expiry)> _envCacheByProfile = new()`. The key is the profile's `Name ?? DisplayIdentifier` string (same key the pool manager uses).
 
-- [ ] Step 3: Add `string? profileName` parameter to `EnvListAsync`. Resolve the profile: if `profileName` provided, load via `collection.GetByNameOrIndex(profileName)`; else use `collection.ActiveProfile`. Use the resolved profile's name as the cache key.
+- [x] Step 3: Add `string? profileName` parameter to `EnvListAsync`. Resolve the profile: if `profileName` provided, load via `collection.GetByNameOrIndex(profileName)`; else use `collection.ActiveProfile`. Use the resolved profile's name as the cache key.
 
-- [ ] Step 4: Update the cache read/write logic in `EnvListAsync` to use the profile-keyed dictionary instead of the scalar fields. Keep the same 5-minute TTL. The `Volatile.Read`/`Volatile.Write` pattern becomes `_envCacheByProfile.TryGetValue(key, out var cached)` for reads and `_envCacheByProfile[key] = (environments, expiry)` for writes (thread-safe via `ConcurrentDictionary`).
+- [x] Step 4: Update the cache read/write logic in `EnvListAsync` to use the profile-keyed dictionary instead of the scalar fields. Keep the same 5-minute TTL. The `Volatile.Read`/`Volatile.Write` pattern becomes `_envCacheByProfile.TryGetValue(key, out var cached)` for reads and `_envCacheByProfile[key] = (environments, expiry)` for writes (thread-safe via `ConcurrentDictionary`).
 
-- [ ] Step 5: Update the cache invalidation in `EnvSelectAsync` (currently `Volatile.Write(ref _discoveredEnvCache, null)`) to clear only the active profile's entry: `_envCacheByProfile.TryRemove(activeProfileKey, out _)`.
+- [x] Step 5: Update the cache invalidation in `EnvSelectAsync` (currently `Volatile.Write(ref _discoveredEnvCache, null)`) to clear only the active profile's entry: `_envCacheByProfile.TryRemove(activeProfileKey, out _)`.
 
-- [ ] Step 6: Commit: `feat(daemon): profile-keyed discovery cache for envList`
+- [x] Step 6: Commit: `feat(daemon): profile-keyed discovery cache for envList`
 
 ### Task 1.3 — Device Code Attribution (ACs: AC-21)
 
