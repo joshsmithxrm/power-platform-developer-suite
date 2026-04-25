@@ -1093,16 +1093,20 @@ def run_monitor(worktree, pr_number, resume=False):
         if not (resume and step_completed(result, "retro")):
             _step_retro(worktree, logger, result)
 
-        # ---- Step 6: Notify ----
-        if not (resume and step_completed(result, "notify")):
-            _step_notify(worktree, pr_number, logger, result)
-
+        # Exit early on CI failure — _step_ready already sent a descriptive
+        # notification explaining why the PR remains in draft. Skipping
+        # _step_notify avoids a misleading "PR is ready" message right
+        # before the monitor exits with an error code.
         if result.get("ci_result") == "fail":
             result["status"] = "ci_failed"
             write_result(worktree, result)
             logger.log("monitor", "COMPLETE_CI_FAILED", pr=pr_number)
             logger.close()
             return 1
+
+        # ---- Step 6: Notify ----
+        if not (resume and step_completed(result, "notify")):
+            _step_notify(worktree, pr_number, logger, result)
 
         result["status"] = "complete"
         write_result(worktree, result)
