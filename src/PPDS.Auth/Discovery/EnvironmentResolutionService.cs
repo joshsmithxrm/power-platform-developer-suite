@@ -76,8 +76,14 @@ public sealed class EnvironmentResolutionService : IDisposable
         }
         else if (!CanUseGlobalDiscovery(_profile.AuthMethod))
         {
-            // Not a URL + non-interactive auth → try BAP Environment Discovery
-            return await TryBapDiscoveryAsync(identifier, cancellationToken);
+            // Not a URL + non-interactive auth → try BAP Environment Discovery (if supported)
+            if (BapEnvironmentService.SupportsAuthMethod(_profile.AuthMethod))
+                return await TryBapDiscoveryAsync(identifier, cancellationToken);
+
+            return EnvironmentResolutionResult.Failed(
+                $"Auth method '{_profile.AuthMethod}' does not support name-based environment resolution. " +
+                "Provide a full environment URL (e.g., https://org.crm.dynamics.com), or use " +
+                "ClientSecret, CertificateFile, or CertificateStore authentication.");
         }
 
         // Try Global Discovery (interactive auth)
@@ -191,7 +197,8 @@ public sealed class EnvironmentResolutionService : IDisposable
     {
         try
         {
-            var service = BapEnvironmentService.FromProfile(_profile, _credentialStore);
+            using var service = await BapEnvironmentService.FromProfileAsync(_profile, _credentialStore)
+                .ConfigureAwait(false);
             var environments = await service.DiscoverEnvironmentsAsync(cancellationToken);
 
             DiscoveredEnvironment? resolved;
