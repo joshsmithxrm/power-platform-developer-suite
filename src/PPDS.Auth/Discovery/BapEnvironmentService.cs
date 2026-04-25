@@ -101,7 +101,10 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
         var authority = CloudEndpoints.GetAuthorityUrl(cloud, profile.TenantId);
         Microsoft.Identity.Client.IConfidentialClientApplication msalClient;
         X509Certificate2? certificateToDispose = null;
+        HttpClient? httpClient = null;
 
+        try
+        {
         switch (profile.AuthMethod)
         {
             case AuthMethod.ClientSecret:
@@ -194,7 +197,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                     $"Use ClientSecret, CertificateFile, or CertificateStore.");
         }
 
-        var httpClient = new HttpClient();
+        httpClient = new HttpClient();
         var capturedScope = scope;
         var capturedMsalClient = msalClient;
 
@@ -211,6 +214,14 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                 return result.AccessToken;
             },
             certificateToDispose);
+        }
+        catch
+        {
+            // Construction failed after we created disposable resources; release them.
+            httpClient?.Dispose();
+            certificateToDispose?.Dispose();
+            throw;
+        }
     }
 
     /// <inheritdoc />
