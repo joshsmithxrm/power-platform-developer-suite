@@ -12,6 +12,7 @@ using Xunit;
 namespace PPDS.Auth.Tests;
 
 [Trait("Category", "Unit")]
+[Collection(EnvironmentVariableMutatingCollection.Name)]
 public sealed class EnvironmentVariableAuthTests : IDisposable
 {
     private readonly Dictionary<string, string?> _originalValues = new();
