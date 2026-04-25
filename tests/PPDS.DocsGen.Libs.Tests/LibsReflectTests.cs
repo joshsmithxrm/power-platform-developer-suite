@@ -180,6 +180,8 @@ public sealed class LibsReflectTests
                     $"RelativePath must not be absolute — got '{file.RelativePath}'");
                 Path.IsPathRooted(file.RelativePath).Should().BeFalse(
                     $"RelativePath must not be rooted — got '{file.RelativePath}'");
+                file.RelativePath.Should().StartWith("DocsGen.Libs.Tests.FixtureLib/",
+                    $"RelativePath must start with the package directory — got '{file.RelativePath}'");
             }
         }
         finally
