@@ -23,10 +23,14 @@ export function registerProfileCommands(
 ): void {
 
     // ── Device Code Handler (registered once, not per createProfile call) ─
-    daemonClient.onDeviceCode(({ userCode, verificationUrl, message }) => {
+    daemonClient.onDeviceCode(({ userCode, verificationUrl, message, profileName }) => {
         void (async (): Promise<void> => {
+            const baseMessage = message || `Enter code: ${userCode}`;
+            const display = profileName
+                ? `Profile "${profileName}" needs re-authentication. ${baseMessage}`
+                : baseMessage;
             const action = await vscode.window.showInformationMessage(
-                message || `Enter code: ${userCode}`,
+                display,
                 { modal: false },
                 'Open Browser', 'Copy Code'
             );

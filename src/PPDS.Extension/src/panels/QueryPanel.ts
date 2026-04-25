@@ -290,7 +290,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 this.environmentColor = null;
             }
         }
-        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, envType: this.environmentType, envColor: this.environmentColor });
+        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, profileName: this.profileName, envType: this.environmentType, envColor: this.environmentColor });
         this.updatePanelTitle(this.panelId, QueryPanel.instances.length > 1);
     }
 

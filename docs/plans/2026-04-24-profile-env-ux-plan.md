@@ -204,19 +204,19 @@ Status Bar     Context        Command
 **Depends-on:** Task 3.1
 **Mode:** alongside
 
-- [ ] Step 1: Read `extension.ts` lines 195-203 where `DaemonStatusBar` and `ProfileStatusBar` are instantiated.
+- [x] Step 1: Read `extension.ts` lines 195-203 where `DaemonStatusBar` and `ProfileStatusBar` are instantiated.
 
-- [ ] Step 2: Replace both instantiations with a single `const statusBar = new PpdsStatusBar(client)`. Update the import to use `PpdsStatusBar` from `./ppdsStatusBar.js`. Remove imports for `DaemonStatusBar` and `ProfileStatusBar`.
+- [x] Step 2: Replace both instantiations with a single `const statusBar = new PpdsStatusBar(client)`. Update the import to use `PpdsStatusBar` from `./ppdsStatusBar.js`. Remove imports for `DaemonStatusBar` and `ProfileStatusBar`.
 
-- [ ] Step 3: Delete `src/PPDS.Extension/src/profileStatusBar.ts` and `src/PPDS.Extension/src/daemonStatusBar.ts`.
+- [x] Step 3: Delete `src/PPDS.Extension/src/profileStatusBar.ts` and `src/PPDS.Extension/src/daemonStatusBar.ts`.
 
-- [ ] Step 4: Search for any other references to the deleted files (`profileStatusBar`, `daemonStatusBar`, `ProfileStatusBar`, `DaemonStatusBar`) in the codebase. Update or remove. Check test files — the smoke test at `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts` may mock `createStatusBarItem`.
+- [x] Step 4: Search for any other references to the deleted files (`profileStatusBar`, `daemonStatusBar`, `ProfileStatusBar`, `DaemonStatusBar`) in the codebase. Update or remove. Check test files — the smoke test at `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts` may mock `createStatusBarItem`.
 
-- [ ] Step 5: If there are callers that call `profileStatusBar.refresh()` (e.g., after profile switch in `profileCommands.ts`), update them to call the new `PpdsStatusBar.refresh()`. The status bar instance may need to be passed to `registerProfileCommands` or made accessible via a module-level reference.
+- [x] Step 5: If there are callers that call `profileStatusBar.refresh()` (e.g., after profile switch in `profileCommands.ts`), update them to call the new `PpdsStatusBar.refresh()`. The status bar instance may need to be passed to `registerProfileCommands` or made accessible via a module-level reference.
 
-- [ ] Step 6: Run `npm run ext:test` to verify no regressions.
+- [x] Step 6: Run `npm run ext:test` to verify no regressions.
 
-- [ ] Step 7: Commit: `refactor(extension): wire PpdsStatusBar, delete DaemonStatusBar and ProfileStatusBar`
+- [x] Step 7: Commit: `refactor(extension): wire PpdsStatusBar, delete DaemonStatusBar and ProfileStatusBar`
 
 ---
 
@@ -395,5 +395,7 @@ Each chunk is independently revertable via `git revert` of its commits.
 1. **Assumption:** `ErrorCodes.Auth.ProfileNotFound` does not exist yet and needs to be added. If it already exists under a different name, use the existing code.
 2. **Assumption:** The `DaemonDeviceCodeHandler` class is in `src/PPDS.Cli/Commands/Serve/Handlers/` and its notification payload is a simple anonymous object or DTO that can be extended with `profileName`. Task 1.3 Step 3 investigates whether the callback is re-registered per call or only at pool creation — the approach may differ based on the finding.
 3. **Verified:** Panel subclasses all pass `environmentUrl` via `this.environmentUrl` in their RPC calls (not hardcoded or from other sources). Confirmed by inspection of all 9 panel files. Note: `QueryPanel` uses `this.environmentUrl` correctly but has its own init/picker flow (addressed explicitly in Task 4.2 Steps 7a-7c).
+
+4. **Known limitation:** `WebResourceFileSystemProvider` (`src/PPDS.Extension/src/providers/WebResourceFileSystemProvider.ts`) routes file-editor reads/writes through `daemon.webResourcesGet/Update/Publish` using only the URL — its URI scheme has no slot for `profileName`. When a `WebResourcesPanel` is bound to a non-active profile and the user opens or saves a resource via the VS Code editor, the daemon resolves authentication against the active profile, not the panel's profile. AC-15/AC-29 are honoured for in-panel actions (list/refresh/publish-all triggered from the toolbar) but not for editor-driven reads/writes. Tracked as a follow-up — needs a URI-scheme change to encode `profileName`.
 
 - [FLAKY: PPDS.Cli.Tests.Commands.Serve.Handlers.RpcMethodHandlerPathConstraintTests.ResolveWorkspacePath_DotDotEscape_Throws] (detected 2026-04-24, task Task 1.1, net9.0 only — passed on rerun)

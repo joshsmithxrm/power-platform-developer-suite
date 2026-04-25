@@ -201,15 +201,3 @@ async function promptManualUrl(
     return { profileName: chosen.profileName, url: trimmed, displayName: trimmed, type: null };
 }
 
-/**
- * Backwards-compatible wrapper for the legacy environment-only picker.
- * @deprecated Use {@link showContextPicker} so the caller also receives the selected profile.
- */
-export async function showEnvironmentPicker(
-    daemon: DaemonClient,
-    currentUrl?: string,
-): Promise<{ url: string; displayName: string; type: string | null } | undefined> {
-    const result = await showContextPicker(daemon, undefined, currentUrl);
-    if (!result) return undefined;
-    return { url: result.url, displayName: result.displayName, type: result.type };
-}

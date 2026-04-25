@@ -2546,7 +2546,7 @@ public class RpcMethodHandler : IDisposable
                 $"cursorOffset must be between 0 and {request.Sql.Length}");
         }
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, ct) =>
         {
             var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
 
@@ -6818,6 +6818,8 @@ public class QueryCompleteRequest
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
     [JsonPropertyName("cursorOffset")] public int CursorOffset { get; set; }
     [JsonPropertyName("language")] public string? Language { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
 }
 
 /// <summary>
