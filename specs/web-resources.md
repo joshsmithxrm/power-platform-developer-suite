@@ -1,15 +1,15 @@
 # Web Resources
 
-**Status:** Implemented
-**Last Updated:** 2026-03-23
-**Code:** [src/PPDS.Dataverse/Services/IWebResourceService.cs](../src/PPDS.Dataverse/Services/IWebResourceService.cs) | [src/PPDS.Extension/src/panels/WebResourcesPanel.ts](../src/PPDS.Extension/src/panels/WebResourcesPanel.ts) | [src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs](../src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs) | [src/PPDS.Cli/Commands/WebResources/](../src/PPDS.Cli/Commands/WebResources/)
+**Status:** Implemented (pull/push: Draft)
+**Last Updated:** 2026-04-25
+**Code:** [src/PPDS.Dataverse/Services/IWebResourceService.cs](../src/PPDS.Dataverse/Services/IWebResourceService.cs) | [src/PPDS.Extension/src/panels/WebResourcesPanel.ts](../src/PPDS.Extension/src/panels/WebResourcesPanel.ts) | [src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs](../src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs) | [src/PPDS.Cli/Commands/WebResources/](../src/PPDS.Cli/Commands/WebResources/) | [src/PPDS.Cli/Services/WebResources/IWebResourceSyncService.cs](../src/PPDS.Cli/Services/WebResources/IWebResourceSyncService.cs)
 **Surfaces:** CLI, TUI, Extension, MCP
 
 ---
 
 ## Overview
 
-Browse, view, edit, and publish web resources. Features a FileSystemProvider for in-editor editing with auto-publish notification, conflict detection, and unpublished change detection. The most complex panel at the VS Code layer due to the full save-conflict-diff-resolve-publish workflow.
+Browse, view, edit, and publish web resources. Features a FileSystemProvider for in-editor editing with auto-publish notification, conflict detection, and unpublished change detection. Pull/push workflow enables batch download to a local folder with hash tracking and batch upload with server conflict detection. The most complex panel at the VS Code layer due to the full save-conflict-diff-resolve-publish workflow.
 
 ### Goals
 
@@ -17,12 +17,13 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 - **Unpublished change detection:** Detect and surface differences between published and unpublished web resource content
 - **Publish coordination:** Prevent concurrent publish operations per environment via semaphore
 - **Multi-surface consistency:** Same data available via VS Code, TUI, MCP, and CLI (Constitution A1, A2)
+- **Pull/push workflow:** Download web resources to local folder with tracking, push back with conflict detection (#161, #162)
 
 ### Non-Goals
 
 - Web resource creation (managed through solutions)
 - Binary content editing (PNG, JPG, GIF, ICO, XAP are view-only)
-- Bulk import/export of web resources (deployment pipeline concern)
+- CI/CD deployment pipeline automation (pull/push is for developer workflow, not automated deployment)
 
 ---
 
@@ -78,6 +79,10 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | `WebResourcesListTool.cs` | MCP tool — web resource listing with type and metadata |
 | `WebResourcesGetTool.cs` | MCP tool — full detail with decoded content for text types |
 | `WebResourcesPublishTool.cs` | MCP tool — publish result |
+| `IWebResourceSyncService` | Application Service — pull (batch download + tracking), push (conflict check + batch upload) |
+| `WebResourceTrackingFile` | Model — `.ppds/webresources.json` serialization, hash computation, read/write |
+| `PullCommand.cs` | CLI command — `ppds webresources pull <folder>` |
+| `PushCommand.cs` | CLI command — `ppds webresources push <path>` |
 
 ### Dependencies
 
@@ -160,6 +165,118 @@ Get the Maker portal URL for a web resource. Follows existing `UrlCommand` patte
 **`ppds webresources publish <name|id>... [--solution <name>]`**
 
 Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. See [publish.md](./publish.md).
+
+#### Pull/Push Workflow
+
+##### Sync Service
+
+`IWebResourceSyncService` in `src/PPDS.Cli/Services/WebResources/` — orchestrates pull and push using `IWebResourceService` for Dataverse operations and manages the local tracking file. Accepts `IProgressReporter` (Constitution A3). CancellationToken threaded through all parallel operations (Constitution R2).
+
+All filtering (solution, type codes, name pattern) lives in the sync service, not in CLI command handlers (Constitution A1). The sync service calls `IWebResourceService.ListAsync` then applies type-code and name-pattern filters client-side (same logic currently in `ListCommand.cs`, moved to service layer).
+
+| Method | Purpose |
+|--------|---------|
+| `PullAsync(options, progress, ct)` | List → filter → parallel download → write files → write tracking file |
+| `PushAsync(options, progress, ct)` | Read tracking → detect local changes → conflict check → parallel upload → update tracking |
+
+Progress is reported per-resource from the sync service orchestration level (not from individual `IWebResourceService` calls).
+
+##### Tracking File
+
+Path: `<folder>/.ppds/webresources.json` — co-located with pulled files. One folder = one pull context (typically one solution). Multi-solution support is achieved by pulling to separate folders.
+
+```json
+{
+  "version": 1,
+  "environmentUrl": "https://org.crm.dynamics.com",
+  "solution": "core_solution",
+  "stripPrefix": true,
+  "pulledAt": "2026-04-25T10:30:00Z",
+  "resources": {
+    "new_/scripts/app.js": {
+      "id": "a1b2c3d4-...",
+      "modifiedOn": "2026-04-20T14:22:00Z",
+      "hash": "sha256:e3b0c44298fc...",
+      "localPath": "scripts/app.js",
+      "webResourceType": 3
+    }
+  }
+}
+```
+
+Fields:
+- **version** — schema version for forward compatibility
+- **environmentUrl** — the environment pulled from (used by push to validate target)
+- **solution** — solution filter used during pull (null if unfiltered)
+- **stripPrefix** — whether publisher prefix was stripped from local paths
+- **pulledAt** — ISO 8601 timestamp of the pull operation
+- **resources** — keyed by Dataverse web resource name (canonical key)
+  - **id** — web resource GUID
+  - **modifiedOn** — server modifiedOn at pull time (conflict detection baseline)
+  - **hash** — SHA256 of local file content at pull time (local change detection)
+  - **localPath** — relative path from folder root (may differ from name if prefix stripped)
+  - **webResourceType** — type code (needed to map local file back to Dataverse on push)
+
+##### Pull Command
+
+**`ppds webresources pull <folder> [--solution <name>] [--type <type>] [--name <pattern>] [--strip-prefix] [--force]`**
+
+Download web resources from Dataverse to a local folder with tracking metadata.
+
+**Arguments:**
+- `<folder>` — target directory (created if not exists)
+
+**Options:**
+- `--solution <name>` — filter by solution unique name
+- `--type <type>` — filter by type (same shortcuts as `list`: text, image, js, css, etc.)
+- `--name <pattern>` — filter by partial name match
+- `--strip-prefix` — remove publisher prefix from local file paths (e.g., `new_/scripts/app.js` → `scripts/app.js`)
+- `--force` — overwrite local files even if they have uncommitted changes (local hash differs from tracked hash)
+
+**Flow:**
+1. List web resources with solution/type/name filters (filtering in sync service per A1)
+2. **Path validation:** For each resource, resolve the local file path and verify it is a descendant of `<folder>`. Reject any resource whose name contains path traversal segments (`../`) that would escape the target directory — log warning and skip.
+3. If tracking file exists and `--force` not set, check for local modifications (hash mismatch). Warn and skip modified files.
+4. Download text content in parallel with CancellationToken threading (R2). Binary types are recorded in the tracking file (metadata only) but no content file is written — `GetContentAsync` returns null for binary types. Push skips binary types.
+5. Write files to folder preserving hierarchical path structure
+6. **Merge tracking file:** Write/update `.ppds/webresources.json` — new and updated resources get fresh entries (modifiedOn + SHA256 hash), skipped resources retain their prior entries, resources no longer returned by the server query are removed.
+
+**Output (text mode):** Progress to stderr, summary line: "Pulled N web resources to <folder> (M new, K updated, J skipped)"
+**Output (JSON mode):** `{ pulled: [...], skipped: [...], errors: [...] }`
+
+**Exit codes:** 0 = success, 2 = failure
+
+##### Push Command
+
+**`ppds webresources push <path> [--solution <name>] [--force] [--dry-run] [--publish]`**
+
+Upload modified web resources from a local folder back to Dataverse with conflict detection.
+
+**Arguments:**
+- `<path>` — folder containing pulled web resources (must have `.ppds/webresources.json`)
+
+**Options:**
+- `--solution <name>` — override solution scope for `--publish` (default: solution from tracking file). Does not affect content upload — `UpdateContentAsync` is solution-independent.
+- `--force` — skip conflict detection (push even if server has changed) and skip environment URL validation
+- `--dry-run` — preview what would be pushed without making changes (per dry-run convention)
+- `--publish` — publish all successfully pushed web resources after upload
+
+**Flow:**
+1. Read `.ppds/webresources.json` — error if missing. **Environment validation:** verify current connection's environment URL matches tracking file's `environmentUrl`. Error if mismatch unless `--force`.
+2. For each tracked resource: if local file is missing from disk, warn and skip (does not delete from server). If resource is a binary type (`IsTextType` = false), skip (binary files are pulled for reference only). Otherwise compute local file SHA256. If hash matches tracked hash, skip (no local changes).
+3. For each locally modified text resource, query server `modifiedOn` in parallel with CancellationToken threading (R2).
+4. **Conflict detection:** If server modifiedOn differs from tracked modifiedOn and `--force` not set, the entire push is blocked — list all conflicting resources to stderr, exit code 10 (`PreconditionFailed`). Suggest: "Run `ppds webresources pull <path>` to fetch latest changes." All-or-nothing: partial push is not supported to avoid ambiguous state.
+5. If `--dry-run`: report what would be pushed (resource names, change summary), then exit 0.
+6. Upload modified content in parallel via `UpdateContentAsync`. On cancellation, in-flight uploads are cancelled and tracking file is not updated for incomplete uploads.
+7. If `--publish`: publish only the IDs of resources successfully uploaded in step 6, via `PublishAsync`.
+8. Update tracking file: for each successfully uploaded resource, record new modifiedOn from server + new SHA256 hash of the uploaded content.
+
+**Conflict detection limitation:** The modifiedOn check is best-effort — a TOCTOU window exists between step 3 (query) and step 6 (upload). The Dataverse `Update` API does not support optimistic concurrency tokens for web resource content. For the developer workflow use case, the modifiedOn pre-check catches the common case (someone else edited while you were working). True concurrent-edit races are rare and acceptable.
+
+**Output (text mode):** Progress to stderr, summary: "Pushed N web resources (M conflicts detected)" or "Dry run: would push N web resources"
+**Output (JSON mode):** `{ pushed: [...], conflicts: [...], skipped: [...] }`
+
+**Exit codes:** 0 = success, 10 = conflict (PreconditionFailed), 2 = failure
 
 ### Extension Surface
 
@@ -246,6 +363,28 @@ Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. 
 | AC-WR-31 | CLI `url` generates Maker portal URL, outputs to stdout | TBD | 🔲 |
 | AC-WR-32 | Name resolution: GUID → exact name → partial match; error on ambiguity for get/url | TBD | 🔲 |
 | AC-WR-33 | CLI `webresources publish` is alias for `ppds publish --type webresource` | TBD | 🔲 |
+| AC-WR-34 | `pull` downloads web resources to target folder preserving hierarchical path structure | `WebResourceSyncServiceTests.PullCreatesDirectoryStructure` | 🔲 |
+| AC-WR-35 | `pull` creates `.ppds/webresources.json` tracking file with version, environmentUrl, solution, resources | `WebResourceSyncServiceTests.PullCreatesTrackingFile` | 🔲 |
+| AC-WR-36 | Tracking file records modifiedOn timestamp and SHA256 hash per resource | `WebResourceTrackingFileTests.TrackingFileContainsHashAndTimestamp` | 🔲 |
+| AC-WR-37 | `pull --strip-prefix` removes publisher prefix from local file paths | `WebResourceSyncServiceTests.StripPrefixRemovesPublisherPrefix` | 🔲 |
+| AC-WR-38 | `pull` downloads content in parallel with progress reporting via IProgressReporter | `WebResourceSyncServiceTests.PullDownloadsInParallel` | 🔲 |
+| AC-WR-39 | `pull` without `--force` warns and skips files with local modifications (hash mismatch) | `WebResourceSyncServiceTests.PullSkipsLocallyModifiedFiles` | 🔲 |
+| AC-WR-40 | `pull --force` overwrites locally modified files | `WebResourceSyncServiceTests.PullForceOverwritesModifiedFiles` | 🔲 |
+| AC-WR-41 | `pull` supports `--solution`, `--type`, `--name` filters (filtering in sync service per A1) | `WebResourceSyncServiceTests.PullFiltersResources` | 🔲 |
+| AC-WR-42 | `push` reads `.ppds/webresources.json` and errors if missing | `PushCommandTests.PushErrorsOnMissingTrackingFile` | 🔲 |
+| AC-WR-43 | `push` detects locally modified files by comparing SHA256 hash, skips unchanged | `WebResourceSyncServiceTests.PushSkipsUnchangedFiles` | 🔲 |
+| AC-WR-44 | `push` detects server conflicts by comparing modifiedOn, exits PreconditionFailed (10) | `PushCommandTests.PushConflictReturnsExitCode10` | 🔲 |
+| AC-WR-45 | `push --force` skips conflict detection and uploads regardless | `WebResourceSyncServiceTests.PushForceSkipsConflictCheck` | 🔲 |
+| AC-WR-46 | `push --dry-run` reports what would be pushed without making changes | `WebResourceSyncServiceTests.PushDryRunNoMutation` | 🔲 |
+| AC-WR-47 | `push --publish` publishes only successfully uploaded resource IDs | `WebResourceSyncServiceTests.PushWithPublishCallsPublishAsync` | 🔲 |
+| AC-WR-48 | `push` updates tracking file after successful upload (new modifiedOn, new hash) | `WebResourceSyncServiceTests.PushUpdatesTrackingFile` | 🔲 |
+| AC-WR-49 | Pull/push business logic lives in `IWebResourceSyncService` (Constitution A1), including filtering | `WebResourceSyncServiceTests.*` | 🔲 |
+| AC-WR-50 | Tracking file keyed by Dataverse resource name, supports round-trip pull→edit→push | `WebResourceSyncServiceTests.RoundTripPullEditPush` | 🔲 |
+| AC-WR-51 | `pull` rejects resource names with path traversal segments that escape target folder | `WebResourceSyncServiceTests.PullRejectsPathTraversal` | 🔲 |
+| AC-WR-52 | `push` validates environment URL matches tracking file, errors on mismatch unless `--force` | `PushCommandTests.PushErrorsOnEnvironmentMismatch` | 🔲 |
+| AC-WR-53 | `push` skips binary types (only uploads text types) with warning | `WebResourceSyncServiceTests.PushSkipsBinaryTypes` | 🔲 |
+| AC-WR-54 | `push` warns and skips tracked files that are missing from disk | `WebResourceSyncServiceTests.PushSkipsDeletedFiles` | 🔲 |
+| AC-WR-55 | `pull` merges tracking file: skipped resources retain prior entries, removed resources are pruned | `WebResourceSyncServiceTests.PullMergesTrackingFile` | 🔲 |
 
 ---
 
@@ -283,12 +422,41 @@ Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. 
 
 **Rationale:** Standard stale-response protection pattern. Without it, the panel can show web resources from a previously selected solution after the user has already switched to a different one.
 
+### Why co-located tracking file per folder?
+
+**Context:** Pull/push needs state to detect conflicts and track what was downloaded. Options: (A) tracking file inside the target folder, (B) single tracking file at repo root, (C) solution-named files in a central `.ppds/` directory.
+
+**Decision:** Option A — `.ppds/webresources.json` co-located inside the target folder.
+
+**Rationale:** One folder = one pull context (typically one solution). Multi-solution support is achieved naturally by pulling to different folders. No central registry to maintain, no cross-referencing. The tracking file is self-contained and portable — move the folder, tracking moves with it. The `.ppds/` directory is a well-known convention for tool metadata (similar to `.git/`, `.vscode/`).
+
+**Alternatives considered:**
+- Central `.ppds/webresources.json` at repo root — harder to reason about with multiple pull targets, single point of contention
+- Solution-named files in `.ppds/webresources/` — requires push to discover which tracking file maps to which directory
+
+### Why SHA256 hash + modifiedOn dual tracking?
+
+**Context:** Need to detect both local changes (file edited after pull) and server changes (someone else edited in Dataverse).
+
+**Decision:** Track both SHA256 hash of local file content and server modifiedOn timestamp.
+
+**Rationale:** Hash detects local modifications without touching the server — fast, offline-capable. ModifiedOn detects server-side changes with a single lightweight query per resource. Together they enable the full conflict matrix: no changes (skip), local-only (safe to push), server-only (warn, suggest pull), both changed (conflict, block without --force).
+
+### Why a separate IWebResourceSyncService?
+
+**Context:** Could extend `IWebResourceService` with pull/push methods, or create a new service.
+
+**Decision:** New `IWebResourceSyncService` that depends on `IWebResourceService`.
+
+**Rationale:** Pull/push is a higher-level orchestration concern — file system I/O, tracking file management, parallel coordination, conflict detection. The existing `IWebResourceService` is a clean Dataverse CRUD interface. Mixing file system operations into it would violate single responsibility. The sync service composes the CRUD service rather than extending it.
+
 ---
 
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-04-25 | Added pull/push workflow specification (#161, #162): IWebResourceSyncService, tracking file, pull/push CLI commands, ACs 34–55. Post-review fixes: path traversal protection, TOCTOU documentation, binary type scope, environment URL validation, tracking file merge semantics, deleted file handling |
 | 2026-03-23 | Added CLI surface (list, get, url), name resolution, publish alias; removed "offline editing" from non-goals (deferred to post-v1) |
 | 2026-03-18 | Extracted from panel-parity.md per SL1 |
 
@@ -296,7 +464,6 @@ Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. 
 
 ## Roadmap
 
-- **Pull/push workflow** — download web resources to local folder with hash tracking, push back with conflict detection (#161, #162)
 - **Diff** — local file vs server comparison, depends on pull/push (#163)
 
 ---
