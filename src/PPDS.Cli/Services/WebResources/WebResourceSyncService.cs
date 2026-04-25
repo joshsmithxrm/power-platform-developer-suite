@@ -75,11 +75,12 @@ public class WebResourceSyncService : IWebResourceSyncService
         // Per-resource path resolution + traversal validation up front so we can
         // skip downloads for invalid entries without occupying a download slot.
         var processable = new List<(WebResourceInfo Resource, string LocalPath, string AbsolutePath)>();
+        var pathClaims = new Dictionary<string, string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         foreach (var resource in filtered)
         {
             if (IsUnsafeResourceName(resource.Name))
             {
-                errors.Add(new ErrorResource(resource.Name, ErrorCodes.Validation.PathOutsideWorkspace));
+                errors.Add(new ErrorResource(resource.Name, "name resolves outside target folder"));
                 continue;
             }
 
@@ -87,9 +88,21 @@ public class WebResourceSyncService : IWebResourceSyncService
             var absolutePath = Path.GetFullPath(Path.Combine(rootAbsolute, localPath));
             if (!IsDescendantOf(absolutePath, rootAbsolute))
             {
-                errors.Add(new ErrorResource(resource.Name, ErrorCodes.Validation.PathOutsideWorkspace));
+                errors.Add(new ErrorResource(resource.Name, "name resolves outside target folder"));
                 continue;
             }
+
+            // Strip-prefix can collapse different publisher prefixes to the same
+            // local path (e.g. new_/scripts/app.js and dev_/scripts/app.js both
+            // become scripts/app.js). Refuse to write the second-and-later
+            // claimants rather than silently overwriting.
+            if (pathClaims.TryGetValue(absolutePath, out var firstClaimant))
+            {
+                errors.Add(new ErrorResource(resource.Name, $"local path collides with '{firstClaimant}' (omit --strip-prefix or narrow with --solution)"));
+                continue;
+            }
+            pathClaims[absolutePath] = resource.Name;
+
             processable.Add((resource, localPath, absolutePath));
         }
 

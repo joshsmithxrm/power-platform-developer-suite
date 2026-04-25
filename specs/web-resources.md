@@ -369,7 +369,7 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 | AC-WR-38 | `pull` downloads content in parallel with progress reporting via IProgressReporter | `WebResourceSyncServiceTests.PullDownloadsInParallel` | ✅ |
 | AC-WR-39 | `pull` without `--force` warns and skips files with local modifications (hash mismatch) | `WebResourceSyncServiceTests.PullSkipsLocallyModifiedFiles` | ✅ |
 | AC-WR-40 | `pull --force` overwrites locally modified files | `WebResourceSyncServiceTests.PullForceOverwritesModifiedFiles` | ✅ |
-| AC-WR-41 | `pull` supports `--solution`, `--type`, `--name` filters (filtering in sync service per A1) | `WebResourceSyncServiceTests.PullFiltersResources` | ✅ |
+| AC-WR-41 | `pull` supports `--solution`, `--type`, `--name` filters (filtering in sync service per A1) | `WebResourceSyncServiceTests.PullFiltersByTypeCode` + `PullFiltersByNamePattern` | ✅ |
 | AC-WR-42 | `push` reads `.ppds/webresources.json` and errors if missing | `WebResourceSyncServiceTests.PushErrorsOnMissingTrackingFile` | ✅ |
 | AC-WR-43 | `push` detects locally modified files by comparing SHA256 hash, skips unchanged | `WebResourceSyncServiceTests.PushSkipsUnchangedFiles` | ✅ |
 | AC-WR-44 | `push` detects server conflicts by comparing modifiedOn, exits PreconditionFailed (10) | `WebResourceSyncServiceTests.PushDetectsServerConflict` + `PushCommandTests.PushConflictReturnsExitCode10` | ✅ |

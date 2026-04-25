@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Dataverse.Models;
 using Xunit;
@@ -104,11 +105,17 @@ public class WebResourceSyncServiceTests : IDisposable
         }
         _fake.SimulateContentLatencyMs = 80;
         _fake.TrackConcurrency = true;
+        var progress = new RecordingOperationProgress();
 
-        await _service.PullAsync(PullOpts(), null);
+        await _service.PullAsync(PullOpts(), progress);
 
         _fake.PeakConcurrency.Should().BeGreaterThan(1);
         _fake.GetContentCallCount.Should().Be(6);
+        // Progress reporting (AC-WR-38): one ReportProgress call per resource,
+        // current values cover 1..6, total is 6 for every call.
+        progress.ProgressCalls.Should().HaveCount(6);
+        progress.ProgressCalls.Select(c => c.Current).OrderBy(c => c).Should().Equal(1, 2, 3, 4, 5, 6);
+        progress.ProgressCalls.Should().OnlyContain(c => c.Total == 6);
     }
 
     /// <summary>AC-WR-39: pull without --force skips files with local hash drift.</summary>
@@ -182,7 +189,23 @@ public class WebResourceSyncServiceTests : IDisposable
         var result = await _service.PullAsync(PullOpts(), null);
 
         result.Errors.Should().ContainSingle(e => e.Name == "../../etc/passwd");
-        result.Errors[0].Error.Should().Be("Validation.PathOutsideWorkspace");
+        result.Errors[0].Error.Should().Be("name resolves outside target folder");
+    }
+
+    /// <summary>AC-WR-37 follow-up: --strip-prefix collisions across publishers do not silently overwrite — second-and-later claimants are reported as errors.</summary>
+    [Fact]
+    public async Task PullRejectsStripPrefixCollisions()
+    {
+        _fake.AddText("new_/scripts/app.js", "from-new");
+        _fake.AddText("dev_/scripts/app.js", "from-dev");
+
+        var result = await _service.PullAsync(PullOpts(stripPrefix: true), null);
+
+        // First wins, second errors. We don't assert which is "first" because
+        // it depends on enumeration order, but exactly one must succeed and one error.
+        result.Pulled.Should().HaveCount(1);
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].Error.Should().Contain("collides with");
     }
 
     /// <summary>AC-WR-55: tracking-file merge retains skipped entries and prunes resources removed from server.</summary>
@@ -567,4 +590,25 @@ internal sealed class FakeWebResourceService : IWebResourceService
         public string? Content { get; set; }
         public DateTime ModifiedOn { get; set; }
     }
+}
+
+internal sealed class RecordingOperationProgress : IOperationProgress
+{
+    public List<string> StatusMessages { get; } = new();
+    public List<(int Current, int Total, string? Message)> ProgressCalls { get; } = new();
+    private readonly object _lock = new();
+
+    public void ReportStatus(string message)
+    {
+        lock (_lock) { StatusMessages.Add(message); }
+    }
+
+    public void ReportProgress(int current, int total, string? message = null)
+    {
+        lock (_lock) { ProgressCalls.Add((current, total, message)); }
+    }
+
+    public void ReportProgress(double fraction, string? message = null) { }
+    public void ReportComplete(string message) { }
+    public void ReportError(string message) { }
 }
