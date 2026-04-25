@@ -21,6 +21,29 @@ paths: ["src/PPDS.Extension/**"]
 
 - Content wrapper uses `class="content"` (not `class="panel-content"`) — all panels follow this convention
 
+## Toolbar Layout Convention
+
+Standard button order (left to right):
+
+```
+Refresh | Panel Actions | Maker Portal | spacer | Search | Filters/Toggles | Sort | EnvPicker
+```
+
+- **Refresh** — always first
+- **Panel-specific actions** — next (e.g., Analyze, Sync, Delete, Export, Publish, New Table)
+- **Maker Portal** — last action button before the spacer
+- **`<span class="toolbar-spacer">`** — pushes everything after it to the right
+- **Search** — `<input class="toolbar-search">`, always first in the right group
+- **Filters/Toggles** — segmented controls, checkboxes (`class="toolbar-checkbox"`), solution filters
+- **Sort** — `<select class="toolbar-select">` when present
+- **EnvPicker** — always last (`${getEnvironmentPickerHtml()}`)
+
+Tool-type panels (e.g., Data Explorer) may substitute their primary action for Refresh and omit Search.
+
+Shared CSS classes (defined in `shared.css`, not in panel CSS):
+- `.toolbar-search` — search input styling
+- `.toolbar-checkbox` — label+checkbox toggle in toolbar
+
 ## Code Rules
 
 - External CSS only (no inline styles) — VS Code silently drops inline scripts exceeding ~32KB

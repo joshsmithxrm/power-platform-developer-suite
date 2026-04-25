@@ -57,6 +57,48 @@ input, textarea, pre, code, .selectable, [contenteditable], .data-table td {
     flex: 1;
 }
 
+/* ── Toolbar search input ────────────────────────────────────────────────── */
+
+.toolbar-search {
+    flex: 1;
+    min-width: 120px;
+    max-width: 300px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 3px 8px;
+    border-radius: 2px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    outline: none;
+}
+
+.toolbar-search:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.toolbar-search::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+/* ── Toolbar checkbox ────────────────────────────────────────────────── */
+
+.toolbar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.toolbar-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
 .status-bar {
     display: flex;
     gap: 16px;

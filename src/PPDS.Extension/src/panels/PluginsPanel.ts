@@ -576,20 +576,20 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh plugin registrations">Refresh</vscode-button>
+    <vscode-button id="expand-all-btn" appearance="secondary" title="Expand all nodes">Expand All</vscode-button>
+    <vscode-button id="collapse-all-btn" appearance="secondary" title="Collapse all nodes">Collapse All</vscode-button>
+    <span class="toolbar-spacer"></span>
+    <input type="text" id="search-input" class="toolbar-search" placeholder="Search registrations..." title="Filter by name, message, or entity" />
     <div class="view-mode-group">
         <vscode-button id="view-mode-assembly" class="view-mode-btn active" appearance="secondary" title="View by assembly">Assembly</vscode-button>
         <vscode-button id="view-mode-message" class="view-mode-btn" appearance="secondary" title="View by message">Message</vscode-button>
         <vscode-button id="view-mode-entity" class="view-mode-btn" appearance="secondary" title="View by entity">Entity</vscode-button>
     </div>
-    <vscode-button id="expand-all-btn" appearance="secondary" title="Expand all nodes">Expand All</vscode-button>
-    <vscode-button id="collapse-all-btn" appearance="secondary" title="Collapse all nodes">Collapse All</vscode-button>
-    <span class="toolbar-spacer"></span>
-    <input type="text" id="search-input" class="toolbar-search" placeholder="Search registrations..." title="Filter by name, message, or entity" />
-    <label class="filter-checkbox" title="Hide disabled steps">
-        <input type="checkbox" id="hide-hidden-check" /> Hide Disabled
+    <label class="toolbar-checkbox" title="Hide disabled steps">
+        <input type="checkbox" id="hide-hidden-check" /> <span>Hide Disabled</span>
     </label>
-    <label class="filter-checkbox" title="Hide Microsoft-managed assemblies">
-        <input type="checkbox" id="hide-microsoft-check" /> Hide Microsoft
+    <label class="toolbar-checkbox" title="Hide Microsoft-managed assemblies">
+        <input type="checkbox" id="hide-microsoft-check" /> <span>Hide Microsoft</span>
     </label>
     ${getEnvironmentPickerHtml()}
 </div>

@@ -382,29 +382,25 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh entity list">Refresh</vscode-button>
-    <vscode-button id="maker-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
     <vscode-button id="new-table-btn" appearance="secondary" title="Create a new table">New Table</vscode-button>
     <vscode-button id="new-column-btn" appearance="secondary" title="Create a new column on the selected table">New Column</vscode-button>
+    <vscode-button id="maker-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
     <span class="toolbar-spacer"></span>
+    <input type="text" id="entity-search" class="toolbar-search" placeholder="Search entities and choices..." />
+    <span id="filter-count"></span>
+    <label class="toolbar-checkbox" title="Show only custom entities">
+        <input type="checkbox" id="hide-system-toggle" />
+        <span>Custom Only</span>
+    </label>
+    <label class="toolbar-checkbox" title="Include many-to-many intersect entities">
+        <input type="checkbox" id="include-intersect-toggle" />
+        <span>Include Intersect</span>
+    </label>
     ${getEnvironmentPickerHtml()}
 </div>
 
 <div class="split-pane">
     <div class="entity-list-pane" id="entity-list-pane">
-        <div class="search-container">
-            <input type="text" id="entity-search" placeholder="Search entities and choices..." />
-            <span id="filter-count"></span>
-        </div>
-        <div class="filter-toggle-container">
-            <label class="filter-toggle-label">
-                <input type="checkbox" id="hide-system-toggle" />
-                <span>Custom Only</span>
-            </label>
-            <label class="filter-toggle-label">
-                <input type="checkbox" id="include-intersect-toggle" />
-                <span>Include Intersect</span>
-            </label>
-        </div>
         <div class="entity-list" id="entity-list"></div>
     </div>
     <div class="entity-detail-pane" id="entity-detail-pane">

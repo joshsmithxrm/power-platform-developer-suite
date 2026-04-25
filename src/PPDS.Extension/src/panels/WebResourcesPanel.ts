@@ -443,16 +443,16 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     <vscode-button id="publish-btn" appearance="secondary" title="Publish selected web resources" disabled>Publish</vscode-button>
     <vscode-button id="publish-all-btn" appearance="secondary" title="Publish all customizations">Publish All</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Web Resources in Maker Portal">Maker Portal</vscode-button>
+    <span class="toolbar-spacer"></span>
+    <input type="text" id="wr-search" class="toolbar-search" placeholder="Search web resources..." title="Filter by name" />
     <div class="solution-filter">
         <span class="solution-filter-label">Solution:</span>
         <div id="solution-filter-container"></div>
     </div>
-    <label class="text-only-toggle" title="Show only text-based web resources (JS, CSS, HTML, XML)">
+    <label class="toolbar-checkbox" title="Show only text-based web resources (JS, CSS, HTML, XML)">
         <input type="checkbox" id="text-only-cb" checked>
         Text only
     </label>
-    <input type="text" id="wr-search" class="toolbar-search" placeholder="Search web resources..." title="Filter by name" />
-    <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 
