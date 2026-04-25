@@ -59,6 +59,13 @@ export class SolutionFilter {
         return this.selectedId;
     }
 
+    setSelectedId(id: string | null): void {
+        if (id === this.selectedId) return;
+        this.selectedId = id;
+        this.persist();
+        this.render();
+    }
+
     /**
      * Update the storage key suffix for per-environment persistence (CR-09).
      * Call this when the environment changes, before setSolutions().

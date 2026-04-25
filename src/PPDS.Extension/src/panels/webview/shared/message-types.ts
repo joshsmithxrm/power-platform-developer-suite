@@ -453,6 +453,7 @@ export type WebResourcesPanelHostToWebview =
     | { command: 'webResourcesLoadComplete'; requestId: number; totalCount: number }
     | { command: 'loading' }
     | { command: 'error'; message: string }
+    | { command: 'filterState'; solutionId: string | null; textOnly: boolean }
     | { command: 'publishResult'; count: number; error?: string }
     | { command: 'daemonReconnected' };
 
