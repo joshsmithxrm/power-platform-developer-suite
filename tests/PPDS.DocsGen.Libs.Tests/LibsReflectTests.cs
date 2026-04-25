@@ -223,13 +223,17 @@ public sealed class LibsReflectTests
                 continue;
             }
 
-            // Detect inline code spans.
+            // Detect inline code spans. CommonMark uses a run of N backticks as
+            // the delimiter and matches the next run of exactly N backticks —
+            // MdxEscape.InlineCode produces multi-backtick delimiters when the
+            // content itself contains backticks, so we cannot assume N=1.
             if (markdown[i] == '`')
             {
-                // Skip past the inline code span.
-                i++;
-                while (i < markdown.Length && markdown[i] != '`' && markdown[i] != '\n') i++;
-                if (i < markdown.Length && markdown[i] == '`') i++; // skip closing backtick
+                int runStart = i;
+                while (i < markdown.Length && markdown[i] == '`') i++;
+                string delimiter = new string('`', i - runStart);
+                int end = markdown.IndexOf(delimiter, i);
+                i = end < 0 ? markdown.Length : end + delimiter.Length;
                 continue;
             }
 
