@@ -331,7 +331,9 @@ def test_pr_gate_allows(ctx: ScenarioContext) -> ScenarioResult:
         "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
     })
     stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
-    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    # Force human context — this scenario tests commit-ref validation, not agent enforcement.
+    # Running from a .worktrees/ path would otherwise trigger agent-context detection.
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin, env_override={"PPDS_PR_GATE_HUMAN": "1"})
     if result.returncode != 0:
         return fail(ctx, f"Expected exit 0, got {result.returncode}. stderr: {result.stderr[:200]}")
     return pass_result(ctx)
@@ -450,7 +452,8 @@ def test_commit_ref_validation(ctx: ScenarioContext) -> ScenarioResult:
         "qa": {},  # workflow-only, no QA needed
         "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
     })
-    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    # Force human context — this scenario tests commit-ref validation, not agent enforcement.
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin, env_override={"PPDS_PR_GATE_HUMAN": "1"})
     if result.returncode != 0:
         return fail(ctx, f"Expected exit 0 for correct commit_ref, got {result.returncode}. stderr: {result.stderr[:300]}")
 
@@ -474,7 +477,8 @@ def test_workflow_only_no_qa(ctx: ScenarioContext) -> ScenarioResult:
         "review": {"passed": "2026-03-28T00:00:00Z", "commit_ref": head_sha},
     })
     stdin = {"tool_input": {"command": "gh pr create --title 'test' --body 'test'"}}
-    result = ctx.run_hook("pr-gate.py", stdin_json=stdin)
+    # Force human context — this scenario tests QA exemption, not agent enforcement.
+    result = ctx.run_hook("pr-gate.py", stdin_json=stdin, env_override={"PPDS_PR_GATE_HUMAN": "1"})
     if result.returncode != 0:
         return fail(ctx, f"Expected exit 0 for workflow-only diff (no QA needed), got {result.returncode}. stderr: {result.stderr[:300]}")
 

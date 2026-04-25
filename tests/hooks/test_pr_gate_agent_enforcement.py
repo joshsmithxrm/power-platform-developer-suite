@@ -125,6 +125,15 @@ import pytest
     ("/x", {"CLAUDE_CODE_AGENT": "1", "PPDS_PR_GATE_HUMAN": "1"}, False),
     # Override value != "1" does not override
     ("/home/j/ppds/.claude/worktrees/agent-abcd", {"PPDS_PR_GATE_HUMAN": "true"}, True),
+    # Project-level .worktrees/ paths (R-01 retro finding from PR #933)
+    ("/home/j/ppds/.worktrees/toolbar-search-consistency", {}, True),
+    ("/home/j/ppds/.worktrees/pr-gate-worktree-enforcement", {}, True),
+    (r"C:\Users\josh\ppds\.worktrees\some-feature", {}, True),
+    ("/home/j/ppds/.worktrees/toolbar-search-consistency/src", {}, True),
+    # Human override beats .worktrees/ path too
+    ("/home/j/ppds/.worktrees/toolbar-search-consistency", {"PPDS_PR_GATE_HUMAN": "1"}, False),
+    # Non-agent .claude/worktrees/ (not just agent-* prefix)
+    ("/home/j/ppds/.claude/worktrees/review-1234", {}, True),
 ])
 def test_is_agent_context(cwd, env, expected):
     assert hook._is_agent_context(cwd=cwd, env=env) is expected
@@ -168,6 +177,26 @@ class TestAgentBlockedWithoutMarker:
         assert r.returncode == 2, r.stderr
         assert "must go through the `/pr` skill" in r.stderr
 
+    def test_worktree_cwd_no_state_blocks(self, tmp_path):
+        """R-01 regression: project-level .worktrees/ must enforce /pr skill."""
+        wt_dir = tmp_path / ".worktrees" / "toolbar-search-consistency"
+        wt_dir.mkdir(parents=True)
+        _init_repo(wt_dir)
+        r = _run_hook("gh pr create --draft", cwd=wt_dir)
+        assert r.returncode == 2, r.stderr
+        assert "must go through the `/pr` skill" in r.stderr
+
+    def test_worktree_cwd_with_full_state_but_no_marker_blocks(self, tmp_path):
+        """R-01 regression: worktree + full state but no /pr marker -> blocked."""
+        wt_dir = tmp_path / ".worktrees" / "feature-branch"
+        wt_dir.mkdir(parents=True)
+        _init_repo(wt_dir)
+        head = _git(wt_dir, ["rev-parse", "HEAD"]).strip()
+        _write_state(wt_dir, _passing_state(head))
+        r = _run_hook("gh pr create --draft -t t -b b", cwd=wt_dir)
+        assert r.returncode == 2, r.stderr
+        assert "must go through the `/pr` skill" in r.stderr
+
 
 class TestAgentAllowedWithMarker:
     def test_agent_with_marker_and_full_state_passes(self, tmp_path):
@@ -181,6 +210,19 @@ class TestAgentAllowedWithMarker:
             cwd=tmp_path,
             env_extra={"CLAUDE_CODE_AGENT": "1"},
         )
+        assert r.returncode == 0, r.stderr
+        assert "must go through the `/pr` skill" not in r.stderr
+
+    def test_worktree_with_marker_and_full_state_passes(self, tmp_path):
+        """R-01 regression: worktree + /pr marker + full state -> allowed."""
+        wt_dir = tmp_path / ".worktrees" / "feature-branch"
+        wt_dir.mkdir(parents=True)
+        _init_repo(wt_dir)
+        head = _git(wt_dir, ["rev-parse", "HEAD"]).strip()
+        state = _passing_state(head)
+        state["pr"] = {"invoked_via_skill": True}
+        _write_state(wt_dir, state)
+        r = _run_hook("gh pr create --draft -t t -b b", cwd=wt_dir)
         assert r.returncode == 0, r.stderr
         assert "must go through the `/pr` skill" not in r.stderr
 

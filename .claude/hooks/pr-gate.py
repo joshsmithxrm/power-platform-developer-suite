@@ -11,15 +11,16 @@ Commit-aware validation (v8.0):
   - Workflow-only diffs skip QA requirement
   - Triage completeness when PR already exists in state
 
-Agent-entry-point enforcement (v9.0):
-  - Agent-context PR creation MUST go through the `/pr` skill.
-  - Agent context = cwd inside ``.claude/worktrees/agent-*`` OR one of the
-    Claude Code agent env vars (``CLAUDE_CODE_AGENT``, ``CLAUDE_AGENT_ID``,
+Worktree entry-point enforcement (v9.1 — R-01 retro fix):
+  - Worktree PR creation MUST go through the ``/pr`` skill.
+  - Worktree context = cwd inside ``.worktrees/`` (project-level) OR
+    ``.claude/worktrees/`` (Claude Code worktrees) OR one of the Claude Code
+    agent env vars (``CLAUDE_CODE_AGENT``, ``CLAUDE_AGENT_ID``,
     ``CLAUDE_CODE_SUBAGENT``) set.
-  - Agent context requires ``pr.invoked_via_skill=true`` in workflow state;
+  - Worktree context requires ``pr.invoked_via_skill=true`` in workflow state;
     the ``/pr`` skill sets this marker at entry.
-  - Human context (main checkout, no agent env vars) keeps the previous
-    behavior -- workflow-step validation only.
+  - Human context (main checkout, no agent env vars, no worktree path) keeps
+    the previous behavior -- workflow-step validation only.
   - Explicit override: ``PPDS_PR_GATE_HUMAN=1`` forces human context for
     the rare case of a human running ``gh pr create`` from a worktree.
 """
@@ -48,11 +49,12 @@ _HUMAN_OVERRIDE_ENV = "PPDS_PR_GATE_HUMAN"
 
 
 def _is_agent_context(cwd=None, env=None):
-    """Return True if this invocation looks like a Claude Code agent.
+    """Return True if this invocation looks like a Claude Code session in a worktree.
 
     Heuristics (any one triggers agent context):
-      1. cwd path contains ``.claude/worktrees/agent-`` segment
-      2. Any known Claude Code agent env var is set to a non-empty value
+      1. cwd is inside a ``.worktrees/`` directory (project-level worktrees)
+      2. cwd is inside ``.claude/worktrees/`` (Claude Code worktrees)
+      3. Any known Claude Code agent env var is set to a non-empty value
 
     The explicit override ``PPDS_PR_GATE_HUMAN=1`` forces False regardless.
     """
@@ -68,7 +70,7 @@ def _is_agent_context(cwd=None, env=None):
     # Fall back to path sniffing. Normalize to forward slashes.
     cwd = cwd if cwd is not None else os.getcwd()
     normalized = cwd.replace("\\", "/")
-    if "/.claude/worktrees/agent-" in normalized:
+    if "/.worktrees/" in normalized or "/.claude/worktrees/" in normalized:
         return True
     return False
 
