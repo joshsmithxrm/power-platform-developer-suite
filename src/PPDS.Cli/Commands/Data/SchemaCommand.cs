@@ -1,14 +1,12 @@
 using System.CommandLine;
-using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Services.Data;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
-using PPDS.Query.Parsing;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -122,10 +120,11 @@ public static class SchemaCommand
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var outputWriter = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+
             if (entityList.Count == 0)
             {
-                var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
-                writer.WriteError(new StructuredError(
+                outputWriter.WriteError(new StructuredError(
                     ErrorCodes.Validation.RequiredField,
                     "No entities specified.",
                     Target: "--entities"));
@@ -139,9 +138,8 @@ public static class SchemaCommand
             if (filters is { Length: > 0 })
             {
                 var entitySet = new HashSet<string>(entityList, StringComparer.OrdinalIgnoreCase);
-                var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
 
-                var result = ParseAndTranspileFilters(filters, entitySet, writer);
+                var result = ParseAndTranspileFilters(filters, entitySet, outputWriter);
                 if (result == null)
                     return ExitCodes.InvalidArguments;
 
@@ -201,54 +199,30 @@ public static class SchemaCommand
                 return null;
             }
 
-            var fetchXmlFilter = TranspileFilterExpression(entityName, expression);
-            if (fetchXmlFilter == null)
+            if (result.ContainsKey(entityName))
             {
                 writer.WriteError(new StructuredError(
-                    ErrorCodes.Query.ParseError,
-                    $"Failed to parse filter expression for \"{entityName}\": {expression}",
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Duplicate filter for entity \"{entityName}\". Specify one --filter per entity; combine conditions with AND/OR.",
                     Target: "--filter"));
                 return null;
             }
 
-            result[entityName] = fetchXmlFilter;
+            try
+            {
+                result[entityName] = FilterTranspiler.TranspileToFetchXmlFilter(entityName, expression);
+            }
+            catch (PpdsException ex)
+            {
+                writer.WriteError(new StructuredError(
+                    ex.ErrorCode,
+                    ex.Message,
+                    Target: "--filter"));
+                return null;
+            }
         }
 
         return result;
-    }
-
-    internal static string? TranspileFilterExpression(string entityName, string expression)
-    {
-        try
-        {
-            var sql = $"SELECT {entityName}id FROM {entityName} WHERE {expression}";
-            var parser = new QueryParser();
-            var stmt = parser.ParseStatement(sql);
-            var generator = new FetchXmlGenerator();
-            var fetchXml = generator.Generate(stmt);
-
-            var doc = XDocument.Parse(fetchXml);
-            var entityElement = doc.Root?.Element("entity");
-            var filterElements = entityElement?.Elements("filter").ToList();
-
-            if (filterElements == null || filterElements.Count == 0)
-                return null;
-
-            if (filterElements.Count == 1)
-                return filterElements[0].ToString(SaveOptions.DisableFormatting);
-
-            var combined = new XElement("filter", new XAttribute("type", "and"));
-            foreach (var f in filterElements)
-            {
-                foreach (var child in f.Elements())
-                    combined.Add(child);
-            }
-            return combined.ToString(SaveOptions.DisableFormatting);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static async Task<int> ExecuteAsync(

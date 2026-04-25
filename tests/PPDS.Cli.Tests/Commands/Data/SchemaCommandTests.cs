@@ -23,72 +23,6 @@ public class SchemaCommandTests
 
     #endregion
 
-    #region TranspileFilterExpression
-
-    [Fact]
-    public void TranspileFilterExpression_SimpleEquality_ReturnsFetchXmlFilter()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("account", "statecode = 0");
-
-        result.Should().NotBeNull();
-        result.Should().Contain("statecode");
-        result.Should().Contain("eq");
-        result.Should().Contain("value=\"0\"");
-        result.Should().StartWith("<filter");
-    }
-
-    [Fact]
-    public void TranspileFilterExpression_GreaterThan_ReturnsFetchXmlFilter()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("contact", "revenue > 10000");
-
-        result.Should().NotBeNull();
-        result.Should().Contain("revenue");
-        result.Should().Contain("gt");
-    }
-
-    [Fact]
-    public void TranspileFilterExpression_LikePattern_ReturnsFetchXmlFilter()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("account", "name LIKE '%test%'");
-
-        result.Should().NotBeNull();
-        result.Should().Contain("name");
-        result.Should().Contain("like");
-    }
-
-    [Fact]
-    public void TranspileFilterExpression_CompoundAndCondition_ReturnsSingleFilter()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("account", "statecode = 0 AND name LIKE '%test%'");
-
-        result.Should().NotBeNull();
-        result.Should().Contain("statecode");
-        result.Should().Contain("name");
-        result.Should().Contain("and");
-    }
-
-    [Fact]
-    public void TranspileFilterExpression_DateComparison_ReturnsFetchXmlFilter()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("contact", "createdon > '2024-01-01'");
-
-        result.Should().NotBeNull();
-        result.Should().Contain("createdon");
-        result.Should().Contain("gt");
-        result.Should().Contain("2024-01-01");
-    }
-
-    [Fact]
-    public void TranspileFilterExpression_InvalidSql_ReturnsNull()
-    {
-        var result = SchemaCommand.TranspileFilterExpression("account", "NOT VALID SQL %%% !!!");
-
-        result.Should().BeNull();
-    }
-
-    #endregion
-
     #region ParseAndTranspileFilters
 
     [Fact]
@@ -159,8 +93,7 @@ public class SchemaCommandTests
             new[] { "account:NOT VALID %%%" }, entitySet, writer.Object);
 
         result.Should().BeNull();
-        writer.Verify(w => w.WriteError(It.Is<StructuredError>(e =>
-            e.Code == ErrorCodes.Query.ParseError)), Times.Once);
+        writer.Verify(w => w.WriteError(It.IsAny<StructuredError>()), Times.Once);
     }
 
     [Fact]
@@ -197,6 +130,22 @@ public class SchemaCommandTests
             new[] { "account:statecode = 0" }, entitySet, writer.Object);
 
         result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void ParseAndTranspileFilters_DuplicateEntity_ReturnsNull()
+    {
+        var entitySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "account" };
+        var writer = new Mock<IOutputWriter>();
+
+        var result = SchemaCommand.ParseAndTranspileFilters(
+            new[] { "account:statecode = 0", "account:name LIKE '%test%'" },
+            entitySet, writer.Object);
+
+        result.Should().BeNull();
+        writer.Verify(w => w.WriteError(It.Is<StructuredError>(e =>
+            e.Code == ErrorCodes.Validation.InvalidValue &&
+            e.Message.Contains("Duplicate"))), Times.Once);
     }
 
     #endregion
