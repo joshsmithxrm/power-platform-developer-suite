@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using PPDS.DocsGen.Common;
 using PPDS.DocsGen.Libs;
@@ -157,6 +158,88 @@ public sealed class LibsReflectTests
         {
             if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task GeneratedMarkdown_ContainsNoRawAngleBracketsOutsideCodeSpans()
+    {
+        // MDX interprets raw <TypeName> as JSX, causing compilation failures.
+        // This test asserts that every generated markdown file has no raw angle
+        // brackets outside of inline-code backtick spans or fenced code blocks.
+        var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-mdx-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = await RunAsync(outputRoot);
+
+            result.Files.Should().NotBeEmpty();
+
+            // Regex: matches <SomeIdentifier> patterns that are NOT inside backticks.
+            // We strip inline code (`...`) and fenced code blocks (```...```) first,
+            // then check for remaining raw angle bracket patterns that look like
+            // type references.
+            var typeRefPattern = new Regex(@"<[A-Z][A-Za-z0-9_]*(\s*,\s*[A-Z][A-Za-z0-9_]*)*>");
+
+            foreach (var file in result.Files)
+            {
+                var stripped = StripCodeSpans(file.Contents);
+                var matches = typeRefPattern.Matches(stripped);
+                matches.Should().BeEmpty(
+                    $"file '{file.RelativePath}' must not contain raw <TypeName> patterns outside code spans — " +
+                    $"MDX would interpret them as JSX. Found: {string.Join(", ", matches.Select(m => m.Value))}");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Strips inline code (backtick spans) and fenced code blocks from markdown,
+    /// leaving only the prose/heading content for MDX safety validation.
+    /// </summary>
+    private static string StripCodeSpans(string markdown)
+    {
+        var sb = new System.Text.StringBuilder(markdown.Length);
+        var inFence = false;
+        var i = 0;
+
+        while (i < markdown.Length)
+        {
+            // Detect fenced code block markers at line start.
+            if (IsAtLineStart(markdown, i) && markdown.Length - i >= 3
+                && markdown[i] == '`' && markdown[i + 1] == '`' && markdown[i + 2] == '`')
+            {
+                inFence = !inFence;
+                // Skip to end of line.
+                while (i < markdown.Length && markdown[i] != '\n') i++;
+                if (i < markdown.Length) i++;
+                continue;
+            }
+
+            if (inFence)
+            {
+                i++;
+                continue;
+            }
+
+            // Detect inline code spans.
+            if (markdown[i] == '`')
+            {
+                // Skip past the inline code span.
+                i++;
+                while (i < markdown.Length && markdown[i] != '`' && markdown[i] != '\n') i++;
+                if (i < markdown.Length && markdown[i] == '`') i++; // skip closing backtick
+                continue;
+            }
+
+            sb.Append(markdown[i]);
+            i++;
+        }
+
+        return sb.ToString();
+
+        static bool IsAtLineStart(string s, int index) => index == 0 || s[index - 1] == '\n';
     }
 
     [Fact]
