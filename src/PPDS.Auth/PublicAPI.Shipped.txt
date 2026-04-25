@@ -573,7 +573,9 @@ static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityBaseUrl(PPDS.Auth.Cloud.CloudE
 static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityHost(PPDS.Auth.Cloud.CloudEnvironment cloud) -> System.Uri!
 static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityUrl(PPDS.Auth.Cloud.CloudEnvironment cloud, string? tenantId = null) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetAzureCloudInstance(PPDS.Auth.Cloud.CloudEnvironment cloud) -> Microsoft.Identity.Client.AzureCloudInstance
+static PPDS.Auth.Cloud.CloudEndpoints.GetFlowPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetGlobalDiscoveryUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
+static PPDS.Auth.Cloud.CloudEndpoints.GetMakerPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAppsApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAppsServiceScope(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetPowerAutomateApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!

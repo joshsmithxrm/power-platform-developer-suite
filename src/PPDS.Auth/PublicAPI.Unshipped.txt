@@ -1,3 +1,1 @@
 #nullable enable
-static PPDS.Auth.Cloud.CloudEndpoints.GetFlowPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
-static PPDS.Auth.Cloud.CloudEndpoints.GetMakerPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
