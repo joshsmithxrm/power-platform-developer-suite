@@ -25,7 +25,7 @@ def workflow() -> dict:
     """Parse the workflow YAML once per module."""
     if not WORKFLOW_PATH.exists():
         pytest.fail(f"docs-release.yml not found at {WORKFLOW_PATH}")
-    return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8")) or {}
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +74,8 @@ def test_mcp_assembly_name_is_correct(workflow_text: str) -> None:
 
 def test_dry_run_dispatch_preserved(workflow: dict) -> None:
     """workflow_dispatch with dry_run input must be preserved."""
-    on = workflow.get("on") or workflow.get(True)
-    assert "workflow_dispatch" in on, "workflow_dispatch trigger must be preserved"
-    inputs = on["workflow_dispatch"].get("inputs", {})
+    on_config = workflow.get("on") or workflow.get(True) or {}
+    assert "workflow_dispatch" in on_config, "workflow_dispatch trigger must be preserved"
+    dispatch = on_config.get("workflow_dispatch") or {}
+    inputs = dispatch.get("inputs", {})
     assert "dry_run" in inputs, "dry_run input must be preserved"
