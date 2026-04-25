@@ -24,6 +24,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
     private readonly bool _ownsHttpClient;
     private readonly string _bapApiUrl;
     private readonly Func<CancellationToken, Task<string>> _tokenProvider;
+    private readonly IDisposable? _certificateToDispose;
     private bool _disposed;
 
     private const string EnvironmentsEndpoint =
@@ -56,10 +57,12 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
         HttpClient httpClient,
         bool ownsHttpClient,
         string bapApiUrl,
-        Func<CancellationToken, Task<string>> tokenProvider)
+        Func<CancellationToken, Task<string>> tokenProvider,
+        IDisposable? certificateToDispose)
         : this(httpClient, bapApiUrl, tokenProvider)
     {
         _ownsHttpClient = ownsHttpClient;
+        _certificateToDispose = certificateToDispose;
     }
 
     /// <summary>
@@ -97,6 +100,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
 
         var authority = CloudEndpoints.GetAuthorityUrl(cloud, profile.TenantId);
         Microsoft.Identity.Client.IConfidentialClientApplication msalClient;
+        X509Certificate2? certificateToDispose = null;
 
         switch (profile.AuthMethod)
         {
@@ -138,8 +142,9 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                     certPassword = stored?.CertificatePassword;
                 }
 
-                // MSAL retains a reference to the cert — it manages its own copy internally
+                // MSAL retains a reference but does not own the cert; the service disposes it.
                 var cert = new X509Certificate2(profile.CertificatePath, certPassword);
+                certificateToDispose = cert;
 
                 msalClient = Microsoft.Identity.Client.ConfidentialClientApplicationBuilder
                     .Create(profile.ApplicationId)
@@ -170,10 +175,14 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                         $"Certificate with thumbprint '{profile.CertificateThumbprint}' not found in store.",
                         AuthErrorCodes.BapApiError);
 
+                certificateToDispose = certs[0];
+                for (int i = 1; i < certs.Count; i++)
+                    certs[i].Dispose();
+
                 msalClient = Microsoft.Identity.Client.ConfidentialClientApplicationBuilder
                     .Create(profile.ApplicationId)
                     .WithAuthority(authority)
-                    .WithCertificate(certs[0])
+                    .WithCertificate(certificateToDispose)
                     .Build();
                 break;
             }
@@ -200,7 +209,8 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                     .ExecuteAsync(ct)
                     .ConfigureAwait(false);
                 return result.AccessToken;
-            });
+            },
+            certificateToDispose);
     }
 
     /// <inheritdoc />
@@ -358,6 +368,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
     {
         if (_disposed) return;
         if (_ownsHttpClient) _httpClient.Dispose();
+        _certificateToDispose?.Dispose();
         _disposed = true;
     }
 }

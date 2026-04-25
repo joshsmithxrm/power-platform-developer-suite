@@ -145,7 +145,7 @@ The authentication system provides secure credential management, multi-method au
    - `properties.linkedEnvironmentMetadata.resourceId` → `Id` (Guid)
    - `properties.linkedEnvironmentMetadata.instanceState` → `State` (map "Ready" → 0, other → 1)
    - `properties.azureRegion` → `Region`
-   - `properties.environmentSku` → `OrganizationType` (map "Production" → 0, "Sandbox" → 5, "Developer" → 6, "Trial" → 11, "Default" → -1)
+   - `properties.environmentSku` → `OrganizationType` (map "Production" → 0, "Sandbox" → 5, "Developer" → 6, "Trial" → 11, "Default" → -1, unknown/missing → -2 to avoid silent re-classification as Production)
    - `properties.tenantId` → `TenantId`
 5. **Return**: Same `DiscoveredEnvironment` type as Global Discovery
 
