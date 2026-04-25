@@ -22,17 +22,17 @@ public static class PushCommand
 
         var forceOption = new Option<bool>("--force")
         {
-            Description = "Skip conflict detection and environment URL validation"
+            Description = "Skip safety checks: server-conflict detection (someone edited since last pull) and environment URL validation (pulled from a different env than the current connection)"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Preview what would be pushed without making changes"
+            Description = "Preview what would be pushed without uploading. Still authenticates and queries the server for conflict detection."
         };
 
         var publishOption = new Option<bool>("--publish")
         {
-            Description = "Publish all successfully uploaded web resources after upload"
+            Description = "After upload, run the Dataverse Publish step on the uploaded resources (required before changes take effect in apps)"
         };
 
         var command = new Command("push", "Push locally-modified web resources back to Dataverse")

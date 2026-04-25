@@ -61,12 +61,12 @@ public static class PullCommand
 
         var stripPrefixOption = new Option<bool>("--strip-prefix")
         {
-            Description = "Remove publisher prefix from local file paths (e.g., new_/scripts/app.js -> scripts/app.js)"
+            Description = "Remove the solution publisher prefix from local file paths (e.g., new_/scripts/app.js -> scripts/app.js). The prefix is org-specific and set by the solution publisher."
         };
 
         var forceOption = new Option<bool>("--force")
         {
-            Description = "Overwrite local files even if they have uncommitted changes"
+            Description = "Overwrite local files even when they differ from the last pulled version (hash mismatch)"
         };
 
         var command = new Command("pull", "Pull web resources to a local folder with tracking metadata")
@@ -192,7 +192,11 @@ public static class PullCommand
             {
                 var newCount = result.Pulled.Count(p => p.IsNew);
                 var updatedCount = result.Pulled.Count - newCount;
-                Console.Error.WriteLine($"Pulled {result.Pulled.Count} of {result.TotalServerCount} web resource(s) to {folder} ({newCount} new, {updatedCount} updated, {result.Skipped.Count} skipped, {result.Errors.Count} errors)");
+                var matched = result.Pulled.Count + result.Skipped.Count + result.Errors.Count;
+                var summary = matched == result.TotalServerCount
+                    ? $"Pulled {result.Pulled.Count} of {result.TotalServerCount} web resource(s) to {folder}"
+                    : $"Pulled {result.Pulled.Count} of {matched} matched web resource(s) to {folder} (filtered from {result.TotalServerCount} total)";
+                Console.Error.WriteLine($"{summary} ({newCount} new, {updatedCount} updated, {result.Skipped.Count} skipped, {result.Errors.Count} errors)");
 
                 if (result.Errors.Count > 0)
                 {

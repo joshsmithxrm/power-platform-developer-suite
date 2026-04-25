@@ -224,10 +224,25 @@ public class WebResourceSyncService : IWebResourceSyncService
         ArgumentNullException.ThrowIfNull(options);
 
         var rootAbsolute = Path.GetFullPath(options.Folder);
+
+        if (File.Exists(rootAbsolute))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Path '{options.Folder}' is a file, not a folder. Pass the folder that contains the pulled web resources (the folder with the .ppds/webresources.json tracking file).");
+        }
+
+        if (!Directory.Exists(rootAbsolute))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.FileNotFound,
+                $"Folder '{options.Folder}' does not exist. Run 'ppds webresources pull {options.Folder}' first.");
+        }
+
         var tracking = await WebResourceTrackingFile.ReadAsync(rootAbsolute, cancellationToken)
             ?? throw new PpdsException(
                 ErrorCodes.Validation.FileNotFound,
-                $"Tracking file '{WebResourceTrackingFile.TrackingFileRelativePath}' not found in '{options.Folder}'. Run 'ppds webresources pull' first.");
+                $"Tracking file '{WebResourceTrackingFile.TrackingFileRelativePath}' not found in '{options.Folder}'. Run 'ppds webresources pull {options.Folder}' first.");
 
         if (!options.Force && !UrlsEqual(tracking.EnvironmentUrl, options.CurrentEnvironmentUrl))
         {
