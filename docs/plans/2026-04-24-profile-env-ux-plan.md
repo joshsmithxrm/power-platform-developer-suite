@@ -296,23 +296,23 @@ Status Bar     Context        Command
 **Depends-on:** Chunk 2
 **Mode:** alongside
 
-- [ ] Step 1: Read `profileCommands.ts` lines 68-119 — the `ppds.listProfiles` command handler. Current format: `label` = profile name, `description` = identity, `detail` = `envName (authMethod)`, `picked` = isActive.
+- [x] Step 1: Read `profileCommands.ts` lines 68-119 — the `ppds.listProfiles` command handler. Current format: `label` = profile name, `description` = identity, `detail` = `envName (authMethod)`, `picked` = isActive.
 
-- [ ] Step 2: Update the quick pick item format:
+- [x] Step 2: Update the quick pick item format:
   - `label`: `$(check) {name}` for active profile, `{name}` for inactive (replace `picked: p.isActive` with `$(check)` prefix)
   - `description`: `{environment.displayName}` (environment name, more prominent position)
   - `detail`: `{identity} · {authMethod}` (identity + auth method in detail line)
   - Remove `picked: p.isActive` (the `$(check)` prefix replaces it visually)
 
-- [ ] Step 3: Update the placeholder text from `Active: {activeProfile}` to `Select a profile to switch`.
+- [x] Step 3: Update the placeholder text from `Active: {activeProfile}` to `Select a profile to switch`.
 
-- [ ] Step 4: Verify the profile switch logic after selection still works (lines 103-118). No change needed — it uses `selected.profile` which is the same `ProfileInfo` object.
+- [x] Step 4: Verify the profile switch logic after selection still works (lines 103-118). No change needed — it uses `selected.profile` which is the same `ProfileInfo` object.
 
-- [ ] Step 5: After a successful profile switch, call `statusBar.refresh()` if the `PpdsStatusBar` instance is accessible. Check how the refresh callback is wired — the existing code calls `refreshProfiles()` which refreshes the tree view. The status bar refresh may need to be added to this callback chain.
+- [x] Step 5: After a successful profile switch, call `statusBar.refresh()` if the `PpdsStatusBar` instance is accessible. Check how the refresh callback is wired — the existing code calls `refreshProfiles()` which refreshes the tree view. The status bar refresh may need to be added to this callback chain. **Done in Chunk 3** — `extension.ts` `registerProfileCommands(...)` callback now invokes `statusBar.refresh()`.
 
-- [ ] Step 6: Run `npm run ext:test` to verify no regressions.
+- [x] Step 6: Run `npm run ext:test` to verify no regressions.
 
-- [ ] Step 7: Commit: `feat(extension): enhance command palette profile picker with $(check) prefix and prominent environment display`
+- [x] Step 7: Commit: `feat(extension): enhance command palette profile picker with $(check) prefix and prominent environment display`
 
 ---
 
