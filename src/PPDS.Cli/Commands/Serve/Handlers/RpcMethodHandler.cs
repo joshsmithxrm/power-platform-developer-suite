@@ -2686,10 +2686,11 @@ public class RpcMethodHandler : IDisposable
                         // pool creation performs async I/O (auth / device-code).  Wrapping in
                         // Task.Run avoids blocking the RPC handler's async context thread,
                         // which would be a thread-pool starvation risk under concurrent requests.
+                        var remoteProfileName = profile.Name ?? profile.DisplayIdentifier;
                         var remoteProvider = Task.Run(() => _poolManager.GetOrCreateServiceProviderAsync(
-                            new[] { profile.Name ?? profile.DisplayIdentifier },
+                            new[] { remoteProfileName },
                             config.Url,
-                            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, remoteProfileName),
                             cancellationToken: ct)).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
                         return remoteProvider.GetRequiredService<IQueryExecutor>();
@@ -3311,10 +3312,11 @@ public class RpcMethodHandler : IDisposable
 
             // Use the pool manager to get a cached service provider. This reuses the existing
             // connection pool instead of creating a new ServiceClient on every RPC call.
+            var activeProfileName = profile.Name ?? profile.DisplayIdentifier;
             var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
-                new[] { profile.Name ?? profile.DisplayIdentifier },
+                new[] { activeProfileName },
                 environment.Url,
-                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, activeProfileName),
                 cancellationToken: cancellationToken);
 
             return await action(serviceProvider, profile, environment, cancellationToken);
@@ -3405,10 +3407,11 @@ public class RpcMethodHandler : IDisposable
                 ? profile.Environment
                 : new PPDS.Auth.Profiles.EnvironmentInfo { Url = resolvedUrl, DisplayName = resolvedUrl };
 
+            var resolvedProfileName = profile.Name ?? profile.DisplayIdentifier;
             var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
-                new[] { profile.Name ?? profile.DisplayIdentifier },
+                new[] { resolvedProfileName },
                 resolvedUrl,
-                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, resolvedProfileName),
                 cancellationToken: cancellationToken);
 
             return await action(serviceProvider, profile, resolvedEnvironment, cancellationToken);
@@ -3531,7 +3534,7 @@ public class RpcMethodHandler : IDisposable
             var profileService = _authServices.GetRequiredService<IProfileService>();
             var result = await profileService.CreateProfileAsync(
                 request,
-                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, name),
                 beforeInteractiveAuth: null,
                 cancellationToken: cancellationToken);
 

@@ -13,8 +13,11 @@ internal static class DaemonDeviceCodeHandler
     /// Creates a device code callback that sends notifications via JSON-RPC.
     /// </summary>
     /// <param name="rpc">The JSON-RPC connection to send notifications on.</param>
+    /// <param name="profileName">Optional profile name to attribute the auth challenge to.
+    /// When set, clients can identify which profile is being authenticated even when multiple
+    /// panels target different profiles concurrently.</param>
     /// <returns>A callback that sends device code info as RPC notification.</returns>
-    public static Action<DeviceCodeInfo> CreateCallback(JsonRpc? rpc)
+    public static Action<DeviceCodeInfo> CreateCallback(JsonRpc? rpc, string? profileName = null)
     {
         return async info =>
         {
@@ -30,7 +33,8 @@ internal static class DaemonDeviceCodeHandler
                 {
                     UserCode = info.UserCode,
                     VerificationUrl = info.VerificationUrl,
-                    Message = info.Message
+                    Message = info.Message,
+                    ProfileName = profileName
                 });
             }
             catch
@@ -64,4 +68,11 @@ public class DeviceCodeNotification
     /// </summary>
     [JsonPropertyName("message")]
     public string Message { get; set; } = "";
+
+    /// <summary>
+    /// Gets or sets the profile name being authenticated, when known.
+    /// Allows clients to attribute the auth challenge to a specific profile.
+    /// </summary>
+    [JsonPropertyName("profileName")]
+    public string? ProfileName { get; set; }
 }

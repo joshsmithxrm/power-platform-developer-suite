@@ -121,15 +121,15 @@ Status Bar     Context        Command
 **Depends-on:** Task 1.1
 **Mode:** alongside
 
-- [ ] Step 1: Search for `DaemonDeviceCodeHandler` to find the device code callback creation. It's called at the `_poolManager.GetOrCreateServiceProviderAsync` callsite inside `WithProfileAndEnvironmentAsync`. The handler sends an `auth/deviceCode` notification via the RPC channel.
+- [x] Step 1: Search for `DaemonDeviceCodeHandler` to find the device code callback creation. It's called at the `_poolManager.GetOrCreateServiceProviderAsync` callsite inside `WithProfileAndEnvironmentAsync`. The handler sends an `auth/deviceCode` notification via the RPC channel.
 
-- [ ] Step 2: Read the `DaemonDeviceCodeHandler` class (likely in `src/PPDS.Cli/Commands/Serve/Handlers/`). Find where it sends the notification — it should be an anonymous object or DTO with `userCode`, `verificationUrl`, `message` fields.
+- [x] Step 2: Read the `DaemonDeviceCodeHandler` class (likely in `src/PPDS.Cli/Commands/Serve/Handlers/`). Find where it sends the notification — it should be an anonymous object or DTO with `userCode`, `verificationUrl`, `message` fields.
 
-- [ ] Step 3: Investigate pool caching behavior — read `DaemonConnectionPoolManager.GetOrCreateServiceProviderAsync` to determine whether the `deviceCodeCallback` is re-registered on every call or only on first pool creation. If the callback is set only at pool creation time, then a pool created before this change won't have `profileName` in its callback. In that case, pass `profileName` via the credential provider's re-auth flow (where the token refresh triggers a new device code challenge), not just the initial callback. If the callback IS re-registered per call, the simpler approach of passing `profileName` to `CreateCallback` is sufficient.
+- [x] Step 3: Investigate pool caching behavior — read `DaemonConnectionPoolManager.GetOrCreateServiceProviderAsync` to determine whether the `deviceCodeCallback` is re-registered on every call or only on first pool creation. If the callback is set only at pool creation time, then a pool created before this change won't have `profileName` in its callback. In that case, pass `profileName` via the credential provider's re-auth flow (where the token refresh triggers a new device code challenge), not just the initial callback. If the callback IS re-registered per call, the simpler approach of passing `profileName` to `CreateCallback` is sufficient.
 
-- [ ] Step 4: Add `profileName` to the notification payload. The profile name is available in `WithProfileAndEnvironmentAsync` as `profile.Name ?? profile.DisplayIdentifier`. Pass it to `DaemonDeviceCodeHandler.CreateCallback` as a new `string? profileName` parameter, and include `ProfileName = profileName` in the notification object.
+- [x] Step 4: Add `profileName` to the notification payload. The profile name is available in `WithProfileAndEnvironmentAsync` as `profile.Name ?? profile.DisplayIdentifier`. Pass it to `DaemonDeviceCodeHandler.CreateCallback` as a new `string? profileName` parameter, and include `ProfileName = profileName` in the notification object.
 
-- [ ] Step 5: Commit: `feat(daemon): include profileName in auth/deviceCode notifications`
+- [x] Step 5: Commit: `feat(daemon): include profileName in auth/deviceCode notifications`
 
 ---
 
