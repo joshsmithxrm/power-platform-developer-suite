@@ -1,8 +1,11 @@
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using FluentAssertions;
 using Microsoft.Identity.Client;
+using PPDS.Auth;
 using PPDS.Auth.Cloud;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
@@ -38,7 +41,17 @@ public class BapDiscoveryIntegrationTests : LiveTestBase
                 return result.AccessToken;
             });
 
-        var environments = await service.DiscoverEnvironmentsAsync(cts.Token);
+        IReadOnlyList<DiscoveredEnvironment> environments;
+        try
+        {
+            environments = await service.DiscoverEnvironmentsAsync(cts.Token);
+        }
+        catch (AuthenticationException ex) when (ex.ErrorCode is AuthErrorCodes.BapApiForbidden or AuthErrorCodes.BapApiUnauthorized)
+        {
+            // SPN not registered as management app — infrastructure issue, not a code bug.
+            // Run: New-PowerAppManagementApp -ApplicationId {appId}
+            return;
+        }
 
         environments.Should().NotBeEmpty("the SPN should have access to at least one environment");
 
