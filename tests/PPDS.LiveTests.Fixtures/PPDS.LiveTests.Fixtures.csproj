@@ -27,13 +27,13 @@
   <!-- Copy DLL and dependencies to TestData after build -->
   <Target Name="CopyToTestData" AfterTargets="Build">
     <MakeDir Directories="..\PPDS.LiveTests\TestData" />
-    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll"
           DestinationFolder="..\PPDS.LiveTests\TestData\" />
-    <Copy SourceFiles="$(OutputPath)$(AssemblyName).pdb"
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).pdb"
           DestinationFolder="..\PPDS.LiveTests\TestData\"
-          Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
+          Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
     <!-- Copy PPDS.Plugins.dll for MetadataLoadContext resolution -->
-    <Copy SourceFiles="$(OutputPath)PPDS.Plugins.dll"
+    <Copy SourceFiles="$(TargetDir)PPDS.Plugins.dll"
           DestinationFolder="..\PPDS.LiveTests\TestData\" />
   </Target>
 
