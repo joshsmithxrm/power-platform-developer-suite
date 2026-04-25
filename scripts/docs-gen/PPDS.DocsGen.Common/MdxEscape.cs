@@ -130,18 +130,7 @@ public static class MdxEscape
     /// </summary>
     public static string Heading(string raw)
     {
-        if (string.IsNullOrEmpty(raw))
-        {
-            return raw;
-        }
-
-        // Replace & first to avoid double-escaping entities produced below.
-        return raw
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("{", "\\{")
-            .Replace("}", "\\}");
+        return Prose(raw);
     }
 
     /// <summary>
