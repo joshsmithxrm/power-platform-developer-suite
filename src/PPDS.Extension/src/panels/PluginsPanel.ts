@@ -586,10 +586,10 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
         <vscode-button id="view-mode-entity" class="view-mode-btn" appearance="secondary" title="View by entity">Entity</vscode-button>
     </div>
     <label class="toolbar-checkbox" title="Hide disabled steps">
-        <input type="checkbox" id="hide-hidden-check" /> Hide Disabled
+        <input type="checkbox" id="hide-hidden-check" /> <span>Hide Disabled</span>
     </label>
     <label class="toolbar-checkbox" title="Hide Microsoft-managed assemblies">
-        <input type="checkbox" id="hide-microsoft-check" /> Hide Microsoft
+        <input type="checkbox" id="hide-microsoft-check" /> <span>Hide Microsoft</span>
     </label>
     ${getEnvironmentPickerHtml()}
 </div>
