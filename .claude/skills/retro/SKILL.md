@@ -15,6 +15,7 @@ Artifacts vary by mode:
 
 **Pipeline mode** (headless via `claude -p`):
 - `.workflow/retro-findings.json` — machine-readable findings, consumed by `scripts/pipeline.py`.
+- `.retros/summary.json` — rolling cross-retro metrics (append-only).
 
 ## Phase Registration (MUST run first)
 
@@ -64,7 +65,7 @@ Detect automatically based on context:
 5. DECISION PHASE               [plan-with-defaults UX]
 6. ROUTING                      [/backlog, /pr, /investigate]
 7. MONITOR & CONFIRM
-8. EXECUTIVE SYNTHESIS          [md only in interactive; md + HTML in pipeline]
+8. EXECUTIVE SYNTHESIS          [md only in interactive; skipped in pipeline]
 9. PERSIST                      [summary.json only in interactive; + findings JSON in pipeline]
 ```
 
