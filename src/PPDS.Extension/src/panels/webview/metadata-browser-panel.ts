@@ -770,42 +770,42 @@ function renderConfigTab(): void {
         {
             title: 'Identity',
             rows: [
-                ['Plural Name', currentEntity.pluralName ?? '—'],
-                ['Logical Collection Name', currentEntity.logicalCollectionName ?? '—'],
-                ['Primary Image Attribute', currentEntity.primaryImageAttribute ?? '—'],
+                ['Plural Name', currentEntity.pluralName ?? '\u2014'],
+                ['Logical Collection Name', currentEntity.logicalCollectionName ?? '\u2014'],
+                ['Primary Image Attribute', currentEntity.primaryImageAttribute ?? '\u2014'],
             ],
         },
         {
             title: 'Features',
             rows: [
-                ['Quick Create Enabled', currentEntity.isQuickCreateEnabled ? '✓' : '—'],
-                ['Duplicate Detection Enabled', currentEntity.isDuplicateDetectionEnabled ? '✓' : '—'],
-                ['Valid for Queue', currentEntity.isValidForQueue ? '✓' : '—'],
-                ['Valid for Advanced Find', currentEntity.isValidForAdvancedFind ? '✓' : '—'],
-                ['Business Process Enabled', currentEntity.isBusinessProcessEnabled ? '✓' : '—'],
+                ['Quick Create Enabled', currentEntity.isQuickCreateEnabled ? '\u2713' : '\u2014'],
+                ['Duplicate Detection Enabled', currentEntity.isDuplicateDetectionEnabled ? '\u2713' : '\u2014'],
+                ['Valid for Queue', currentEntity.isValidForQueue ? '\u2713' : '\u2014'],
+                ['Valid for Advanced Find', currentEntity.isValidForAdvancedFind ? '\u2713' : '\u2014'],
+                ['Business Process Enabled', currentEntity.isBusinessProcessEnabled ? '\u2713' : '\u2014'],
             ],
         },
         {
             title: 'Auditing & Tracking',
             rows: [
-                ['Audit Enabled', currentEntity.isAuditEnabled ? '✓' : '—'],
-                ['Change Tracking Enabled', currentEntity.changeTrackingEnabled ? '✓' : '—'],
+                ['Audit Enabled', currentEntity.isAuditEnabled ? '\u2713' : '\u2014'],
+                ['Change Tracking Enabled', currentEntity.changeTrackingEnabled ? '\u2713' : '\u2014'],
             ],
         },
         {
             title: 'Relationships',
             rows: [
-                ['Has Notes', currentEntity.hasNotes ? '✓' : '—'],
-                ['Has Activities', currentEntity.hasActivities ? '✓' : '—'],
-                ['Is Activity Party', currentEntity.isActivityParty ? '✓' : '—'],
-                ['Is Intersect', currentEntity.isIntersect ? '✓' : '—'],
+                ['Has Notes', currentEntity.hasNotes ? '\u2713' : '\u2014'],
+                ['Has Activities', currentEntity.hasActivities ? '\u2713' : '\u2014'],
+                ['Is Activity Party', currentEntity.isActivityParty ? '\u2713' : '\u2014'],
+                ['Is Intersect', currentEntity.isIntersect ? '\u2713' : '\u2014'],
             ],
         },
         {
             title: 'Bulk API Support',
             rows: [
-                ['Can Create Multiple', currentEntity.canCreateMultiple ? '✓' : '—'],
-                ['Can Update Multiple', currentEntity.canUpdateMultiple ? '✓' : '—'],
+                ['Can Create Multiple', currentEntity.canCreateMultiple ? '\u2713' : '\u2014'],
+                ['Can Update Multiple', currentEntity.canUpdateMultiple ? '\u2713' : '\u2014'],
             ],
         },
     ];
