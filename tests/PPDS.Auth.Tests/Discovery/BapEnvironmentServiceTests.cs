@@ -23,8 +23,8 @@ public class BapEnvironmentServiceTests
     {
         var json = @"{ ""value"": [{ ""name"": ""env-id-1"", ""properties"": { ""displayName"": ""PPDS Demo - Dev"", ""azureRegion"": ""westus"", ""environmentSku"": ""Developer"", ""tenantId"": ""34502e2f-89bb-4550-8a28-1d734e433e88"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""PPDS Demo - Dev"", ""uniqueName"": ""unq3a504f43"", ""domainName"": ""orgcabef92d"", ""version"": ""9.2.26033.179"", ""instanceUrl"": ""https://orgcabef92d.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }] }";
 
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -51,8 +51,8 @@ public class BapEnvironmentServiceTests
             { ""name"": ""env-2"", ""properties"": { ""displayName"": ""Default (no Dataverse)"", ""environmentSku"": ""Default"" } }
         ] }";
 
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -64,8 +64,8 @@ public class BapEnvironmentServiceTests
     public async Task DiscoverEnvironments_Throws_OnForbidden()
     {
         var json = @"{ ""error"": { ""code"": ""Forbidden"", ""message"": ""Not registered"" } }";
-        var client = CreateMockHttpClient(HttpStatusCode.Forbidden, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.Forbidden, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var act = () => service.DiscoverEnvironmentsAsync();
 
@@ -76,8 +76,8 @@ public class BapEnvironmentServiceTests
     [Fact]
     public async Task DiscoverEnvironments_Throws_OnUnauthorized()
     {
-        var client = CreateMockHttpClient(HttpStatusCode.Unauthorized, "");
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.Unauthorized, "");
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var act = () => service.DiscoverEnvironmentsAsync();
 
@@ -88,8 +88,8 @@ public class BapEnvironmentServiceTests
     [Fact]
     public async Task DiscoverEnvironments_Throws_OnServerError()
     {
-        var client = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Internal Server Error");
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Internal Server Error");
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var act = () => service.DiscoverEnvironmentsAsync();
 
@@ -98,11 +98,39 @@ public class BapEnvironmentServiceTests
     }
 
     [Fact]
+    public async Task DiscoverEnvironments_Throws_OnTimeout()
+    {
+        // AC-32: a TaskCanceledException from a non-cancelled token (HttpClient timeout shape)
+        // must surface as AuthenticationException with Auth.BapApiTimeout.
+        using var client = new HttpClient(new TimeoutMessageHandler());
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+
+        var act = () => service.DiscoverEnvironmentsAsync();
+
+        var ex = await act.Should().ThrowAsync<AuthenticationException>();
+        ex.Which.ErrorCode.Should().Be("Auth.BapApiTimeout");
+        ex.Which.InnerException.Should().BeOfType<TaskCanceledException>();
+    }
+
+    [Fact]
+    public async Task DiscoverEnvironments_PropagatesCancellation_WhenTokenCancelled()
+    {
+        using var client = new HttpClient(new TimeoutMessageHandler());
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => service.DiscoverEnvironmentsAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task DiscoverEnvironments_ReturnsEmpty_WhenNoValueProperty()
     {
         var json = @"{ }";
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -119,8 +147,8 @@ public class BapEnvironmentServiceTests
     {
         var json = $@"{{ ""value"": [{{ ""name"": ""env-1"", ""properties"": {{ ""displayName"": ""Test"", ""environmentSku"": ""{sku}"", ""linkedEnvironmentMetadata"": {{ ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" }} }} }}] }}";
 
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -133,8 +161,8 @@ public class BapEnvironmentServiceTests
     {
         var json = @"{ ""value"": [{ ""name"": ""env-1"", ""properties"": { ""displayName"": ""Test"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Provisioning"" } } }] }";
 
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -150,8 +178,8 @@ public class BapEnvironmentServiceTests
             { ""name"": ""env-1"", ""properties"": { ""displayName"": ""Alpha"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""4b604f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Alpha"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }
         ] }";
 
-        var client = CreateMockHttpClient(HttpStatusCode.OK, json);
-        var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
+        using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
+        using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
 
         var result = await service.DiscoverEnvironmentsAsync();
 
@@ -178,6 +206,20 @@ public class BapEnvironmentServiceTests
                 Content = new StringContent(_content, Encoding.UTF8, "application/json")
             };
             return Task.FromResult(response);
+        }
+    }
+
+    /// <summary>
+    /// Handler that throws TaskCanceledException as if HttpClient hit its own timeout
+    /// (i.e., not because the caller's CancellationToken was cancelled). This is the
+    /// shape BapEnvironmentService translates to Auth.BapApiTimeout.
+    /// </summary>
+    private class TimeoutMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new TaskCanceledException("Simulated HttpClient timeout.");
         }
     }
 }

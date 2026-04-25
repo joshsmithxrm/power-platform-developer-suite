@@ -90,9 +90,13 @@ public sealed class DiscoveredEnvironment
     /// <summary>
     /// Gets the environment type as a string.
     /// Maps from Microsoft.Xrm.Sdk.Organization.OrganizationType enum values.
+    /// Sentinels -1 / -2 are produced by BAP discovery (see BapEnvironmentService.MapEnvironmentSku)
+    /// to distinguish a "Default" environment and an unrecognized SKU from a real Production org.
     /// </summary>
     public string EnvironmentType => OrganizationType switch
     {
+        -2 => "Unknown",         // BAP SKU not in known list
+        -1 => "Default",         // BAP "Default" SKU (no Dataverse instance)
         0 => "Production",       // Customer
         5 => "Sandbox",          // CustomerTest
         6 => "Sandbox",          // CustomerFreeTest

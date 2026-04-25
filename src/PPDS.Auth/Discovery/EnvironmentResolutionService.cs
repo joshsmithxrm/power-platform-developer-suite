@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -135,6 +136,10 @@ public sealed class EnvironmentResolutionService : IDisposable
 
             return EnvironmentResolutionResult.Succeeded(envInfo, ResolutionMethod.DirectConnection);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return EnvironmentResolutionResult.Failed($"Direct connection failed: {ex.Message}");
@@ -166,7 +171,8 @@ public sealed class EnvironmentResolutionService : IDisposable
             if (resolved == null)
             {
                 return EnvironmentResolutionResult.Failed(
-                    $"Environment '{identifier}' not found. Use 'ppds env list' to see available environments.");
+                    BuildEnvironmentNotFoundMessage(identifier, environments),
+                    AuthErrorCodes.EnvironmentNotFound);
             }
 
             var envInfo = new EnvironmentInfo
@@ -175,12 +181,20 @@ public sealed class EnvironmentResolutionService : IDisposable
                 DisplayName = resolved.FriendlyName,
                 UniqueName = resolved.UniqueName,
                 EnvironmentId = resolved.EnvironmentId,
-                OrganizationId = resolved.Id.ToString(),
+                OrganizationId = resolved.Id != Guid.Empty ? resolved.Id.ToString() : null,
                 Type = resolved.EnvironmentType,
                 Region = resolved.Region
             };
 
             return EnvironmentResolutionResult.Succeeded(envInfo, ResolutionMethod.GlobalDiscovery);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (AuthenticationException ex)
+        {
+            return EnvironmentResolutionResult.Failed($"Global Discovery failed: {ex.Message}", ex.ErrorCode);
         }
         catch (Exception ex)
         {
@@ -197,7 +211,7 @@ public sealed class EnvironmentResolutionService : IDisposable
     {
         try
         {
-            using var service = await BapEnvironmentService.FromProfileAsync(_profile, _credentialStore)
+            using var service = await BapEnvironmentService.FromProfileAsync(_profile, _credentialStore, cancellationToken)
                 .ConfigureAwait(false);
             var environments = await service.DiscoverEnvironmentsAsync(cancellationToken);
 
@@ -214,7 +228,8 @@ public sealed class EnvironmentResolutionService : IDisposable
             if (resolved == null)
             {
                 return EnvironmentResolutionResult.Failed(
-                    $"Environment '{identifier}' not found. Use 'ppds env list' to see available environments.");
+                    BuildEnvironmentNotFoundMessage(identifier, environments),
+                    AuthErrorCodes.EnvironmentNotFound);
             }
 
             var envInfo = new EnvironmentInfo
@@ -223,17 +238,28 @@ public sealed class EnvironmentResolutionService : IDisposable
                 DisplayName = resolved.FriendlyName,
                 UniqueName = resolved.UniqueName,
                 EnvironmentId = resolved.EnvironmentId,
-                OrganizationId = resolved.Id.ToString(),
+                OrganizationId = resolved.Id != Guid.Empty ? resolved.Id.ToString() : null,
                 Type = resolved.EnvironmentType,
                 Region = resolved.Region
             };
 
             return EnvironmentResolutionResult.Succeeded(envInfo, ResolutionMethod.BapDiscovery);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (AuthenticationException ex) when (ex.ErrorCode == AuthErrorCodes.BapApiForbidden)
         {
             return EnvironmentResolutionResult.Failed(
-                $"BAP API access denied. {ex.Message}");
+                $"BAP API access denied. {ex.Message}",
+                AuthErrorCodes.BapApiForbidden);
+        }
+        catch (AuthenticationException ex)
+        {
+            return EnvironmentResolutionResult.Failed(
+                $"BAP Environment Discovery failed: {ex.Message}",
+                ex.ErrorCode);
         }
         catch (Exception ex)
         {
@@ -241,19 +267,38 @@ public sealed class EnvironmentResolutionService : IDisposable
         }
     }
 
+    internal static string BuildEnvironmentNotFoundMessage(
+        string identifier,
+        System.Collections.Generic.IReadOnlyList<DiscoveredEnvironment> environments)
+    {
+        if (environments.Count == 0)
+        {
+            return $"Environment '{identifier}' not found. No environments are visible to this principal.";
+        }
+
+        const int MaxNames = 10;
+        var names = environments
+            .Select(e => e.FriendlyName)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Take(MaxNames)
+            .ToList();
+        var list = string.Join(", ", names);
+        var suffix = environments.Count > MaxNames ? $", … (+{environments.Count - MaxNames} more)" : string.Empty;
+        return $"Environment '{identifier}' not found. Available: {list}{suffix}.";
+    }
+
     /// <summary>
     /// Checks if the identifier looks like a URL.
     /// </summary>
     private static bool IsUrl(string identifier)
     {
-        // Check for common URL patterns
-        if (identifier.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            identifier.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        if (Uri.TryCreate(identifier, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
         {
             return true;
         }
 
-        // Check for hostname patterns like "org.crm.dynamics.com"
+        // Hostname pattern with no scheme (e.g., "org.crm.dynamics.com").
         if (identifier.Contains(".crm", StringComparison.OrdinalIgnoreCase) &&
             identifier.Contains(".dynamics.com", StringComparison.OrdinalIgnoreCase))
         {
@@ -348,6 +393,12 @@ public sealed class EnvironmentResolutionResult
     /// </summary>
     public string? ErrorMessage { get; private init; }
 
+    /// <summary>
+    /// Gets the structured error code carried from the underlying failure (null if successful or unknown).
+    /// Values come from <see cref="AuthErrorCodes"/>.
+    /// </summary>
+    public string? ErrorCode { get; private init; }
+
     private EnvironmentResolutionResult() { }
 
     /// <summary>
@@ -366,12 +417,13 @@ public sealed class EnvironmentResolutionResult
     /// <summary>
     /// Creates a failed result.
     /// </summary>
-    public static EnvironmentResolutionResult Failed(string errorMessage)
+    public static EnvironmentResolutionResult Failed(string errorMessage, string? errorCode = null)
     {
         return new EnvironmentResolutionResult
         {
             Success = false,
-            ErrorMessage = errorMessage
+            ErrorMessage = errorMessage,
+            ErrorCode = errorCode
         };
     }
 }

@@ -73,10 +73,12 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
     /// </summary>
     /// <param name="profile">The auth profile (must use ClientSecret, CertificateFile, or CertificateStore).</param>
     /// <param name="credentialStore">Optional credential store for retrieving stored secrets.</param>
+    /// <param name="cancellationToken">Cancellation token for the credential store lookup.</param>
     /// <returns>A new BapEnvironmentService instance. Caller must dispose.</returns>
     public static async Task<BapEnvironmentService> FromProfileAsync(
         AuthProfile profile,
-        ISecureCredentialStore? credentialStore = null)
+        ISecureCredentialStore? credentialStore = null,
+        CancellationToken cancellationToken = default)
     {
         if (profile == null)
             throw new ArgumentNullException(nameof(profile));
@@ -103,7 +105,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                 string? clientSecret = null;
                 if (credentialStore != null && profile.ApplicationId != null)
                 {
-                    var stored = await credentialStore.GetAsync(profile.ApplicationId).ConfigureAwait(false);
+                    var stored = await credentialStore.GetAsync(profile.ApplicationId, cancellationToken).ConfigureAwait(false);
                     clientSecret = stored?.ClientSecret;
                 }
 
@@ -132,7 +134,7 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                 string? certPassword = null;
                 if (credentialStore != null && profile.ApplicationId != null)
                 {
-                    var stored = await credentialStore.GetAsync(profile.ApplicationId).ConfigureAwait(false);
+                    var stored = await credentialStore.GetAsync(profile.ApplicationId, cancellationToken).ConfigureAwait(false);
                     certPassword = stored?.CertificatePassword;
                 }
 
@@ -152,13 +154,10 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
                 if (string.IsNullOrEmpty(profile.CertificateThumbprint))
                     throw new AuthenticationException("Certificate thumbprint not configured.", AuthErrorCodes.BapApiError);
 
-                var storeName = StoreName.My;
-                var storeLocation = StoreLocation.CurrentUser;
-
-                if (!string.IsNullOrEmpty(profile.CertificateStoreName))
-                    Enum.TryParse(profile.CertificateStoreName, out storeName);
-                if (!string.IsNullOrEmpty(profile.CertificateStoreLocation))
-                    Enum.TryParse(profile.CertificateStoreLocation, out storeLocation);
+                var storeName = ParseStoreEnum<StoreName>(
+                    profile.CertificateStoreName, StoreName.My, "CertificateStoreName");
+                var storeLocation = ParseStoreEnum<StoreLocation>(
+                    profile.CertificateStoreLocation, StoreLocation.CurrentUser, "CertificateStoreLocation");
 
                 using var store = new X509Store(storeName, storeLocation);
                 store.Open(OpenFlags.ReadOnly);
@@ -326,6 +325,8 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
 
     private static int MapEnvironmentSku(string? sku)
     {
+        // -1 = Default, -2 = unknown SKU. Distinct sentinels so unknown SKUs don't get
+        // silently re-classified as Production (0) by DiscoveredEnvironment.EnvironmentType.
         return sku switch
         {
             "Production" => 0,
@@ -333,8 +334,23 @@ public sealed class BapEnvironmentService : IEnvironmentDiscoveryService, IDispo
             "Developer" => 6,
             "Trial" => 11,
             "Default" => -1,
-            _ => 0
+            _ => -2
         };
+    }
+
+    private static T ParseStoreEnum<T>(string? value, T fallback, string fieldName)
+        where T : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        if (Enum.TryParse<T>(value.Trim(), ignoreCase: true, out var parsed))
+            return parsed;
+
+        throw new AuthenticationException(
+            $"{fieldName} '{value}' is not a valid {typeof(T).Name}. " +
+            $"Allowed values: {string.Join(", ", Enum.GetNames(typeof(T)))}.",
+            AuthErrorCodes.BapApiError);
     }
 
     /// <inheritdoc />

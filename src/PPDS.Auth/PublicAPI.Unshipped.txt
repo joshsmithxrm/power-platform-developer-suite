@@ -10,7 +10,10 @@ PPDS.Auth.Discovery.BapEnvironmentService.BapEnvironmentService(System.Net.Http.
 PPDS.Auth.Discovery.BapEnvironmentService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
 PPDS.Auth.Discovery.BapEnvironmentService.Dispose() -> void
 static PPDS.Auth.Discovery.BapEnvironmentService.SupportsAuthMethod(PPDS.Auth.Profiles.AuthMethod authMethod) -> bool
-static PPDS.Auth.Discovery.BapEnvironmentService.FromProfileAsync(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null) -> System.Threading.Tasks.Task<PPDS.Auth.Discovery.BapEnvironmentService!>!
+static PPDS.Auth.Discovery.BapEnvironmentService.FromProfileAsync(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Discovery.BapEnvironmentService!>!
+PPDS.Auth.Discovery.EnvironmentResolutionResult.ErrorCode.get -> string?
+*REMOVED*static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
+static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage, string? errorCode = null) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
 PPDS.Auth.Discovery.IEnvironmentDiscoveryService
 PPDS.Auth.Discovery.IEnvironmentDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
 static PPDS.Auth.Cloud.CloudEndpoints.GetBapApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!

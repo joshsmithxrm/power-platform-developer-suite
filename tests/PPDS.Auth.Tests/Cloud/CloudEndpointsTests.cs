@@ -102,8 +102,14 @@ public class CloudEndpointsTests
     [InlineData("USGOV", CloudEnvironment.UsGov)]
     [InlineData("usgov", CloudEnvironment.UsGov)]
     [InlineData("USGOVHIGH", CloudEnvironment.UsGovHigh)]
+    [InlineData("usgovhigh", CloudEnvironment.UsGovHigh)]
+    [InlineData("UsGovHigh", CloudEnvironment.UsGovHigh)]
     [InlineData("USGOVDOD", CloudEnvironment.UsGovDod)]
+    [InlineData("usgovdod", CloudEnvironment.UsGovDod)]
+    [InlineData("UsGovDod", CloudEnvironment.UsGovDod)]
     [InlineData("CHINA", CloudEnvironment.China)]
+    [InlineData("china", CloudEnvironment.China)]
+    [InlineData("China", CloudEnvironment.China)]
     public void Parse_ValidValue_ReturnsCorrectCloud(string value, CloudEnvironment expected)
     {
         var result = CloudEndpoints.Parse(value);

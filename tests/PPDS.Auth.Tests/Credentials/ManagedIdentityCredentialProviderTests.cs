@@ -24,6 +24,7 @@ public class ManagedIdentityCredentialProviderTests
 
         provider.AuthMethod.Should().Be(AuthMethod.ManagedIdentity);
         provider.Identity.Should().Be("my-client-id");
+        provider.TenantId.Should().BeNull();
     }
 
     [Fact]

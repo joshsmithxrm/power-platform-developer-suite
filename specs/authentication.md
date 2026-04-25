@@ -133,12 +133,12 @@ The authentication system provides secure credential management, multi-method au
 
 **Environment Discovery (SPN — BAP API):**
 
-1. **Create BapEnvironmentService**: From profile with non-interactive auth method (ClientSecret, CertificateFile, CertificateStore, ManagedIdentity, GitHubFederated, AzureDevOpsFederated)
+1. **Create BapEnvironmentService**: From profile with confidential-client auth (ClientSecret, CertificateFile, CertificateStore). MSAL `IConfidentialClientApplication` is required; federated, managed-identity, and ROPC flows are not supported by this service today.
 2. **Acquire token**: MSAL confidential client with scope `https://api.bap.microsoft.com/.default`
 3. **Call BAP API**: `GET {CloudEndpoints.GetBapApiUrl(cloud)}/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2020-10-01`
 4. **Map results**: Parse JSON response to `DiscoveredEnvironment`:
    - `name` → `EnvironmentId`
-   - `properties.displayName` → `FriendlyName`
+   - `properties.linkedEnvironmentMetadata.friendlyName` → `FriendlyName` (fallback: `properties.displayName` if missing)
    - `properties.linkedEnvironmentMetadata.instanceUrl` → `ApiUrl`
    - `properties.linkedEnvironmentMetadata.uniqueName` → `UniqueName`
    - `properties.linkedEnvironmentMetadata.domainName` → `UrlName`
@@ -153,8 +153,8 @@ The authentication system provides secure credential management, multi-method au
 
 1. **URL provided** → direct connection (no discovery needed)
 2. **Name/ID + interactive auth** (InteractiveBrowser, DeviceCode) → Global Discovery Service
-3. **Name/ID + non-interactive auth** (ClientSecret, CertificateFile, CertificateStore, ManagedIdentity, GitHubFederated, AzureDevOpsFederated) → BAP Environment Service
-4. **Name/ID + UsernamePassword** → BAP Environment Service (ROPC is non-interactive despite being user-delegated; Global Discovery does not support it)
+3. **Name/ID + confidential-client auth** (ClientSecret, CertificateFile, CertificateStore) → BAP Environment Service
+4. **Name/ID + any other auth method** (UsernamePassword, ManagedIdentity, GitHubFederated, AzureDevOpsFederated) → returns a helpful error directing the caller to provide a full environment URL or switch to a supported auth method (no name-based discovery available today)
 5. **Name matching**: case-insensitive match on `FriendlyName` or `UniqueName`; exact match preferred, partial match throws `AmbiguousMatchException` if multiple candidates
 
 **Environment Variable Authentication (Stateless):**
@@ -629,7 +629,7 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 (flips ✅ on green CI matrix) |
 | AC-15 | `BapEnvironmentService.DiscoverEnvironmentsAsync` returns environments with correct FriendlyName, ApiUrl, UniqueName, EnvironmentId, Region, State, and OrganizationType from BAP API JSON | `BapEnvironmentServiceTests.DiscoverEnvironments_MapsJsonToDiscoveredEnvironments` | ✅ |
 | AC-16 | `BapEnvironmentService` skips environments without `linkedEnvironmentMetadata` (no Dataverse instance) | `BapEnvironmentServiceTests.DiscoverEnvironments_SkipsNonDataverseEnvironments` | ✅ |
-| AC-17 | `BapEnvironmentService` throws `PpdsException` with `Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | ✅ |
+| AC-17 | `BapEnvironmentService` throws `AuthenticationException` with `ErrorCode = Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | ✅ |
 | AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | ✅ |
 | AC-19 | BAP discovery returns environments for SPN with management app registration | `BapDiscoveryIntegrationTests.BapEnvironmentService_DiscoversEnvironments` (Category=Integration) | ✅ |
 | AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | ✅ |
@@ -642,7 +642,11 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_SupportsGlobalDiscovery` | ✅ |
 | AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlIdentifier_AttemptsDirectConnection` | ✅ |
 | AC-29 | BAP-discovered environments resolve by name case-insensitively matching FriendlyName or UniqueName | `EnvironmentResolverTests.Resolve_ByFriendlyNameCaseInsensitive_ReturnsEnvironment`, `Resolve_ByUniqueNameCaseInsensitive_ReturnsEnvironment` | ✅ |
-| AC-30 | BAP API 401 response throws `PpdsException` with `Auth.BapApiUnauthorized` | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnUnauthorized` | ✅ |
+| AC-30 | BAP API 401 response throws `AuthenticationException` with `ErrorCode = Auth.BapApiUnauthorized` | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnUnauthorized` | ✅ |
+| AC-31 | BAP API 5xx / unexpected status throws `AuthenticationException` with `ErrorCode = Auth.BapApiError` (status code included in the message) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnServerError` | ✅ |
+| AC-32 | BAP API request that times out (non-cancelled `TaskCanceledException`) throws `AuthenticationException` with `ErrorCode = Auth.BapApiTimeout` wrapping the inner timeout | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnTimeout` | ✅ |
+| AC-33 | BAP API request whose `CancellationToken` is already cancelled propagates `OperationCanceledException` (no swallow into `Auth.BapApiTimeout`) | `BapEnvironmentServiceTests.DiscoverEnvironments_PropagatesCancellation_WhenTokenCancelled` | ✅ |
+| AC-34 | `EnvironmentResolutionResult.Failed` carries a structured `ErrorCode`; "name not found" branches set `Auth.EnvironmentNotFound` and the message lists the available names | `EnvironmentResolutionTests.EnvironmentNotFoundMessage_ListsAvailableNames`, `EnvironmentResolutionResultTests.Failed_PreservesErrorCode` | ✅ |
 
 ### Edge Cases
 
@@ -658,14 +662,14 @@ public class MyCredentialProvider : ICredentialProvider
 | Env vars set + `--profile` flag | Both present | Env vars win (highest priority) |
 | `PPDS_ENVIRONMENT_URL` missing scheme | `myorg.crm.dynamics.com` | `PpdsException` with `Auth.InvalidEnvironmentUrl` — must be full URL with `https://` |
 | Env var values are whitespace | `PPDS_CLIENT_ID=" "` | Treated as not set (trimmed) |
-| BAP API 403 (SPN not registered) | SPN without management app registration | `PpdsException` with `Auth.BapApiForbidden` and guidance to run `New-PowerAppManagementApp` |
+| BAP API 403 (SPN not registered) | SPN without management app registration | `AuthenticationException` with `ErrorCode = Auth.BapApiForbidden` and guidance to run `New-PowerAppManagementApp` |
 | BAP API returns no Dataverse environments | All environments are default/non-Dataverse | Empty list returned (no match possible) |
 | BAP API exact name matches multiple | Two environments with identical FriendlyName "QA" | First exact match returned (rare — BAP returns deterministic order) |
 | BAP API partial name matches multiple | Input "QA" matches "QA Dev" and "QA Test" | `AmbiguousMatchException` listing matching environment names |
-| BAP API network timeout | Endpoint unreachable | `PpdsException` with `Auth.BapApiTimeout` wrapping inner `TimeoutException` |
-| BAP API 401 (invalid token) | Expired or malformed SPN token | `PpdsException` with `Auth.BapApiUnauthorized` |
-| BAP API 429/5xx (transient) | Rate limited or server error | `PpdsException` with `Auth.BapApiError` including status code |
-| BAP name not found | `--environment "Staging"` but no match | `PpdsException` with `Auth.EnvironmentNotFound` listing available names |
+| BAP API network timeout | Endpoint unreachable | `AuthenticationException` with `ErrorCode = Auth.BapApiTimeout` wrapping inner `TaskCanceledException` |
+| BAP API 401 (invalid token) | Expired or malformed SPN token | `AuthenticationException` with `ErrorCode = Auth.BapApiUnauthorized` |
+| BAP API 429/5xx (transient) | Rate limited or server error | `AuthenticationException` with `ErrorCode = Auth.BapApiError` including status code |
+| BAP name not found | `--environment "Staging"` but no match | `EnvironmentResolutionResult.Failed` with `ErrorCode = Auth.EnvironmentNotFound`; the message lists the available environment names |
 
 ### Test Examples
 

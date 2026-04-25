@@ -1,5 +1,7 @@
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using PPDS.Auth;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using Xunit;
@@ -70,6 +72,25 @@ public class EnvironmentResolutionTests
     }
 
     [Theory]
+    [InlineData(AuthMethod.InteractiveBrowser)]
+    [InlineData(AuthMethod.DeviceCode)]
+    public async Task Interactive_NameIdentifier_RoutesGlobalDiscovery(AuthMethod authMethod)
+    {
+        // Verifies the routing path actually executes for AC-27: an interactive auth method
+        // with a name (not URL) identifier should attempt Global Discovery, not BAP.
+        var profile = new AuthProfile { AuthMethod = authMethod };
+        using var service = new EnvironmentResolutionService(profile);
+
+        var result = await service.ResolveAsync("MyEnvironment");
+
+        result.Success.Should().BeFalse(because: "GDS will fail without real credentials");
+        result.ErrorMessage.Should().Contain("Global Discovery",
+            because: $"{authMethod} should route to GDS for name-based resolution");
+        result.ErrorMessage.Should().NotContain("BAP",
+            because: "interactive auth must not fall through to BAP discovery");
+    }
+
+    [Theory]
     [InlineData("https://org.crm.dynamics.com")]
     [InlineData("https://myorg.crm4.dynamics.com")]
     public async Task UrlIdentifier_AttemptsDirectConnection(string url)
@@ -100,5 +121,52 @@ public class EnvironmentResolutionTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("required");
+    }
+
+    [Fact]
+    public void EnvironmentNotFoundMessage_ListsAvailableNames()
+    {
+        // AC-34: not-found branch lists the available environment names.
+        var environments = new[]
+        {
+            new DiscoveredEnvironment { FriendlyName = "QA Dev" },
+            new DiscoveredEnvironment { FriendlyName = "QA Test" },
+            new DiscoveredEnvironment { FriendlyName = "Prod" },
+        };
+
+        var message = EnvironmentResolutionService.BuildEnvironmentNotFoundMessage(
+            "Staging", environments);
+
+        message.Should().Contain("'Staging'");
+        message.Should().Contain("not found");
+        message.Should().Contain("QA Dev");
+        message.Should().Contain("QA Test");
+        message.Should().Contain("Prod");
+    }
+
+    [Fact]
+    public void EnvironmentNotFoundMessage_HandlesEmptyList()
+    {
+        var message = EnvironmentResolutionService.BuildEnvironmentNotFoundMessage(
+            "Staging", Array.Empty<DiscoveredEnvironment>());
+
+        message.Should().Contain("'Staging'");
+        message.Should().Contain("not found");
+        message.Should().Contain("No environments");
+    }
+
+    [Fact]
+    public void EnvironmentNotFoundMessage_TruncatesLongLists()
+    {
+        var environments = Enumerable.Range(0, 25)
+            .Select(i => new DiscoveredEnvironment { FriendlyName = $"Env-{i}" })
+            .ToArray();
+
+        var message = EnvironmentResolutionService.BuildEnvironmentNotFoundMessage(
+            "Staging", environments);
+
+        message.Should().Contain("Env-0");
+        message.Should().Contain("Env-9");
+        message.Should().Contain("(+15 more)");
     }
 }

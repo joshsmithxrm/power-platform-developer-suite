@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Threading;
 using FluentAssertions;
 using Microsoft.Identity.Client;
 using PPDS.Auth.Cloud;
@@ -9,7 +10,7 @@ using Xunit;
 namespace PPDS.LiveTests.Authentication;
 
 [Trait("Category", "Integration")]
-public class BapDiscoveryIntegrationTests : LiveTestBase, IDisposable
+public class BapDiscoveryIntegrationTests : LiveTestBase
 {
     [SkipIfNoClientSecret]
     public async Task BapEnvironmentService_DiscoversEnvironments()
@@ -24,8 +25,9 @@ public class BapDiscoveryIntegrationTests : LiveTestBase, IDisposable
             .WithClientSecret(Configuration.ClientSecret)
             .Build();
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var httpClient = new HttpClient();
-        var service = new BapEnvironmentService(
+        using var service = new BapEnvironmentService(
             httpClient,
             bapApiUrl,
             async ct =>
@@ -36,7 +38,7 @@ public class BapDiscoveryIntegrationTests : LiveTestBase, IDisposable
                 return result.AccessToken;
             });
 
-        var environments = await service.DiscoverEnvironmentsAsync();
+        var environments = await service.DiscoverEnvironmentsAsync(cts.Token);
 
         environments.Should().NotBeEmpty("the SPN should have access to at least one environment");
 
@@ -45,9 +47,5 @@ public class BapDiscoveryIntegrationTests : LiveTestBase, IDisposable
             env.FriendlyName.Should().NotBeNullOrWhiteSpace();
             env.ApiUrl.Should().NotBeNullOrWhiteSpace();
         }
-    }
-
-    public void Dispose()
-    {
     }
 }
