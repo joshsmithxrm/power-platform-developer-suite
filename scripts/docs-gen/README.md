@@ -20,7 +20,7 @@ All four emit deterministic, byte-identical output on repeat runs (AC-19). All t
 | [`PPDS.DocsGen.Common/`](./PPDS.DocsGen.Common/) | Shared C# library: `IReferenceGenerator`, `MdxEscape`, `BannerHelper` |
 | [`smoke/`](./smoke/) | CI tool — extracts fenced `csharp` blocks from ppds-docs guides, wraps in one of three forms (complete file / top-level statements / method body), compiles via Roslyn |
 | [`lint-extension-contributions.js`](./lint-extension-contributions.js) | Pre-commit check — every `contributes.commands` entry in the extension's `package.json` has `title` + `category` |
-| [`app-token/`](./app-token/) | C# console helper — mints a GitHub App installation token for cross-repo PR creation |
+| [`app-token/`](./app-token/) | C# console helper — mints a GitHub App installation token (superseded by `actions/create-github-app-token@v3` in the workflow; retained for local debugging) |
 | [`compute-rollover-diff.sh`](./compute-rollover-diff.sh) | Moves `PublicAPI.Unshipped.txt` entries to `PublicAPI.Shipped.txt` at release time |
 | [`check-open-rollover.sh`](./check-open-rollover.sh) | Aborts a release when a prior rollover PR is still open |
 | [`compute-surface-summary.sh`](./compute-surface-summary.sh) | Produces the release-PR body listing added/removed/modified public API |
@@ -68,7 +68,9 @@ The Phase 0 triage decides per type whether it's **customer-facing** (annotate f
 
 ## GitHub App setup (release workflow)
 
-The release workflow (`.github/workflows/docs-release.yml`) uses a GitHub App to open cross-repo PRs in ppds-docs. Setup is a **one-time** step per repo admin:
+The release workflow (`.github/workflows/docs-release.yml`) uses a GitHub App to open cross-repo PRs in ppds-docs. The workflow uses [`actions/create-github-app-token@v3`](https://github.com/actions/create-github-app-token) to mint short-lived installation tokens — no custom token logic needed.
+
+Setup is a **one-time** step per repo admin:
 
 1. **Create the App** — Settings → Developer settings → GitHub Apps → New GitHub App
    - Name: `ppds-docs-bot`
@@ -80,9 +82,10 @@ The release workflow (`.github/workflows/docs-release.yml`) uses a GitHub App to
    - Subscribe to no events (the app is polled, not pushed)
 2. **Generate private key** — scroll to "Private keys" → "Generate a private key" — download the `.pem` file and keep it secret.
 3. **Install on both repos** — from the App's public page, click "Install" and select `joshsmithxrm/ppds` and `joshsmithxrm/ppds-docs`.
-4. **Store secrets in the ppds repo:**
-   - `PPDS_DOCS_APP_ID` (Actions secret) — the numeric App ID (public value; stored as secret for consistency)
-   - `PPDS_DOCS_APP_PRIVATE_KEY` (Actions secret) — the full PEM contents, including `-----BEGIN RSA PRIVATE KEY-----` / `-----END RSA PRIVATE KEY-----`
+4. **Store in the ppds repo:**
+   - `PPDS_DOCS_APP_ID` (Actions **variable**, not secret) — the numeric App ID (public value). Set via Settings → Secrets and variables → Actions → Variables tab.
+   - `PPDS_DOCS_APP_PRIVATE_KEY` (Actions **secret**) — the full PEM contents, including `-----BEGIN RSA PRIVATE KEY-----` / `-----END RSA PRIVATE KEY-----`
+   - `PPDS_DOCS_REPO` (Actions **variable**) — owner/name of the docs repo (e.g. `joshsmithxrm/ppds-docs`)
 5. **Verify** — re-run `docs-release.yml` with `workflow_dispatch: dry_run=false` and confirm a PR lands in ppds-docs.
 
 If the App private key is ever compromised: generate a new one in the App settings, update `PPDS_DOCS_APP_PRIVATE_KEY`, delete the old key. No code change required.

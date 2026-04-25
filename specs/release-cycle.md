@@ -1,8 +1,8 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-04-24
-**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py)
+**Last Updated:** 2026-04-25
+**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
 ---
@@ -192,12 +192,39 @@ A merged PR does NOT warrant `release:patch`:
 3. **If >8 weeks and >0 unreleased commits**: opens issue titled "Release check-in: {N} commits unreleased, {W} weeks since last release"
 4. **Maintainer triages**: release now, defer with reason, or close as not-needed
 
+### Tag Convention
+
+PPDS uses **two layers of git tags** with distinct purposes:
+
+| Tag type | Pattern | Purpose | Trigger |
+|----------|---------|---------|---------|
+| Per-package | `{Package}-v{version}` | Source of truth for package versions (MinVer); triggers publishing workflows | `publish-nuget.yml`, `release-cli.yml`, `extension-publish.yml` |
+| Unified | `v{version}` | Trigger for docs generation; marks the coordinated release point | `docs-release.yml` |
+
+**Per-package tags** are always pushed — one per package that has changes. These drive MinVer version resolution and trigger the appropriate CI publishing workflows.
+
+**Unified tags** are pushed only for coordinated releases (minor/stable). They trigger `docs-release.yml` which regenerates reference documentation and opens a paired PR in ppds-docs. Patches do not push unified tags because docs don't regenerate for single-package fixes.
+
+**Examples:**
+
+```
+# Minor release — all packages + unified tag:
+Auth-v1.1.0  Cli-v1.1.0  Dataverse-v1.1.0  ...  v1.1.0
+
+# Patch release — single package only, no unified tag:
+Query-v1.0.1
+
+# Prerelease — all packages, optional unified tag:
+Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
+```
+
 ### Constraints
 
 - Tag push is irreversible — never auto-tag or auto-publish
 - Per-package patching must not require re-releasing unaffected packages
-- Extension publish remains manual dispatch (documented workaround for GitHub Actions limitation)
+- Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
+- Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the `/release` skill's pre-merge verification step
 
 ---
 
@@ -217,6 +244,10 @@ A merged PR does NOT warrant `release:patch`:
 | AC-10 | `post-merge-release-check.yml` opens an issue with "unknown package" warning when a `release:patch` PR touches no recognized `src/PPDS.*` paths | `tests/ci/test_post_merge_release_check.py::test_unknown_package_warning` | ✅ |
 | AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | ✅ |
 | AC-12 | `post-merge-release-check.yml` identifies multiple affected packages when a `release:patch` PR touches paths in more than one package | `tests/ci/test_post_merge_release_check.py::test_multi_package_detection` | ✅ |
+| AC-13 | `/release` skill enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_skill_content.py::test_security_review_gate_documented` | ✅ |
+| AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
+| AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
+| AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
 
 ### Edge Cases
 
@@ -302,4 +333,5 @@ A merged PR does NOT warrant `release:patch`:
 
 | Date | Change |
 |------|--------|
+| 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
 | 2026-04-24 | Initial spec |

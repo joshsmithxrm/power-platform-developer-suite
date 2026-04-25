@@ -32,7 +32,7 @@ Before starting:
 
 1. **All in-flight PRs are merged or explicitly deferred.** Running a release with open feature PRs means either you forget to include them or you rush-merge. Decide first.
 2. **No broken CI on `main`.** Check `gh run list --branch main --limit 5`. If CI is red, fix first.
-3. **Security review done for stable releases.** Prereleases can skip; stable must have a recent security audit of the diff since the last stable.
+3. **Security review done for stable releases (enforced).** Prereleases can skip; stable (`vX.Y.0`) **must** have a completed `/security-review` artifact at `docs/qa/security-review-*.md` covering the diff since the last stable release. The pre-merge verification step (Step 6) checks for this file — the release **cannot proceed** without it. Patches (`vX.Y.Z` where Z > 0) do not require a security review.
 4. **Known the last release commit and/or tags.** The CHANGELOG enumeration is "since when?". Grab the previous release commit hash:
    ```bash
    git log --grep='chore(release)' --oneline -5
@@ -183,9 +183,21 @@ dotnet list package --vulnerable
 
 **All must be green. No exceptions.**
 
+#### Security Review Gate (stable releases only)
+
+For stable releases (`vX.Y.0`), verify a completed security review artifact exists:
+
+```bash
+# Must find at least one matching file — if empty, STOP and run /security-review first
+ls docs/qa/security-review-*.md
+```
+
+The security review must cover the delta since the last stable release. If no artifact exists, run `/security-review` before proceeding. **This gate is not enforced for patches or prereleases.**
+
 Spot-check:
 - Per-package CHANGELOGs: scan for fabricated PR numbers (`gh pr view NNN` should work for each cited PR)
 - Extension `package.json` and `package-lock.json` version match
+- For stable releases: confirm the security review artifact exists at `docs/qa/security-review-*.md` and covers the current release delta
 - For stable releases: confirm any "What's new" doc (e.g., `docs/whats-new-v<major>.md` if present) reflects the final feature list
 
 ### 7. Open Release PR
@@ -259,6 +271,32 @@ done
 
 **Tag prefixes must match MinVer config** in each csproj's `<MinVerTagPrefix>`. Deviations will produce wrong versions.
 
+#### Unified v* Tag (minor/stable releases only)
+
+After pushing all per-package tags, push a **unified version tag** to trigger docs generation:
+
+```bash
+# For minor/stable releases: push a unified tag that triggers docs-release.yml
+git tag v<version>   # e.g. v1.1.0
+git push origin "refs/tags/v<version>"
+```
+
+**When to push a unified `v*` tag:**
+
+| Release type | Unified tag? | Example | Triggers |
+|---|---|---|---|
+| Minor (coordinated) | **Yes** — `vX.Y.0` | `v1.1.0` | `docs-release.yml` → regenerate reference docs, open ppds-docs PR |
+| Stable (coordinated) | **Yes** — `vX.Y.0` | `v1.0.0` | Same as minor |
+| Prerelease (coordinated) | **Optional** — `vX.Y.0-beta.N` | `v1.1.0-beta.3` | `docs-release.yml` dry-run preview only (if desired) |
+| Patch (single-package) | **No** | — | Per-package tags only; docs don't regenerate for patches |
+
+The unified tag is **not used for versioning** — it is purely a trigger for `docs-release.yml`. Per-package tags (`Auth-v*`, `Cli-v*`, etc.) remain the source of truth for package versions via MinVer.
+
+**Relationship between tag types:**
+
+- **Per-package tags** (e.g., `Auth-v1.1.0`, `Cli-v1.1.0`): trigger publishing workflows (`publish-nuget.yml`, `release-cli.yml`, `extension-publish.yml`). One per package, versioned independently.
+- **Unified tag** (e.g., `v1.1.0`): triggers `docs-release.yml` which regenerates reference documentation and opens a PR in ppds-docs. One per coordinated release.
+
 ### 9. Monitor CI Workflow Runs
 
 Tags trigger different workflows:
@@ -267,7 +305,7 @@ Tags trigger different workflows:
 |---|---|---|
 | `Auth-v*`, `Dataverse-v*`, `Migration-v*`, `Query-v*`, `Mcp-v*`, `Plugins-v*` | `publish-nuget.yml` | NuGet.org packages |
 | `Cli-v*` | `publish-nuget.yml` + `release-cli.yml` | NuGet tool package + multi-platform binaries (win-x64/arm64, osx-x64/arm64, linux-x64) + draft GitHub release published |
-| `Extension-v*` | `extension-publish.yml` (**requires manual dispatch** — does NOT auto-chain from CLI release) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). One target failing does not fail the rest. Dispatch with: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable` (or `-f channel=pre-release`). |
+| `Extension-v*` | `extension-publish.yml` (auto-dispatches on tag push; channel inferred from odd/even minor) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). Manual override: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable`. |
 
 **Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
 
@@ -284,9 +322,10 @@ gh run list --limit 20 --json status,conclusion,createdAt,displayTitle,workflowN
 ```
 
 Expected sequence (typical timing):
-1. 7 `publish-nuget.yml` runs start within seconds of `git push --tags` — ~3–5 min each
+1. 7 `publish-nuget.yml` runs start within seconds of tag push — ~3–5 min each
 2. `release-cli.yml` runs in parallel — builds binaries on 3 OSes — ~8–15 min
-3. `extension-publish.yml` must be manually dispatched with the Extension tag ref (it does NOT auto-chain from the CLI release). Use `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=<stable|pre-release>`.
+3. `extension-publish.yml` auto-dispatches on `Extension-v*` tag push — ~10–15 min. Channel (pre-release vs stable) is inferred from the tag version (odd minor = pre-release, even minor = stable). Manual override available via `gh workflow run extension-publish.yml --ref Extension-v<version> -f channel=<stable|pre-release>`.
+4. `docs-release.yml` fires on the unified `v*` tag push (if pushed) — opens paired PRs in ppds-docs and this repo.
 
 ### 10. Verify Publishes
 
@@ -461,17 +500,17 @@ tag_name was used by an immutable release
 
 **Prevention:** Don't manually create GitHub releases. Let `release-cli.yml` own that. If a previous release for this tag partially succeeded, delete the draft before re-pushing.
 
-### Gotcha 2: Extension publish does NOT auto-chain from CLI release
+### Gotcha 2: Extension publish — auto-dispatch on tag push
 
-**Symptom:** `extension-publish.yml` never fires even though the `Extension-v*` tag was pushed and the CLI release was published.
+**Current behavior:** `extension-publish.yml` triggers automatically when an `Extension-v*` tag is pushed. The workflow infers the release channel from the tag version (odd minor = pre-release, even minor = stable).
 
-**Cause:** The workflow's `if` conditions on both `preflight` and `publish` jobs require `refs/tags/Extension-v*` as the git ref. The `release: published` event from the CLI release has `github.ref = refs/tags/Cli-v*`, which doesn't match. Even with `workflow_dispatch`, omitting `--ref` defaults to `refs/heads/main`, which also doesn't match.
-
-**Fix:** Always dispatch with `--ref Extension-v<version>`:
+**Manual override:** If you need to override the inferred channel or do a dry run, use `workflow_dispatch` with `--ref`:
 ```bash
 gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable
 # For prerelease: -f channel=pre-release
 ```
+
+**Note:** Omitting `--ref` defaults to `refs/heads/main`, which will fail the ref-check guard. Always pass `--ref Extension-v<version>` for manual dispatch.
 
 ### Gotcha 3: NuGet central package management (NU1507)
 
@@ -571,6 +610,7 @@ After all publishes verify:
 5. **Stable releases require full verification.** Prereleases tolerate gotchas being caught post-publish; stable releases should not.
 6. **Package lineage is immutable.** PPDS.Plugins started at 1.0.0 stable in Jan 2026; never regress to an earlier major.
 7. **MinVer tag prefixes are source of truth.** Don't invent new prefixes without updating the matching csproj.
+8. **Stable releases require a security review artifact.** A `docs/qa/security-review-*.md` file covering the current release delta must exist before tagging `vX.Y.0`. Patches and prereleases are exempt.
 
 ## References
 
