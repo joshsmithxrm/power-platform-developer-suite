@@ -170,6 +170,26 @@ python scripts/workflow-state.py set gates.passed now
 python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
 ```
 
+## Workflow Continuation — MANDATORY
+
+Gates are ONE step in the shipping pipeline — not the last one.
+
+After gates pass, check whether `/implement` is driving the pipeline:
+
+```bash
+python scripts/workflow-state.py get phase
+```
+
+- **If phase is `implementing`:** return gate results to the `/implement` orchestrator. It manages the remaining pipeline steps.
+- **Otherwise (standalone invocation):** you MUST continue the pipeline yourself. Do NOT stop after reporting gate results. Do NOT wait for the user to tell you what to do next. Execute the following chain:
+
+  1. `/verify` for each affected surface (extension, cli, tui, mcp)
+  2. `/pr` to create the pull request
+
+  **This is the #1 workflow failure mode** (retro R-01, 2026-04-24): reporting "all gates pass" and stopping. 3 of 9 PRs in v1.1 were never submitted because the AI stopped here. The chain is `/gates` → `/verify` → `/pr`. Execute it.
+
+Exception: if gates FAIL, stop and fix the failures first. Re-run `/gates` after fixing, then resume the chain.
+
 ## Rules
 
 1. **Mechanical only** — no subjective judgments, no code review, no style opinions
