@@ -508,7 +508,8 @@ function renderNode(flatNode: FlatNode): HTMLElement {
     // Toggle arrow (if has children)
     if (flatNode.node.hasChildren || (flatNode.node.children && flatNode.node.children.length > 0)) {
         const toggle = document.createElement('span');
-        toggle.className = `tree-toggle codicon ${flatNode.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`;
+        toggle.className = 'tree-toggle';
+        toggle.textContent = flatNode.expanded ? '▾' : '▸'; // ▾ ▸
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleNode(flatNode);
@@ -1758,8 +1759,9 @@ function buildRegisterDropdown(): void {
     const wrapper = document.createElement('div');
     wrapper.className = 'register-dropdown register-dropdown-wrapper';
 
-    const btn = document.createElement('button');
-    btn.className = 'toolbar-btn register-dropdown-btn';
+    const btn = document.createElement('vscode-button');
+    btn.setAttribute('appearance', 'secondary');
+    btn.className = 'register-dropdown-btn';
     btn.textContent = 'Register \u25BE'; // ▾
     btn.setAttribute('aria-haspopup', 'true');
     btn.setAttribute('aria-expanded', 'false');
@@ -2094,8 +2096,8 @@ function buildHelpButton(): void {
     const toolbar = document.querySelector('.toolbar');
     if (!toolbar) return;
 
-    const helpBtn = document.createElement('button');
-    helpBtn.className = 'toolbar-btn';
+    const helpBtn = document.createElement('vscode-button');
+    helpBtn.setAttribute('appearance', 'secondary');
     helpBtn.textContent = '?';
     helpBtn.title = 'Plugin Registration Help';
     helpBtn.setAttribute('aria-label', 'Open plugin registration documentation');

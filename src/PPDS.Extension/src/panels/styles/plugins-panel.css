@@ -400,32 +400,6 @@
     background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
 }
 
-/* ── Toolbar Buttons (plain <button> elements matching vscode-button secondary) */
-.toolbar-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    border: none;
-    padding: 4px 11px;
-    font-size: 13px;
-    font-family: var(--vscode-font-family);
-    border-radius: 2px;
-    cursor: pointer;
-    white-space: nowrap;
-    line-height: 18px;
-}
-
-.toolbar-btn:hover {
-    background: var(--vscode-button-secondaryHoverBackground);
-}
-
-.toolbar-btn:focus-visible {
-    outline: 1px solid var(--vscode-focusBorder);
-    outline-offset: 1px;
-}
-
 /* ── Register Dropdown ───────────────────────────────────────────── */
 .register-dropdown {
     position: relative;
