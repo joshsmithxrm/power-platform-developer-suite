@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PPDS.Auth.Tests;
 
+[Collection("AuthenticationOutput")]
 public class AuthenticationOutputTests
 {
     [Fact]
