@@ -96,12 +96,12 @@ jobs:
       - name: Get GitHub App token
         if: ${{ inputs.dry_run != true }}
         id: app-token
-        env:
-          APP_ID: ${{ vars.PPDS_DOCS_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.PPDS_DOCS_APP_PRIVATE_KEY }}
-        run: |
-          TOKEN=$(dotnet run --project scripts/docs-gen/app-token -c Release)
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.PPDS_DOCS_APP_ID }}
+          private-key: ${{ secrets.PPDS_DOCS_APP_PRIVATE_KEY }}
+          owner: joshsmithxrm
+          repositories: ppds-docs
 
       - name: Open ppds-docs PR
         if: ${{ inputs.dry_run != true && steps.app-token.outputs.token != '' }}

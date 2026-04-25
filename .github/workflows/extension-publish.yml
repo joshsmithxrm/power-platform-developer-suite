@@ -1,8 +1,9 @@
 name: Publish Extension
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "Extension-v*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -128,8 +129,14 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "is_prerelease=${{ inputs.channel == 'pre-release' }}" >> $GITHUB_OUTPUT
           else
-            # For tag-triggered releases, check the GitHub release prerelease flag
-            echo "is_prerelease=${{ github.event.release.prerelease }}" >> $GITHUB_OUTPUT
+            # Infer channel from tag version: odd minor = pre-release, even minor = stable
+            TAG="${{ github.ref_name }}"
+            MINOR=$(echo "$TAG" | sed -E 's/Extension-v[0-9]+\.([0-9]+)\..*/\1/')
+            if (( MINOR % 2 == 1 )); then
+              echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            else
+              echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Package extension (pre-release)
@@ -152,7 +159,7 @@ jobs:
       - name: Publish to VS Code Marketplace (pre-release)
         if: |
           steps.channel.outputs.is_prerelease == 'true' &&
-          (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+          (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
         run: npx vsce publish --target ${{ matrix.target }} --pre-release --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
@@ -161,7 +168,7 @@ jobs:
       - name: Publish to VS Code Marketplace (stable)
         if: |
           steps.channel.outputs.is_prerelease != 'true' &&
-          (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+          (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
         run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
