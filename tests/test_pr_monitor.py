@@ -1174,6 +1174,43 @@ class TestReplyDedupe:
             assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS
 
 
+class TestStepCompletedResumeLogic:
+    """Regression #929: failed steps must be retried on --resume.
+
+    step_completed() previously returned True for any recorded status,
+    including failures like 'rebase_failed' and 'error'. On resume,
+    this caused failed steps to be skipped instead of retried.
+    """
+
+    def test_done_is_completed(self):
+        result = {"steps_completed": {"ready": {"status": "done", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is True
+
+    def test_pass_is_completed(self):
+        result = {"steps_completed": {"ci": {"status": "pass", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ci") is True
+
+    def test_rebase_failed_is_not_completed(self):
+        result = {"steps_completed": {"ready": {"status": "rebase_failed", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_skipped_is_not_completed(self):
+        result = {"steps_completed": {"ready": {"status": "skipped", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_error_is_not_completed(self):
+        result = {"steps_completed": {"retro": {"status": "error", "timestamp": "t"}}}
+        assert pr_monitor.step_completed(result, "retro") is False
+
+    def test_missing_step_is_not_completed(self):
+        result = {"steps_completed": {}}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+    def test_no_steps_completed_key(self):
+        result = {}
+        assert pr_monitor.step_completed(result, "ready") is False
+
+
 class TestRebaseBeforeReady:
     """Meta-retro finding #6: rebase source branch before flipping ready."""
 

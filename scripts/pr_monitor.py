@@ -891,9 +891,20 @@ def run_notify(worktree, pr_number, logger, message=None):
 STEPS = ["ci", "gemini", "triage", "ready", "retro", "notify"]
 
 
+_SUCCESS_STATUSES = frozenset({"done", "pass"})
+
+
 def step_completed(result, step_name):
-    """Check if a step was already completed (for --resume)."""
-    return result.get("steps_completed", {}).get(step_name) is not None
+    """Check if a step completed successfully (for --resume).
+
+    Only terminal success statuses count. Failed/skipped/errored steps
+    are retried on resume — the conditions that caused the failure may
+    have changed (e.g. dirty files cleaned up, new commits pushed).
+    """
+    step = result.get("steps_completed", {}).get(step_name)
+    if step is None:
+        return False
+    return step.get("status") in _SUCCESS_STATUSES
 
 
 def mark_step(result, step_name, status):
