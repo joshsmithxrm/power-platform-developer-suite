@@ -29,6 +29,7 @@ Options:
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -189,6 +190,16 @@ def should_converge(state):
         return True, "review FAIL"
 
 
+def compute_resume_stage(failed_stage):
+    """Map a failed stage name to a valid ``--from`` stage for resume."""
+    if failed_stage in STAGES:
+        return failed_stage
+    if "reconverge" in failed_stage:
+        return "converge"
+    base = failed_stage.split("-")[0]
+    return base if base in STAGES else failed_stage
+
+
 def find_last_completed_stage(log_path):
     """Parse pipeline.log to find the last completed stage for --resume."""
     if not os.path.exists(log_path):
@@ -313,6 +324,47 @@ def classify_activity(current_size, last_size, git_changes, last_git_changes,
         consecutive_idle += 1
         activity = "stalled" if consecutive_idle >= 3 else "idle"
         return activity, consecutive_idle
+
+
+def auto_commit_stranded(worktree_path, stage, logger, *,
+                          reason="stranded files committed",
+                          add_all=False):
+    """Auto-commit any uncommitted changes in the worktree.
+
+    Returns True if a commit was created.
+    """
+    if not worktree_path:
+        return False
+    try:
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=worktree_path, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+        if dirty.returncode != 0 or not dirty.stdout.strip():
+            return False
+        add_flag = "-A" if add_all else "-u"
+        subprocess.run(
+            ["git", "add", add_flag], cwd=worktree_path,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        )
+        scope = stage.split("-")[0] if "-" in stage else stage
+        msg = f"chore({scope}): auto-commit {reason}"
+        commit = subprocess.run(
+            ["git", "commit", "-m", msg],
+            cwd=worktree_path, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        if commit.returncode == 0:
+            log(logger, stage, "AUTO_COMMIT", reason=reason)
+            return True
+        elif "nothing to commit" not in (commit.stdout + commit.stderr):
+            log(logger, stage, "AUTO_COMMIT_FAILED",
+                reason=commit.stderr.strip()[:200])
+    except (subprocess.TimeoutExpired, OSError):
+        log(logger, stage, "AUTO_COMMIT_FAILED", reason="subprocess error")
+    return False
 
 
 def get_git_activity(worktree_path):
@@ -1238,7 +1290,8 @@ def _read_last_lines(worktree_path, stage_name, n=50):
 
 
 def write_result(worktree_path, status, duration, stages, pr_url=None,
-                  failed_stage=None, error=None, last_output=None):
+                  failed_stage=None, error=None, last_output=None,
+                  resume_command=None):
     """Write pipeline-result.json and invoke notify.py (best-effort)."""
     result = {
         "status": status,
@@ -1253,6 +1306,8 @@ def write_result(worktree_path, status, duration, stages, pr_url=None,
         result["error"] = error
     if last_output is not None:
         result["last_output"] = last_output
+    if resume_command:
+        result["resume_command"] = resume_command
 
     # Include partial QA results from state if QA failed
     if failed_stage and "qa" in failed_stage:
@@ -1597,21 +1652,7 @@ def main():
 
             # Auto-commit stranded files between stages (#717)
             if worktree_path and stage not in ("worktree", "retro", "pr"):
-                dirty = subprocess.run(
-                    ["git", "status", "--porcelain"],
-                    cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
-                )
-                if dirty.returncode == 0 and dirty.stdout.strip():
-                    subprocess.run(["git", "add", "-u"], cwd=worktree_path,
-                                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
-                    commit = subprocess.run(
-                        ["git", "commit", "-m", f"chore({stage}): auto-commit stage changes"],
-                        cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-                    )
-                    if commit.returncode == 0:
-                        log(logger, stage, "AUTO_COMMIT", reason="stranded files committed")
-                    elif "nothing to commit" not in (commit.stdout + commit.stderr):
-                        log(logger, stage, "AUTO_COMMIT_FAILED", reason=commit.stderr.strip()[:200])
+                auto_commit_stranded(worktree_path, stage, logger)
 
             # Track stage duration with exit code and last output line
             stage_dur = f"{int(time.time() - stage_start_time)}s"
@@ -1637,11 +1678,36 @@ def main():
         log(logger, "pipeline", "FAILED",
             failed_stage=_failed_stage, reason=_failed_reason,
             duration=f"{duration}s")
+        resume_cmd = None
         if worktree_path:
+            # Auto-commit stranded files on failure (converge STALL_TIMEOUT fix)
+            auto_commit_stranded(
+                worktree_path, _failed_log_stage or _failed_stage, logger,
+                reason="stranded files on pipeline failure",
+                add_all=True,
+            )
+
+            # Compute and emit RESUME_HINT
+            resume_stage = compute_resume_stage(_failed_stage)
+            resume_parts = ["python", "scripts/pipeline.py"]
+            if plan_path:
+                resume_parts.extend(["--plan", source_rel])
+            elif spec_path:
+                resume_parts.extend(["--spec", source_rel, "--branch", branch])
+            resume_parts.extend(["--from", resume_stage,
+                                 "--worktree", worktree_path])
+            if args.dry_run:
+                resume_parts.append("--dry-run")
+            if args.max_stage_seconds is not None:
+                resume_parts.extend(["--max-stage-seconds",
+                                     str(args.max_stage_seconds)])
+            resume_cmd = shlex.join(resume_parts)
+            log(logger, "pipeline", "RESUME_HINT", command=resume_cmd)
+
             last_output = _read_last_lines(worktree_path, _failed_log_stage, 50)
             write_result(worktree_path, "failed", duration, stage_durations,
                          failed_stage=_failed_stage, error=_failed_reason,
-                         last_output=last_output)
+                         last_output=last_output, resume_command=resume_cmd)
             _result_written = True
 
             # Best-effort failure retro — safe to spawn subprocesses here
@@ -1662,6 +1728,8 @@ def main():
         print(f"\nPipeline FAILED at stage '{_failed_stage}'.", file=sys.stderr)
         if _failed_reason:
             print(f"  Reason: {_failed_reason}", file=sys.stderr)
+        if resume_cmd:
+            print(f"  Resume: {resume_cmd}", file=sys.stderr)
         sys.exit(1)
 
     except KeyboardInterrupt:
