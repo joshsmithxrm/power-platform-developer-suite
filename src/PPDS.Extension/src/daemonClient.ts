@@ -596,6 +596,7 @@ export class DaemonClient implements vscode.Disposable {
         label?: string;
         type?: string;
         color?: string;
+        profileName?: string;
     }): Promise<EnvConfigSetResponse> {
         await this.ensureConnected();
 

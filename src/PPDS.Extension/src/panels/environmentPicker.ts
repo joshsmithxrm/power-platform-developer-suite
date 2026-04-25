@@ -197,7 +197,7 @@ async function promptManualUrl(
     });
     if (!chosen) return undefined;
 
-    try { await daemon.envConfigSet({ environmentUrl: trimmed }); } catch { /* best-effort */ }
+    try { await daemon.envConfigSet({ environmentUrl: trimmed, profileName: chosen.profileName }); } catch { /* best-effort */ }
     return { profileName: chosen.profileName, url: trimmed, displayName: trimmed, type: null };
 }
 

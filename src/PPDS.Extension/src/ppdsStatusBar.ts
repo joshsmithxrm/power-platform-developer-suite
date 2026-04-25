@@ -21,6 +21,7 @@ export class PpdsStatusBar implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private readonly client: DaemonClient;
     private currentState: DaemonState;
+    private disposed = false;
 
     constructor(client: DaemonClient) {
         this.client = client;
@@ -57,6 +58,7 @@ export class PpdsStatusBar implements vscode.Disposable {
         if (this.currentState !== 'ready') return;
         void withRpcTimeout(this.client.authList(), PpdsStatusBar.RPC_TIMEOUT_MS, 'authList')
             .then(result => {
+                if (this.currentState !== 'ready' || this.disposed) return;
                 const active = result.profiles.find(p => p.isActive);
                 let name: string | null = result.activeProfile;
                 if (!name && active) name = active.name ?? `Profile ${active.index}`;
@@ -128,6 +130,7 @@ export class PpdsStatusBar implements vscode.Disposable {
     }
 
     dispose(): void {
+        this.disposed = true;
         for (const d of this.disposables) d.dispose();
     }
 }
