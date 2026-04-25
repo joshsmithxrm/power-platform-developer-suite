@@ -66,8 +66,8 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
 
             var nsSubPath = NamespaceSubPath(type, packageName);
             var relPath = string.IsNullOrEmpty(nsSubPath)
-                ? $"docs/reference/libraries/{packageShort}/{type.Name}.md"
-                : $"docs/reference/libraries/{packageShort}/{nsSubPath}/{type.Name}.md";
+                ? $"{packageShort}/{type.Name}.md"
+                : $"{packageShort}/{nsSubPath}/{type.Name}.md";
 
             var (typeMd, memberDiagnostics) = RenderType(type, typeDoc, xmlDocs, packageName);
             diagnostics.AddRange(memberDiagnostics);
@@ -81,7 +81,7 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
         }
 
         files.Add(new GeneratedFile(
-            $"docs/reference/libraries/{packageShort}/_index.md",
+            $"{packageShort}/_index.md",
             RenderIndex(packageShort, indexEntries)));
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
