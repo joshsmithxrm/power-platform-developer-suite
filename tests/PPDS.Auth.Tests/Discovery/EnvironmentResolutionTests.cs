@@ -6,23 +6,13 @@ using Xunit;
 
 namespace PPDS.Auth.Tests.Discovery;
 
-/// <summary>
-/// Verifies the routing logic in <see cref="EnvironmentResolutionService"/>:
-/// non-interactive auth + name → BAP discovery (AC-26);
-/// interactive auth + name → Global Discovery (AC-27);
-/// URL identifier → direct connection, no discovery (AC-28).
-/// </summary>
 public class EnvironmentResolutionTests
 {
     [Theory]
     [InlineData(AuthMethod.ClientSecret)]
     [InlineData(AuthMethod.CertificateFile)]
     [InlineData(AuthMethod.CertificateStore)]
-    [InlineData(AuthMethod.ManagedIdentity)]
-    [InlineData(AuthMethod.GitHubFederated)]
-    [InlineData(AuthMethod.AzureDevOpsFederated)]
-    [InlineData(AuthMethod.UsernamePassword)]
-    public async Task NonInteractive_NameIdentifier_RoutesBapNotGds(AuthMethod authMethod)
+    public async Task SpnAuth_NameIdentifier_RoutesBapDiscovery(AuthMethod authMethod)
     {
         var profile = new AuthProfile { AuthMethod = authMethod };
         using var service = new EnvironmentResolutionService(profile);
@@ -30,8 +20,45 @@ public class EnvironmentResolutionTests
         var result = await service.ResolveAsync("MyEnvironment");
 
         result.Success.Should().BeFalse(because: "BAP discovery will fail without real credentials");
-        result.ErrorMessage.Should().NotContain("Service principals require a full environment URL",
-            because: "non-interactive auth should route to BAP discovery, not reject name-based resolution");
+        result.ErrorMessage.Should().Contain("BAP",
+            because: "SPN auth should route to BAP discovery for name-based resolution");
+    }
+
+    [Theory]
+    [InlineData(AuthMethod.ManagedIdentity)]
+    [InlineData(AuthMethod.GitHubFederated)]
+    [InlineData(AuthMethod.AzureDevOpsFederated)]
+    [InlineData(AuthMethod.UsernamePassword)]
+    public async Task UnsupportedAuth_NameIdentifier_ReturnsHelpfulError(AuthMethod authMethod)
+    {
+        var profile = new AuthProfile { AuthMethod = authMethod };
+        using var service = new EnvironmentResolutionService(profile);
+
+        var result = await service.ResolveAsync("MyEnvironment");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("does not support name-based environment resolution",
+            because: $"{authMethod} cannot use either GDS or BAP for discovery");
+    }
+
+    [Theory]
+    [InlineData(AuthMethod.ClientSecret)]
+    [InlineData(AuthMethod.CertificateFile)]
+    [InlineData(AuthMethod.CertificateStore)]
+    public void BapDiscovery_SupportsSpnAuthMethods(AuthMethod authMethod)
+    {
+        BapEnvironmentService.SupportsAuthMethod(authMethod).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(AuthMethod.InteractiveBrowser)]
+    [InlineData(AuthMethod.DeviceCode)]
+    [InlineData(AuthMethod.ManagedIdentity)]
+    [InlineData(AuthMethod.GitHubFederated)]
+    [InlineData(AuthMethod.AzureDevOpsFederated)]
+    public void BapDiscovery_DoesNotSupportOtherAuthMethods(AuthMethod authMethod)
+    {
+        BapEnvironmentService.SupportsAuthMethod(authMethod).Should().BeFalse();
     }
 
     [Theory]
@@ -39,21 +66,7 @@ public class EnvironmentResolutionTests
     [InlineData(AuthMethod.DeviceCode)]
     public void Interactive_SupportsGlobalDiscovery(AuthMethod authMethod)
     {
-        GlobalDiscoveryService.SupportsGlobalDiscovery(authMethod).Should().BeTrue(
-            because: $"{authMethod} is interactive and should use Global Discovery");
-    }
-
-    [Theory]
-    [InlineData(AuthMethod.ClientSecret)]
-    [InlineData(AuthMethod.CertificateFile)]
-    [InlineData(AuthMethod.CertificateStore)]
-    [InlineData(AuthMethod.ManagedIdentity)]
-    [InlineData(AuthMethod.GitHubFederated)]
-    [InlineData(AuthMethod.AzureDevOpsFederated)]
-    public void NonInteractive_DoesNotSupportGlobalDiscovery(AuthMethod authMethod)
-    {
-        GlobalDiscoveryService.SupportsGlobalDiscovery(authMethod).Should().BeFalse(
-            because: $"{authMethod} is non-interactive and should use BAP discovery");
+        GlobalDiscoveryService.SupportsGlobalDiscovery(authMethod).Should().BeTrue();
     }
 
     [Theory]
@@ -67,8 +80,7 @@ public class EnvironmentResolutionTests
         var result = await service.ResolveAsync(url);
 
         result.Success.Should().BeFalse(because: "no real credentials provided");
-        result.ErrorMessage.Should().Contain("Direct connection failed",
-            because: "URL identifiers should attempt direct connection first");
+        result.ErrorMessage.Should().Contain("Direct connection failed");
     }
 
     [Fact]
