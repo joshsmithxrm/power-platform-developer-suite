@@ -1621,8 +1621,24 @@ public class RpcMethodHandler : IDisposable
             Description = entity.Description,
             PrimaryIdAttribute = entity.PrimaryIdAttribute,
             PrimaryNameAttribute = entity.PrimaryNameAttribute,
+            PrimaryImageAttribute = entity.PrimaryImageAttribute,
             EntitySetName = entity.EntitySetName,
+            LogicalCollectionName = entity.LogicalCollectionName,
+            PluralName = entity.PluralName,
             IsActivity = entity.IsActivity,
+            IsActivityParty = entity.IsActivityParty,
+            HasNotes = entity.HasNotes,
+            HasActivities = entity.HasActivities,
+            IsValidForAdvancedFind = entity.IsValidForAdvancedFind,
+            IsAuditEnabled = entity.IsAuditEnabled,
+            ChangeTrackingEnabled = entity.ChangeTrackingEnabled,
+            IsBusinessProcessEnabled = entity.IsBusinessProcessEnabled,
+            IsQuickCreateEnabled = entity.IsQuickCreateEnabled,
+            IsDuplicateDetectionEnabled = entity.IsDuplicateDetectionEnabled,
+            IsValidForQueue = entity.IsValidForQueue,
+            IsIntersect = entity.IsIntersect,
+            CanCreateMultiple = entity.CanCreateMultiple,
+            CanUpdateMultiple = entity.CanUpdateMultiple,
             Attributes = entity.Attributes.Select(MapAttributeToRpc).ToList(),
             OneToManyRelationships = entity.OneToManyRelationships.Select(MapRelationshipToRpc).ToList(),
             ManyToOneRelationships = entity.ManyToOneRelationships.Select(MapRelationshipToRpc).ToList(),
@@ -1731,6 +1747,9 @@ public class RpcMethodHandler : IDisposable
             DisplayName = os.DisplayName,
             OptionSetType = os.OptionSetType,
             IsGlobal = os.IsGlobal,
+            IsCustomOptionSet = os.IsCustomOptionSet,
+            IsManaged = os.IsManaged,
+            Description = os.Description,
             Options = os.Options.Select(MapOptionValueToRpc).ToList()
         };
     }
@@ -7153,8 +7172,59 @@ public class MetadataEntityDetailDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EntitySetName { get; set; }
 
+    [JsonPropertyName("primaryImageAttribute")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryImageAttribute { get; set; }
+
+    [JsonPropertyName("logicalCollectionName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogicalCollectionName { get; set; }
+
+    [JsonPropertyName("pluralName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluralName { get; set; }
+
     [JsonPropertyName("isActivity")]
     public bool IsActivity { get; set; }
+
+    [JsonPropertyName("isActivityParty")]
+    public bool IsActivityParty { get; set; }
+
+    [JsonPropertyName("hasNotes")]
+    public bool HasNotes { get; set; }
+
+    [JsonPropertyName("hasActivities")]
+    public bool HasActivities { get; set; }
+
+    [JsonPropertyName("isValidForAdvancedFind")]
+    public bool IsValidForAdvancedFind { get; set; }
+
+    [JsonPropertyName("isAuditEnabled")]
+    public bool IsAuditEnabled { get; set; }
+
+    [JsonPropertyName("changeTrackingEnabled")]
+    public bool ChangeTrackingEnabled { get; set; }
+
+    [JsonPropertyName("isBusinessProcessEnabled")]
+    public bool IsBusinessProcessEnabled { get; set; }
+
+    [JsonPropertyName("isQuickCreateEnabled")]
+    public bool IsQuickCreateEnabled { get; set; }
+
+    [JsonPropertyName("isDuplicateDetectionEnabled")]
+    public bool IsDuplicateDetectionEnabled { get; set; }
+
+    [JsonPropertyName("isValidForQueue")]
+    public bool IsValidForQueue { get; set; }
+
+    [JsonPropertyName("isIntersect")]
+    public bool IsIntersect { get; set; }
+
+    [JsonPropertyName("canCreateMultiple")]
+    public bool CanCreateMultiple { get; set; }
+
+    [JsonPropertyName("canUpdateMultiple")]
+    public bool CanUpdateMultiple { get; set; }
 
     [JsonPropertyName("attributes")]
     public List<MetadataAttributeDto> Attributes { get; set; } = [];
@@ -7392,6 +7462,16 @@ public class MetadataOptionSetDto
 
     [JsonPropertyName("isGlobal")]
     public bool IsGlobal { get; set; }
+
+    [JsonPropertyName("isCustomOptionSet")]
+    public bool IsCustomOptionSet { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
 
     [JsonPropertyName("options")]
     public List<MetadataOptionValueDto> Options { get; set; } = [];

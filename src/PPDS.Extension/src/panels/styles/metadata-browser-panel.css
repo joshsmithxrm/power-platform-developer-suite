@@ -258,7 +258,8 @@
 .rel-table-wrapper,
 .keys-table-wrapper,
 .priv-table-wrapper,
-.choice-detail-wrapper {
+.choice-detail-wrapper,
+.config-grid-wrapper {
     flex: 1;
     overflow: auto;
     min-height: 0;
@@ -505,6 +506,17 @@
 }
 
 /* ── Global choice detail ──────────────────────────────────────────────── */
+
+.choice-detail-wrapper {
+    display: flex;
+    flex-direction: column;
+}
+
+.choice-table-container {
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+}
 
 .choice-summary {
     padding: 8px 12px;

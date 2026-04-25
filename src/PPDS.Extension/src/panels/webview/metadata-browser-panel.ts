@@ -55,10 +55,11 @@ const tabSearchTerms: Record<string, string> = {};
 let entitiesSectionCollapsed = false;
 let choicesSectionCollapsed = false;
 
-type TabId = 'attributes' | '1n' | 'n1' | 'nn' | 'keys' | 'privileges' | 'choices' | 'choice-detail';
+type TabId = 'attributes' | 'config' | '1n' | 'n1' | 'nn' | 'keys' | 'privileges' | 'choices' | 'choice-detail';
 
 const ENTITY_TAB_DEFS: { id: TabId; label: string }[] = [
     { id: 'attributes', label: 'Attributes' },
+    { id: 'config', label: 'Configuration' },
     { id: '1n', label: '1:N' },
     { id: 'n1', label: 'N:1' },
     { id: 'nn', label: 'N:N' },
@@ -484,6 +485,9 @@ function renderTabContent(): void {
         case 'attributes':
             renderAttributesTab();
             break;
+        case 'config':
+            renderConfigTab();
+            break;
         case '1n':
             renderOneToManyTab();
             break;
@@ -752,6 +756,84 @@ function showAttributePropertiesPanel(attr: MetadataAttributeDto, container: HTM
     }
 
     container.appendChild(panel);
+}
+
+// ── Configuration tab ──
+function renderConfigTab(): void {
+    if (!currentEntity) return;
+    tabContent.innerHTML = '';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'config-grid-wrapper';
+
+    const sections: { title: string; rows: [string, string][] }[] = [
+        {
+            title: 'Identity',
+            rows: [
+                ['Plural Name', currentEntity.pluralName ?? '\u2014'],
+                ['Logical Collection Name', currentEntity.logicalCollectionName ?? '\u2014'],
+                ['Primary Image Attribute', currentEntity.primaryImageAttribute ?? '\u2014'],
+            ],
+        },
+        {
+            title: 'Features',
+            rows: [
+                ['Quick Create Enabled', currentEntity.isQuickCreateEnabled ? '\u2713' : '\u2014'],
+                ['Duplicate Detection Enabled', currentEntity.isDuplicateDetectionEnabled ? '\u2713' : '\u2014'],
+                ['Valid for Queue', currentEntity.isValidForQueue ? '\u2713' : '\u2014'],
+                ['Valid for Advanced Find', currentEntity.isValidForAdvancedFind ? '\u2713' : '\u2014'],
+                ['Business Process Enabled', currentEntity.isBusinessProcessEnabled ? '\u2713' : '\u2014'],
+            ],
+        },
+        {
+            title: 'Auditing & Tracking',
+            rows: [
+                ['Audit Enabled', currentEntity.isAuditEnabled ? '\u2713' : '\u2014'],
+                ['Change Tracking Enabled', currentEntity.changeTrackingEnabled ? '\u2713' : '\u2014'],
+            ],
+        },
+        {
+            title: 'Relationships',
+            rows: [
+                ['Has Notes', currentEntity.hasNotes ? '\u2713' : '\u2014'],
+                ['Has Activities', currentEntity.hasActivities ? '\u2713' : '\u2014'],
+                ['Is Activity Party', currentEntity.isActivityParty ? '\u2713' : '\u2014'],
+                ['Is Intersect', currentEntity.isIntersect ? '\u2713' : '\u2014'],
+            ],
+        },
+        {
+            title: 'Bulk API Support',
+            rows: [
+                ['Can Create Multiple', currentEntity.canCreateMultiple ? '\u2713' : '\u2014'],
+                ['Can Update Multiple', currentEntity.canUpdateMultiple ? '\u2713' : '\u2014'],
+            ],
+        },
+    ];
+
+    for (const section of sections) {
+        const header = document.createElement('div');
+        header.className = 'prop-section-header';
+        header.textContent = section.title;
+        wrapper.appendChild(header);
+
+        const table = document.createElement('table');
+        table.className = 'prop-panel-table';
+        for (const [label, value] of section.rows) {
+            const tr = document.createElement('tr');
+            const labelTd = document.createElement('td');
+            labelTd.className = 'prop-label';
+            labelTd.textContent = label;
+            tr.appendChild(labelTd);
+            const valueTd = document.createElement('td');
+            valueTd.className = 'prop-value';
+            valueTd.textContent = value;
+            tr.appendChild(valueTd);
+            table.appendChild(tr);
+        }
+        wrapper.appendChild(table);
+    }
+
+    tabContent.appendChild(wrapper);
 }
 
 // ── 1:N Relationships tab ──
@@ -1363,8 +1445,11 @@ function renderGlobalChoiceOptionsTable(container: HTMLElement): void {
         ['Display Name', currentGlobalChoice!.displayName || '\u2014'],
         ['Name', currentGlobalChoice!.name],
         ['Type', currentGlobalChoice!.optionSetType],
+        ['Description', currentGlobalChoice!.description || '\u2014'],
         ['Options', String(currentGlobalChoice!.options.length)],
         ['Is Global', 'Yes'],
+        ['Is Custom', currentGlobalChoice!.isCustomOptionSet ? 'Yes' : 'No'],
+        ['Is Managed', currentGlobalChoice!.isManaged ? 'Yes' : 'No'],
     ];
     for (const [label, value] of props) {
         const row = document.createElement('div');
@@ -1395,8 +1480,12 @@ function renderGlobalChoiceOptionsTable(container: HTMLElement): void {
         );
     }
 
+    const tableContainer = document.createElement('div');
+    tableContainer.className = 'choice-table-container';
+    wrapper.appendChild(tableContainer);
+
     const table = new DataTable<OptionValueRow>({
-        container: wrapper,
+        container: tableContainer,
         columns: [
             { key: 'value', label: 'Value', render: (o) => escapeHtml(String(o.value)) },
             { key: 'label', label: 'Label', render: (o) => escapeHtml(o.label) },
