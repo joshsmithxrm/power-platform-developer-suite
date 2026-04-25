@@ -59,8 +59,13 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
         string tenantId,
         CloudEnvironment cloud = CloudEnvironment.Public)
     {
-        _applicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
-        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        if (string.IsNullOrWhiteSpace(applicationId))
+            throw new ArgumentException("ApplicationId is required and cannot be empty.", nameof(applicationId));
+        if (string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("TenantId is required and cannot be empty.", nameof(tenantId));
+
+        _applicationId = applicationId;
+        _tenantId = tenantId;
         _cloud = cloud;
     }
 

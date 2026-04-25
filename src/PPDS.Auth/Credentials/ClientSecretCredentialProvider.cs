@@ -63,9 +63,16 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
         string tenantId,
         CloudEnvironment cloud = CloudEnvironment.Public)
     {
-        _applicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
-        _clientSecret = clientSecret ?? throw new ArgumentNullException(nameof(clientSecret));
-        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        if (string.IsNullOrWhiteSpace(applicationId))
+            throw new ArgumentException("ApplicationId is required and cannot be empty.", nameof(applicationId));
+        if (string.IsNullOrWhiteSpace(clientSecret))
+            throw new ArgumentException("ClientSecret is required and cannot be empty.", nameof(clientSecret));
+        if (string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("TenantId is required and cannot be empty.", nameof(tenantId));
+
+        _applicationId = applicationId;
+        _clientSecret = clientSecret;
+        _tenantId = tenantId;
         _cloud = cloud;
     }
 

@@ -93,9 +93,9 @@ public class ClientSecretAuthenticationTests : LiveTestBase, IDisposable
         var act2 = () => new ClientSecretCredentialProvider("app", null!, "tenant");
         var act3 = () => new ClientSecretCredentialProvider("app", "secret", null!);
 
-        act1.Should().Throw<ArgumentNullException>().WithParameterName("applicationId");
-        act2.Should().Throw<ArgumentNullException>().WithParameterName("clientSecret");
-        act3.Should().Throw<ArgumentNullException>().WithParameterName("tenantId");
+        act1.Should().Throw<ArgumentException>().WithParameterName("applicationId");
+        act2.Should().Throw<ArgumentException>().WithParameterName("clientSecret");
+        act3.Should().Throw<ArgumentException>().WithParameterName("tenantId");
     }
 
     [Fact]
