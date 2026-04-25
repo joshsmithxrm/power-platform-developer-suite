@@ -42,6 +42,13 @@ namespace PPDS.Migration.Schema
         public IReadOnlyList<string>? ExcludeAttributes { get; set; }
 
         /// <summary>
+        /// Gets or sets per-entity FetchXML filter expressions to embed in the generated schema.
+        /// Keys are entity logical names; values are FetchXML filter XML strings
+        /// (e.g., "&lt;filter&gt;&lt;condition attribute='statecode' operator='eq' value='0'/&gt;&lt;/filter&gt;").
+        /// </summary>
+        public IReadOnlyDictionary<string, string>? EntityFilters { get; set; }
+
+        /// <summary>
         /// Determines if an attribute should be included based on the filtering options.
         /// </summary>
         /// <param name="attributeName">The attribute logical name.</param>

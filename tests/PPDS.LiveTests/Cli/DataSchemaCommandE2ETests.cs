@@ -146,6 +146,118 @@ public class DataSchemaCommandE2ETests : CliE2ETestBase
         result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
     }
 
+    [CliE2EWithCredentials]
+    public async Task DataSchema_WithFilter_EmbedsFilterInSchema()
+    {
+        var profileName = GenerateTestProfileName();
+        await RunCliAsync(
+            "auth", "create",
+            "--name", profileName,
+            "--applicationId", Configuration.ApplicationId!,
+            "--clientSecret", Configuration.ClientSecret!,
+            "--tenant", Configuration.TenantId!,
+            "--environment", Configuration.DataverseUrl!);
+
+        await RunCliAsync("auth", "select", "--name", profileName);
+
+        var outputPath = GenerateTempFilePath(".xml");
+
+        var result = await RunCliAsync(
+            "data", "schema",
+            "--entities", "account",
+            "--output", outputPath,
+            "--filter", "account:statecode = 0");
+
+        result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
+        File.Exists(outputPath).Should().BeTrue();
+
+        var content = await File.ReadAllTextAsync(outputPath);
+        content.Should().Contain("account");
+        content.Should().Contain("<filter>");
+        content.Should().Contain("statecode");
+    }
+
+    [CliE2EWithCredentials]
+    public async Task DataSchema_WithMultipleFilters_EmbedsAllFilters()
+    {
+        var profileName = GenerateTestProfileName();
+        await RunCliAsync(
+            "auth", "create",
+            "--name", profileName,
+            "--applicationId", Configuration.ApplicationId!,
+            "--clientSecret", Configuration.ClientSecret!,
+            "--tenant", Configuration.TenantId!,
+            "--environment", Configuration.DataverseUrl!);
+
+        await RunCliAsync("auth", "select", "--name", profileName);
+
+        var outputPath = GenerateTempFilePath(".xml");
+
+        var result = await RunCliAsync(
+            "data", "schema",
+            "--entities", "account,contact",
+            "--output", outputPath,
+            "--filter", "account:statecode = 0",
+            "--filter", "contact:statecode = 0");
+
+        result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
+
+        var content = await File.ReadAllTextAsync(outputPath);
+        content.Should().Contain("account");
+        content.Should().Contain("contact");
+        // Both entities should have filter elements
+        content.Should().Contain("statecode");
+    }
+
+    #endregion
+
+    #region Filter validation errors
+
+    [CliE2EFact]
+    public async Task DataSchema_FilterEntityNotInEntities_Fails()
+    {
+        var outputPath = GenerateTempFilePath(".xml");
+
+        var result = await RunCliAsync(
+            "data", "schema",
+            "--entities", "account",
+            "--output", outputPath,
+            "--filter", "contact:statecode = 0");
+
+        result.ExitCode.Should().NotBe(0);
+        (result.StdOut + result.StdErr).Should().ContainAny("not in", "entities");
+    }
+
+    [CliE2EFact]
+    public async Task DataSchema_FilterInvalidFormat_Fails()
+    {
+        var outputPath = GenerateTempFilePath(".xml");
+
+        var result = await RunCliAsync(
+            "data", "schema",
+            "--entities", "account",
+            "--output", outputPath,
+            "--filter", "no-colon-separator");
+
+        result.ExitCode.Should().NotBe(0);
+        (result.StdOut + result.StdErr).Should().ContainAny("Invalid filter format", "entity:expression");
+    }
+
+    [CliE2EFact]
+    public async Task DataSchema_FilterInvalidExpression_Fails()
+    {
+        var outputPath = GenerateTempFilePath(".xml");
+
+        var result = await RunCliAsync(
+            "data", "schema",
+            "--entities", "account",
+            "--output", outputPath,
+            "--filter", "account:NOT VALID %%% !!!");
+
+        result.ExitCode.Should().NotBe(0);
+        (result.StdOut + result.StdErr).Should().ContainAny("parse", "filter");
+    }
+
     #endregion
 
     #region Validation errors

@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
@@ -6,6 +7,8 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
+using PPDS.Query.Parsing;
+using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -59,6 +62,11 @@ public static class SchemaCommand
             AllowMultipleArgumentsPerToken = true
         };
 
+        var filterOption = new Option<string[]?>("--filter")
+        {
+            Description = "SQL-like filter per entity. Format: entity:expression (e.g., \"account:statecode = 0\"). Repeatable."
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
         {
             Description = "Output format",
@@ -87,6 +95,7 @@ public static class SchemaCommand
             disablePluginsOption,
             includeAttributesOption,
             excludeAttributesOption,
+            filterOption,
             outputFormatOption,
             verboseOption,
             debugOption
@@ -102,6 +111,7 @@ public static class SchemaCommand
             var disablePlugins = parseResult.GetValue(disablePluginsOption);
             var includeAttributes = parseResult.GetValue(includeAttributesOption);
             var excludeAttributes = parseResult.GetValue(excludeAttributesOption);
+            var filters = parseResult.GetValue(filterOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
@@ -125,10 +135,23 @@ public static class SchemaCommand
             var includeAttrList = ParseAttributeList(includeAttributes);
             var excludeAttrList = ParseAttributeList(excludeAttributes);
 
+            Dictionary<string, string>? entityFilters = null;
+            if (filters is { Length: > 0 })
+            {
+                var entitySet = new HashSet<string>(entityList, StringComparer.OrdinalIgnoreCase);
+                var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+
+                var result = ParseAndTranspileFilters(filters, entitySet, writer);
+                if (result == null)
+                    return ExitCodes.InvalidArguments;
+
+                entityFilters = result;
+            }
+
             return await ExecuteAsync(
                 profile, environment, entityList, output,
                 includeAuditFields, disablePlugins,
-                includeAttrList, excludeAttrList,
+                includeAttrList, excludeAttrList, entityFilters,
                 outputFormat, verbose, debug, cancellationToken);
         });
 
@@ -147,6 +170,87 @@ public static class SchemaCommand
             .ToList();
     }
 
+    internal static Dictionary<string, string>? ParseAndTranspileFilters(
+        string[] filters,
+        HashSet<string> entitySet,
+        IOutputWriter writer)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var filter in filters)
+        {
+            var colonIndex = filter.IndexOf(':');
+            if (colonIndex <= 0 || colonIndex >= filter.Length - 1)
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Invalid filter format: \"{filter}\". Expected entity:expression (e.g., \"account:statecode = 0\").",
+                    Target: "--filter"));
+                return null;
+            }
+
+            var entityName = filter[..colonIndex].Trim();
+            var expression = filter[(colonIndex + 1)..].Trim();
+
+            if (!entitySet.Contains(entityName))
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Filter entity \"{entityName}\" is not in the --entities list.",
+                    Target: "--filter"));
+                return null;
+            }
+
+            var fetchXmlFilter = TranspileFilterExpression(entityName, expression);
+            if (fetchXmlFilter == null)
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Query.ParseError,
+                    $"Failed to parse filter expression for \"{entityName}\": {expression}",
+                    Target: "--filter"));
+                return null;
+            }
+
+            result[entityName] = fetchXmlFilter;
+        }
+
+        return result;
+    }
+
+    internal static string? TranspileFilterExpression(string entityName, string expression)
+    {
+        try
+        {
+            var sql = $"SELECT {entityName}id FROM {entityName} WHERE {expression}";
+            var parser = new QueryParser();
+            var stmt = parser.ParseStatement(sql);
+            var generator = new FetchXmlGenerator();
+            var fetchXml = generator.Generate(stmt);
+
+            var doc = XDocument.Parse(fetchXml);
+            var entityElement = doc.Root?.Element("entity");
+            var filterElements = entityElement?.Elements("filter").ToList();
+
+            if (filterElements == null || filterElements.Count == 0)
+                return null;
+
+            if (filterElements.Count == 1)
+                return filterElements[0].ToString(SaveOptions.DisableFormatting);
+
+            var combined = new XElement("filter", new XAttribute("type", "and"));
+            foreach (var f in filterElements)
+            {
+                foreach (var child in f.Elements())
+                    combined.Add(child);
+            }
+            return combined.ToString(SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task<int> ExecuteAsync(
         string? profile,
         string? environment,
@@ -156,6 +260,7 @@ public static class SchemaCommand
         bool disablePlugins,
         List<string>? includeAttributes,
         List<string>? excludeAttributes,
+        Dictionary<string, string>? entityFilters,
         OutputFormat outputFormat,
         bool verbose,
         bool debug,
@@ -199,7 +304,8 @@ public static class SchemaCommand
                 IncludeAuditFields = includeAuditFields,
                 DisablePluginsByDefault = disablePlugins,
                 IncludeAttributes = includeAttributes,
-                ExcludeAttributes = excludeAttributes
+                ExcludeAttributes = excludeAttributes,
+                EntityFilters = entityFilters
             };
 
             var schema = await generator.GenerateAsync(
