@@ -27,7 +27,7 @@ describe('EnvironmentVariablesPanel message types', () => {
         expect(messages).toHaveLength(14);
     });
 
-    it('WebviewToHost filterBySolution accepts null for "All Solutions"', () => {
+    it('WebviewToHost filterBySolution accepts null for "(No filter)"', () => {
         const msg: EnvironmentVariablesPanelWebviewToHost = {
             command: 'filterBySolution',
             solutionId: null,
