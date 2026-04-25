@@ -80,6 +80,7 @@ const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
+// Covers AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-06a, AC-07, AC-08, AC-09
 describe('PpdsStatusBar', () => {
     beforeEach(() => {
         mockStatusBarItem.text = '';

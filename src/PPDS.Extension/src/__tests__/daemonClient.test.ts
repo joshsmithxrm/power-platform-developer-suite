@@ -950,6 +950,7 @@ describe('DaemonClient', () => {
         });
     });
 
+    // AC-16, AC-17, AC-18: profileName parameter is positional and optional
     describe('environmentVariablesSyncDeploymentSettings', () => {
         it('should pass cancellation token to sendRequest when provided', async () => {
             const mockResult = {
