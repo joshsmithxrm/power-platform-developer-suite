@@ -1381,6 +1381,79 @@ class TestStaleTrackingRef:
         assert not any(c[:2] == ["git", "push"] for c in call_log)
 
 
+class TestUntrackedFilesDoNotBlockStash:
+    """Regression #929: untracked files should not poison the stash safety check.
+
+    git status --porcelain emits ?? for untracked files.  These don't block
+    rebase, but if included in the dirty list they prevent stashing of
+    legitimately dirty (modified) files that DO block rebase.
+    """
+
+    def test_untracked_file_excluded_from_stash_safety_check(self, tmp_path):
+        """Modified .claude/state/ file is stashed even when an untracked .retros/ file exists."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout=" M .claude/state/in-flight-issues.json\n"
+                           "?? .retros/summary.md\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) >= 1
+        push_call = stash_calls[0]
+        assert push_call[:4] == ["git", "stash", "push", "-m"]
+        assert ".claude/state/in-flight-issues.json" in push_call
+        assert ".retros/summary.md" not in push_call
+
+    def test_only_untracked_files_skips_stash_entirely(self, tmp_path):
+        """When all dirty entries are untracked, no stash is needed."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        call_log = []
+
+        def fake_run(cmd, **kwargs):
+            call_log.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="main\n", stderr="")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="feat/test\n", stderr="")
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout="?? .retros/summary.md\n"
+                           "?? some-other-untracked.txt\n",
+                    stderr="")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("pr_monitor.subprocess.run", side_effect=fake_run):
+            result = pr_monitor._rebase_source_branch(wt, 42, logger)
+
+        assert result is True
+        stash_calls = [c for c in call_log if c[:2] == ["git", "stash"]]
+        assert len(stash_calls) == 0
+
+
 class TestDetectBaseBranch:
     """Regression: gh pr view argv must not include ``--`` before the PR number.
 

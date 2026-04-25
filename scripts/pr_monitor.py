@@ -516,8 +516,11 @@ def _rebase_source_branch(worktree, pr_number, logger):
     try:
         status = _run(["git", "status", "--porcelain"])
         if status.returncode == 0 and status.stdout.strip():
+            # Exclude untracked (??) files — they don't block rebase and
+            # shouldn't poison the safety check for modified files.
             dirty = [l.strip().split(maxsplit=1)[-1].strip('"')
-                     for l in status.stdout.strip().splitlines() if l.strip()]
+                     for l in status.stdout.strip().splitlines()
+                     if l.strip() and not l.strip().startswith("??")]
             safe = all(any(f.startswith(p) for p in _STASHABLE) for f in dirty)
             if safe and dirty:
                 stash = _run(["git", "stash", "push", "-m", "pr-monitor-rebase",
