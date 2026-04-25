@@ -50,21 +50,22 @@ jobs:
 
       - name: Build
         run: |
-          dotnet build PPDS.sln -c Release -o artifacts/bin
-          ls artifacts/bin/PPDS.Cli.dll
-          ls artifacts/bin/PPDS.Mcp.dll
+          dotnet build src/PPDS.Cli/PPDS.Cli.csproj -c Release -f net10.0 -o artifacts/bin
+          dotnet build src/PPDS.Mcp/PPDS.Mcp.csproj -c Release -f net10.0 -o artifacts/bin
+          ls artifacts/bin/ppds.dll
+          ls artifacts/bin/ppds-mcp-server.dll
 
       - name: Generate reference markdown
         run: |
           mkdir -p artifacts/docs
           dotnet run --project scripts/docs-gen/cli-reflect -c Release -- \
-            --assembly artifacts/bin/PPDS.Cli.dll \
+            --assembly artifacts/bin/ppds.dll \
             --output artifacts/docs/reference/cli
           dotnet run --project scripts/docs-gen/libs-reflect -c Release -- \
             --assemblies artifacts/bin \
             --output artifacts/docs/reference/libraries
           dotnet run --project scripts/docs-gen/mcp-reflect -c Release -- \
-            --assembly artifacts/bin/PPDS.Mcp.dll \
+            --assembly artifacts/bin/ppds-mcp-server.dll \
             --output artifacts/docs/reference/mcp
           node scripts/docs-gen/ext-reflect/generate.js \
             --package-json src/PPDS.Extension/package.json \
