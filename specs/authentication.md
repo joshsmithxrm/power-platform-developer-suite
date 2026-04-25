@@ -627,10 +627,10 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-14a | Vendored credential store round-trips a secret via Windows Credential Manager (DPAPI) | `NativeCredentialStoreInteropTests.Windows_RoundTripsSecret` (CI: `windows-latest`) | 🔲 (flips ✅ on green CI matrix) |
 | AC-14b | Vendored credential store round-trips a secret via macOS Keychain | `NativeCredentialStoreInteropTests.MacOS_RoundTripsSecret` (CI: `macos-latest`) | 🔲 (flips ✅ on green CI matrix) |
 | AC-14c | Vendored credential store round-trips a secret via Linux libsecret | `NativeCredentialStoreInteropTests.Linux_RoundTripsSecret` (CI: `ubuntu-latest` with libsecret installed) | 🔲 (flips ✅ on green CI matrix) |
-| AC-15 | `BapEnvironmentService.DiscoverEnvironmentsAsync` returns environments with correct FriendlyName, ApiUrl, UniqueName, EnvironmentId, Region, State, and OrganizationType from BAP API JSON | `BapEnvironmentServiceTests.DiscoverEnvironments_MapsJsonToDiscoveredEnvironments` | 🔲 |
-| AC-16 | `BapEnvironmentService` skips environments without `linkedEnvironmentMetadata` (no Dataverse instance) | `BapEnvironmentServiceTests.DiscoverEnvironments_SkipsNonDataverseEnvironments` | 🔲 |
-| AC-17 | `BapEnvironmentService` throws `PpdsException` with `Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | 🔲 |
-| AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | 🔲 |
+| AC-15 | `BapEnvironmentService.DiscoverEnvironmentsAsync` returns environments with correct FriendlyName, ApiUrl, UniqueName, EnvironmentId, Region, State, and OrganizationType from BAP API JSON | `BapEnvironmentServiceTests.DiscoverEnvironments_MapsJsonToDiscoveredEnvironments` | ✅ |
+| AC-16 | `BapEnvironmentService` skips environments without `linkedEnvironmentMetadata` (no Dataverse instance) | `BapEnvironmentServiceTests.DiscoverEnvironments_SkipsNonDataverseEnvironments` | ✅ |
+| AC-17 | `BapEnvironmentService` throws `PpdsException` with `Auth.BapApiForbidden` on 403 response (SPN not registered as management app) | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnForbidden` | ✅ |
+| AC-18 | `CloudEndpoints.GetBapApiUrl` returns correct URL for each cloud (Public, GCC, GCCHigh, DoD, China) | `CloudEndpointsTests.GetBapApiUrl_ReturnsCorrectUrl_ForEachCloud` | ✅ |
 | AC-19 | BAP discovery returns environments for SPN with management app registration | Integration test (Category=Integration) | 🔲 |
 | AC-20 | `ClientSecretCredentialProvider` validates required fields (ApplicationId, ClientSecret, TenantId) and rejects null/empty inputs | `ClientSecretCredentialProviderTests` | ✅ |
 | AC-21 | `CertificateFileCredentialProvider` validates required fields (ApplicationId, CertificatePath, TenantId) and rejects invalid cert paths | `CertificateFileCredentialProviderTests` | ✅ |
@@ -638,11 +638,11 @@ public class MyCredentialProvider : ICredentialProvider
 | AC-23 | `ManagedIdentityCredentialProvider` constructs with optional ClientId and sets correct AuthMethod | `ManagedIdentityCredentialProviderTests` | ✅ |
 | AC-24 | `GitHubFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `GitHubFederatedCredentialProviderTests` | ✅ |
 | AC-25 | `AzureDevOpsFederatedCredentialProvider` validates required fields (ApplicationId, TenantId) and sets correct AuthMethod | `AzureDevOpsFederatedCredentialProviderTests` | ✅ |
-| AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.NonInteractive_RoutesToBapDiscovery` | 🔲 |
-| AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_RoutesToGlobalDiscovery` | 🔲 |
-| AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlProvided_SkipsDiscovery` | 🔲 |
-| AC-29 | BAP-discovered environments resolve by name case-insensitively matching FriendlyName or UniqueName | `BapEnvironmentServiceTests.NameMatching_CaseInsensitive` | 🔲 |
-| AC-30 | BAP API 401 response throws `PpdsException` with `Auth.BapApiUnauthorized` | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnUnauthorized` | 🔲 |
+| AC-26 | Non-interactive auth method + environment name routes to `BapEnvironmentService` for resolution | `EnvironmentResolutionTests.NonInteractive_NameIdentifier_RoutesBapNotGds` | ✅ |
+| AC-27 | Interactive auth method + environment name routes to `GlobalDiscoveryService` for resolution | `EnvironmentResolutionTests.Interactive_SupportsGlobalDiscovery` | ✅ |
+| AC-28 | Environment URL provided directly skips discovery entirely regardless of auth method | `EnvironmentResolutionTests.UrlIdentifier_AttemptsDirectConnection` | ✅ |
+| AC-29 | BAP-discovered environments resolve by name case-insensitively matching FriendlyName or UniqueName | `EnvironmentResolverTests.Resolve_ByFriendlyNameCaseInsensitive_ReturnsEnvironment`, `Resolve_ByUniqueNameCaseInsensitive_ReturnsEnvironment` | ✅ |
+| AC-30 | BAP API 401 response throws `PpdsException` with `Auth.BapApiUnauthorized` | `BapEnvironmentServiceTests.DiscoverEnvironments_Throws_OnUnauthorized` | ✅ |
 
 ### Edge Cases
 

@@ -1,4 +1,4 @@
-using System;
+using System.Threading.Tasks;
 using FluentAssertions;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
@@ -6,6 +6,12 @@ using Xunit;
 
 namespace PPDS.Auth.Tests.Discovery;
 
+/// <summary>
+/// Verifies the routing logic in <see cref="EnvironmentResolutionService"/>:
+/// non-interactive auth + name → BAP discovery (AC-26);
+/// interactive auth + name → Global Discovery (AC-27);
+/// URL identifier → direct connection, no discovery (AC-28).
+/// </summary>
 public class EnvironmentResolutionTests
 {
     [Theory]
@@ -16,14 +22,13 @@ public class EnvironmentResolutionTests
     [InlineData(AuthMethod.GitHubFederated)]
     [InlineData(AuthMethod.AzureDevOpsFederated)]
     [InlineData(AuthMethod.UsernamePassword)]
-    public void NonInteractive_NameIdentifier_RoutesBapNotGds(AuthMethod authMethod)
+    public async Task NonInteractive_NameIdentifier_RoutesBapNotGds(AuthMethod authMethod)
     {
         var profile = new AuthProfile { AuthMethod = authMethod };
         using var service = new EnvironmentResolutionService(profile);
 
-        var result = service.ResolveAsync("MyEnvironment").GetAwaiter().GetResult();
+        var result = await service.ResolveAsync("MyEnvironment");
 
-        // Should NOT return the old "Service principals require a full environment URL" error
         result.Success.Should().BeFalse(because: "BAP discovery will fail without real credentials");
         result.ErrorMessage.Should().NotContain("Service principals require a full environment URL",
             because: "non-interactive auth should route to BAP discovery, not reject name-based resolution");
@@ -54,12 +59,12 @@ public class EnvironmentResolutionTests
     [Theory]
     [InlineData("https://org.crm.dynamics.com")]
     [InlineData("https://myorg.crm4.dynamics.com")]
-    public void UrlIdentifier_AttemptsDirectConnection(string url)
+    public async Task UrlIdentifier_AttemptsDirectConnection(string url)
     {
         var profile = new AuthProfile { AuthMethod = AuthMethod.ClientSecret };
         using var service = new EnvironmentResolutionService(profile);
 
-        var result = service.ResolveAsync(url).GetAwaiter().GetResult();
+        var result = await service.ResolveAsync(url);
 
         result.Success.Should().BeFalse(because: "no real credentials provided");
         result.ErrorMessage.Should().Contain("Direct connection failed",
@@ -74,12 +79,12 @@ public class EnvironmentResolutionTests
     }
 
     [Fact]
-    public void EmptyIdentifier_ReturnsError()
+    public async Task EmptyIdentifier_ReturnsError()
     {
         var profile = new AuthProfile { AuthMethod = AuthMethod.ClientSecret };
         using var service = new EnvironmentResolutionService(profile);
 
-        var result = service.ResolveAsync("").GetAwaiter().GetResult();
+        var result = await service.ResolveAsync("");
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("required");
