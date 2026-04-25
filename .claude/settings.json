@@ -196,7 +196,6 @@
       "Bash(git rebase -i:*)",
       "Bash(git rebase --onto:*)",
       "Bash(git rebase --root:*)",
-      "Bash(git rebase:*)",
       "Bash(git reset:*)",
       "Bash(git apply:*)",
       "Bash(git am:*)",
