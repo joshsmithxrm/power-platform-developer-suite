@@ -194,8 +194,7 @@ public class SolutionServiceTests
             BindingFlags.NonPublic | BindingFlags.Static);
         dictField.Should().NotBeNull("ComponentTypeNames dictionary should exist");
 
-        var dict = dictField!.GetValue(null) as Dictionary<int, string>
-            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+        var dict = dictField!.GetValue(null).Should().BeOfType<Dictionary<int, string>>().Subject;
         dict.Should().ContainKey(typeCode);
         dict[typeCode].Should().Be(expectedName);
     }
@@ -209,8 +208,7 @@ public class SolutionServiceTests
             BindingFlags.NonPublic | BindingFlags.Static);
         dictField.Should().NotBeNull();
 
-        var dict = dictField!.GetValue(null) as Dictionary<int, string>
-            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+        var dict = dictField!.GetValue(null).Should().BeOfType<Dictionary<int, string>>().Subject;
 
         foreach (var value in Enum.GetValues<PPDS.Dataverse.Generated.componenttype>())
         {
@@ -228,8 +226,7 @@ public class SolutionServiceTests
         var dictField = typeof(SolutionService).GetField(
             "ComponentTypeNames",
             BindingFlags.NonPublic | BindingFlags.Static);
-        var dict = dictField!.GetValue(null) as Dictionary<int, string>
-            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+        var dict = dictField!.GetValue(null).Should().BeOfType<Dictionary<int, string>>().Subject;
 
         dict.Should().ContainKey(80);
         dict[80].Should().Be("Model-Driven App");
@@ -242,8 +239,7 @@ public class SolutionServiceTests
         var dictField = typeof(SolutionService).GetField(
             "ComponentTypeNames",
             BindingFlags.NonPublic | BindingFlags.Static);
-        var dict = dictField!.GetValue(null) as Dictionary<int, string>
-            ?? throw new InvalidOperationException("ComponentTypeNames must be Dictionary<int, string>");
+        var dict = dictField!.GetValue(null).Should().BeOfType<Dictionary<int, string>>().Subject;
 
         // Connector1 (372) should display as "Connector", not the auto-generated "Connector1"
         dict.Should().ContainKey(372);
