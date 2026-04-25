@@ -363,28 +363,28 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 | AC-WR-31 | CLI `url` generates Maker portal URL, outputs to stdout | TBD | 🔲 |
 | AC-WR-32 | Name resolution: GUID → exact name → partial match; error on ambiguity for get/url | TBD | 🔲 |
 | AC-WR-33 | CLI `webresources publish` is alias for `ppds publish --type webresource` | TBD | 🔲 |
-| AC-WR-34 | `pull` downloads web resources to target folder preserving hierarchical path structure | `WebResourceSyncServiceTests.PullCreatesDirectoryStructure` | 🔲 |
-| AC-WR-35 | `pull` creates `.ppds/webresources.json` tracking file with version, environmentUrl, solution, resources | `WebResourceSyncServiceTests.PullCreatesTrackingFile` | 🔲 |
-| AC-WR-36 | Tracking file records modifiedOn timestamp and SHA256 hash per resource | `WebResourceTrackingFileTests.TrackingFileContainsHashAndTimestamp` | 🔲 |
-| AC-WR-37 | `pull --strip-prefix` removes publisher prefix from local file paths | `WebResourceSyncServiceTests.StripPrefixRemovesPublisherPrefix` | 🔲 |
-| AC-WR-38 | `pull` downloads content in parallel with progress reporting via IProgressReporter | `WebResourceSyncServiceTests.PullDownloadsInParallel` | 🔲 |
-| AC-WR-39 | `pull` without `--force` warns and skips files with local modifications (hash mismatch) | `WebResourceSyncServiceTests.PullSkipsLocallyModifiedFiles` | 🔲 |
-| AC-WR-40 | `pull --force` overwrites locally modified files | `WebResourceSyncServiceTests.PullForceOverwritesModifiedFiles` | 🔲 |
-| AC-WR-41 | `pull` supports `--solution`, `--type`, `--name` filters (filtering in sync service per A1) | `WebResourceSyncServiceTests.PullFiltersResources` | 🔲 |
-| AC-WR-42 | `push` reads `.ppds/webresources.json` and errors if missing | `PushCommandTests.PushErrorsOnMissingTrackingFile` | 🔲 |
-| AC-WR-43 | `push` detects locally modified files by comparing SHA256 hash, skips unchanged | `WebResourceSyncServiceTests.PushSkipsUnchangedFiles` | 🔲 |
-| AC-WR-44 | `push` detects server conflicts by comparing modifiedOn, exits PreconditionFailed (10) | `PushCommandTests.PushConflictReturnsExitCode10` | 🔲 |
-| AC-WR-45 | `push --force` skips conflict detection and uploads regardless | `WebResourceSyncServiceTests.PushForceSkipsConflictCheck` | 🔲 |
-| AC-WR-46 | `push --dry-run` reports what would be pushed without making changes | `WebResourceSyncServiceTests.PushDryRunNoMutation` | 🔲 |
-| AC-WR-47 | `push --publish` publishes only successfully uploaded resource IDs | `WebResourceSyncServiceTests.PushWithPublishCallsPublishAsync` | 🔲 |
-| AC-WR-48 | `push` updates tracking file after successful upload (new modifiedOn, new hash) | `WebResourceSyncServiceTests.PushUpdatesTrackingFile` | 🔲 |
-| AC-WR-49 | Pull/push business logic lives in `IWebResourceSyncService` (Constitution A1), including filtering | `WebResourceSyncServiceTests.*` | 🔲 |
-| AC-WR-50 | Tracking file keyed by Dataverse resource name, supports round-trip pull→edit→push | `WebResourceSyncServiceTests.RoundTripPullEditPush` | 🔲 |
-| AC-WR-51 | `pull` rejects resource names with path traversal segments that escape target folder | `WebResourceSyncServiceTests.PullRejectsPathTraversal` | 🔲 |
-| AC-WR-52 | `push` validates environment URL matches tracking file, errors on mismatch unless `--force` | `PushCommandTests.PushErrorsOnEnvironmentMismatch` | 🔲 |
-| AC-WR-53 | `push` skips binary types (only uploads text types) with warning | `WebResourceSyncServiceTests.PushSkipsBinaryTypes` | 🔲 |
-| AC-WR-54 | `push` warns and skips tracked files that are missing from disk | `WebResourceSyncServiceTests.PushSkipsDeletedFiles` | 🔲 |
-| AC-WR-55 | `pull` merges tracking file: skipped resources retain prior entries, removed resources are pruned | `WebResourceSyncServiceTests.PullMergesTrackingFile` | 🔲 |
+| AC-WR-34 | `pull` downloads web resources to target folder preserving hierarchical path structure | `WebResourceSyncServiceTests.PullCreatesDirectoryStructure` | ✅ |
+| AC-WR-35 | `pull` creates `.ppds/webresources.json` tracking file with version, environmentUrl, solution, resources | `WebResourceSyncServiceTests.PullCreatesTrackingFile` | ✅ |
+| AC-WR-36 | Tracking file records modifiedOn timestamp and SHA256 hash per resource | `WebResourceTrackingFileTests.TrackingFileContainsHashAndTimestamp` | ✅ |
+| AC-WR-37 | `pull --strip-prefix` removes publisher prefix from local file paths | `WebResourceSyncServiceTests.StripPrefixRemovesPublisherPrefix` | ✅ |
+| AC-WR-38 | `pull` downloads content in parallel with progress reporting via IProgressReporter | `WebResourceSyncServiceTests.PullDownloadsInParallel` | ✅ |
+| AC-WR-39 | `pull` without `--force` warns and skips files with local modifications (hash mismatch) | `WebResourceSyncServiceTests.PullSkipsLocallyModifiedFiles` | ✅ |
+| AC-WR-40 | `pull --force` overwrites locally modified files | `WebResourceSyncServiceTests.PullForceOverwritesModifiedFiles` | ✅ |
+| AC-WR-41 | `pull` supports `--solution`, `--type`, `--name` filters (filtering in sync service per A1) | `WebResourceSyncServiceTests.PullFiltersResources` | ✅ |
+| AC-WR-42 | `push` reads `.ppds/webresources.json` and errors if missing | `WebResourceSyncServiceTests.PushErrorsOnMissingTrackingFile` | ✅ |
+| AC-WR-43 | `push` detects locally modified files by comparing SHA256 hash, skips unchanged | `WebResourceSyncServiceTests.PushSkipsUnchangedFiles` | ✅ |
+| AC-WR-44 | `push` detects server conflicts by comparing modifiedOn, exits PreconditionFailed (10) | `WebResourceSyncServiceTests.PushDetectsServerConflict` + `PushCommandTests.PushConflictReturnsExitCode10` | ✅ |
+| AC-WR-45 | `push --force` skips conflict detection and uploads regardless | `WebResourceSyncServiceTests.PushForceSkipsConflictCheck` | ✅ |
+| AC-WR-46 | `push --dry-run` reports what would be pushed without making changes | `WebResourceSyncServiceTests.PushDryRunNoMutation` | ✅ |
+| AC-WR-47 | `push --publish` publishes only successfully uploaded resource IDs | `WebResourceSyncServiceTests.PushWithPublishCallsPublishAsync` | ✅ |
+| AC-WR-48 | `push` updates tracking file after successful upload (new modifiedOn, new hash) | `WebResourceSyncServiceTests.PushUpdatesTrackingFile` | ✅ |
+| AC-WR-49 | Pull/push business logic lives in `IWebResourceSyncService` (Constitution A1), including filtering | `WebResourceSyncServiceTests.*` | ✅ |
+| AC-WR-50 | Tracking file keyed by Dataverse resource name, supports round-trip pull→edit→push | `WebResourceSyncServiceTests.RoundTripPullEditPush` | ✅ |
+| AC-WR-51 | `pull` rejects resource names with path traversal segments that escape target folder | `WebResourceSyncServiceTests.PullRejectsPathTraversal` | ✅ |
+| AC-WR-52 | `push` validates environment URL matches tracking file, errors on mismatch unless `--force` | `WebResourceSyncServiceTests.PushErrorsOnEnvironmentMismatch_WhenNotForced` | ✅ |
+| AC-WR-53 | `push` skips binary types (only uploads text types) with warning | `WebResourceSyncServiceTests.PushSkipsBinaryTypes` | ✅ |
+| AC-WR-54 | `push` warns and skips tracked files that are missing from disk | `WebResourceSyncServiceTests.PushSkipsDeletedFiles` | ✅ |
+| AC-WR-55 | `pull` merges tracking file: skipped resources retain prior entries, removed resources are pruned | `WebResourceSyncServiceTests.PullMergesTrackingFile` | ✅ |
 
 ---
 
