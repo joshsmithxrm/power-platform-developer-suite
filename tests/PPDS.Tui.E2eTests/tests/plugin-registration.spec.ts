@@ -1,24 +1,14 @@
 import { test, expect } from '@microsoft/tui-test';
-import { getPpdsPath } from './test-helpers.js';
+import { getPpdsPath, openToolsMenuItem, settle } from './test-helpers.js';
 
 const ppdsPath = getPpdsPath();
 
 test.use({ program: { file: ppdsPath, args: ['interactive'] } });
 
-const settle = (ms = 150) => new Promise(r => setTimeout(r, ms));
-
 async function navigateToPluginRegistration(terminal: any) {
   await expect(terminal.getByText('PPDS - Power Platform Developer Suite', { full: true })).toBeVisible();
 
-  terminal.write('\x1bt');  // Alt+T to open Tools menu
-  await expect(terminal.getByText('SQL Query', { full: true })).toBeVisible();
-  await settle();
-  // Down 6: SQL Query → Solutions → Import Jobs → Connection References → Environment Variables → Plugin Traces → Plugin Registration
-  for (let i = 0; i < 6; i++) {
-    terminal.write('\x1b[B');
-    await settle();
-  }
-  terminal.write('\r');  // Enter to select
+  await openToolsMenuItem(terminal, 'Plugin Registration');
 
   await expect(terminal.getByText('Registrations')).toBeVisible();
 }

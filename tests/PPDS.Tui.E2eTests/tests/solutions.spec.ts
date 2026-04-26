@@ -1,21 +1,14 @@
 import { test, expect } from '@microsoft/tui-test';
-import { getPpdsPath } from './test-helpers.js';
+import { getPpdsPath, openToolsMenuItem, settle } from './test-helpers.js';
 
 const ppdsPath = getPpdsPath();
 
 test.use({ program: { file: ppdsPath, args: ['interactive'] } });
 
-const settle = (ms = 150) => new Promise(r => setTimeout(r, ms));
-
 async function navigateToSolutions(terminal: any) {
   await expect(terminal.getByText('PPDS - Power Platform Developer Suite', { full: true })).toBeVisible();
 
-  terminal.write('\x1bt');  // Alt+T to open Tools menu
-  await expect(terminal.getByText('SQL Query', { full: true })).toBeVisible();
-  await settle();
-  terminal.write('\x1b[B');  // Down to Solutions
-  await settle();
-  terminal.write('\r');  // Enter to select
+  await openToolsMenuItem(terminal, 'Solutions');
 
   await expect(terminal.getByText('Include Managed')).toBeVisible();
 }

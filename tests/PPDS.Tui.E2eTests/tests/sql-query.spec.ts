@@ -5,7 +5,7 @@
  * These tests use @microsoft/tui-test for terminal rendering capture.
  */
 import { test, expect } from '@microsoft/tui-test';
-import { getPpdsPath } from './test-helpers.js';
+import { getPpdsPath, openToolsMenuItem } from './test-helpers.js';
 
 const ppdsPath = getPpdsPath();
 
@@ -17,10 +17,7 @@ async function navigateToSqlQuery(terminal: any) {
   // Wait for main window
   await expect(terminal.getByText('PPDS - Power Platform Developer Suite', { full: true })).toBeVisible();
 
-  // Navigate via Tools > SQL Query menu
-  terminal.write('\x1bt');  // Alt+T to open Tools menu
-  await expect(terminal.getByText('SQL Query', { full: true })).toBeVisible();
-  terminal.write('\r');  // Enter to select
+  await openToolsMenuItem(terminal, 'SQL Query');
 
   // Wait for SQL Query screen to load (title includes F5, Ctrl+Space, Alt+arrows, F6 hints)
   await expect(terminal.getByText('F5 to execute')).toBeVisible();
