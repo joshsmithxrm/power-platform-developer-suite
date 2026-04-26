@@ -429,3 +429,55 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
                 log_fn("POSTED", comment_id=comment_id, action=action)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             log_fn("FAILED", comment_id=comment_id)
+
+
+def dispatch_subagent(profile_name, payload, model="sonnet", worktree=".", timeout=1800):
+    """Invoke ``claude -p`` with an agent profile, passing payload via stdin.
+
+    Centralises the Windows-quoting / UTF-8 stdin / shell=False (Constitution S2)
+    invocation pattern so CI-fix and Gemini-triage dispatchers share one code path.
+
+    Args:
+        profile_name: agent profile name (matches .claude/agents/<name>.md)
+        payload: dict to pass as JSON via stdin to the claude process
+        model: model slug (floating name, no version pin)
+        worktree: working directory for the subprocess
+        timeout: seconds before the process is killed (default 30 min)
+
+    Returns:
+        dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int)
+    """
+    import sys as _sys
+    cmd = [
+        "claude", "-p",
+        "--verbose", "--output-format", "stream-json",
+        "--model", model,
+        "--agent", profile_name,
+    ]
+    payload_bytes = json.dumps(payload).encode("utf-8")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=worktree,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(
+                input=payload_bytes, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return {"stdout": "", "stderr": "timeout", "exit_code": -1}
+        return {
+            "stdout": stdout_bytes.decode("utf-8", errors="replace"),
+            "stderr": stderr_bytes.decode("utf-8", errors="replace"),
+            "exit_code": proc.returncode,
+        }
+    except FileNotFoundError:
+        return {"stdout": "", "stderr": "claude command not found", "exit_code": -1}
+    except OSError as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": -1}

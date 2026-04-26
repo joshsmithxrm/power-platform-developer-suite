@@ -52,6 +52,8 @@ Thumbs.db
 .claude/settings.local.json
 *.local.json
 .workflow/
+!.workflow/ci-fix-decisions/
+!.workflow/ci-fix-decisions/**
 
 # Temporary artifacts (testing, exports, logs)
 tmp/

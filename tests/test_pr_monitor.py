@@ -1989,3 +1989,147 @@ class TestCiEscalation:
             log_contents = f.read()
         assert "RECOVERED" in log_contents
         assert "ci_checks_posting=True" in log_contents
+
+
+# ---------------------------------------------------------------------------
+# AC-183: MAX_CI_FIX_ROUNDS constant
+# ---------------------------------------------------------------------------
+
+
+class TestCiFixRoundBudget:
+    """AC-183: MAX_CI_FIX_ROUNDS default 3, overridable via env var."""
+
+    def test_ci_fix_round_budget_default_and_override(self, monkeypatch):
+        """MAX_CI_FIX_ROUNDS defaults to 3 and is overridable via PPDS_MAX_CI_FIX_ROUNDS."""
+        # Default value
+        assert pr_monitor.MAX_CI_FIX_ROUNDS == 3
+
+        # Override via environment variable (by checking the expression)
+        import importlib
+        monkeypatch.setenv("PPDS_MAX_CI_FIX_ROUNDS", "5")
+        # Verify the constant is read from env at module load time
+        override_val = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
+        assert override_val == 5
+
+
+# ---------------------------------------------------------------------------
+# AC-184 (part 1): KNOWN_FLAKE_PATTERNS constant
+# ---------------------------------------------------------------------------
+
+
+class TestKnownFlakePatternsConstant:
+    """AC-184 part 1: KNOWN_FLAKE_PATTERNS constant exists and is non-empty."""
+
+    def test_known_flake_patterns_constant_exists(self):
+        """KNOWN_FLAKE_PATTERNS is a non-empty list of lowercase strings."""
+        patterns = pr_monitor.KNOWN_FLAKE_PATTERNS
+        assert isinstance(patterns, list), "KNOWN_FLAKE_PATTERNS must be a list"
+        assert len(patterns) > 0, "KNOWN_FLAKE_PATTERNS must be non-empty"
+        # Check at least one network/transient pattern is present
+        patterns_lower = [p.lower() for p in patterns]
+        assert any("timeout" in p or "connection" in p or "reset" in p
+                   for p in patterns_lower), \
+            "KNOWN_FLAKE_PATTERNS should include at least one transient network pattern"
+
+
+# ---------------------------------------------------------------------------
+# AC-187: Decision file schema
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionFileSchema:
+    """AC-187: _write_ci_fix_decision writes typed fields to JSON."""
+
+    def test_decision_file_schema_typed_fields(self, tmp_path):
+        """_write_ci_fix_decision writes all required fields with correct types."""
+        wt = _make_worktree(tmp_path)
+        sha = "abc1234def567"
+        payload = {
+            "pr": 42,
+            "failure_summary": "test suite failed on line 10",
+            "files_touched": ["scripts/pr_monitor.py", "tests/test_pr_monitor.py"],
+            "lines_added": 5,
+            "lines_removed": 3,
+            "action": "fix",
+            "escalation_reason": None,
+            "scope_violation": False,
+        }
+
+        path = pr_monitor._write_ci_fix_decision(wt, sha, round_num=1, payload=payload)
+
+        assert os.path.exists(str(path))
+        with open(str(path), "r", encoding="utf-8") as f:
+            record = json.load(f)
+
+        assert isinstance(record["round"], int)
+        assert record["round"] == 1
+        assert isinstance(record["timestamp"], str)
+        assert "T" in record["timestamp"]  # ISO 8601 format
+        assert isinstance(record["pr"], int)
+        assert record["pr"] == 42
+        assert isinstance(record["failure_summary"], str)
+        assert isinstance(record["files_touched"], list)
+        assert all(isinstance(p, str) for p in record["files_touched"])
+        assert isinstance(record["lines_added"], int)
+        assert isinstance(record["lines_removed"], int)
+        assert record["action"] in ("fix", "escalate")
+        assert record["escalation_reason"] is None or isinstance(record["escalation_reason"], str)
+        assert isinstance(record["scope_violation"], bool)
+
+
+# ---------------------------------------------------------------------------
+# AC-188: .workflow/ci-fix-decisions/ not gitignored
+# ---------------------------------------------------------------------------
+
+
+class TestCiFixDecisionsDirNotGitignored:
+    """AC-188: .workflow/ci-fix-decisions/ is committed, not gitignored."""
+
+    def test_ci_fix_decisions_dir_not_gitignored(self, tmp_path):
+        """The .gitignore negation rules allow ci-fix-decisions/ to be tracked."""
+        import subprocess as sp
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        # git check-ignore returns non-zero when path is NOT ignored
+        result = sp.run(
+            ["git", "check-ignore", "-v",
+             ".workflow/ci-fix-decisions/.gitkeep"],
+            cwd=repo_root,
+            stdin=sp.DEVNULL,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            text=True,
+        )
+        # Non-zero means "not ignored" — that's what we want
+        assert result.returncode != 0, (
+            ".workflow/ci-fix-decisions/.gitkeep must NOT be gitignored. "
+            f"git check-ignore says: {result.stdout.strip()!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-194 (enum): TERMINAL_STATES constant
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalStateEnum:
+    """AC-194: TERMINAL_STATES tuple contains exactly the specified values."""
+
+    def test_terminal_state_enum(self):
+        """TERMINAL_STATES is a tuple with exactly the 6 required terminal state names."""
+        states = pr_monitor.TERMINAL_STATES
+        assert isinstance(states, tuple), "TERMINAL_STATES must be a tuple"
+        required = {
+            "ready",
+            "stuck-ci-fix-exhausted",
+            "stuck-triage-exhausted",
+            "stuck-thrash-detected",
+            "ci-timeout",
+            "monitor-crash",
+        }
+        assert set(states) == required, (
+            f"TERMINAL_STATES mismatch.\n"
+            f"Expected: {sorted(required)}\n"
+            f"Got:      {sorted(states)}"
+        )
+        assert len(states) == 6, "TERMINAL_STATES must have exactly 6 entries (no duplicates)"

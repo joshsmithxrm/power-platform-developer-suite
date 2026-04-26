@@ -47,6 +47,36 @@ GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
 GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
+MAX_CI_FIX_ROUNDS = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
+
+KNOWN_FLAKE_PATTERNS = [
+    "connection reset by peer",
+    "connection refused",
+    "timeout waiting for",
+    "timed out after",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "read: connection reset",
+    "net/http: request canceled",
+    "unexpected EOF",
+    "i/o timeout",
+    "dial tcp: lookup",
+    "no such host",
+    "temporary failure in name resolution",
+    "rate limit exceeded",
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+]
+
+TERMINAL_STATES = (
+    "ready",
+    "stuck-ci-fix-exhausted",
+    "stuck-triage-exhausted",
+    "stuck-thrash-detected",
+    "ci-timeout",
+    "monitor-crash",
+)
+
 SHAKEDOWN = os.environ.get("PPDS_SHAKEDOWN", "")
 
 # Substrings that indicate Gemini has "spoken" but has nothing for us to
@@ -1047,6 +1077,48 @@ def _notify_terminal(worktree, pr_number, logger, message):
         run_notify(worktree, pr_number, logger, message=message)
     except Exception as notify_err:  # noqa: BLE001 — best-effort
         logger.log("notify", "TERMINAL_NOTIFY_ERROR", error=str(notify_err))
+
+
+def _write_ci_fix_decision(worktree, sha, round_num, payload):
+    """Write a CI-fix decision file to .workflow/ci-fix-decisions/<sha>.json.
+
+    Single-write (non-atomic) for v1 per spec note. v2 will add write-temp+rename.
+    Returns the Path written.
+    """
+    decisions_dir = os.path.join(worktree, ".workflow", "ci-fix-decisions")
+    os.makedirs(decisions_dir, exist_ok=True)
+    path = os.path.join(decisions_dir, f"{sha}.json")
+    record = {
+        "round": round_num,
+        "timestamp": _timestamp(),
+        "pr": payload.get("pr"),
+        "failure_summary": payload.get("failure_summary", ""),
+        "files_touched": payload.get("files_touched", []),
+        "lines_added": payload.get("lines_added", 0),
+        "lines_removed": payload.get("lines_removed", 0),
+        "action": payload.get("action", "fix"),
+        "escalation_reason": payload.get("escalation_reason"),
+        "scope_violation": bool(payload.get("scope_violation", False)),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+        f.write("\n")
+    return Path(path)
+
+
+def _load_prior_decision(worktree, sha):
+    """Load the most recent CI-fix decision file for the given commit SHA.
+
+    Returns the parsed dict or None if no file exists.
+    """
+    path = os.path.join(worktree, ".workflow", "ci-fix-decisions", f"{sha}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def run_monitor(worktree, pr_number, resume=False):
