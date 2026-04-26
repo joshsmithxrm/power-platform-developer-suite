@@ -60,13 +60,15 @@ def _make_state(project_dir: str, state: dict) -> str:
 
 def _git_init_branch(project_dir: str, branch: str = "feat/x"):
     """Make project_dir look enough like a git repo to satisfy the stop hook."""
-    subprocess.run(["git", "init", "-q", "-b", branch], cwd=project_dir, check=True)
+    subprocess.run(["git", "init", "-q", "-b", branch], cwd=project_dir, check=True,
+                   stdin=subprocess.DEVNULL)
     subprocess.run(["git", "config", "user.email", "test@example.com"],
-                   cwd=project_dir, check=True)
-    subprocess.run(["git", "config", "user.name", "test"], cwd=project_dir, check=True)
+                   cwd=project_dir, check=True, stdin=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=project_dir, check=True,
+                   stdin=subprocess.DEVNULL)
     # Empty initial commit so HEAD exists
     subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", "init"],
-                   cwd=project_dir, check=True)
+                   cwd=project_dir, check=True, stdin=subprocess.DEVNULL)
 
 
 # ---------------------------------------------------------------------------
@@ -120,14 +122,15 @@ class TestStopHookPrInvocationGate(unittest.TestCase):
         _git_init_branch(tmp, "feat/x")
         # Stub origin/main to current HEAD (no commits ahead) by default.
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=tmp, capture_output=True, text=True
+            ["git", "rev-parse", "HEAD"], cwd=tmp, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
         ).stdout.strip()
         subprocess.run(["git", "update-ref", "refs/remotes/origin/main", head],
-                       cwd=tmp, check=True)
+                       cwd=tmp, check=True, stdin=subprocess.DEVNULL)
         for i in range(ahead):
             subprocess.run(
                 ["git", "commit", "--allow-empty", "-q", "-m", f"c{i}"],
-                cwd=tmp, check=True,
+                cwd=tmp, check=True, stdin=subprocess.DEVNULL,
             )
         _make_state(tmp, state)
         return tmp

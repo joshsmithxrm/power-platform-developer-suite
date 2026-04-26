@@ -64,7 +64,7 @@ def _make_fake_repo(skill_files: dict[str, str], hook_names: list[str],
 def _run(repo: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", repo, *args],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
     )
 
 
@@ -224,6 +224,7 @@ class TestAllT1DirectivesMarked(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), "--discover"],
             cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=30,
+            stdin=subprocess.DEVNULL,
         )
         self.assertEqual(
             proc.returncode, 0,
