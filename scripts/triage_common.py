@@ -305,10 +305,11 @@ def build_triage_prompt(worktree, pr_number, comments):
 
 
 def parse_triage_json(content):
-    """Find and parse triage JSON array from raw text content.
+    """Find and parse a triage JSON array from raw text content.
 
-    Works for both direct stage log content (pipeline) and
-    pre-extracted text (pr_monitor). Returns list or None.
+    Scans right-to-left for '[' and returns the last valid JSON array found.
+    For CI-fix agent output (which is a JSON object), use parse_triage_json_obj.
+    Returns list or None.
     """
     decoder = json.JSONDecoder()
     search_from = len(content)
