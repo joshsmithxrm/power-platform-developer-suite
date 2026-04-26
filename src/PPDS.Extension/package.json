@@ -2,7 +2,7 @@
   "name": "power-platform-developer-suite",
   "displayName": "Power Platform Developer Suite",
   "description": "Power Platform and Dataverse developer suite for VS Code — SQL/FetchXML notebooks, plugin registration, metadata browsing, bundled ppds CLI, and an MCP server for AI agents.",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "publisher": "JoshSmithXRM",
   "preview": false,
   "qna": false,
