@@ -46,7 +46,7 @@ class TestAutoCommitStranded(unittest.TestCase):
 
     @patch("pipeline.subprocess.run")
     @patch("pipeline.log")
-    def test_dirty_worktree_commits_with_add_u(self, mock_log, mock_run):
+    def test_dirty_worktree_commits_with_add_A(self, mock_log, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=" M file.py\n", stderr=""),
             MagicMock(returncode=0),
