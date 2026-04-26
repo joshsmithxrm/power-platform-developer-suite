@@ -27,6 +27,7 @@ def get_current_branch(cwd: str = None) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             print(
@@ -77,6 +78,7 @@ def _branch_for_path(file_path: str) -> str:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                stdin=subprocess.DEVNULL,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return ""

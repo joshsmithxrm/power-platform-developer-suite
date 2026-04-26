@@ -1932,8 +1932,8 @@ class TestReadLastLines:
 class TestRetroSkillPrompt:
     def test_skill_prompt_contains_observation_tier(self):
         """AC-01: Retro skill prompt includes observation tier with definition."""
-        skill_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "SKILL.md")
-        with open(skill_path, "r") as f:
+        ref_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "REFERENCE.md")
+        with open(ref_path, "r") as f:
             content = f.read()
         assert "**observation**:" in content or "- **observation**" in content, (
             "Retro skill prompt must define the observation tier"
@@ -1947,8 +1947,8 @@ class TestRetroSkillPrompt:
 
     def test_skill_prompt_contains_litmus_test(self):
         """AC-02: Retro skill prompt includes litmus test guidance."""
-        skill_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "SKILL.md")
-        with open(skill_path, "r") as f:
+        ref_path = os.path.join(REPO_ROOT, ".claude", "skills", "retro", "REFERENCE.md")
+        with open(ref_path, "r") as f:
             content = f.read()
         assert "Can someone open" in content and "code change" in content, (
             "Retro skill prompt must include the litmus test: "
