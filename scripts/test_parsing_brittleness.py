@@ -112,18 +112,18 @@ class TestLaunchPromptSafety(unittest.TestCase):
         self.assertIn("'@ midline", script)
 
     def test_terminator_at_line_start_rejected(self):
-        prompt = "Line1\n'@ this would break\nLine3"
+        prompt = "Line1\n'@\nLine3"
         with self.assertRaises(ValueError):
             launch_claude_session.build_launch_script(
                 r"C:\repo", r"C:\bin\claude.exe", prompt,
             )
 
-    def test_indented_terminator_rejected(self):
-        prompt = "Line1\n  '@ indented also breaks\nLine3"
-        with self.assertRaises(ValueError):
-            launch_claude_session.build_launch_script(
-                r"C:\repo", r"C:\bin\claude.exe", prompt,
-            )
+    def test_terminator_with_trailing_text_allowed(self):
+        prompt = "Line1\n'@ this is fine in PowerShell\nLine3"
+        script = launch_claude_session.build_launch_script(
+            r"C:\repo", r"C:\bin\claude.exe", prompt,
+        )
+        self.assertIn("'@ this is fine", script)
 
     def test_prompt_stdin_dry_run(self):
         prompt = "Test with – em-dash and $(whoami)"
@@ -141,6 +141,50 @@ class TestLaunchPromptSafety(unittest.TestCase):
                 content = f.read()
             self.assertIn("$(whoami)", content)
             self.assertIn("–", content)
+
+
+class TestParseTriageJson(unittest.TestCase):
+    """parse_triage_json must find the JSON array even when description
+    strings contain '[' characters (e.g. regex patterns)."""
+
+    def test_bracket_in_description_does_not_break_parse(self):
+        from triage_common import parse_triage_json
+        content = (
+            'Here are the triage results:\n'
+            '```json\n'
+            '[{"id": 1, "action": "fixed", '
+            '"description": "Changed regex [ \\\\t]*\'@ to exact match", '
+            '"commit": "abc123"}]\n'
+            '```'
+        )
+        result = parse_triage_json(content)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 1)
+
+    def test_multiple_brackets_in_descriptions(self):
+        from triage_common import parse_triage_json
+        content = (
+            '[{"id": 1, "action": "dismissed", '
+            '"description": "Regex [a-z]+ is fine", "commit": null}, '
+            '{"id": 2, "action": "fixed", '
+            '"description": "Changed [old] to [new]", "commit": "def456"}]'
+        )
+        result = parse_triage_json(content)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 2)
+
+    def test_no_json_returns_none(self):
+        from triage_common import parse_triage_json
+        self.assertIsNone(parse_triage_json("no json here"))
+        self.assertIsNone(parse_triage_json(""))
+
+    def test_plain_array_without_fences(self):
+        from triage_common import parse_triage_json
+        content = '[{"id": 1, "action": "fixed", "description": "done", "commit": "abc"}]'
+        result = parse_triage_json(content)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["action"], "fixed")
 
 
 class TestNoBareOpen(unittest.TestCase):
