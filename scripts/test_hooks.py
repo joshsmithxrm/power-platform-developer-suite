@@ -151,7 +151,8 @@ class TestStopHookPrInvocationGate(unittest.TestCase):
         # AC-171 — zero commits ahead → no block
         tmp = self._setup({"phase": "implementing", "pr": {}}, ahead=0)
         proc = _run_hook("session-stop-workflow.py", {}, project_dir=tmp)
-        # May still block on missing gates/verify/etc., but not on pr-invocation.
+        self.assertEqual(proc.returncode, 0,
+                         f"expected exit 0; got {proc.returncode}\nstdout={proc.stdout}\nstderr={proc.stderr}")
         # Confirm stderr/stdout doesn't contain the pr-invocation block reason.
         self.assertNotIn("/pr was not invoked", proc.stdout)
 
@@ -207,6 +208,20 @@ class TestSkillLineCap(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         proc = _run_hook("skill-line-cap.py", payload, project_dir=tmp)
         self.assertEqual(proc.returncode, 0)
+
+    def test_skill_line_cap_at_boundary_allowed(self):
+        # AC-158 — exactly 150 lines + trailing newline must be ALLOWED
+        content = "\n".join([f"line {i}" for i in range(150)]) + "\n"
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": ".claude/skills/foo/SKILL.md",
+                           "content": content},
+        }
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        proc = _run_hook("skill-line-cap.py", payload, project_dir=tmp)
+        self.assertEqual(proc.returncode, 0,
+                         f"expected exit 0; got {proc.returncode}\nstderr={proc.stderr}")
 
     def test_skill_line_cap_ignores_non_skill_md(self):
         content = "\n".join([f"line {i}" for i in range(500)]) + "\n"

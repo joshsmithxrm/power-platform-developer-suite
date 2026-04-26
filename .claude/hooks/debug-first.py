@@ -24,9 +24,11 @@ def _now_iso():
 def _is_test_or_build(command):
     cmd = command.lower()
     return (
-        "dotnet test", "dotnet build" in cmd
-        or "npm test", "npm run build" in cmd
+        "dotnet test" in cmd
+        or "dotnet build" in cmd
+        or "npm test" in cmd
         or "npm run test" in cmd
+        or "npm run build" in cmd
         or (" test " in cmd and "dotnet" in cmd)
     )
 
@@ -80,7 +82,6 @@ def main():
         resp = payload.get("tool_response", {}) or {}
         rc = resp.get("returncode") if isinstance(resp, dict) else None
         ok = resp.get("success") if isinstance(resp, dict) else None
-        # Treat failure as: rc != 0, or success == False
         failed = (rc is not None and rc != 0) or (ok is False)
         if failed:
             _record_failure(project_dir, command)
@@ -96,13 +97,13 @@ def main():
         debug_last = (state.get("debug") or {}).get("last_run")
         if debug_last and debug_last > last.get("timestamp", ""):
             sys.exit(0)
-        print(
-            f"BLOCKED: test/build re-invocation blocked. A prior failure was recorded at "
-            f"{last.get('timestamp')}.\n"
-            f"  Run /debug to investigate before retrying.\n"
-            f"  See CLAUDE.md: 'For any test/build failure, invoke /debug first.'",
-            file=sys.stderr,
+        ts = last.get("timestamp")
+        msg = (
+            f"BLOCKED: test/build re-invocation blocked. A prior failure was recorded at {ts}.\n"
+            "  Run /debug to investigate before retrying.\n"
+            "  See CLAUDE.md: 'For any test/build failure, invoke /debug first.'"
         )
+        print(msg, file=sys.stderr)
         sys.exit(2)
 
     sys.exit(0)

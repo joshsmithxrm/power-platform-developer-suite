@@ -991,18 +991,19 @@ def mark_step(result, step_name, status):
     }
 
 
-_DEREGISTERED = False
+_DEREGISTERED_BRANCHES: "set[str]" = set()
 
 
 def _deregister_inflight(worktree, logger):
-    global _DEREGISTERED
-    if _DEREGISTERED:
-        return
     """Deregister the worktree's branch from the in-flight registry.
 
     Called before terminal notification so the registry reflects "no
     longer working on this" before the user sees the notification.
     Best-effort — failures do not block the notify path.
+
+    Idempotent (I-8): once a branch has been deregistered in this
+    process, subsequent calls early-return so multiple terminal paths
+    (CI fail, ready-flip, retro/notify) cannot double-deregister.
     """
     try:
         result = subprocess.run(
@@ -1014,14 +1015,15 @@ def _deregister_inflight(worktree, logger):
         return
     if not branch:
         return
+    if branch in _DEREGISTERED_BRANCHES:
+        return
     try:
         subprocess.run(
             [sys.executable, "scripts/inflight-deregister.py", "--branch", branch],
             cwd=worktree, capture_output=True, text=True, timeout=15,
         )
         logger.log("inflight", "DEREGISTERED", branch=branch)
-        global _DEREGISTERED
-        _DEREGISTERED = True
+        _DEREGISTERED_BRANCHES.add(branch)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("inflight", "DEREGISTER_FAILED",
                    branch=branch, error=str(e))
@@ -1081,10 +1083,10 @@ def run_monitor(worktree, pr_number, resume=False):
                 result["status"] = "ci_failed"
                 write_result(worktree, result)
                 _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI failed — "
-                                 f"continuing to triage")
-                logger.log("monitor", "CI_FAILED_CONTINUE",
-                           reason="CI failed, proceeding to Gemini/triage")
+                                 f"PR #{pr_number} CI failed")
+                logger.log("monitor", "ABORT", reason="CI failed (AC-108)")
+                logger.close()
+                return 1
 
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"

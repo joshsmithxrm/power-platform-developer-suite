@@ -53,8 +53,12 @@ class TestStaleTTLDetection(unittest.TestCase):
         old = datetime.now(timezone.utc) - timedelta(days=10)
         entry = self._entry(started=old, branch="feat/long-gone")
         self.assertTrue(self.mod._is_stale(entry, live_branches=set()))
-        # annotate_stale flips a 'stale' field on the dict
-        annotated = self.mod.annotate_stale([entry])
+        # annotate_stale flips a 'stale' field on the dict.
+        # Patch _live_worktree_branches so the test doesn't shell out to
+        # `git worktree list` (I-12: deterministic, no live git dependency).
+        with patch.object(self.mod, "_live_worktree_branches",
+                          return_value=set()):
+            annotated = self.mod.annotate_stale([entry])
         self.assertTrue(annotated[0].get("stale"))
 
     def test_recent_entry_not_stale(self):

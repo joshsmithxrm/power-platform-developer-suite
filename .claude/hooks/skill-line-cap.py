@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """PreToolUse hook: enforce 150-line cap on SKILL.md edits.
 
 Skills are loaded selectively. Each SKILL.md is the entry point - rationale
@@ -48,7 +49,10 @@ def main():
 
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {}) or {}
-    file_path = tool_input.get("file_path", "")
+    file_path = tool_input.get("file_path")
+    if not file_path:
+        # Edit/Write payloads always include file_path; nothing to enforce when absent.
+        sys.exit(0)
 
     if not is_skill_md(file_path):
         sys.exit(0)

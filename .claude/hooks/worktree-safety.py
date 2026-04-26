@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: protect against catastrophic worktree removals.
+"""Hook: protect against catastrophic worktree removals.
 
-Blocks:
-- ``git worktree remove`` targeting the main repo root
-- Concurrent worktree removals (lock file with live PID)
+PreToolUse on ``git worktree remove*``:
+- Block removals targeting the main repo root.
+- Block concurrent removals (lock file with live PID).
 
-Triggers on Bash matching ``git worktree remove*``.
+PostToolUse on the same matcher:
+- Clean up the PID lock so a follow-up removal is not falsely blocked.
+
 Exit 0: allow. Exit 2: block.
 """
 import json
@@ -42,28 +44,29 @@ def _parse_target(command):
     except ValueError:
         return None
     # Expect: git worktree remove [--force] <path>
-    if "worktree" in toks and "remove" in toks:
-        rwt_idx = toks.index("worktree")
-        # remove must follow `worktree` directly (skip past stray remove tokens elsewhere)
-        try:
-            idx = toks.index("remove", wt_idx + 1)
-        except ValueError:
-            return None
-        for tok in toks[ridx + 1:]:
-            if not tok.startswith("-"):
-                return tok.strip("'\"")
+    if "worktree" not in toks:
+        return None
+    wt_idx = toks.index("worktree")
+    # `remove` must follow `worktree` directly (skip stray "remove" tokens elsewhere,
+    # e.g. inside a path argument). Search starting at wt_idx + 1.
+    try:
+        rm_idx = toks.index("remove", wt_idx + 1)
+    except ValueError:
+        return None
+    for tok in toks[rm_idx + 1:]:
+        if not tok.startswith("-"):
+            return tok.strip("'\"")
     return None
 
 
 def _is_main_root(target, project_dir):
-    # Resolve both, compare. project_dir may be a worktree; the "main root"
-    # is its common parent or itself if invoked from main. We compare normalized
-    # absolute paths.
+    # Compare normalized absolute paths. project_dir may itself be a worktree;
+    # this hook only blocks when the target equals the active root.
     try:
         t = os.path.abspath(target)
         p = os.path.abspath(project_dir)
         return os.path.normcase(t) == os.path.normcase(p)
-    except Exception:
+    except OSError:
         return False
 
 
@@ -72,20 +75,35 @@ def main():
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
+    hook_event = payload.get("hook_event_name", "")
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""
     if "worktree" not in command or "remove" not in command:
         sys.exit(0)
 
     project_dir = normalize_msys_path(get_project_dir())
+    lock_path = os.path.join(project_dir, LOCK_REL)
+
+    if hook_event == "PostToolUse":
+        # AC-164: release the PID lock once the removal completes (success or failure).
+        try:
+            with open(lock_path, "r") as f:
+                owner = int(f.read().strip() or "0")
+        except (OSError, ValueError):
+            owner = 0
+        if owner == os.getppid() or owner == os.getpid():
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
+        sys.exit(0)
+
     target = _parse_target(command)
 
     if target and _is_main_root(target, project_dir):
         print("BLOCKED: cannot remove the main worktree.", file=sys.stderr)
         sys.exit(2)
 
-    # Concurrent removal lock
-    lock_path = os.path.join(project_dir, LOCK_REL)
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     if os.path.exists(lock_path):
         try:
@@ -100,10 +118,10 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(2)
-    # Write current PID; cleanup is best-effort (next invocation detects stale).
+    # Write current parent PID (Bash invoker) so the PostToolUse cleanup matches.
     try:
         with open(lock_path, "w") as f:
-            f.write(str(os.getpid()))
+            f.write(str(os.getppid()))
     except OSError:
         pass
     sys.exit(0)

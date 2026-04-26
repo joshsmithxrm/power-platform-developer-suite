@@ -75,8 +75,14 @@ test.describe('SQL Query Screen', () => {
     // Ctrl+Shift+H is a complex key combination - using the Terminal.Gui expected sequence
     terminal.write('\x1b[72;6~');  // Ctrl+Shift+H attempt
 
-    // Note: If Ctrl+Shift+H doesn't work, the test will timeout and fail
-    // This helps identify if the key binding is incorrect
+    // Without an environment selected, history retrieval must surface
+    // an error mentioning the missing environment context. We accept
+    // either capitalisation since the dialog wording is not
+    // load-bearing — only that the user is told an environment is
+    // required.
+    await expect(
+      terminal.getByText(/environment/i, { full: false })
+    ).toBeVisible();
   });
 
   test('status bar displays profile information', async ({ terminal }) => {

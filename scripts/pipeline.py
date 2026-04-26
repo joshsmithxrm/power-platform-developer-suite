@@ -238,17 +238,21 @@ def find_last_completed_stage(log_path):
                     except ValueError:
                         continue  # Malformed log line — skip
                     stage_name = line[bracket_start:bracket_end]
-                    # Normalize converge round names back to base stage
+                    # Normalize converge round names. Sub-stage rounds
+                    # (gates-rN, verify-rN, qa-rN, review-rN) map to
+                    # "review" (the stage immediately before converge)
+                    # so --resume re-enters the converge loop instead of
+                    # skipping past it.
                     if stage_name.startswith("converge"):
                         stage_name = "converge"
                     elif stage_name.startswith("gates-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("verify-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("qa-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("review-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     if stage_name in STAGES:
                         last_done = stage_name
     except OSError:
@@ -365,9 +369,11 @@ def auto_commit_stranded(worktree_path, stage, logger, *,
         )
         if dirty.returncode != 0 or not dirty.stdout.strip():
             return False
-        add_flag = "-A" if add_all else "-u"
+        # Use -A so untracked files (which the porcelain status above
+        # detects) are also staged. -u alone would only stage already-
+        # tracked modifications, leaving untracked files stranded.
         subprocess.run(
-            ["git", "add", add_flag], cwd=worktree_path,
+            ["git", "add", "-A"], cwd=worktree_path,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )

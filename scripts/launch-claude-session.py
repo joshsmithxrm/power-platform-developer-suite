@@ -1,22 +1,7 @@
-import re
 #!/usr/bin/env python3
 """
 Launch a new interactive `claude` session in a target directory.
 
-
-
-_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
-def _validate_name(name):
-    """Reject names that would unsafely interpolate into a PowerShell -Command (S2)."""
-    if name is None:
-        return
-    if not _NAME_RE.match(name):
-        sys.stderr.write(
-            f"--name must match [A-Za-z0-9_-]+, got: {name!r}\n"
-        )
-        sys.exit(2)
 This helper implements the `launch-session` pattern from the sibling
 procode-toolkit repo. It exists because the `/start` skill's v1
 dispatch AI deviated from the documented pattern and used:
@@ -62,12 +47,24 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from typing import List, Optional
 
 
 PROMPT_TERMINATOR = "'@"
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_name(name: Optional[str]) -> None:
+    """Reject --name values that would unsafely interpolate into PowerShell (S2)."""
+    if name is None:
+        return
+    if not _NAME_RE.match(name):
+        print("--name must match [A-Za-z0-9_-]+", file=sys.stderr)
+        sys.exit(2)
 
 
 def build_launch_script(
@@ -205,7 +202,7 @@ def launch(
 
     if dry_run:
         print(f"script: {script_path}", file=sys.stderr)
-        print(f"spawn:  {' '.join(cmd)}")
+        print(f"spawn:  {' '.join(cmd)}", file=sys.stderr)
         return 0
 
     try:
@@ -227,7 +224,7 @@ def launch(
         return 2
 
     print(f"spawned new session in {target}", file=sys.stderr)
-    print(f"  script: {script_path}")
+    print(f"  script: {script_path}", file=sys.stderr)
     return 0
 
 
@@ -271,6 +268,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
+    _validate_name(args.name)
     if not os.path.exists(args.prompt_file):
         sys.stderr.write(f"prompt file not found: {args.prompt_file}\n")
         return 1
