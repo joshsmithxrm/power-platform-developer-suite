@@ -310,15 +310,19 @@ def parse_triage_json(content):
     Works for both direct stage log content (pipeline) and
     pre-extracted text (pr_monitor). Returns list or None.
     """
-    last_bracket = content.rfind("[")
-    if last_bracket != -1:
+    decoder = json.JSONDecoder()
+    search_from = len(content)
+    while search_from > 0:
+        pos = content.rfind("[", 0, search_from)
+        if pos == -1:
+            return None
         try:
-            decoder = json.JSONDecoder()
-            obj, _ = decoder.raw_decode(content[last_bracket:])
+            obj, _ = decoder.raw_decode(content[pos:])
             if isinstance(obj, list):
                 return obj
         except (json.JSONDecodeError, ValueError):
             pass
+        search_from = pos
     return None
 
 
