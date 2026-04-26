@@ -1,8 +1,8 @@
 # Workflow Enforcement
 
-**Status:** Draft (v8.0 — commit-aware exit validation, PR-as-source-of-truth triage, CodeQL automation, Gemini retry)
-**Version:** 8.0
-**Last Updated:** 2026-03-30
+**Status:** Draft (v9.0 — hook-over-skill enforcement, model routing, two-file skill pattern, enforcement harness)
+**Version:** 9.0
+**Last Updated:** 2026-04-25
 **Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
 
@@ -17,6 +17,9 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 - **Process compliance without babysitting**: Gates, QA, verification, and code review happen automatically as part of the workflow. The user is involved at design and final review only.
 - **Mechanical enforcement**: Critical checkpoints (commit, PR creation) are blocked if required steps were skipped. Prose instructions are backed by hooks that make non-compliance impossible at exit points.
 - **Visibility without interruption**: The user can see workflow progress at any time but is not prompted until the work is ready for review.
+- **Hook-over-skill enforcement (v9.0)**: Every MANDATORY/MUST/NEVER directive in skills is backed by a deterministic hook, not advisory text alone. Anthropic guidance: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens." Directives that exist only in skill text are documented escape hatches, not enforcement.
+- **Cost-appropriate model routing (v9.0)**: Headless executor sessions (implement, gates, verify, qa, review, converge, pr, retro) run on Sonnet. Opus reserved for user-facing orchestration (design, investigate, spec). Anthropic guidance: "Subagents help you control costs by routing tasks to faster, cheaper models."
+- **Lean skills (v9.0)**: Skills ≤150 lines (procedure + commands). Rationale, taxonomies, and examples extracted to REFERENCE.md loaded on demand by explicit section reference. Anthropic guidance: "Bloated CLAUDE.md files cause Claude to ignore your actual instructions."
 
 ### Non-Goals
 
@@ -107,8 +110,17 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 | Pre-Commit Hook (enhanced) | Warns if `/gates` hasn't been run since last code changes. Soft gate — does not block. |
 | PR Gate Hook | Blocks `gh pr create` unless gates, verify, QA, and review are all current. Hard gate. |
 | Stop Hook | Blocks session end when workflow steps are incomplete. Pipeline-aware: exits immediately when `PPDS_PIPELINE=1`. |
-| Skills | Define each workflow step. Write their completion status to the workflow state file. |
-| Pipeline Orchestrator | `scripts/pipeline.py` — runs stages as sequential `claude -p --output-format stream-json` sessions. Each stage gets a fresh context window. Multi-signal activity monitoring (output bytes, git changes, commits). Worktree lock file prevents concurrent instances. The script — not the AI — decides what runs next. |
+| Skills | Define each workflow step. Write their completion status to the workflow state file. Two-file pattern (v9.0): SKILL.md ≤150 lines (procedure), REFERENCE.md (rationale, loaded on demand). |
+| Pipeline Orchestrator | `scripts/pipeline.py` — runs stages as sequential `claude -p --output-format stream-json` sessions. Each stage gets a fresh context window. Multi-signal activity monitoring (output bytes, git changes, commits). Worktree lock file prevents concurrent instances. The script — not the AI — decides what runs next. Per-stage model routing via `STAGE_MODELS` dict (v9.0). |
+| Monitor Gate Hook (v9.0) | Blocks session end when `phase=pr` but `pr.monitor_launched` missing from workflow state. Closes the escape hatch from PR #868/#961. |
+| Skill Line Cap Hook (v9.0) | Blocks Edit/Write on any `SKILL.md` that would exceed 150 lines. Mirrors `claudemd-line-cap.py` pattern. |
+| Retro HTML Guard Hook (v9.0) | Blocks Write to `.retros/*.html` when `PPDS_PIPELINE` is not set (interactive mode). Fixes F-7 from retro. |
+| Worktree Safety Hook (v9.0) | Blocks `git worktree remove` on main worktree and prevents parallel removals. |
+| TaskCreate Cap Hook (v9.0) | Blocks TaskCreate when 3 background tasks already in-flight. Enforces CLAUDE.md ≤3 cap. |
+| Debug-First Hook (v9.0) | Records test/build failures (PostToolUse), blocks re-invocation without /debug (PreToolUse). |
+| PR-Invocation Gate (v9.0) | Merged into Stop hook step 5c. Blocks session exit when commits ahead of origin/main but /pr never invoked. |
+| In-flight Auto-Deregister (v9.0) | Lifecycle-tied deregistration from `.claude/state/in-flight-issues.json`: pr_monitor terminal step (canonical), PostToolUse on merge/branch-delete (side path), 7-day TTL (fallback). Structural elimination of the "remember to /cleanup" rule. |
+| Enforcement Harness (v9.0) | `scripts/audit-enforcement.py` — CI script validating that every T1-marked directive in skills and CLAUDE.md has a matching hook. `--report` mode generates `.workflow/audit-snapshot.md` with live counts (canonical source, replaces hand-transcribed numbers). |
 
 ### Dependencies
 
@@ -181,7 +193,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
    | `qa` | `/qa` | Skip enforcement (mid-workflow) |
    | `shakedown` | `/shakedown` | Skip enforcement (validation phase) |
    | `retro` | `/retro` | Skip enforcement (retrospective phase) |
-   | `pr` | `/pr` | Skip enforcement (PR creation is its own gate) |
+   | `pr` | `/pr` | Monitor gate enforcement (v9.0): blocks exit if `pr.monitor_launched` missing. Full gates/verify/review enforcement skipped — PR creation is its own gate. |
    | null/missing | Legacy state files, manual sessions | Full enforcement (safe default) |
 
    Note: `pipeline` phase is intentionally absent from the stop hook's step-5 bypass list because `PPDS_PIPELINE=1` catches it in step 1 (env var check fires before phase check).
@@ -297,7 +309,9 @@ Run these before creating a PR.
 2. **Infinite loop guard:** If `stop_hook_active` is set in hook input, exit 0 (prevents re-entry).
 3. **Main branch:** If on `main` or `master`, exit 0.
 4. Read `.workflow/state.json` if it exists. If missing, exit 0.
-5. **Phase-aware bypass:** Read `phase` from state. If phase is `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`, or `pr`, exit 0 — these phases do not owe gates/verify/qa/review. Only `implementing` and null/missing phases trigger enforcement. This replaces the previous "design-only bypass" which used `git diff` against local `main` and was unreliable (see Design Decisions: Why Phase-Based Stop Hook).
+5. **Phase-aware bypass:** Read `phase` from state. If phase is `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, or `retro`, exit 0 — these phases do not owe gates/verify/qa/review. Only `implementing`, `pr`, and null/missing phases trigger enforcement. This replaces the previous "design-only bypass" which used `git diff` against local `main` and was unreliable (see Design Decisions: Why Phase-Based Stop Hook).
+5b. **(v9.0) PR-phase monitor gate:** When `phase=pr`, the stop hook does NOT bypass. Instead it checks that `pr.monitor_launched` is set in state (either a timestamp or a `fallback: <reason>` value). If missing, the hook blocks with: "PR monitor not launched. Run Step 5 of /pr to launch the monitor before exiting." This closes the escape hatch from PR #868 (agent skipped monitor, manually triaged 3 of 9 comments, missed all CodeQL) and PR #961 (seatbelt PR itself skipped the workflow). The monitor gate runs AFTER the phase check and BEFORE code change detection — it applies even to workflow-only diffs.
+5c. **(v9.0) PR-invocation gate:** When phase is NOT in the bypass list (`starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`) and NOT `pr`, check if there are commits ahead of origin/main (`git rev-list --count origin/main..HEAD > 0`). If yes AND `pr.invoked_via_skill` is not true in state, block with: "Work has been committed but /pr was not invoked. Run /pr or set workflow state to acknowledge defer." This closes R-01's largest escape hatch: the pr-gate.py inside /pr only fires when /pr is invoked — if /pr is never invoked, the gate never fires. The heuristic works because pause-to-fix doesn't end the session; session-end IS the signal that the agent is trying to leave without shipping.
 6. **Code change detection:** Compare changed files using `origin/main...HEAD` (not local `main` — local main can be arbitrarily stale after worktree creation). If only non-code prefixes changed (`specs/`, `.plans/`, `docs/`, `README`, `CLAUDE.md`), exit 0.
 7. Check workflow completion. If steps missing, emit `decision: block` with status and next required step.
 8. **Enforcement logging:** On block, write to state file: `stop_hook_blocked: true`, `stop_hook_count: N` (increment), `stop_hook_last: <timestamp>`. This enables retro to detect "stop hook fired N times, agent ignored all N" as a finding.
@@ -994,54 +1008,288 @@ For workflow-only diffs (changes limited to `.claude/`, `scripts/`, `specs/`, `d
 
 The `qa.workflow` auto-stamp in `/verify workflow` (SKILL.md line 218) is removed. The PR gate detects workflow-only diffs via path heuristics and skips the QA requirement.
 
+### Enforcement Tier Model (v9.0)
+
+**Problem:** An audit of all SKILL.md files and CLAUDE.md found that the majority of enforcement-level directives (MANDATORY, MUST, NEVER, ALWAYS, DO NOT, FORBIDDEN) have no code-backed enforcement — they are advisory-only text the agent can and does ignore. Five of six recent PRs (#958–#963) were workflow-fixing-workflow. The seatbelt PR (#961) itself skipped the workflow it was adding. CLAUDE.md's NEVER/ALWAYS sections are highest-leverage — they load every session — yet the PR #961 rules added there have zero hook enforcement. (Live counts: see `.workflow/audit-snapshot.md`, generated by `audit-enforcement.py --report`. The historical motivation — ~84% advisory at time of audit — is the design driver; the snapshot tracks the current state.)
+
+**Anthropic guidance:** "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens." "Use hooks for actions that must happen every time with zero exceptions."
+
+**Principle:** The best hook is the one you don't need because the structure prevents the bug. For each T1 candidate, the audit evaluates structural elimination before defaulting to a hook.
+
+**Solution:** Triage every directive into one of three enforcement tiers:
+
+| Tier | Criteria | Enforcement | Marker |
+|------|----------|-------------|--------|
+| **T1 — Blocking** | Skipping it caused a retro finding, data loss, or workflow escape | Hard hook (exit code 2) | `<!-- enforcement: T1 hook:<name> -->` |
+| **T2 — Detectable** | Violation is mechanically detectable but not catastrophic | Soft hook (warn to stderr, log to state) | `<!-- enforcement: T2 hook:<name> -->` |
+| **T3 — Contextual** | Guidance that depends on judgment; not mechanically enforceable | Stays in SKILL.md text only | `<!-- enforcement: T3 -->` |
+
+**T1 directives requiring new hooks (from audit):**
+
+| Directive | Source | New Hook | Structural Alternative | Retro Evidence |
+|-----------|--------|----------|----------------------|----------------|
+| PR monitor must be launched before session exit | pr SKILL.md | Merged into `session-stop-workflow.py` step 5b (Stop) | None — monitor launch is an action, not a constraint | PR #868 R-02: agent skipped monitor |
+| Work committed but /pr never invoked | session-stop-workflow.py | Merged into `session-stop-workflow.py` step 5c (Stop). Heuristic: commits-ahead-of-origin/main > 0 AND phase ∉ {pr, design, investigating, starting} AND pr.invoked_via_skill != true → block. Pause-to-fix doesn't end the session, so session-end IS the signal. | None — the problem is omission, not wrong action | Retro R-01: 3 PRs never submitted; PR #956 session 1 thrashed without invoking /pr |
+| SKILL.md must not exceed 150 lines | all skills | `skill-line-cap.py` (PreToolUse) | None — growth is incremental, not structurally preventable | Anthropic docs: bloated files cause instruction loss |
+| Skip HTML artifacts in interactive retro mode | retro SKILL.md | `retro-html-guard.py` (PreToolUse on Write `.retros/*.html`) | None — generator is a pure renderer, mode detection must be external | F-7: HTML written despite skip directive |
+| Never remove the main worktree | cleanup SKILL.md | `worktree-safety.py` (PreToolUse on Bash `git worktree remove*`) | None — git has no built-in protection for this | Safety-critical, no existing enforcement |
+| Do not parallelize worktree removals | cleanup SKILL.md | `worktree-safety.py` (PreToolUse, lock-file guard) | None — git doesn't serialize removals | Race condition risk on Windows |
+| TaskCreate cap ≤3 simultaneous | CLAUDE.md ALWAYS | `taskcreate-cap.py` (PreToolUse on TaskCreate) | None — tool invocation count is runtime state | PR #956 retro: unbounded parallel agents caused thrashing |
+| Never edit PublicAPI.Unshipped.txt during rebase | CLAUDE.md NEVER | **Structural elimination preferred.** Configure Roslyn analyzer to auto-regenerate the file on build (pre-commit hook already runs `dotnet build`). If structural fix lands, demote to T3 with `<!-- enforcement: T3 structurally-eliminated -->`. If not feasible, add `unshipped-protect.py` (PreToolUse on Edit/Write matching `*PublicAPI.Unshipped.txt` when rebase is active). | Roslyn auto-regen on commit makes manual edits impossible to keep | PR #956 retro: phantom API-drift conflicts |
+| /debug first for test/build failure | CLAUDE.md ALWAYS | `debug-first.py` (PostToolUse on `Bash(dotnet test:*)` / `Bash(npm.*test*)` writes `.workflow/last_failure` on non-zero exit; PreToolUse on next test/build blocks unless `/debug` ran since — checked via workflow state `debug.last_run > last_failure`) | None — failure-then-retry is a behavioral sequence | PR #956 retro: hypothesizing without evidence |
+| pipeline.py --resume on failure | CLAUDE.md ALWAYS | *T3 escape hatch* — not mechanically detectable as a "should-have-resumed" event. Documented with `<!-- enforcement: T3 escape-hatch: cannot detect omission of --resume flag -->` | None | PR #956 retro |
+
+**T2 directives (warn-and-log, not blocking — deferred beyond v9.0 PRs):**
+
+T2 hooks are informational targets identified by the audit. They are not part of the v9.0 PR sequence. Implementation is tracked in the Roadmap. Example candidates:
+
+| Directive | Skill | Candidate Hook | Rationale |
+|-----------|-------|----------------|-----------|
+| Sequential dispatch required | backlog | `dispatch-guard.py` | Parallel launches cause state races |
+| Run unit tests before interactive verification | verify | `verify-prereq.py` | Test failures during interactive sessions waste time |
+| Always include constitution in agent prompts | implement, review | `agent-prompt-check.py` | Quality floor, not safety-critical |
+
+**T3 stays as text** — judgment calls: "don't stack fixes" (debug), "always propose 2-3 approaches" (design), "don't batch fixes" (qa), "evidence required for every PASS/FAIL" (qa).
+
+**Escape hatch documentation:** Every T1 directive includes `<!-- enforcement: T1 hook:<name> -->` as an inline HTML comment. The hook test harness (see below) validates these markers match actual hooks. If a MANDATORY directive intentionally lacks a hook, it gets `<!-- enforcement: T3 escape-hatch: <rationale> -->`.
+
+**3-strike escape valve (canonical):** All T1 hard gates share a common release valve already implemented in `session-stop-workflow.py` line 67-69: after 3 consecutive blocks within one session (`stop_hook_count >= 3`), the Stop hook exits 0 and allows the action. This prevents deadlock when the rule itself is wrong or the agent is stuck. The override is logged to workflow state (`stop_hook_count`, `stop_hook_last`) and `/retro` flags overrides as findings. New T1 hooks that block via Stop (monitor-gate, pr-invocation-gate) inherit this valve automatically since they are merged into the Stop hook. PreToolUse hooks (`skill-line-cap.py`, `retro-html-guard.py`, `worktree-safety.py`, `taskcreate-cap.py`, `debug-first.py`) do NOT have a session-level counter — they block every invocation. The escape for PreToolUse hooks is the user denying the hook (Claude Code prompts the user on hook block, user can override).
+
+**Audit scope:** The audit scans CLAUDE.md NEVER/ALWAYS sections AND all `.claude/skills/*/SKILL.md` files. CLAUDE.md directives are highest-leverage — they load every session — and must not be a blind spot.
+
+**Migration commitment:** PR-2a adds an explicit tier marker (`<!-- enforcement: T1|T2|T3 ... -->`) to ALL directives across SKILL.md files and CLAUDE.md. No unmarked directives remain after PR-2a. See AC-172.
+
+### Two-File Skill Pattern (v9.0)
+
+**Problem:** Skills total ~8,000 lines across 32+ files (live count: `.workflow/audit-snapshot.md`). Top offenders: release (623), backlog (592), ext-panels (554), qa (486), retro (388). Anthropic example skills are 15-30 lines. Long skills cause the agent to lose instructions in context.
+
+**Anthropic guidance:** "For domain knowledge or workflows that are only relevant sometimes, use skills instead. Claude loads them on demand without bloating every conversation." "Bloated CLAUDE.md files cause Claude to ignore your actual instructions."
+
+**Solution:** Two-file split pattern.
+
+**Split heuristic:** If removing a sentence changes *what gets executed*, it's procedure (SKILL.md). If it only changes *why*, it's rationale (REFERENCE.md). Commands are pure procedure; tier taxonomies are rationale the procedure references by name; rule-change history is pure rationale.
+
+**SKILL.md contract (≤150 lines):**
+- Frontmatter (name, description)
+- Numbered steps with concrete commands
+- References are explicit function calls, not footnotes: `Read REFERENCE.md §3 "Label taxonomy" before filing`
+- Enforced by `skill-line-cap.py` hook (PreToolUse on Edit/Write matching `*/SKILL.md`)
+
+**REFERENCE.md contract:**
+- Section-headed with `##` anchors for partial loading (e.g., `REFERENCE.md §3 "Label taxonomy"`)
+- Agent uses the `Read` tool with offset/limit to load only the referenced section — the explicit directive in SKILL.md tells the agent which section to read at which step. This is advisory (the agent interprets the instruction), but the explicit syntax makes compliance far more likely than vague "see REFERENCE.md" pointers. The hook test harness validates that SKILL.md references point to actual sections in REFERENCE.md.
+- Contains: rationale, taxonomies, examples, rule-change history, contributing factors, edge case tables
+- No line limit — this is the document that grows
+
+**Proof-of-concept targets (PR-3):**
+
+| Skill | Current Lines | Target SKILL.md | REFERENCE.md Sections |
+|-------|---------------|-----------------|----------------------|
+| release | 623 | ~120 | Version strategy, signing matrix, platform-specific notes, changelog format |
+| backlog | 592 | ~130 | Label taxonomy, dispatch heuristics, conflict resolution examples |
+| retro | 388 | ~120 | Tier definitions, finding taxonomy, rule-change template, self-evaluation framework |
+
+Retro replaces ext-panels as the third dogfood target because: (a) retro produced the broken seatbelt PRs (#961) this redesign addresses — splitting it tests the pattern on the skill most responsible for the meta-problem; (b) the next retro session will run on the unsplit version, so splitting now enables before/after measurement; (c) retro's rationale-vs-procedure boundary is cleaner than ext-panels'. ext-panels follows as a subsequent PR after the pattern proves itself.
+
+**Pattern doc:** Written as `.claude/skills/TWO-FILE-PATTERN.md` so it's discoverable by `/write-skill`. Includes the split heuristic, reference-loading syntax, section-heading conventions, and a worked example.
+
+### Model Routing (v9.0)
+
+**Problem:** All `claude -p` invocations in `scripts/pipeline.py` and `scripts/pr_monitor.py` run on the default model (Opus). `scripts/launch-claude-session.py` hardcodes `--model claude-opus-4-6`. Agent subagents already route correctly (gemini-triage=sonnet, fix-agent=sonnet, explorer=haiku, code-reviewer=opus, challenger=sonnet). But the pipeline — which runs 6-8 sessions per feature — burns Opus tokens on mechanical tasks.
+
+**Anthropic guidance:** "Subagents help you control costs by routing tasks to faster, cheaper models like Haiku."
+
+**Solution:** `STAGE_MODELS` dict in `pipeline.py`.
+
+```python
+STAGE_MODELS = {
+    "implement":   "sonnet",
+    "gates":       "sonnet",
+    "verify":      "sonnet",
+    "qa":          "sonnet",
+    "review":      "sonnet",
+    "converge":    "sonnet",
+    "pr":          "sonnet",
+    "retro":       "sonnet",
+    # User-facing / high-reasoning — inherit default (Opus)
+    "design":      None,
+    "investigate": None,
+    "spec":        None,
+}
+```
+
+Model IDs float (e.g., `"sonnet"` not `"claude-sonnet-4-6"`) — consistent with agent frontmatter (`model: sonnet` in gemini-triage.md). Floating means pipeline automatically uses the latest Sonnet version. Quality regressions are caught by the converge loop (bad Sonnet output fails gates/review). The `--model` override accepts either floating or pinned IDs.
+
+**`run_claude()` change:** When `STAGE_MODELS[stage]` is non-None, append `--model {model}` to the `cmd` list. When None, omit the flag (inherits the user's default, typically Opus).
+
+**`launch-claude-session.py` change:** Keep `--model claude-opus-4-6` — this script spawns user-facing interactive sessions. User-facing sessions need Opus-level reasoning for design, investigation, and open-ended work.
+
+**`pr_monitor.py` change:** When spawning `claude -p` for triage or retro, pass `--model claude-sonnet-4-6`. These are mechanical tasks: reading comments, applying fixes, generating summaries.
+
+**Override:** `--model <id>` CLI flag on `pipeline.py` overrides `STAGE_MODELS` for all stages. Useful for debugging ("run the whole pipeline on Opus to compare quality").
+
+### New Hook Specifications (v9.0)
+
+#### Monitor Gate (merged into Stop Hook)
+
+**File:** `.claude/hooks/session-stop-workflow.py` (merged, not standalone)
+**Trigger:** Stop event — runs as step 5b within the existing Stop hook.
+**Rationale for merging:** Two Stop hooks would run in sequence with potentially conflicting decisions. The monitor gate is a single additional check within the existing phase-aware Stop hook flow.
+
+**Behavior:**
+1. Read `phase` from state. If not `pr`, skip (other phases handled by existing logic).
+2. Read `pr.monitor_launched` from state.
+3. If missing or falsy: emit `decision: block` with message: "PR monitor not launched. The /pr skill Step 5 is MANDATORY — run it before exiting."
+4. If present (timestamp or `fallback: <reason>`): exit 0 (monitor was launched or fallback recorded).
+
+#### Skill Line Cap Hook
+
+**File:** `.claude/hooks/skill-line-cap.py`
+**Trigger:** PreToolUse on Edit/Write matching `*/SKILL.md`
+
+**Behavior:**
+1. Compute the post-edit line count (same approach as `claudemd-line-cap.py`).
+2. If post-edit line count > 150: exit code 2 with message: "SKILL.md would exceed 150 lines ({count}). Move rationale/examples to REFERENCE.md. See .claude/skills/TWO-FILE-PATTERN.md."
+3. Applies to ALL `SKILL.md` files in `.claude/skills/`.
+
+#### Retro HTML Guard Hook
+
+**File:** `.claude/hooks/retro-html-guard.py`
+**Trigger:** PreToolUse on Write matching `.retros/*.html`
+
+**Behavior:**
+1. Check `PPDS_PIPELINE` env var. If set: exit 0 (pipeline mode — HTML generation is expected).
+2. If not set (interactive mode): exit code 2 with message: "HTML artifacts are not written in interactive retro mode. The conversation IS the analysis. See retro SKILL.md Step 8b."
+
+#### TaskCreate Cap Hook
+
+**File:** `.claude/hooks/taskcreate-cap.py`
+**Trigger:** PreToolUse on TaskCreate
+
+**Behavior:**
+1. Read `.claude/state/in-flight-issues.json` (or equivalent active task state).
+2. Count tasks with status not in `{completed, cancelled, failed}`.
+3. If active count >= 3: exit code 2 with message: "TaskCreate blocked. 3 background tasks already in-flight (CLAUDE.md cap). Wait for a task to complete before starting a 4th."
+4. If active count < 3: exit 0.
+
+#### Debug-First Hook
+
+**File:** `.claude/hooks/debug-first.py`
+**Trigger:** PostToolUse on `Bash(dotnet test:*)` and `Bash(npm.*test*)` + PreToolUse on `Bash(dotnet test:*)` and `Bash(npm.*test*)`
+
+**Behavior (PostToolUse — failure recording):**
+1. Read exit code from hook input.
+2. If non-zero: write `.workflow/last_failure` with timestamp and command. Exit 0 (don't block — just record).
+3. If zero: delete `.workflow/last_failure` if it exists (tests passed, slate clean). Exit 0.
+
+**Behavior (PreToolUse — enforcement):**
+1. If `.workflow/last_failure` does not exist: exit 0 (no prior failure to enforce).
+2. Read workflow state for `debug.last_run`.
+3. If `debug.last_run` timestamp > `.workflow/last_failure` timestamp: exit 0 (debug was run after the failure).
+4. Otherwise: exit code 2 with message: "Test/build re-invocation blocked. A prior failure was recorded at {timestamp}. Run /debug to investigate before retrying. See CLAUDE.md: 'For any test/build failure, invoke /debug first.'"
+
+#### Worktree Safety Hook
+
+**File:** `.claude/hooks/worktree-safety.py`
+**Trigger:** PreToolUse on Bash matching `git worktree remove*`
+
+**Behavior:**
+1. Parse the worktree path from the command.
+2. If path resolves to the main repo root (not a `.worktrees/` subdirectory): exit code 2 with message: "Cannot remove the main worktree."
+3. Check for concurrent worktree removal: if `.workflow/worktree-remove.lock` exists with a live PID, exit code 2 with message: "Another worktree removal is in progress (PID {pid}). Wait for it to finish."
+4. Write current PID to `.workflow/worktree-remove.lock`. Clean up in a finally block (or the next invocation detects stale lock via PID liveness).
+
+### In-flight Registry Auto-Deregistration (v9.0)
+
+**Problem:** `.claude/state/in-flight-issues.json` entries persist after PR merge because deregistration depends on manual `/cleanup` invocation. Session 27df36b3 (PR #963) leaked — PR merged 23:56:11Z, registration still present. This is the same shape as the structural-elimination principle: a cleanup rule that depends on someone remembering to run it is an advisory rule.
+
+**Structural fix:** Auto-deregister at lifecycle termini. Three layers, in order of leverage:
+
+**Layer 1 — pr_monitor terminal step (canonical, catches ~95%):**
+```python
+# In pr_monitor.py, just before _step_notify:
+if status in ("complete", "ci_failed", "gemini_timeout"):
+    subprocess.run(["python", "scripts/inflight-deregister.py", "--branch", branch],
+                   cwd=repo_root, timeout=10)
+```
+The monitor is the last process holding the branch's lifecycle context. It already runs retro and writes result.json. One added call.
+
+**Layer 2 — PostToolUse hook (catches manual merge/cleanup):**
+
+**File:** `.claude/hooks/inflight-auto-deregister.py`
+**Trigger:** PostToolUse on `Bash(gh pr merge:*)` and `Bash(git branch -D feat/*)` and `Bash(git branch -d feat/*)`
+
+**Behavior:**
+1. Read exit code from hook input. If non-zero: exit 0 (merge/delete failed, don't deregister).
+2. Extract branch name from command arguments.
+3. Call `inflight-deregister.py --branch <branch>`.
+4. Exit 0 (never block — deregistration is best-effort).
+
+**Layer 3 — TTL fallback (catches anomalous cases):**
+
+**File:** `scripts/inflight-check.py` (existing, modified)
+
+**Behavior change:** When checking for conflicts, also check registration age:
+1. If `started` timestamp is >7 days old AND `git worktree list` does not contain the branch → report as `[stale]` in conflict output.
+2. Stale entries are informational — they do NOT block registration of new work on the same issues. An operator can see "this looks stale, last seen X days ago" and decide.
+3. `/cleanup` still handles explicit deregistration for stale entries when invoked manually.
+
+**Structural-elimination note:** This is documented in the T1 audit table not as a hook directive but as an example of the structural-elimination principle applied: stale-registration cleanup is structurally eliminated by lifecycle-tied deregistration. No "remember to run /cleanup" rule needed because the structure prevents the bug.
+
+### Hook Test Harness (v9.0)
+
+**File:** `scripts/audit-enforcement.py`
+
+**Purpose:** CI-time validation that enforcement markers in SKILL.md files match actual hooks. Creates a closed loop: add a MANDATORY directive → marker demands a hook → CI fails if hook is missing.
+
+**Flow:**
+1. Scan all `.claude/skills/*/SKILL.md` files AND `CLAUDE.md` NEVER/ALWAYS sections for `<!-- enforcement: T1 hook:<name> -->` markers.
+2. For each T1 marker, verify that `.claude/hooks/<name>.py` (or `.sh`) exists.
+3. Scan `.claude/settings.json` hook configuration to verify each T1 hook is actually wired up.
+4. Report:
+   - `PASS`: all T1 markers have matching hooks, all hooks are wired in settings.json.
+   - `FAIL`: list of T1 markers with missing hooks or unwired hooks.
+5. Informational: count T2 coverage and report T3 escape hatches.
+
+**CI integration:** Add to `.github/workflows/` or run as part of `/gates`:
+```bash
+python scripts/audit-enforcement.py --strict
+```
+Exit code 0 on pass, 1 on any T1 gap.
+
+**grep-audit mode:** For the initial audit pass (PR-2a), run in discovery mode:
+```bash
+python scripts/audit-enforcement.py --discover
+```
+Scans all `.claude/skills/*/SKILL.md` files and `CLAUDE.md` for MANDATORY/MUST/NEVER/ALWAYS/DO NOT/FORBIDDEN without markers. Reports each as a finding needing triage into T1/T2/T3.
+
+**report mode (v9.0 — canonical source for counts):** Generates a dated markdown snapshot with live metrics. Replaces hand-transcribed counts in the spec that drift on every skill change.
+```bash
+python scripts/audit-enforcement.py --report --out .workflow/audit-snapshot.md
+```
+**Snapshot contents:**
+- Total directive count (with date)
+- T1 / T2 / T3 breakdown with percentages
+- Per-skill directive counts
+- Hook coverage: T1 directives with matching wired hook ÷ total T1
+- Per-file unmarked-directive count (target: 0 after PR-2a)
+- Top 5 longest SKILL.md files by line count
+
+The snapshot is gitignored (`.workflow/` is already gitignored) — regenerated locally, same convention as `state.json`. CI runs `--report` on every PR to keep the snapshot current in-worktree. The spec references the snapshot for live counts rather than transcribing numbers that rot.
+
 ### CLAUDE.md Workflow Section Rewrite
 
-Replace the current workflow bullet list with:
+The v9.0 hooks enforce the workflow mechanically — advisory text in CLAUDE.md repeating what hooks enforce is redundant (if hooks work) or ineffective (if they don't). Per the spec's own anti-bloat principle (Anthropic: "Bloated CLAUDE.md files cause Claude to ignore your actual instructions"), the CLAUDE.md workflow section is replaced with a lean pointer:
 
 ```markdown
-## Workflow (REQUIRED SEQUENCE)
+## Workflow
 
-### New feature or non-trivial change
-1. /design (brainstorm → spec → plan → review)
-2. /implement (or /implement <plan-path>)
-3. /gates — STOP on failure, fix before proceeding
-4. /verify for EVERY affected surface — you MUST use the product:
-   - Extension changed → /ext-verify (screenshots required)
-   - TUI changed → /tui-verify (PTY interaction required)
-   - MCP changed → /mcp-verify (tool invocation required)
-   - CLI changed → /cli-verify (run the command)
-5. /qa for at least one affected surface (blind verification)
-6. /review → /converge until 0 critical, 0 important
-7. /pr (rebase, create PR, monitor CI + reviews)
+Complete the shipping pipeline: `/gates` → `/verify` → `/pr`. Never stop after `/gates` or `/verify` — the work is not done until `/pr` creates the pull request.
 
-### Bug fix or small change
-1. /gates before committing
-2. If UI/output changed → /verify for affected surface
-3. /pr when ready
-
-### Docs change
-1. Edit docs and commit
-2. /pr when ready
-
-### Enforcement
-Steps 3-6 are enforced by hooks. The PR gate hook will block `gh pr create`
-if these steps are incomplete. Run `/status` to check current workflow state.
-
-### STOP conditions
-- DO NOT skip steps 3-6 because "tests pass." Tests are necessary, not sufficient.
-- DO NOT declare work complete without visual verification of affected surfaces.
-
-### Autonomy scope
-"Don't ask, just do it" applies to: committing after tasks, running gates,
-running verification, running QA, running review, triaging external review
-comments (fix valid ones, dismiss invalid ones with rationale).
-"Don't ask, just do it" does NOT apply to: skipping any workflow step,
-filing/closing issues, creating PRs without passing gates.
-
-After external review: respond to EACH comment individually on the PR with
-the action taken (fixed in <commit>, or dismissed with rationale). Include
-a summary of all comments and actions in the PR status report.
+Hooks enforce the pipeline. Run `/status` to check current state.
 ```
+
+The detailed sequence (new feature path, bug fix path, docs path, surface-specific verify commands) moves to `.claude/interaction-patterns.md` §Workflow Paths, which skills already reference. CLAUDE.md keeps the 2-line behavioral rule that passes the 4-question test (globally relevant, behavior-shaping, not auto-discoverable, stable). The "STOP conditions" and "Autonomy scope" text is deleted — hooks now enforce these mechanically.
 
 ### Superpowers Disposition
 
@@ -1160,7 +1408,7 @@ After all skills in this spec are implemented:
 | AC-98 | `/design` reads `.plans/context.md` (not `design-context.md`) at Step 1 and offers proceed/brainstorm choice when found | `grep "context.md" .claude/skills/design/SKILL.md` returns match in Step 1 | 🔲 |
 | AC-99 | `/implement` Step 0 prompts user when no relevant spec is found: "No spec found. Run `/design` or continue without?" | Manual: run `/implement` with no spec in workflow state and no matching spec in `specs/`, verify prompt | 🔲 |
 | AC-100 | Stop hook uses `origin/main...HEAD` (not local `main...HEAD`) for code change detection — no false positives from stale local main | `test_pipeline.py::test_stop_hook_uses_origin_main` | 🔲 |
-| AC-101 | Stop hook reads `phase` from state and skips enforcement for `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro`, `pr` phases | `test_pipeline.py::test_stop_hook_phase_bypass` | 🔲 |
+| AC-101 | Stop hook reads `phase` from state and skips enforcement for `starting`, `investigating`, `design`, `reviewing`, `qa`, `shakedown`, `retro` phases. Note: `pr` phase is NOT bypassed — it triggers the monitor gate (AC-147/148/149) instead. | `test_pipeline.py::test_stop_hook_phase_bypass` | 🔲 |
 | AC-102 | Stop hook enforces workflow for `implementing` phase and null/missing phase (safe default) | `test_pipeline.py::test_stop_hook_enforces_implementing_phase` | 🔲 |
 | AC-103 | Stop hook exits 0 immediately when `PPDS_SHAKEDOWN=1` env var is set | `test_pipeline.py::test_stop_hook_exits_in_shakedown_mode` | 🔲 |
 | AC-104 | Stop hook writes `stop_hook_blocked: true`, `stop_hook_count: N`, `stop_hook_last: <timestamp>` to state file on block — retro can detect repeated ignored blocks | `test_pipeline.py::test_stop_hook_enforcement_logging` | 🔲 |
@@ -1207,6 +1455,40 @@ After all skills in this spec are implemented:
 | AC-144 | ~~pr_monitor polls CodeQL check status via `gh pr checks`~~ — **retracted**: `poll_ci` already waits for CodeQL to reach a terminal state; dedicated CodeQL poll was redundant. Latent risk (comment delivery lag after terminal status) is pre-existing and unchanged by the retraction | — | ✂️ |
 | AC-145 | pr_monitor triages CodeQL + Gemini comments in single triage pass | `test_pr_monitor.py::test_unified_triage_pass` | 🔲 |
 | AC-146 | Converge fix commits do not invalidate verify/qa (ancestor-of-HEAD check passes) | `test_pipeline.py::test_converge_preserves_verify_qa` | 🔲 |
+| AC-147 | **(v9.0 — F-2)** Stop hook blocks session exit when `phase=pr` and `pr.monitor_launched` is missing from workflow state | `test_hooks.py::test_stop_hook_blocks_pr_without_monitor` | 🔲 |
+| AC-148 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains a timestamp | `test_hooks.py::test_stop_hook_allows_pr_with_monitor` | 🔲 |
+| AC-149 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains `fallback: <reason>` | `test_hooks.py::test_stop_hook_allows_pr_with_fallback` | 🔲 |
+| AC-150 | **(v9.0 — F-7)** `retro-html-guard.py` blocks Write to `.retros/*.html` when `PPDS_PIPELINE` is not set | `test_hooks.py::test_retro_html_guard_blocks_interactive` | 🔲 |
+| AC-151 | **(v9.0 — F-7)** `retro-html-guard.py` allows Write to `.retros/*.html` when `PPDS_PIPELINE=1` | `test_hooks.py::test_retro_html_guard_allows_pipeline` | 🔲 |
+| AC-152 | **(v9.0 — Model)** `pipeline.py` passes `--model sonnet` for implement, gates, verify, qa, review, converge, pr, retro stages (floating ID, not pinned) | `test_pipeline.py::test_stage_models_sonnet` | 🔲 |
+| AC-153 | **(v9.0 — Model)** `pipeline.py` passes no `--model` flag for design, investigate, spec stages (inherits default) | `test_pipeline.py::test_stage_models_opus_default` | 🔲 |
+| AC-154 | **(v9.0 — Model)** `pipeline.py --model <id>` overrides STAGE_MODELS for all stages | `test_pipeline.py::test_stage_model_override` | 🔲 |
+| AC-155 | **(v9.0 — Model)** `pr_monitor.py` passes `--model sonnet` when spawning triage and retro sessions (floating ID) | `test_pr_monitor.py::test_monitor_uses_sonnet` | 🔲 |
+| AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | 🔲 |
+| AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | 🔲 |
+| AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | 🔲 |
+| AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | 🔲 |
+| AC-160 | **(v9.0 — Split)** backlog SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_backlog_skill_line_count` | 🔲 |
+| AC-161 | **(v9.0 — Split)** retro SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_retro_skill_line_count` | 🔲 |
+| AC-162 | **(v9.0 — Split)** `.claude/skills/TWO-FILE-PATTERN.md` defines the split heuristic, reference syntax, and worked example | `test_skill_structure.py::test_two_file_pattern_doc_exists` | 🔲 |
+| AC-163 | **(v9.0 — Safety)** `worktree-safety.py` blocks `git worktree remove` on main repo root | `test_hooks.py::test_worktree_safety_blocks_main` | 🔲 |
+| AC-164 | **(v9.0 — Safety)** `worktree-safety.py` blocks concurrent worktree removals | `test_hooks.py::test_worktree_safety_blocks_parallel` | 🔲 |
+| AC-165 | **(v9.0 — Harness)** `audit-enforcement.py --strict` exits 0 when all T1 markers have matching hook files AND those hooks are wired in `.claude/settings.json` | `test_audit_enforcement.py::test_strict_pass` | 🔲 |
+| AC-166 | **(v9.0 — Harness)** `audit-enforcement.py --strict` exits 1 when a T1 marker references a missing hook | `test_audit_enforcement.py::test_strict_fail_missing_hook` | 🔲 |
+| AC-167 | **(v9.0 — Harness)** `audit-enforcement.py --discover` reports all MANDATORY/MUST/NEVER/ALWAYS directives without enforcement markers | `test_audit_enforcement.py::test_discover_mode` | 🔲 |
+| AC-168 | **(v9.0 — Audit)** Every T1 directive in all SKILL.md files and CLAUDE.md has a `<!-- enforcement: T1 hook:<name> -->` marker | `test_audit_enforcement.py::test_all_t1_directives_marked` | 🔲 |
+| AC-169 | **(v9.0 — F-2b)** Stop hook blocks session exit when commits-ahead-of-origin/main > 0 AND phase ∉ {pr, design, investigating, starting} AND `pr.invoked_via_skill` != true | `test_hooks.py::test_stop_hook_blocks_no_pr_invocation` | 🔲 |
+| AC-170 | **(v9.0 — F-2b)** Stop hook allows session exit when `phase=pr` regardless of pr.invoked_via_skill | `test_hooks.py::test_stop_hook_allows_pr_phase` | 🔲 |
+| AC-171 | **(v9.0 — F-2b)** Stop hook allows session exit when no commits ahead of origin/main (nothing to ship) | `test_hooks.py::test_stop_hook_allows_no_commits` | 🔲 |
+| AC-172 | **(v9.0 — Audit)** After PR-2a lands, `audit-enforcement.py --report` snapshot shows 0 unmarked directives across all SKILL.md files and CLAUDE.md. Snapshot attached to PR-2a description as proof. | `test_audit_enforcement.py::test_zero_unmarked_after_audit` | 🔲 |
+| AC-173 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` blocks TaskCreate when 3 background tasks are already in-flight | `test_hooks.py::test_taskcreate_cap_blocks_fourth` | 🔲 |
+| AC-174 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` allows TaskCreate when fewer than 3 tasks are in-flight | `test_hooks.py::test_taskcreate_cap_allows_under_limit` | 🔲 |
+| AC-175 | **(v9.0 — CLAUDE.md)** `debug-first.py` blocks test/build re-invocation after a failure unless `/debug` was run since the failure | `test_hooks.py::test_debug_first_blocks_retry` | 🔲 |
+| AC-176 | **(v9.0 — Escape)** Stop hook allows session exit after 3 consecutive blocks for the same reason within one session, logs `OVERRIDE_GRANTED`, and `/retro` flags the override as a finding | `test_hooks.py::test_three_strike_escape_valve` | 🔲 |
+| AC-177 | **(v9.0 — Report)** `audit-enforcement.py --report` produces `.workflow/audit-snapshot.md` containing: total directive count (dated), T1/T2/T3 breakdown with percentages, per-skill counts, hook coverage %, per-file unmarked count, top 5 longest SKILL.md files. Output is valid markdown and parseable. | `test_audit_enforcement.py::test_report_snapshot` | 🔲 |
+| AC-178 | **(v9.0 — Inflight)** `pr_monitor.py` terminal step (any of complete, ci_failed, gemini_timeout) calls `inflight-deregister.py --branch <branch>` before final notification | `test_pr_monitor.py::test_terminal_deregisters_inflight` | 🔲 |
+| AC-179 | **(v9.0 — Inflight)** PostToolUse hook on `Bash(gh pr merge:*)` deregisters the branch from in-flight registry on exit 0 | `test_hooks.py::test_inflight_deregister_on_merge` | 🔲 |
+| AC-180 | **(v9.0 — Inflight)** `inflight-check.py` reports registrations older than 7 days with no live worktree as `[stale]` in conflict output (informational, not blocking) | `test_inflight.py::test_stale_ttl_detection` | 🔲 |
 
 ### Edge Cases
 
@@ -1255,6 +1537,36 @@ After all skills in this spec are implemented:
 | `/status` run when no pipeline active | Shows completed stage summaries from `.log` files and workflow state. No JSONL parsing attempted. |
 | `/status` run during active stage | Parses JSONL up to current file size (no file locking needed — append-only writes). Shows last tool call, file count, commit count. |
 | JSONL file has a partial (unterminated) last line during active write | `/status` parser and post-processor both use `json.loads` in try/except — incomplete final line is silently skipped. Next read picks up the completed line. |
+| **(v9.0)** Stop hook fires on `phase=pr` with `pr.monitor_launched` set | Gate passes — monitor was launched. Session exits cleanly. |
+| **(v9.0)** Stop hook fires on `phase=pr` with `pr.monitor_launched` missing | Gate blocks with "PR monitor not launched" message. Agent must run Step 5. |
+| **(v9.0)** Stop hook fires on `phase=pr` with `pr.monitor_launched = "fallback: claude not found"` | Gate passes — fallback was recorded with reason. Manual triage path acknowledged. |
+| **(v9.0)** SKILL.md edited to exactly 150 lines | `skill-line-cap.py` allows — block threshold is >150, so exactly 150 lines is permitted. |
+| **(v9.0)** SKILL.md edited to 151 lines | `skill-line-cap.py` blocks with guidance to use REFERENCE.md. |
+| **(v9.0)** REFERENCE.md edited (any size) | No line cap. REFERENCE.md is the expansion space. |
+| **(v9.0)** `retro-html-guard.py` fires in pipeline mode | Allows — `PPDS_PIPELINE=1` means HTML generation is expected (for persistent artifacts). |
+| **(v9.0)** `retro-html-guard.py` fires on `.retros/*.md` (not .html) | No match — hook only triggers on `.html` writes. Markdown summaries always allowed. |
+| **(v9.0)** `audit-enforcement.py` finds a MANDATORY directive with no marker | `--discover` mode reports it. `--strict` mode ignores unmarked directives (only checks markers). |
+| **(v9.0)** Pipeline stage not in STAGE_MODELS dict | `STAGE_MODELS.get(stage)` returns None → no `--model` flag → inherits default. Safe fallback. |
+| **(v9.0)** `--model` override passed to pipeline.py | Overrides STAGE_MODELS for ALL stages. Logged at START of each stage for auditability. |
+| **(v9.0)** Stop hook fires with commits ahead, phase=implementing, /pr never invoked | PR-invocation gate (step 5c) blocks: "Work committed but /pr was not invoked." |
+| **(v9.0)** Stop hook fires with commits ahead, phase=design | Phase is in bypass list → exit 0. Design sessions don't owe /pr. |
+| **(v9.0)** Stop hook fires with 0 commits ahead of origin/main | PR-invocation gate passes — nothing to ship. |
+| **(v9.0)** Stop hook fires after 3 consecutive blocks | 3-strike escape valve fires: logs OVERRIDE_GRANTED, allows exit. /retro flags the override. |
+| **(v9.0)** TaskCreate attempted with 3 active tasks | `taskcreate-cap.py` blocks with cap message. |
+| **(v9.0)** TaskCreate attempted with 2 active tasks, 1 completed | `taskcreate-cap.py` allows — only active (non-terminal) tasks count. |
+| **(v9.0)** `dotnet test` fails, then `dotnet test` re-invoked without /debug | `debug-first.py` PreToolUse blocks: "Run /debug first." |
+| **(v9.0)** `dotnet test` fails, /debug runs, then `dotnet test` re-invoked | `debug-first.py` allows — debug.last_run > last_failure. |
+| **(v9.0)** `dotnet test` succeeds after prior failure | `debug-first.py` PostToolUse clears `.workflow/last_failure`. Slate clean. |
+| **(v9.0)** PublicAPI.Unshipped.txt edited when structural elimination is in place | Roslyn auto-regen on build overwrites manual edits. No hook needed. Rule becomes T3 with `structurally-eliminated` marker. |
+| **(v9.0)** PublicAPI.Unshipped.txt edited when structural elimination NOT yet in place | Hook `unshipped-protect.py` blocks during rebase (fallback path). |
+| **(v9.0)** PR merges via pr_monitor (normal path) | Monitor calls `inflight-deregister.py --branch` at terminal step. Entry removed from in-flight registry. |
+| **(v9.0)** PR merged manually via `gh pr merge` | PostToolUse hook fires, calls `inflight-deregister.py --branch`. Entry removed. |
+| **(v9.0)** Branch deleted locally via `git branch -D feat/X` | PostToolUse hook fires, calls `inflight-deregister.py --branch`. Entry removed. |
+| **(v9.0)** In-flight registration is 8 days old, no live worktree | `inflight-check.py` reports `[stale]` in output. Informational only — does not block new registration. |
+| **(v9.0)** In-flight registration is 8 days old, live worktree exists | Not stale — worktree proves active work. Reported normally. |
+| **(v9.0)** `inflight-deregister.py` called for branch not in registry | No-op. Exit 0. |
+| **(v9.0)** `audit-enforcement.py --report` run with no markers yet (pre-PR-2a) | Produces snapshot with all directives listed as unmarked. Total/T1/T2/T3 all show 0 marked. |
+| **(v9.0)** Skill added after PR-2a without enforcement markers | `audit-enforcement.py --discover` catches it. `--strict` does NOT fail (strict only checks existing T1 markers). `--report` shows non-zero unmarked count. |
 | Lock file contains PID that was recycled to an unrelated process | Lock is treated as live (false positive). Acceptable trade-off — PID recycling within pipeline lifetime (~1 hour max) is rare. User can manually delete `.workflow/pipeline.lock` if needed. |
 | Gemini posts no review comments within 5 minutes | Pipeline logs `GEMINI_TIMEOUT`, skips triage, converts draft → ready. PR body notes "Gemini: no review received." |
 | Gemini posts comments incrementally (1 comment at 2 min, 2nd at 3 min) | 90s minimum wait + polling until comment count stabilizes (same count on 2 consecutive polls) ensures all comments are captured before triage. |
@@ -1389,6 +1701,61 @@ After all skills in this spec are implemented:
 **Alternatives considered:**
 - Keep agent-driven but add `--draft`: Fixes notification timing but still wastes Opus tokens polling. Doesn't fix the premature "no comments" race.
 - GitHub webhook instead of polling: Would be ideal long-term but requires webhook infrastructure (server, auth, routing). Deferred to roadmap.
+
+### Why Hook-Over-Skill Enforcement? (v9.0)
+
+**Context:** Five of six PRs in the April 2026 sprint (#958–#963) were workflow-fixing-workflow. The seatbelt PR (#961) — which added `pr.monitor_launched` recording — itself skipped the workflow it was enforcing. The user's verbatim assessment: "the AI is circumventing the tooling that's in place."
+
+**Evidence:**
+- Majority of enforcement directives across skills + CLAUDE.md were advisory-only at time of audit (live counts: `.workflow/audit-snapshot.md`)
+- PR #868: agent skipped monitor despite MANDATORY label, manually triaged 3 of 9 comments, missed all CodeQL
+- PR #961: seatbelt PR skipped its own workflow
+- Anthropic docs: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic"
+
+**Decision:** Triage all directives into T1 (hard hook), T2 (soft hook), T3 (text-only). Add hooks for every T1 directive. Accept that T3 directives are advisory escape hatches, documented as such. Live tier breakdown tracked by `audit-enforcement.py --report`.
+
+**Alternatives considered:**
+- **Status quo (advisory + retros to catch drift):** Five sprints of evidence shows this doesn't work. Retros catch drift after it ships, not before.
+- **Full deterministic enforcement for all directives:** Most are judgment calls ("don't batch fixes"). Hooks can only enforce mechanically detectable actions. The majority are fundamentally T3 (live count in snapshot).
+- **Stronger CLAUDE.md rules:** Anthropic explicitly warns: "Bloated CLAUDE.md files cause Claude to ignore your actual instructions."
+
+**Consequences:**
+- Positive: Every retro-evidenced failure gets a mechanical prevention. New MANDATORY directives require hooks (CI enforced).
+- Negative: More hook scripts to maintain (~6 new). Mitigated by the audit-enforcement.py harness keeping the mapping current.
+
+### Why Sonnet for Pipeline Executors? (v9.0)
+
+**Context:** All pipeline sessions run on Opus despite being mechanical tasks (build, test, verify, triage). Opus costs ~5x Sonnet per token. A typical pipeline run spawns 6-8 sessions.
+
+**Decision:** Route executor stages to Sonnet via `STAGE_MODELS` dict. Keep Opus for user-facing and high-reasoning tasks. `implement` is included as a Sonnet stage in pipeline mode because the plan has already been written (by Opus in /design) and the implement stage is executing predefined steps. If Sonnet quality is insufficient for implement, the `--model` override provides a per-run fallback, and the STAGE_MODELS dict can be changed per-stage without a spec revision.
+
+**Alternatives considered:**
+- **Haiku for cheapest tasks:** Haiku may lack the code editing quality needed for triage fixes and converge cycles. Sonnet is the safe middle ground.
+- **Environment variable per-session:** Invisible — easy to forget what model is running. Dict-in-code is visible and version-controlled.
+- **Agent frontmatter only:** Would require creating agent definitions for every pipeline stage. Current pattern (raw prompts) is simpler.
+
+**Consequences:**
+- Positive: ~5x cost reduction on pipeline runs. Zero quality regression expected for mechanical tasks — quality is validated by the converge loop.
+- Negative: If Sonnet quality is insufficient for a stage, `--model` override allows fallback. Per-stage override (changing the dict) is also trivial.
+
+### Why Two-File Split at 150 Lines? (v9.0)
+
+**Context:** Anthropic example skills are 15-30 lines. Our skills grew to 300-600+ lines by accumulating rationale, taxonomies, examples, and rule-change history alongside procedure.
+
+**Decision:** Hard cap at 150 lines for SKILL.md. Everything above the cap goes to REFERENCE.md with section-anchored loading.
+
+**Why 150 and not 30?** Our skills genuinely need more procedure than Anthropic's examples. A release skill has ~25 numbered steps with real commands. 150 lines is tight enough to force extraction of rationale but generous enough that procedure doesn't get artificially compressed.
+
+**Why explicit references instead of "see REFERENCE.md"?** Anthropic: "Claude loads [skills] on demand and the agent decides what to pull." Vague references → agent skips the reference. Explicit `Read REFERENCE.md §3 "Label taxonomy" before filing` → agent loads the specific section at the right time. Treat it like a function call, not a footnote.
+
+**Alternatives considered:**
+- **No REFERENCE.md — just trim:** Some content IS needed for correct execution (label taxonomies, signing matrices). Deleting it degrades quality.
+- **Per-section skills (split into multiple SKILL.md files):** Claude loads one skill at a time. Splitting procedure across files means steps get lost.
+- **Dynamic skill length (no hard cap):** Without enforcement, skills will grow back. The line cap hook prevents regression.
+
+**Consequences:**
+- Positive: Agent reads only what it needs for the current step. Skills load faster, fit better in context.
+- Negative: Two files to maintain per skill. Mitigated by TWO-FILE-PATTERN.md documenting the convention.
 
 ### Why Polling Instead of Threading?
 
@@ -1566,6 +1933,7 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 
 | Date | Change |
 |------|--------|
+| 2026-04-25 | v9.0 — Hook-over-skill enforcement redesign: (1) Enforcement tier model (T1/T2/T3) with audit of all 270+ directives across 32 skills + CLAUDE.md, structural-elimination column for each T1. (2) Two-file skill pattern (SKILL.md ≤150 lines + REFERENCE.md with section-anchored loading). (3) Model routing via STAGE_MODELS dict — Sonnet (floating) for pipeline executors, Opus for user-facing. (4) F-2 monitor gate: Stop hook step 5b blocks exit when phase=pr but pr.monitor_launched missing. (5) PR-invocation gate: Stop hook step 5c blocks exit when commits ahead but /pr never invoked (R-01 fix). (6) F-7 retro HTML guard: blocks .retros/*.html writes in interactive mode. (7) CLAUDE.md hooks: taskcreate-cap.py (≤3 cap), debug-first.py (enforce /debug before retry), PublicAPI.Unshipped.txt (structural elimination preferred). (8) Worktree safety hook. (9) Skill line cap hook. (10) Hook test harness (audit-enforcement.py) — CI validates T1 markers match actual hooks across SKILL.md + CLAUDE.md. (11) 3-strike escape valve documented as canonical. (12) CLAUDE.md rewrite reduced to 2-line pointer. PR sequence: PR-1 Sonnet switch → PR-2a audit markers → PR-2b new hooks → PR-2c activate enforcement + --report → PR-3 two-file split (release, backlog, retro) → PR-4 in-flight auto-deregister. Gap-8 revision: hand-transcribed counts replaced with audit-snapshot.md links; --report mode added. Gap-9 revision: in-flight registry auto-deregistration at lifecycle termini (pr_monitor terminal step, PostToolUse on merge/branch-delete, 7-day TTL fallback). |
 | 2026-03-20 | Initial spec (v1.0) |
 | 2026-03-22 | v2.0 — skill renames, /design, /start, /pr, main branch bootstrap |
 | 2026-03-24 | v3.0 — stop hook blocking, converge cycle handling, /shakedown |
@@ -1574,6 +1942,21 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 | 2026-03-27 | v6.0 — work-type routing: (1) `/start` classifies work type (user-confirmed, labels as hints), (2) `.plans/context.md` written to worktree with issue details + work type + next step, (3) work-type-aware guidance replaces hardcoded `/design`, (4) `work_type` field in workflow state, (5) `/design` reads `context.md` instead of `design-context.md`, (6) `/design` anti-patterns updated for bug-fix path, (7) `/implement` Step 0 fallback when no spec found. |
 | 2026-03-30 | v8.0 — commit-aware exit validation: (1) tiered commit-ref validation in PR gate (exact HEAD for gates+review, ancestor for verify+qa), (2) PR-as-source-of-truth triage completeness (replaces gemini_triaged flag), (3) triage reconciliation loop with delta re-triage, (4) CodeQL automation in pr_monitor (same triage loop as Gemini), (5) Gemini overload detection + 1 auto-retry, (6) workflow surface QA exemption (verify.workflow sufficient, no qa.workflow), (7) post-commit clears review alongside gates, (8) surface-aware PR gate detects required surfaces from diff. |
 | 2026-03-27 | v7.0 — comprehensive workflow overhaul: (1) phase-aware stop hook replaces git-diff heuristic, (2) `origin/main` in all hooks/heartbeat replaces stale local `main`, (3) enforcement logging in state for retro detection, (4) `PPDS_SHAKEDOWN=1` env var, (5) post-PR monitor (`pr_monitor.py`) — decoupled background process for CI/Gemini/triage/retro/notify, (6) `/shakedown-workflow` skill — behavioral integration test for workflow changes (later folded into `/shakedown` Workflow Mode per PR #842), (7) hook path doubling investigation + workaround, (8) phase lifecycle for all entry points. Addresses issues #731, #727, #732, #730, #734, #712, #733, #728, #729, #723, #724, #715, #662. |
+
+---
+
+## v9.0 Implementation Sequence
+
+| PR | Scope | ACs | Est. Size | Dependencies |
+|----|-------|-----|-----------|--------------|
+| **PR-1** | Sonnet switch: `STAGE_MODELS` dict in pipeline.py, `--model` in pr_monitor.py, `--model` CLI override | AC-152 through AC-156 | S (~50 LOC) | None |
+| **PR-2a** | Audit-only marker pass: add `<!-- enforcement: T1\|T2\|T3 ... -->` markers to ALL directives across 32 SKILL.md files + CLAUDE.md. Pure documentation diff. Zero unmarked directives after this PR. | AC-168, AC-172 | M (touches ~35 files, text-only) | None (parallel with PR-1) |
+| **PR-2b** | New hook files: monitor-gate + pr-invocation-gate (merged into session-stop-workflow.py steps 5b/5c), skill-line-cap.py, retro-html-guard.py, worktree-safety.py, taskcreate-cap.py, debug-first.py. Wire all into .claude/settings.json. Code only. | AC-147 through AC-151, AC-157, AC-158, AC-163, AC-164, AC-169 through AC-171, AC-173 through AC-175 | M (~400 LOC, 6 hooks) | PR-2a (markers identify targets) |
+| **PR-2c** | Activate enforcement: add `audit-enforcement.py --strict` + `--report` to `/gates`. Harness script with all three modes (strict, discover, report). | AC-165 through AC-167, AC-177 | S (~350 LOC for harness + config) | PR-2a + PR-2b |
+| **PR-3** | Two-file split: release, backlog, retro + TWO-FILE-PATTERN.md | AC-159 through AC-162 | L (3 skills refactored) | PR-2b (line cap hook exists) |
+| **PR-4** | In-flight auto-deregister: pr_monitor terminal step + PostToolUse hook on merge/branch-delete + 7-day TTL on inflight-check. | AC-178 through AC-180 | S (~60 LOC across 3 sites) | PR-2b (hook infrastructure pattern established). May fold into PR-2b if scope allows. |
+
+Note: PR-2a can ship alone if PR-2b/2c hit obstacles — markers themselves have value as a discoverability artifact. The three sub-PRs are designed to be independently reviewable (documentation → code → config). PR-4 is structurally identical to PR-2b hooks and can fold in if review bandwidth allows.
 
 ---
 
