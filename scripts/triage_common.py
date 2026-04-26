@@ -447,27 +447,23 @@ def dispatch_subagent(profile_name, payload, model="sonnet", worktree=".", timeo
     Returns:
         dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int)
     """
-    import sys as _sys
+    prompt = json.dumps(payload)
     cmd = [
-        "claude", "-p",
+        "claude", "-p", prompt,
         "--verbose", "--output-format", "stream-json",
         "--model", model,
         "--agent", profile_name,
     ]
-    payload_bytes = json.dumps(payload).encode("utf-8")
 
     try:
         proc = subprocess.Popen(
             cmd,
             cwd=worktree,
-            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         try:
-            stdout_bytes, stderr_bytes = proc.communicate(
-                input=payload_bytes, timeout=timeout
-            )
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()

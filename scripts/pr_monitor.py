@@ -1437,13 +1437,20 @@ def run_monitor(worktree, pr_number, resume=False):
                     logger.log("monitor", "FLAKE_RERUN",
                                commit=commit_sha, round=ci_fix_rounds_used)
                     try:
-                        subprocess.run(
+                        id_proc = subprocess.run(
                             ["gh", "run", "list", "--limit", "1",
                              "--json", "databaseId", "--jq", ".[0].databaseId"],
                             cwd=worktree, capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=30,
                         )
-                        # Best-effort rerun — if we can't get the run ID, just re-poll
+                        if id_proc.returncode == 0:
+                            run_id = id_proc.stdout.strip()
+                            if run_id:
+                                subprocess.run(
+                                    ["gh", "run", "rerun", run_id, "--failed"],
+                                    cwd=worktree, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=30,
+                                )
                     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                         pass
                     # Re-poll CI after rerun
@@ -1472,14 +1479,8 @@ def run_monitor(worktree, pr_number, resume=False):
                     ci_fix_rounds_used, comments,
                 )
 
-                # Write decision file (AC-187)
-                decision["pr"] = pr_number
-                _write_ci_fix_decision(worktree, commit_sha, ci_fix_rounds_used, decision)
-                logger.log("monitor", "CI_FIX_DECISION",
-                           action=decision.get("action"),
-                           files=len(decision.get("files_touched") or []))
-
-                # Thrash check (AC-186)
+                # Thrash check (AC-186) — BEFORE writing decision file so
+                # _load_prior_decision reads round N-1, not the current round.
                 if _check_thrash(worktree, commit_sha, ci_fix_rounds_used, decision):
                     logger.log("monitor", "THRASH_DETECTED",
                                round=ci_fix_rounds_used, files=decision.get("files_touched"))
@@ -1492,6 +1493,13 @@ def run_monitor(worktree, pr_number, resume=False):
                             ci_fix_rounds_used, triage_rounds_used, worktree))
                     logger.close()
                     return 1
+
+                # Write decision file after thrash check (AC-187)
+                decision["pr"] = pr_number
+                _write_ci_fix_decision(worktree, commit_sha, ci_fix_rounds_used, decision)
+                logger.log("monitor", "CI_FIX_DECISION",
+                           action=decision.get("action"),
+                           files=len(decision.get("files_touched") or []))
 
                 if decision.get("action") == "escalate":
                     logger.log("monitor", "CI_FIX_ESCALATED",
@@ -1595,8 +1603,12 @@ def run_monitor(worktree, pr_number, resume=False):
 
         # --- Phase D: CI still failing after loop? ---
         if result.get("ci_result") == "fail":
-            result["status"] = "ci_failed"
+            result["status"] = "stuck-ci-fix-exhausted"
             write_result(worktree, result)
+            _notify_terminal(worktree, pr_number, logger,
+                             _build_terminal_notification(
+                                 pr_number, "stuck-ci-fix-exhausted", result,
+                                 ci_fix_rounds_used, triage_rounds_used, worktree))
             logger.log("monitor", "COMPLETE_CI_FAILED", pr=pr_number)
             logger.close()
             return 1
