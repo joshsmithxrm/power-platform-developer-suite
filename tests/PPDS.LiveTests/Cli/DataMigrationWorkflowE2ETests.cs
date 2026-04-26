@@ -185,7 +185,6 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
     {
         using var client = await LiveTestHelpers.CreateServiceClientAsync(Configuration);
         client.Update(new Entity("account", id) { ["description"] = description });
-        await Task.CompletedTask;
     }
 
     public override async Task DisposeAsync()

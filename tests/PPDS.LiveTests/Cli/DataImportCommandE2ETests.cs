@@ -97,11 +97,12 @@ public class DataImportCommandE2ETests : CliE2ETestBase
     {
         var zipPath = GenerateTempFilePath(".zip");
         await File.WriteAllBytesAsync(zipPath, Array.Empty<byte>());
+        var nonexistentMapping = Path.Combine(Path.GetTempPath(), $"nonexistent-{Guid.NewGuid():N}.xml");
 
         var result = await RunCliAsync(
             "data", "import",
             "--data", zipPath,
-            "--user-mapping", "nonexistent.xml");
+            "--user-mapping", nonexistentMapping);
 
         result.ExitCode.Should().NotBe(0);
         (result.StdOut + result.StdErr).Should().ContainAny("user mapping", "not found", "does not exist");
@@ -142,9 +143,11 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
         File.Exists(zipPath).Should().BeTrue("export should have produced a zip");
 
-        // 4. Delete the account so the import can recreate it.
+        // 4. Delete the account so the import can recreate it. The id stays in
+        // _createdAccountIds — DeleteAccountsAsync ignores not-found, so cleanup
+        // is idempotent whether the import succeeds, fails, or this method
+        // throws before we can re-track the id.
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
-        _createdAccountIds.Remove(accountId);
 
         // 5. Import the data back.
         var importResult = await RunCliAsync(
@@ -155,11 +158,9 @@ public class DataImportCommandE2ETests : CliE2ETestBase
 
         importResult.ExitCode.Should().Be(0, $"import failed: {importResult.StdErr}");
 
-        // 6. Verify the account exists again, and re-track for cleanup.
+        // 6. Verify the account exists again (Upsert preserves primary key).
         var exists = await LiveTestHelpers.AccountExistsAsync(Configuration, accountId);
         exists.Should().BeTrue("account should have been re-imported");
-
-        _createdAccountIds.Add(accountId);
     }
 
     [CliE2EWithCredentials]
@@ -191,7 +192,6 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
 
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
-        _createdAccountIds.Remove(accountId);
 
         var importResult = await RunCliAsync(
             "data", "import",
@@ -203,8 +203,6 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         // JSON format streams progress objects to stderr per output conventions
         // (mirrors DataSchema_JsonFormat_OutputsProgress).
         importResult.StdErr.Should().Contain("{");
-
-        _createdAccountIds.Add(accountId);
     }
 
     [CliE2EWithCredentials]
@@ -244,7 +242,6 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
 
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
-        _createdAccountIds.Remove(accountId);
 
         var importResult = await RunCliAsync(
             "data", "import",
@@ -252,8 +249,6 @@ public class DataImportCommandE2ETests : CliE2ETestBase
             "--profile", profileName);
 
         importResult.ExitCode.Should().Be(0, $"import failed: {importResult.StdErr}");
-
-        _createdAccountIds.Add(accountId);
     }
 
     #endregion
