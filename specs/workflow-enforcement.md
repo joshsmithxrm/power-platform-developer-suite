@@ -1460,11 +1460,11 @@ After all skills in this spec are implemented:
 | AC-149 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains `fallback: <reason>` | `test_hooks.py::test_stop_hook_allows_pr_with_fallback` | 🔲 |
 | AC-150 | **(v9.0 — F-7)** `retro-html-guard.py` blocks Write to `.retros/*.html` when `PPDS_PIPELINE` is not set | `test_hooks.py::test_retro_html_guard_blocks_interactive` | 🔲 |
 | AC-151 | **(v9.0 — F-7)** `retro-html-guard.py` allows Write to `.retros/*.html` when `PPDS_PIPELINE=1` | `test_hooks.py::test_retro_html_guard_allows_pipeline` | 🔲 |
-| AC-152 | **(v9.0 — Model)** `pipeline.py` passes `--model sonnet` for implement, gates, verify, qa, review, converge, pr, retro stages (floating ID, not pinned) | `test_pipeline.py::test_stage_models_sonnet` | 🔲 |
-| AC-153 | **(v9.0 — Model)** `pipeline.py` passes no `--model` flag for design, investigate, spec stages (inherits default) | `test_pipeline.py::test_stage_models_opus_default` | 🔲 |
-| AC-154 | **(v9.0 — Model)** `pipeline.py --model <id>` overrides STAGE_MODELS for all stages | `test_pipeline.py::test_stage_model_override` | 🔲 |
-| AC-155 | **(v9.0 — Model)** `pr_monitor.py` passes `--model sonnet` when spawning triage and retro sessions (floating ID) | `test_pr_monitor.py::test_monitor_uses_sonnet` | 🔲 |
-| AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | 🔲 |
+| AC-152 | **(v9.0 — Model)** `pipeline.py` passes `--model sonnet` for implement, gates, verify, qa, review, converge, pr, retro stages (floating ID, not pinned) | `test_pipeline.py::test_stage_models_sonnet` | ✅ |
+| AC-153 | **(v9.0 — Model)** `pipeline.py` passes no `--model` flag for design, investigate, spec stages (inherits default) | `test_pipeline.py::test_stage_models_opus_default` | ✅ |
+| AC-154 | **(v9.0 — Model)** `pipeline.py --model <id>` overrides STAGE_MODELS for all stages | `test_pipeline.py::test_stage_model_override` | ✅ |
+| AC-155 | **(v9.0 — Model)** `pr_monitor.py` passes `--model sonnet` when spawning triage and retro sessions (floating ID) | `test_pr_monitor.py::test_monitor_uses_sonnet` | ✅ |
+| AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | ✅ |
 | AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | 🔲 |
 | AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | 🔲 |
 | AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | 🔲 |

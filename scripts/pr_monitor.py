@@ -417,6 +417,20 @@ def _fetch_latest_gemini_review_body(worktree, pr_number):
     return (latest or {}).get("body") or ""
 
 
+def _build_triage_cmd(full_prompt):
+    """Build argv for the gemini-triage claude session.
+
+    Extracted so tests can assert on the cmd shape without mocking the full
+    run_triage flow (subprocess, file I/O, polling).
+    """
+    return [
+        "claude", "-p", full_prompt,
+        "--verbose", "--output-format", "stream-json",
+        "--model", "sonnet",
+        "--agent", "gemini-triage",
+    ]
+
+
 def run_triage(worktree, pr_number, comments, logger):
     """Spawn claude -p with gemini-triage agent. Returns triage result list or None."""
     if SHAKEDOWN:
@@ -440,11 +454,7 @@ def run_triage(worktree, pr_number, comments, logger):
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-triage.jsonl")
 
-    cmd = [
-        "claude", "-p", full_prompt,
-        "--verbose", "--output-format", "stream-json",
-        "--agent", "gemini-triage",
-    ]
+    cmd = _build_triage_cmd(full_prompt)
 
     logger.log("triage", "START", comments=len(comments))
 
@@ -829,6 +839,19 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
         write_result(worktree, result)
 
 
+def _build_retro_cmd(prompt):
+    """Build argv for the retro claude session.
+
+    Extracted so tests can assert on the cmd shape without mocking the full
+    run_retro flow.
+    """
+    return [
+        "claude", "-p", prompt, "--verbose",
+        "--output-format", "stream-json",
+        "--model", "sonnet",
+    ]
+
+
 def run_retro(worktree, logger):
     """Run claude -p '/retro' for retrospective."""
     if SHAKEDOWN:
@@ -849,8 +872,7 @@ def run_retro(worktree, logger):
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-retro.jsonl")
 
-    cmd = ["claude", "-p", prompt, "--verbose",
-           "--output-format", "stream-json"]
+    cmd = _build_retro_cmd(prompt)
 
     logger.log("retro", "START")
 

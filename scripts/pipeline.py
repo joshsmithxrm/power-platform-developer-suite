@@ -78,6 +78,28 @@ STAGE_OUTCOMES = {
 STALL_LIMIT = 5    # consecutive idle heartbeats before kill (5 min at 60s interval)
 HARD_CEILING = 7200  # max duration per AI invocation in seconds (120 min, overridable via --max-stage-seconds). Applied per run_claude call; stages with retries or converge rounds can accumulate multiple invocations.
 
+# Per-stage model routing (v9.0). Floating IDs — not pinned to a specific
+# version. Headless executor stages run on Sonnet for cost; Opus is reserved
+# for user-facing orchestration (design, investigate, spec) which inherits the
+# CLI default by passing no --model flag (value None).
+STAGE_MODELS = {
+    "implement": "sonnet",
+    "gates": "sonnet",
+    "verify": "sonnet",
+    "qa": "sonnet",
+    "review": "sonnet",
+    "converge": "sonnet",
+    "pr": "sonnet",
+    "retro": "sonnet",
+    "design": None,
+    "investigate": None,
+    "spec": None,
+}
+
+# Override applied via --model CLI flag; when set, takes precedence over
+# STAGE_MODELS for every stage in the run.
+MODEL_OVERRIDE = None
+
 
 class PipelineFailure(Exception):
     """Raised by _pipeline_fail to exit the stage loop without sys.exit."""
@@ -447,7 +469,11 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
     full_prompt = HEADLESS_PREAMBLE + prompt
 
     effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
-    log(logger, stage, "START", ceiling=f"{effective_ceiling}s")
+    effective_model = MODEL_OVERRIDE if MODEL_OVERRIDE is not None else STAGE_MODELS.get(stage)
+    log_kwargs = {"ceiling": f"{effective_ceiling}s"}
+    if effective_model:
+        log_kwargs["model"] = effective_model
+    log(logger, stage, "START", **log_kwargs)
 
     if dry_run:
         time.sleep(0.1)  # Simulate
@@ -472,6 +498,8 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
 
     cmd = ["claude", "-p", full_prompt, "--verbose",
            "--output-format", "stream-json"]
+    if effective_model:
+        cmd.extend(["--model", effective_model])
     if agent:
         cmd.extend(["--agent", agent])
 
@@ -1363,7 +1391,22 @@ def main():
     parser.add_argument("--worktree", help="Use existing worktree instead of creating one")
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
+    parser.add_argument(
+        "--model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Override the per-stage model for every stage in this run "
+            "(e.g., 'sonnet', 'opus', or a pinned ID). When unset, stages "
+            "use STAGE_MODELS routing; design/investigate/spec inherit the "
+            "CLI default."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.model:
+        global MODEL_OVERRIDE
+        MODEL_OVERRIDE = args.model
 
     if args.max_stage_seconds is not None and args.max_stage_seconds <= 0:
         parser.error("--max-stage-seconds must be a positive integer")
