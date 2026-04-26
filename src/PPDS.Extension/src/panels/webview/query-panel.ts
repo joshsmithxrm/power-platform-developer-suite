@@ -55,7 +55,6 @@ try {
 let currentLanguage = 'sql';
 let validationRequestId = 0;
 let validationTimeout: ReturnType<typeof setTimeout> | undefined;
-let validationResponseTimeout: ReturnType<typeof setTimeout> | undefined;
 let manualOverride = false;
 
 // ── Resize handle (editor height splitter) ──
@@ -331,7 +330,6 @@ if (editor) editor.onDidChangeModelContent(() => {
     const model = editor.getModel();
     if (model) monaco.editor.setModelMarkers(model, 'ppds', []);
     clearTimeout(validationTimeout);
-    clearTimeout(validationResponseTimeout);
     const sql = editor.getValue();
     const language = currentLanguage;
     if (sql.trim().length >= 3) {
@@ -343,9 +341,6 @@ if (editor) editor.onDidChangeModelContent(() => {
                 sql,
                 language,
             } as QueryPanelWebviewToHost);
-            validationResponseTimeout = setTimeout(() => {
-                if (model) monaco.editor.setModelMarkers(model, 'ppds', []);
-            }, 3000);
         }, 300);
     }
 });
@@ -930,7 +925,6 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
         }
         case 'validationResult': {
             if (msg.requestId !== validationRequestId) break;
-            clearTimeout(validationResponseTimeout);
             if (msg.diagnostics?.length) {
                 setDiagnosticMarkers(msg.diagnostics);
             } else if (editor) {
