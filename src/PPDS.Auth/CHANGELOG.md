@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for all credential providers (#133, #956).
 
 ### Fixed
-- Sovereign-cloud URL generation in `DataverseUrlBuilder` now correctly handles GCC High, DoD, and other sovereign clouds (#879, #947).
+- Sovereign-cloud Maker Portal and Flow Portal URLs in `CloudEndpoints` — added `GetMakerPortalUrl` and `GetFlowPortalUrl` with per-cloud URL tables (#879, #947).
 
 ## [1.0.0] - 2026-04-18
 
