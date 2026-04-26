@@ -306,8 +306,8 @@ def release_lock(lock_path):
         pass
 
 
-def get_child_process_count(pid):
-    """Count active child processes of a given PID."""
+def _get_direct_children(pid):
+    """Return list of direct child PIDs for *pid*."""
     try:
         if sys.platform == "win32":
             result = subprocess.run(
@@ -317,9 +317,8 @@ def get_child_process_count(pid):
                 encoding="utf-8", errors="replace",
             )
             if result.returncode == 0:
-                lines = [l.strip() for l in result.stdout.strip().splitlines()
-                         if l.strip().isdigit()]
-                return len(lines)
+                return [int(l.strip()) for l in result.stdout.strip().splitlines()
+                        if l.strip().isdigit()]
         else:
             result = subprocess.run(
                 ["pgrep", "-P", str(pid)],
@@ -327,10 +326,24 @@ def get_child_process_count(pid):
                 encoding="utf-8", errors="replace",
             )
             if result.returncode == 0:
-                return len(result.stdout.strip().splitlines())
+                return [int(l.strip()) for l in result.stdout.strip().splitlines()
+                        if l.strip()]
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
         pass
-    return 0
+    return []
+
+
+def get_child_process_count(pid):
+    """Count all descendant processes of *pid* (children, grandchildren, …)."""
+    visited = set()
+    queue = [pid]
+    while queue:
+        current = queue.pop()
+        for child in _get_direct_children(current):
+            if child not in visited:
+                visited.add(child)
+                queue.append(child)
+    return len(visited)
 
 
 def classify_activity(current_size, last_size, git_changes, last_git_changes,

@@ -17,6 +17,10 @@ pipeline orchestrator. In pipeline mode:
 - Execute Steps 1-5 only (plan analysis through phase execution)
 - Skip Step 6 (Mandatory Tail) — the pipeline orchestrator runs gates/verify/qa/review
   as separate `claude -p` sessions with their own timeouts and monitoring
+- **Do NOT use `ScheduleWakeup`** — the pipeline monitors parent-process output to detect
+  stalls. A sleeping parent produces no output and will be killed. Instead, dispatch agents
+  in foreground (`run_in_background: false`) or poll background agents with `TaskOutput`
+  at ≤60 s intervals so the parent transcript keeps growing.
 - Exit cleanly after all phases are committed
 
 In interactive mode (`PPDS_PIPELINE` not set), execute the full process including Step 6.

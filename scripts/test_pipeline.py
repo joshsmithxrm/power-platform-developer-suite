@@ -17,9 +17,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pipeline
 from pipeline import (
     STAGE_MODELS,
+    _get_direct_children,
     auto_commit_stranded,
     classify_activity,
     compute_resume_stage,
+    get_child_process_count,
     should_converge,
     write_result,
 )
@@ -50,7 +52,7 @@ class TestAutoCommitStranded(unittest.TestCase):
         result = auto_commit_stranded("/tmp/wt", "converge-r1", self._logger())
         self.assertTrue(result)
         add_call = mock_run.call_args_list[1]
-        self.assertIn("-u", add_call[0][0])
+        self.assertIn("-A", add_call[0][0])
 
     @patch("pipeline.subprocess.run")
     @patch("pipeline.log")
@@ -227,6 +229,55 @@ class TestClassifyActivityPreserved(unittest.TestCase):
         activity, idle = classify_activity(100, 100, 0, 0, 1, 1, 2)
         self.assertEqual(activity, "stalled")
         self.assertEqual(idle, 3)
+
+
+class TestDescendantProcessCount(unittest.TestCase):
+    """Verify get_child_process_count walks the full process tree (#964)."""
+
+    @patch("pipeline._get_direct_children")
+    def test_counts_grandchildren(self, mock_children):
+        # Tree: pid 1 -> [2, 3], pid 2 -> [4], pid 3 -> [], pid 4 -> []
+        mock_children.side_effect = lambda pid: {
+            1: [2, 3],
+            2: [4],
+            3: [],
+            4: [],
+        }.get(pid, [])
+        self.assertEqual(get_child_process_count(1), 3)  # 2, 3, 4
+
+    @patch("pipeline._get_direct_children")
+    def test_no_children_returns_zero(self, mock_children):
+        mock_children.return_value = []
+        self.assertEqual(get_child_process_count(99), 0)
+
+    @patch("pipeline._get_direct_children")
+    def test_only_direct_children(self, mock_children):
+        mock_children.side_effect = lambda pid: {
+            10: [11, 12],
+            11: [],
+            12: [],
+        }.get(pid, [])
+        self.assertEqual(get_child_process_count(10), 2)
+
+    @patch("pipeline._get_direct_children")
+    def test_deep_tree(self, mock_children):
+        # Linear chain: 1 -> 2 -> 3 -> 4 -> 5
+        mock_children.side_effect = lambda pid: {
+            1: [2], 2: [3], 3: [4], 4: [5], 5: [],
+        }.get(pid, [])
+        self.assertEqual(get_child_process_count(1), 4)  # 2, 3, 4, 5
+
+    @patch("pipeline._get_direct_children")
+    def test_grandchild_active_classifies_as_active(self, mock_children):
+        """Parent silent + grandchild active -> 'active' not 'stalled'."""
+        mock_children.side_effect = lambda pid: {
+            1: [2], 2: [3], 3: [],
+        }.get(pid, [])
+        count = get_child_process_count(1)
+        activity, idle = classify_activity(
+            100, 100, 0, 0, 1, 1, 4, has_children=count > 0)
+        self.assertEqual(activity, "active")
+        self.assertEqual(idle, 0)
 
 
 class TestShouldConvergePreserved(unittest.TestCase):
