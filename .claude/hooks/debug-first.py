@@ -80,8 +80,8 @@ def main():
 
     if hook_event == "PostToolUse":
         resp = payload.get("tool_response", {}) or {}
-        rc = resp.get("returncode") if isinstance(resp, dict) else None
-        ok = resp.get("success") if isinstance(resp, dict) else None
+        rc = resp.get("returncode")
+        ok = resp.get("success")
         failed = (rc is not None and rc != 0) or (ok is False)
         if failed:
             _record_failure(project_dir, command)

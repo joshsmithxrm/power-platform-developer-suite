@@ -1083,10 +1083,9 @@ def run_monitor(worktree, pr_number, resume=False):
                 result["status"] = "ci_failed"
                 write_result(worktree, result)
                 _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI failed")
-                logger.log("monitor", "ABORT", reason="CI failed (AC-108)")
-                logger.close()
-                return 1
+                                 f"PR #{pr_number} CI failed — continuing to triage")
+                logger.log("monitor", "CI_FAILED_CONTINUE",
+                           reason="CI failed, continuing to Gemini triage (AC-108)")
 
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
