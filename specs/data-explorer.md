@@ -1,8 +1,8 @@
 # Data Explorer
 
 **Status:** Draft
-**Last Updated:** 2026-03-18
-**Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts)
+**Last Updated:** 2026-04-25
+**Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/)
 **Surfaces:** Extension, TUI, MCP
 
 ---
@@ -16,6 +16,7 @@ The VS Code panel (`QueryPanel.ts`) hosts a webview that currently uses a raw `<
 ### Goals
 
 - **Monaco editor**: SQL and FetchXML syntax highlighting, IntelliSense via existing daemon `query/complete` endpoint, auto-detection between query languages
+- **Live diagnostics**: Inline error squiggles via `setModelMarkers()` before query execution, powered by daemon `query/validate` endpoint
 - **Familiar selection UX**: Click, drag, Shift+click rectangular selection matching SSMS/Excel behavior
 - **Smart copy defaults**: Single cell = value only; multi-cell = with headers; Ctrl+Shift+C inverts
 - **Discoverable shortcuts**: Context menu and status bar hints teach users the available actions
@@ -42,8 +43,11 @@ QueryPanel.ts (webview)
 ├── Monaco Editor (replaces textarea)
 │   ├── SQL language mode (built-in)
 │   ├── XML language mode (built-in, for FetchXML)
-│   └── CompletionItemProvider (registered for both)
-│       └── postMessage → host → daemon.queryComplete() → postMessage back
+│   ├── CompletionItemProvider (registered for both)
+│   │   └── postMessage → host → daemon.queryComplete() → postMessage back
+│   └── Diagnostic Markers (setModelMarkers)
+│       └── postMessage → host → daemon.queryValidate() → postMessage back
+├── Validation debounce (300ms, request ID cancellation)
 ├── Language auto-detect (content change listener)
 ├── Language toggle button (manual override)
 ├── Selection State: anchor {row, col}, focus {row, col}
@@ -62,6 +66,8 @@ QueryPanel.ts (webview)
 | Language auto-detector | Switches Monaco language mode based on content prefix |
 | Language toggle button | Manual override for auto-detected language |
 | Completion bridge | postMessage round-trip between webview and host for daemon completions |
+| Validation bridge | Debounced validation round-trip between webview and host for live diagnostics |
+| Marker renderer | Maps diagnostic DTOs to Monaco `IMarkerData` and calls `setModelMarkers()` |
 | esbuild config | Bundle Monaco workers + core for webview consumption |
 
 ### Selection Components
@@ -81,6 +87,7 @@ QueryPanel.ts (webview)
 - `monaco-editor` npm package (~2-3MB bundled)
 - Existing: `daemon.queryComplete()` in `daemonClient.ts`
 - Existing: `SqlCompletionEngine` and `FetchXmlCompletionEngine` in daemon
+- Existing: `SqlValidator` in `PPDS.Query.Intellisense` (reused for `query/validate`)
 
 ---
 
@@ -239,8 +246,10 @@ Monaco creates workers via blob URLs, so `worker-src blob:` is required.
 | Webview → Host | `requestCompletions` | `{ requestId, sql, cursorOffset, language }` | Request IntelliSense completions |
 | Host → Webview | `completionResult` | `{ requestId, items }` | Return completion items |
 | Host → Webview | `loadQuery` | `{ sql }` | Load query text (from history, notebook) |
+| Webview → Host | `requestValidation` | `{ requestId, sql, language }` | Request syntax validation (debounced, 300ms) |
+| Host → Webview | `validationResult` | `{ requestId, diagnostics }` | Return diagnostic markers |
 
-All other existing messages (`queryResult`, `queryError`, `executionStarted`, etc.) are unchanged.
+`queryError` is enriched with optional diagnostics: `{ error, diagnostics?: DiagnosticItem[] }`. All other existing messages (`queryResult`, `executionStarted`, etc.) are unchanged.
 
 #### Error Handling
 
@@ -251,6 +260,82 @@ All other existing messages (`queryResult`, `queryError`, `executionStarted`, et
 | Completion timeout | Daemon slow or unresponsive | 3-second timeout returns empty suggestions, no user-visible error |
 | Completion returns malformed response | Daemon bug | Catch in message handler, resolve with empty suggestions |
 | `queryFetch` not available | FetchXML execution path missing | Falls back to `querySql` which auto-transpiles FetchXML |
+| Validation timeout | Daemon slow or unresponsive | 3-second timeout clears markers, no user-visible error |
+
+#### Diagnostic Markers
+
+Live syntax validation powered by a new `query/validate` RPC endpoint. The webview calls validation on a debounced timer as the user types; the daemon runs `SqlValidator` (parse-only, no Dataverse connection) and returns structured diagnostics. The webview maps these to Monaco markers via `setModelMarkers()`, producing inline error squiggles with hover messages.
+
+##### Validation Endpoint
+
+**RPC Method:** `query/validate`
+
+**Request:**
+```json
+{ "sql": "SELECT name FORM account", "language": "sql" }
+```
+
+**Response:**
+```json
+{
+  "diagnostics": [
+    { "start": 12, "length": 4, "severity": "error", "message": "Incorrect syntax near 'FORM'. Did you mean 'FROM'?" }
+  ]
+}
+```
+
+The endpoint reuses the existing `SqlValidator` which wraps `TSql170Parser`. It returns `SqlDiagnostic[]` mapped to a JSON DTO:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start` | `number` | 0-based character offset in the query text |
+| `length` | `number` | Number of characters the diagnostic spans |
+| `severity` | `"error" \| "warning" \| "info"` | Maps to `monaco.MarkerSeverity` |
+| `message` | `string` | Human-readable description shown on hover |
+
+FetchXML validation is a non-goal for this iteration — the endpoint returns an empty diagnostics array for `language: "xml"`.
+
+##### Live Validation Flow
+
+1. User types in Monaco editor
+2. `onDidChangeModelContent` clears existing markers immediately (stale)
+3. Content change resets 300ms debounce timer
+4. Debounce fires → webview sends `requestValidation` with incrementing `requestId`
+5. Host calls `daemon.queryValidate({ sql, language })`
+6. Host sends `validationResult` back with `{ requestId, diagnostics }` (host re-attaches the `requestId` from the original webview request)
+7. Webview checks `requestId` matches latest request — stale results are discarded
+8. Webview converts `start`/`length` to Monaco line/column positions via `model.getPositionAt(start)` and `model.getPositionAt(start + length)`
+9. Webview calls `monaco.editor.setModelMarkers(model, 'ppds', markers)`
+
+Skip validation when content is fewer than 3 characters (avoids noise on empty/partial queries).
+
+##### Execution-Time Markers
+
+When query execution fails with a parse error (`ErrorCode: Query.ParseError`), the daemon includes structured diagnostics in the RPC error data. The host enriches the `queryError` webview message:
+
+```typescript
+// Current shape
+{ command: 'queryError', error: string }
+
+// Enriched shape
+{ command: 'queryError', error: string, diagnostics?: DiagnosticItem[] }
+```
+
+The daemon normalizes `QueryParseException` line/column coordinates to 0-based `start`/`length` offsets matching the `DiagnosticDto` shape, so the webview uses a single code path for both live and execution-time markers. FetchXML execution errors do not produce markers (FetchXML validation is a non-goal for this iteration).
+
+The C# RPC response uses `DiagnosticDto` (with `start`, `length`, `severity`, `message`). The TypeScript webview maps these to `DiagnosticItem` — same shape, language-specific type.
+
+The error display div still shows the full error text (including line/column) for accessibility and visibility.
+
+##### Marker Clearing
+
+| Event | Action |
+|-------|--------|
+| Content changes | Clear markers immediately, debounce triggers re-validation |
+| Successful query execution | Clear markers |
+| Language switch (SQL ↔ FetchXML) | Clear markers |
+| Empty/trivial content (< 3 chars) | Skip validation, clear markers |
+| Editor disposed | Markers cleared automatically by Monaco |
 
 ---
 
@@ -409,6 +494,34 @@ Monaco edge cases:
 | Very long query (5000+ chars) | Monaco handles efficiently (built-in virtualization) |
 | Multiple Data Explorer panels | Each has independent Monaco instance + completion state |
 
+### Diagnostic Markers
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| DM-01 | SQL syntax errors show red squiggles under the error location as the user types | `QueryValidateHandler.ValidSql_ReturnsEmpty` / `QueryValidateHandler.InvalidSql_ReturnsDiagnostics` | ❌ |
+| DM-02 | Hovering over a squiggle shows the error message in a tooltip | Manual | ❌ |
+| DM-03 | Markers clear when content changes and re-validate after 300ms debounce | Manual | ❌ |
+| DM-04 | Stale validation responses (outdated requestId) are discarded | `requestId staleness` unit test | ❌ |
+| DM-05 | Execution errors with position info set markers in the editor | `QueryPanel.executeQuery error enrichment` | ❌ |
+| DM-06 | Markers clear on successful query execution | Manual | ❌ |
+| DM-07 | Markers clear on language switch | Manual | ❌ |
+| DM-08 | FetchXML content returns empty diagnostics (no false errors) | `QueryValidateHandler.FetchXml_ReturnsEmpty` | ❌ |
+| DM-09 | Daemon not running returns empty diagnostics, no error shown | Manual | ❌ |
+| DM-10 | Validation timeout (3s) clears markers silently | Manual | ❌ |
+
+Diagnostic markers edge cases:
+
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| Rapid typing (< 300ms between keystrokes) | Debounce resets; only one validation request sent after typing stops |
+| Daemon not running | Validation returns empty diagnostics, no error shown |
+| Very large query (5000+ chars) | Validation still runs; parser handles large input efficiently |
+| Multiple parse errors | All errors shown as separate markers |
+| Error spans multiple lines | Marker covers the full span using `getPositionAt()` |
+| Content cleared while validation in-flight | Stale response discarded; markers cleared |
+| Switch to FetchXML while SQL validation in-flight | Stale response discarded; markers cleared on language switch |
+| Valid SQL referencing nonexistent table/column | No markers shown (parse-only validation, no semantic checking) |
+
 ### Selection & Copy
 
 | ID | Criterion | Test | Status |
@@ -498,6 +611,21 @@ Selection & Copy edge cases:
 
 **Rationale:** When you copy a single cell, you want the value (to paste into a filter, a URL, a variable). When you copy a range, you're building a dataset (paste into Excel, share with someone) and headers provide context. This matches the TUI's design in `TableCopyHelper.cs` and the self-teaching status bar hint pattern.
 
+### Why a dedicated `query/validate` endpoint over parsing error strings?
+
+**Context:** Need inline diagnostic markers in Monaco. The daemon already has structured parse error info (`QueryParseException` with `Line`/`Column`, `SqlValidator` with `Start`/`Length`), but the RPC layer currently flattens errors into a plain string.
+
+**Decision:** New `query/validate` RPC endpoint returning structured `DiagnosticDto[]`, plus enriched `queryError` responses with optional diagnostics.
+
+**Alternatives considered:**
+- **Client-side regex parsing of error strings**: Parse "Line X, Column Y" from `queryError` messages. No daemon changes, but fragile (breaks if message format changes), can't support as-you-type validation, and violates A2 (other surfaces would need their own parsing).
+- **Execution-time markers only**: Enrich `queryError` but no live validation. Simpler but doesn't satisfy the "before execution" requirement. Also implemented as part of this design, but not sufficient alone.
+- **Full LSP server**: Expose the daemon as a Language Server Protocol server. Provides diagnostics, completions, hover via standard protocol. But the incremental value over `query/validate` + `query/complete` doesn't justify the protocol overhaul. `query/validate` is a stepping stone — the diagnostic shape is already LSP-compatible.
+
+**Consequences:**
+- Positive: Reusable by all surfaces (A2), extends naturally to semantic validation (unknown tables/columns), clean separation of parse-only vs execute paths
+- Negative: New RPC endpoint to maintain (minimal — `SqlValidator` already exists, endpoint is a thin wrapper)
+
 ---
 
 ## Related Specs
@@ -506,6 +634,7 @@ Selection & Copy edge cases:
 - TUI copy implementation: `src/PPDS.Cli/Tui/Helpers/TableCopyHelper.cs`
 - Daemon endpoint: `query/complete` in `RpcMethodHandler.cs`
 - Extension client: `daemonClient.queryComplete()` in `daemonClient.ts`
+- [rpc-contracts.md](./rpc-contracts.md) — Contract tests covering `query/validate` shape
 - [solutions.md](./solutions.md) — Solutions panel (absorbed from persistence-and-solutions-polish spec)
 
 ---
@@ -514,4 +643,5 @@ Selection & Copy edge cases:
 
 | Date | Change |
 |------|--------|
+| 2026-04-25 | Added Diagnostic Markers section: `query/validate` endpoint, live validation flow, execution-time markers, marker clearing rules (#650) |
 | 2026-03-18 | Created from vscode-data-explorer-monaco-editor.md and vscode-data-explorer-selection-copy.md per SL1 |
