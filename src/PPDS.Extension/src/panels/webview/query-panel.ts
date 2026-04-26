@@ -333,6 +333,7 @@ if (editor) editor.onDidChangeModelContent(() => {
     clearTimeout(validationTimeout);
     clearTimeout(validationResponseTimeout);
     const sql = editor.getValue();
+    const language = currentLanguage;
     if (sql.trim().length >= 3) {
         validationTimeout = setTimeout(() => {
             validationRequestId++;
@@ -340,7 +341,7 @@ if (editor) editor.onDidChangeModelContent(() => {
                 command: 'requestValidation',
                 requestId: validationRequestId,
                 sql,
-                language: currentLanguage,
+                language,
             } as QueryPanelWebviewToHost);
             validationResponseTimeout = setTimeout(() => {
                 if (model) monaco.editor.setModelMarkers(model, 'ppds', []);
