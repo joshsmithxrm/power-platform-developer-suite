@@ -250,6 +250,18 @@ export interface QueryCompleteResponse {
     items: CompletionItemDto[];
 }
 
+// ── Validation types ────────────────────────────────────────────────
+export interface DiagnosticItem {
+    start: number;
+    length: number;
+    severity: 'error' | 'warning' | 'info';
+    message: string;
+}
+
+export interface QueryValidateResponse {
+    diagnostics: DiagnosticItem[];
+}
+
 export interface CompletionItemDto {
     label: string;
     insertText: string;

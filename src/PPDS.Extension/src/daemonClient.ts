@@ -26,6 +26,7 @@ import type {
     EnvWhoResponse,
     QueryResultResponse,
     QueryCompleteResponse,
+    QueryValidateResponse,
     QueryHistoryListResponse,
     QueryHistoryDeleteResponse,
     QueryExportResponse,
@@ -225,6 +226,7 @@ export function parseDaemonLogLevel(line: string): 'trace' | 'debug' | 'info' | 
 const RPC_QUERY_SQL = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/sql', ParameterStructures.byPosition);
 const RPC_QUERY_FETCH = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/fetch', ParameterStructures.byPosition);
 const RPC_QUERY_COMPLETE = new RequestType<Record<string, unknown>, QueryCompleteResponse, void>('query/complete', ParameterStructures.byPosition);
+const RPC_QUERY_VALIDATE = new RequestType<Record<string, unknown>, QueryValidateResponse, void>('query/validate', ParameterStructures.byPosition);
 const RPC_QUERY_HISTORY_LIST = new RequestType<Record<string, unknown>, QueryHistoryListResponse, void>('query/history/list', ParameterStructures.byPosition);
 const RPC_QUERY_HISTORY_DELETE = new RequestType<Record<string, unknown>, QueryHistoryDeleteResponse, void>('query/history/delete', ParameterStructures.byPosition);
 const RPC_QUERY_EXPORT = new RequestType<Record<string, unknown>, QueryExportResponse, void>('query/export', ParameterStructures.byPosition);
@@ -679,6 +681,10 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryComplete(params: { sql: string; cursorOffset: number; language?: string; environmentUrl?: string; profileName?: string }): Promise<QueryCompleteResponse> {
         return this.sendRequestQuiet(RPC_QUERY_COMPLETE, params);
+    }
+
+    async queryValidate(params: { sql: string; language?: string }): Promise<QueryValidateResponse> {
+        return this.sendRequestQuiet(RPC_QUERY_VALIDATE, params);
     }
 
     // ── Query History ────────────────────────────────────────────────────────

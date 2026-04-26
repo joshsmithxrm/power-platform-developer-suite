@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
-import type { QueryResultResponse } from '../types.js';
+import type { DiagnosticItem, QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { handleAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
@@ -155,6 +155,19 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     // eslint-disable-next-line no-console -- non-critical: IntelliSense unavailable
                     console.warn(`[PPDS] IntelliSense error: ${err instanceof Error ? err.message : String(err)}`);
                     this.postMessage({ command: 'completionResult', requestId, items: [] });
+                }
+                break;
+            }
+            case 'requestValidation': {
+                const requestId = message.requestId;
+                try {
+                    const result = await this.daemon.queryValidate({
+                        sql: message.sql,
+                        language: message.language,
+                    });
+                    this.postMessage({ command: 'validationResult', requestId, diagnostics: result.diagnostics });
+                } catch {
+                    this.postMessage({ command: 'validationResult', requestId, diagnostics: [] });
                 }
                 break;
             }
@@ -362,7 +375,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 return;
             }
 
-            this.postMessage({ command: 'queryError', error: msg });
+            const errorData = error instanceof ResponseError
+                ? error.data as { diagnostics?: DiagnosticItem[] } | undefined
+                : undefined;
+            const diagnostics = Array.isArray(errorData?.diagnostics) ? errorData.diagnostics : undefined;
+            this.postMessage({ command: 'queryError', error: msg, diagnostics });
         }
     }
 
