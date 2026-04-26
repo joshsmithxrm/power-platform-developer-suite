@@ -17,7 +17,7 @@ Artifacts:
 python scripts/workflow-state.py set phase retro
 ```
 
-Read REFERENCE.md §6 "Lane discipline rationale" before deciding what to dispatch and what to keep main-session.
+Read REFERENCE.md SS6 "Lane discipline rationale" before deciding what to dispatch and what to keep main-session.
 
 ## Mode Detection
 
@@ -32,7 +32,7 @@ Read REFERENCE.md §6 "Lane discipline rationale" before deciding what to dispat
 1. INVOKE /retro [scope]
 2. SCOPE + CARRYOVER
 3. MECHANICAL EXTRACTION   [subprocess - non-LLM]
-4. MAIN-SE§ION ANALYSIS   [main Claude only]
+4. MAIN-SESSION ANALYSIS   [main Claude only]
 5. DECISION PHASE          [plan-with-defaults UX]
 6. ROUTING                 [/backlog, /pr, /investigate]
 7. MONITOR & CONFIRM
@@ -71,15 +71,15 @@ Output a single structured blob for Phase 4. Do NOT synthesize yet.
 
 ### Phase 4. Main-Session Analysis (no delegation)
 
-Read REFERENCE.md §1 "Tier definitions" and §2 "Finding taxonomy" before classifying. Build the findings table; row schema: `# | issue | rec | rationale | confidence | tier | kind`. Tag every incident with contributing factors (`tooling | behavior | skill | setup`). Apply the severity heuristic: any of user_interrupts > 0, frustration_hits > 0, very-short crashes, wrong-branch incidents -> rough session, full depth.
+Read REFERENCE.md SS1 "Tier definitions" and SS2 "Finding taxonomy" before classifying. Build the findings table; row schema: `# | issue | rec | rationale | confidence | tier | kind`. Tag every incident with contributing factors (`tooling | behavior | skill | setup`). Apply the severity heuristic: any of user_interrupts > 0, frustration_hits > 0, very-short crashes, wrong-branch incidents -> rough session, full depth.
 
 ### Phase 5. Decision Phase - plan-with-defaults UX
 
-Read REFERENCE.md §3 "Decision phase rules" before authoring the bulk-plan / contested split. Follow `.claude/interaction-patterns.md` §4 verbatim. Pre-triage every finding (`DO NOW` / `DEFER` / `DROP` / `RESEARCH-FIRST`) with confidence (HIGH / LOW). Send ONE message with a bulk plan + contested block (cap 5). Serialize meta-recommendations.
+Read REFERENCE.md SS3 "Decision phase rules" before authoring the bulk-plan / contested split. Follow `.claude/interaction-patterns.md` SS4 verbatim. Pre-triage every finding (`DO NOW` / `DEFER` / `DROP` / `RESEARCH-FIRST`) with confidence (HIGH / LOW). Send ONE message with a bulk plan + contested block (cap 5). Serialize meta-recommendations.
 
 ### Phase 6. Routing
 
-Read REFERENCE.md §4 "Routing matrix" before dispatching. One-way flow per decision. Rule-drift kind additionally generates a SKILL.md / rule-surface patch proposal per `.claude/interaction-patterns.md §7`.
+Read REFERENCE.md SS4 "Routing matrix" before dispatching. One-way flow per decision. Rule-drift kind additionally generates a SKILL.md / rule-surface patch proposal per `.claude/interaction-patterns.md SS7`.
 
 ### Phase 7. Monitor & Confirm
 
@@ -97,7 +97,7 @@ Sections: pattern narrative, top-N prioritized, decisions log, what worked, meta
 
 ### Phase 9. Persist
 
-Read REFERENCE.md §5 "Persist schemas" for the JSON shapes.
+Read REFERENCE.md SS5 "Persist schemas" for the JSON shapes.
 
 Interactive mode: run 9b only (update `.retros/summary.json`). Append findings, increment `total_retros`, update rolling metrics, trim entries older than 6 months AND beyond the last 20 retros.
 
@@ -120,7 +120,7 @@ No grading, no root-cause analysis, no HTML in pipeline mode.
 ## References
 
 - `.claude/skills/retro/REFERENCE.md` - tier defs, taxonomies, decision rules, routing matrix, schemas.
-- `.claude/interaction-patterns.md` §1, §3, §4, §6, §7.
+- `.claude/interaction-patterns.md` SS1, SS3, SS4, SS6, SS7.
 - `docs/BACKLOG.md` - labels for DEFER routing.
 - `scripts/retro_helpers.py` - mechanical extraction helpers.
 - `scripts/pipeline.py:process_retro_findings` - auto-heal consumer.

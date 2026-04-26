@@ -24,8 +24,8 @@ def _now_iso():
 def _is_test_or_build(command):
     cmd = command.lower()
     return (
-        "dotnet test" in cmd
-        or "npm test" in cmd
+        "dotnet test", "dotnet build" in cmd
+        or "npm test", "npm run build" in cmd
         or "npm run test" in cmd
         or (" test " in cmd and "dotnet" in cmd)
     )

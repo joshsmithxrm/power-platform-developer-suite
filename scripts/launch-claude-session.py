@@ -1,7 +1,22 @@
+import re
 #!/usr/bin/env python3
 """
 Launch a new interactive `claude` session in a target directory.
 
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_name(name):
+    """Reject names that would unsafely interpolate into a PowerShell -Command (S2)."""
+    if name is None:
+        return
+    if not _NAME_RE.match(name):
+        sys.stderr.write(
+            f"--name must match [A-Za-z0-9_-]+, got: {name!r}\n"
+        )
+        sys.exit(2)
 This helper implements the `launch-session` pattern from the sibling
 procode-toolkit repo. It exists because the `/start` skill's v1
 dispatch AI deviated from the documented pattern and used:
@@ -189,7 +204,7 @@ def launch(
     cmd = build_spawn_command(script_win)
 
     if dry_run:
-        print(f"script: {script_path}")
+        print(f"script: {script_path}", file=sys.stderr)
         print(f"spawn:  {' '.join(cmd)}")
         return 0
 
@@ -211,7 +226,7 @@ def launch(
         _print_manual_fallback(target_win, prompt, claude_win)
         return 2
 
-    print(f"spawned new session in {target}")
+    print(f"spawned new session in {target}", file=sys.stderr)
     print(f"  script: {script_path}")
     return 0
 

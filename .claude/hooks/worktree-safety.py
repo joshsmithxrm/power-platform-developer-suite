@@ -43,7 +43,12 @@ def _parse_target(command):
         return None
     # Expect: git worktree remove [--force] <path>
     if "worktree" in toks and "remove" in toks:
-        ridx = toks.index("remove")
+        rwt_idx = toks.index("worktree")
+        # remove must follow `worktree` directly (skip past stray remove tokens elsewhere)
+        try:
+            idx = toks.index("remove", wt_idx + 1)
+        except ValueError:
+            return None
         for tok in toks[ridx + 1:]:
             if not tok.startswith("-"):
                 return tok.strip("'\"")

@@ -1415,7 +1415,7 @@ After all skills in this spec are implemented:
 | AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `qa`, `/shakedown workflow` → `shakedown`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
 | AC-106 | `pr_monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
 | AC-107 | `pr_monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
-| AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends notification with failure details, exits 1 | `test_pr_monitor.py::test_ci_failure_notify_and_exit` | 🔲 |
+| AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends a CI-failed notification, continues to Gemini polling/triage so reviewer comments are still addressed (#860), then exits 1 after triage completes (or when no inline comments are pending) | `test_pr_monitor.py::test_ci_failure_notify_and_exit`, `test_pr_monitor.py::test_ci_fail_then_gemini_comment_is_triaged` | 🔲 |
 | AC-109 | `pr_monitor.py --resume` skips already-completed steps by reading `pr-monitor-result.json` | `test_pr_monitor.py::test_resume_skips_completed` | 🔲 |
 | AC-110 | `pr_monitor.py` spawns `claude -p` triage when inline comments > 0, waits for completion, posts threaded replies | `test_pr_monitor.py::test_triage_on_inline_comments` | 🔲 |
 | AC-111 | `pr_monitor.py` re-polls CI after triage commits (loop back to CI check) | `test_pr_monitor.py::test_repoll_ci_after_triage` | 🔲 |
@@ -1432,7 +1432,7 @@ After all skills in this spec are implemented:
 | AC-122 | `/shakedown workflow` cleans up throwaway worktrees after report generation | Manual: verify worktrees removed after shakedown | 🔲 |
 | AC-123 | All hook commands resolve correctly in worktrees (no doubled path from Claude Code project dir resolution) | Manual: run hook in worktree, verify no path doubling error | 🔲 |
 | AC-124 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
-| AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
+| AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min (`CI_MAX_WAIT = 900`) if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
 | AC-126 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
 | AC-127 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
 | AC-128 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |

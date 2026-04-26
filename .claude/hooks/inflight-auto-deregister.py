@@ -82,7 +82,7 @@ def main():
         rc = response.get("returncode")
     if rc is None and response.get("success") is False:
         rc = 1
-    if rc not in (0, None):
+    if rc != 0:
         sys.exit(0)
     tool_input = payload.get("tool_input") or {}
     command = (tool_input.get("command") or "").strip()
@@ -100,7 +100,8 @@ def main():
         sys.exit(0)
     try:
         subprocess.run(
-            ["python", "scripts/inflight-deregister.py", "--branch", branch],
+            [sys.executable, "scripts/inflight-deregister.py",
+             "--branch", branch],
             cwd=project_dir, capture_output=True, text=True, timeout=15,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

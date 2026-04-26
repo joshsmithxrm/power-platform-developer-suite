@@ -672,7 +672,7 @@ def create_worktree(repo_root, name, branch, logger):
 
     # Initialize workflow state
     result = subprocess.run(
-        ["python", "scripts/workflow-state.py", "init", branch],
+        [sys.executable, "scripts/workflow-state.py", "init", branch],
         cwd=worktree_path,
         capture_output=True,
         text=True,
@@ -1116,7 +1116,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
 
     # 3. Read issues from state
     issues_result = subprocess.run(
-        ["python", "scripts/workflow-state.py", "get", "issues"],
+        [sys.executable, "scripts/workflow-state.py", "get", "issues"],
         cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     issues = []
@@ -1196,7 +1196,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
         ["set", "pr.created", "now"],
     ]:
         subprocess.run(
-            ["python", "scripts/workflow-state.py"] + cmd_args,
+            [sys.executable, "scripts/workflow-state.py"] + cmd_args,
             cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
 
@@ -1515,7 +1515,7 @@ def main():
         # Write pipeline phase to state (if worktree exists)
         if worktree_path and os.path.exists(worktree_path):
             subprocess.run(
-                ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
+                [sys.executable, "scripts/workflow-state.py", "set", "phase", "pipeline"],
                 cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
 
@@ -1571,12 +1571,12 @@ def main():
                     ["set", "started", "now"],
                 ]:
                     subprocess.run(
-                        ["python", "scripts/workflow-state.py"] + state_args,
+                        [sys.executable, "scripts/workflow-state.py"] + state_args,
                         cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     )
 
                 if args.issue:
-                    cmd = ["python", "scripts/workflow-state.py", "append", "issues"] + [str(n) for n in args.issue]
+                    cmd = [sys.executable, "scripts/workflow-state.py", "append", "issues"] + [str(n) for n in args.issue]
                     subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
                     log(logger, "worktree", "ISSUES_LINKED", issues=args.issue)
 
@@ -1732,7 +1732,7 @@ def main():
 
             # Compute and emit RESUME_HINT
             resume_stage = compute_resume_stage(_failed_stage)
-            resume_parts = ["python", "scripts/pipeline.py"]
+            resume_parts = [sys.executable, "scripts/pipeline.py"]
             if plan_path:
                 resume_parts.extend(["--plan", source_rel])
             elif spec_path:

@@ -40,7 +40,7 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 3600          # 60 minutes max for CI
+CI_MAX_WAIT = 900           # 15 minutes max for CI (AC-125)
 CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
 CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
@@ -141,10 +141,16 @@ def read_result(worktree):
 
 def write_result(worktree, result):
     path = _result_path(worktree)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(result, f, indent=2)
-        f.write("\n")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(result, f, indent=2)
+            f.write("\n")
+    except OSError as e:
+        # Fail-open: a write_result error must not crash the monitor.
+        sys.stderr.write(
+            f"[pr-monitor] write_result failed: {e}\n"
+        )
 
 
 def _empty_result():
@@ -985,7 +991,13 @@ def mark_step(result, step_name, status):
     }
 
 
+_DEREGISTERED = False
+
+
 def _deregister_inflight(worktree, logger):
+    global _DEREGISTERED
+    if _DEREGISTERED:
+        return
     """Deregister the worktree's branch from the in-flight registry.
 
     Called before terminal notification so the registry reflects "no
@@ -998,16 +1010,18 @@ def _deregister_inflight(worktree, logger):
             cwd=worktree, capture_output=True, text=True, timeout=10,
         )
         branch = (result.stdout or "").strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return
     if not branch:
         return
     try:
         subprocess.run(
-            ["python", "scripts/inflight-deregister.py", "--branch", branch],
+            [sys.executable, "scripts/inflight-deregister.py", "--branch", branch],
             cwd=worktree, capture_output=True, text=True, timeout=15,
         )
         logger.log("inflight", "DEREGISTERED", branch=branch)
+        global _DEREGISTERED
+        _DEREGISTERED = True
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.log("inflight", "DEREGISTER_FAILED",
                    branch=branch, error=str(e))

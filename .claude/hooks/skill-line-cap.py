@@ -26,8 +26,8 @@ def is_skill_md(file_path: str) -> bool:
 
 
 def count_lines(content: str) -> int:
-    """Match GNU ``wc -l`` semantics: count newline characters."""
-    return content.count("\n")
+    """Count physical lines, including a final unterminated line."""
+    return len(content.splitlines())
 
 
 def project_edit(original, old_string, new_string, replace_all):
@@ -48,7 +48,7 @@ def main():
 
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {}) or {}
-    file_path = tool_input.get("file_path") or payload.get("file_path", "")
+    file_path = tool_input.get("file_path", "")
 
     if not is_skill_md(file_path):
         sys.exit(0)
