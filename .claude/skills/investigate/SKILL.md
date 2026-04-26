@@ -52,7 +52,7 @@ Agent tool:
   prompt: {research question with codebase context}
 ```
 
-**Researcher tool restrictions** — the prompt MUST include:
+**Researcher tool restrictions** — the prompt MUST include: <!-- enforcement: T3 -->
 > You may ONLY use these tools: Read, Glob, Grep, WebSearch, WebFetch.
 > Do NOT use Edit, Write, Bash, or Agent. You are read-only.
 
@@ -116,7 +116,7 @@ Between rounds, address the BLOCKERs by updating the Investigation Summary and r
 
 Classify and route challenge findings:
 
-- **BLOCKERs**: ALWAYS present to human at Align step — never auto-resolved
+- **BLOCKERs**: ALWAYS present to human at Align step — never auto-resolved <!-- enforcement: T3 -->
 - **CONCERNs with factual errors** (challenger cited wrong information): AI auto-resolves with correction
 - **CONCERNs with design decisions** (legitimate tradeoff the challenger flagged): Present to human at Align step
 - **NITs with missing details** (challenger noted something not mentioned): AI fills in the detail

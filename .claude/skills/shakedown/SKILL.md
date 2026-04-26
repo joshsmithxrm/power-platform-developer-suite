@@ -79,7 +79,7 @@ configured and active.
    CI where sentinel-file management is awkward. (The env-var name is
    configurable via `safety.readonly_env_var` in settings.json; default
    is `PPDS_SHAKEDOWN`.)
-4. **Acknowledge the model:** plugin deploys MUST be invoked with
+4. **Acknowledge the model:** plugin deploys MUST be invoked with <!-- enforcement: T3 -->
    `--dry-run` during shakedown. To run a real deploy, delete the
    sentinel file (`rm .claude/state/shakedown-active.json`) and unset
    `PPDS_SHAKEDOWN` if it's also in the environment — deliberate action,
@@ -98,7 +98,7 @@ Ask the user which surfaces to test:
 - [ ] MCP (tool invocations)
 - [ ] CLI (command execution)
 
-All declared surfaces MUST get interactive verification — not just code audit.
+All declared surfaces MUST get interactive verification — not just code audit. <!-- enforcement: T3 -->
 
 ### Phase 2: Test Matrix
 
@@ -210,7 +210,7 @@ Before declaring complete:
 - No declaring "VERIFIED (code)" for interactive features — either test it interactively or mark as "NOT TESTED"
 - Do not recommend deferring issues — present findings, let user decide disposition
 - Background tasks that fail must be retried or investigated, not dismissed
-- AI MUST actually use the product. A passing test suite is not a shakedown.
+- AI MUST actually use the product. A passing test suite is not a shakedown. <!-- enforcement: T3 -->
 
 ## Workflow Mode
 

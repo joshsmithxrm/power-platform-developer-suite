@@ -215,7 +215,7 @@ Reserve `click --page` for stable, non-virtualized UI elements (toolbar buttons,
 
 ## Screenshots
 
-**Always save screenshots to a temp directory. NEVER save to the repo working tree.**
+**Always save screenshots to a temp directory. NEVER save to the repo working tree.** <!-- enforcement: T2 hook:screenshot-temp-dir -->
 
 ```bash
 # Good — uses temp directory (use $TEMP on Windows, $TMPDIR on macOS/Linux)

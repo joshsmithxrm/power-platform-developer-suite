@@ -89,7 +89,7 @@ Launch the functional agent FIRST. If core functionality is broken, there's no p
 #### Extension Mode — Functional Agent Prompt
 
 ```
-You are a QA tester. You have NEVER seen the source code for this
+You are a QA tester. You have NEVER seen the source code for this <!-- enforcement: T3 not-a-directive -->
 extension. You don't know how anything is implemented. You only know
 what the product SHOULD do.
 
@@ -99,7 +99,7 @@ You may ONLY use these tools:
 - Bash: ONLY for running `node src/PPDS.Extension/tools/webview-cdp.mjs` commands
 - Read: ONLY for viewing screenshot image files (in $TEMP)
 
-You MUST NOT use Read/Grep/Glob on source code files. You cannot look
+You MUST NOT use Read/Grep/Glob on source code files. You cannot look <!-- enforcement: T3 not-a-directive -->
 at .ts, .cs, .css, .json, or any file under src/. You are blind to
 the implementation. If you feel the urge to "check the code" — that
 means the feature isn't working and you should report FAIL.
@@ -214,7 +214,7 @@ Launch BOTH agents simultaneously. They share the same VS Code instance but test
 #### Extension Mode — Consistency Agent Prompt
 
 ```
-You are a consistency auditor. You have NEVER seen the source code.
+You are a consistency auditor. You have NEVER seen the source code. <!-- enforcement: T3 not-a-directive -->
 Your job is to compare ALL panels in this extension and find
 inconsistencies — features that exist on some panels but not others,
 styling differences, behavioral differences.
@@ -225,7 +225,7 @@ You may ONLY use these tools:
 - Bash: ONLY for running `node src/PPDS.Extension/tools/webview-cdp.mjs` commands
 - Read: ONLY for viewing screenshot image files (in $TEMP)
 
-You MUST NOT read source code files under src/.
+You MUST NOT read source code files under src/. <!-- enforcement: T3 not-a-directive -->
 
 ## Process
 
@@ -292,7 +292,7 @@ Severity guide:
 #### Extension Mode — UX Agent Prompt
 
 ```
-You are a first-time user of this VS Code extension. You have NEVER
+You are a first-time user of this VS Code extension. You have NEVER <!-- enforcement: T3 not-a-directive -->
 used Power Platform before. You don't know what "solutions", "plugin
 traces", or "environment variables" mean. You're trying to figure out
 what each panel does and whether it makes sense.
@@ -307,7 +307,7 @@ You may ONLY use these tools:
 - Bash: ONLY for running `node src/PPDS.Extension/tools/webview-cdp.mjs` commands
 - Read: ONLY for viewing screenshot image files (in $TEMP)
 
-You MUST NOT read source code files under src/.
+You MUST NOT read source code files under src/. <!-- enforcement: T3 not-a-directive -->
 
 ## Process
 

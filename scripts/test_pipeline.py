@@ -14,7 +14,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pipeline
 from pipeline import (
+    STAGE_MODELS,
     auto_commit_stranded,
     classify_activity,
     compute_resume_stage,
@@ -240,6 +242,93 @@ class TestShouldConvergePreserved(unittest.TestCase):
     def test_not_passed_triggers(self):
         run, _ = should_converge({"review": {"passed": False}})
         self.assertTrue(run)
+
+
+class _FakePopen:
+    """Minimal Popen stand-in that records argv and exits cleanly."""
+
+    def __init__(self, cmd, **kwargs):
+        self.cmd = cmd
+        self.returncode = 0
+        self._waited = False
+
+    def poll(self):
+        return 0
+
+    def wait(self, timeout=None):
+        self._waited = True
+        return 0
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+def _capture_run_claude_argv(stage, model_override=None):
+    """Invoke pipeline.run_claude with mocks; return the argv list passed to Popen."""
+    captured = {}
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return _FakePopen(cmd, **kwargs)
+
+    with tempfile.TemporaryDirectory() as worktree:
+        original_override = pipeline.MODEL_OVERRIDE
+        pipeline.MODEL_OVERRIDE = model_override
+        try:
+            with patch("pipeline.subprocess.Popen", side_effect=_fake_popen):
+                logger = io.StringIO()
+                pipeline.run_claude(worktree, "test prompt", logger, stage,
+                                    dry_run=False)
+        finally:
+            pipeline.MODEL_OVERRIDE = original_override
+
+    return captured.get("cmd", [])
+
+
+class TestStageModels(unittest.TestCase):
+    """AC-152, AC-153, AC-154 — model routing in pipeline.py."""
+
+    def test_stage_models_sonnet(self):
+        sonnet_stages = ["implement", "gates", "verify", "qa", "review",
+                         "converge", "pr", "retro"]
+        for stage in sonnet_stages:
+            with self.subTest(stage=stage):
+                self.assertEqual(STAGE_MODELS.get(stage), "sonnet",
+                                 f"{stage} must route to sonnet")
+
+    def test_stage_models_opus_default(self):
+        for stage in ["design", "investigate", "spec"]:
+            with self.subTest(stage=stage):
+                self.assertIsNone(STAGE_MODELS.get(stage),
+                                  f"{stage} must inherit CLI default (no --model)")
+
+    def test_stage_model_override(self):
+        argv = _capture_run_claude_argv("design", model_override="haiku")
+        self.assertIn("--model", argv)
+        idx = argv.index("--model")
+        self.assertEqual(argv[idx + 1], "haiku",
+                         "CLI --model override must apply to a stage that "
+                         "would otherwise have no --model")
+
+        argv = _capture_run_claude_argv("implement", model_override="opus")
+        self.assertIn("--model", argv)
+        idx = argv.index("--model")
+        self.assertEqual(argv[idx + 1], "opus",
+                         "CLI --model override must replace STAGE_MODELS value")
+
+    def test_run_claude_passes_sonnet_for_implement(self):
+        argv = _capture_run_claude_argv("implement")
+        self.assertIn("--model", argv)
+        idx = argv.index("--model")
+        self.assertEqual(argv[idx + 1], "sonnet")
+
+    def test_run_claude_omits_model_for_design(self):
+        argv = _capture_run_claude_argv("design")
+        self.assertNotIn("--model", argv,
+                         "design stage must inherit default (no --model flag)")
 
 
 if __name__ == "__main__":

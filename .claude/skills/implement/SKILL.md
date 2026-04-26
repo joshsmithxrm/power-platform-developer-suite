@@ -77,14 +77,14 @@ Before dispatching any agents, load the specification context that will be injec
 Construct a text block that will be prepended to every subagent prompt:
 
 ```
-## Constitution (MUST comply — violations are defects)
+## Constitution (MUST comply — violations are defects) <!-- enforcement: T3 -->
 {full CONSTITUTION.md content}
 
 ## Relevant Specifications — Acceptance Criteria
 ### {spec-name}.md
 {AC table rows from that spec}
 
-Your implementation MUST satisfy these criteria. If your task conflicts
+Your implementation MUST satisfy these criteria. If your task conflicts <!-- enforcement: T3 -->
 with a spec or constitution principle, STOP and report the conflict
 to the orchestrator — do not silently deviate.
 ```
@@ -129,14 +129,14 @@ For EACH phase in the plan, repeat this cycle:
 **A. Dispatch Agents**
 - For ALL independent tasks within the current phase, dispatch background agents using the Agent tool with `run_in_background: true`
 - For parallel streams in a phase group (e.g., "Phase 2-4: PARALLEL"), dispatch ALL streams simultaneously
-- Each agent prompt MUST include:
+- Each agent prompt MUST include: <!-- enforcement: T3 -->
   - The specific task/subtask from the plan with full requirements
   - Full file paths and codebase context (what exists, what to read first)
   - Instructions to read existing code before writing anything
   - Build verification command to run before finishing
   - Test command to run and verify
   - The spec context block from Step 2 (constitution + relevant AC tables)
-  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values.
+  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values. <!-- enforcement: T3 -->
   - Reminder: no shell redirections (2>&1, >, >>)
   - Self-check gate: before reporting completion, run the relevant gate checks for your changed files. For TypeScript/extension changes: `npm run typecheck:all --prefix src/PPDS.Extension` and `npx eslint --quiet {changed-files}`. For C# changes: `dotnet build {project}.csproj -v q`. Report gate results in your summary — do not silently suppress failures.
 - Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
@@ -158,14 +158,14 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 **C. Verify Phase Gate**
 - Run full solution build: `dotnet build PPDS.sln -v q` (or appropriate build command)
 - Run full test suite: `dotnet test PPDS.sln --filter "Category!=Integration" -v q --no-build`
-- Both MUST show 0 errors / 0 failures
+- Both MUST show 0 errors / 0 failures <!-- enforcement: T3 -->
 - If build errors exist, dispatch a fix agent with the specific errors
 - If test failures exist, dispatch a fix agent with the failing test names and error messages
 - **AC coverage gate (Constitution I6):** For every AC in the relevant spec(s) that this phase claims to implement, verify:
   1. The spec AC table `Test` column is filled in (not empty, not "❌ no test yet")
   2. The referenced test method exists in the codebase
   3. The test passes: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
-  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes.
+  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes. <!-- enforcement: T3 -->
   5. **Negative verification:** For bug-fix or threshold ACs, the test SHOULD demonstrate failure when the condition is not met (e.g., assert the function returns a different value with wrong input), not just that the happy path works.
   If any AC is missing a test or has only a structural/source-inspection test, the phase gate FAILS. Do not proceed — dispatch an agent to write proper behavioral tests. This is not optional — Constitution I6 makes untested ACs a defect.
 - If the phase touches extension code (`src/PPDS.Extension/` directory):
@@ -208,7 +208,7 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 
 ### Step 6: Mandatory Tail — Full Verification Pipeline
 
-After ALL phases are committed, you MUST run the complete verification pipeline. This is not optional. The whole point of /implement is that it does not declare victory after just running the phases — it proves the work is done.
+After ALL phases are committed, you MUST run the complete verification pipeline. This is not optional. The whole point of /implement is that it does not declare victory after just running the phases — it proves the work is done. <!-- enforcement: T1 hook:session-stop-workflow -->
 
 **A. Gates**
 Invoke `/gates` — full mechanical checks.

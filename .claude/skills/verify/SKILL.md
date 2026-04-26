@@ -76,7 +76,7 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 0
 ```
 
-**Phase B: Interactive Verification (MANDATORY for TUI rendering/interaction changes)**
+**Phase B: Interactive Verification (MANDATORY for TUI rendering/interaction changes)** <!-- enforcement: T3 -->
 
 If changed files touch `src/PPDS.Cli/Tui/`, Phase B is NOT optional.
 
@@ -126,7 +126,7 @@ node src/PPDS.Extension/tools/webview-cdp.mjs logs
 node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
-**Phase B: Interaction Verification (MANDATORY for query/data-display/panel-interaction changes)**
+**Phase B: Interaction Verification (MANDATORY for query/data-display/panel-interaction changes)** <!-- enforcement: T3 -->
 
 If changed files touch query execution (`SqlQueryService`, `RpcMethodHandler`, `QueryPanel`, `query-panel.ts`), data rendering, or panel interactions, Phase B is NOT optional — you must execute at least one query and verify the results.
 
@@ -249,7 +249,7 @@ python scripts/workflow-state.py set verify.{surface}_commit_ref "$(git rev-pars
 Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
 Surface key `workflow`: `/verify workflow` → writes `verify.workflow` (structural validation for process code).
 
-## Workflow Continuation — MANDATORY
+## Workflow Continuation — MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
 
 Verify is ONE step in the shipping pipeline — not the last one.
 

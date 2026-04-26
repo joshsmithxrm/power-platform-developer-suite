@@ -219,7 +219,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-main-branch.py\"",
+            "command": "python \".claude/hooks/protect-main-branch.py\"",
             "timeout": 5
           }
         ]
@@ -229,7 +229,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-main-branch.py\"",
+            "command": "python \".claude/hooks/protect-main-branch.py\"",
             "timeout": 5
           }
         ]
@@ -239,7 +239,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/snk-protect.py\"",
+            "command": "python \".claude/hooks/snk-protect.py\"",
             "timeout": 5
           }
         ]
@@ -249,7 +249,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/snk-protect.py\"",
+            "command": "python \".claude/hooks/snk-protect.py\"",
             "timeout": 5
           }
         ]
@@ -259,7 +259,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/claudemd-line-cap.py\"",
+            "command": "python \".claude/hooks/claudemd-line-cap.py\"",
             "timeout": 5
           }
         ]
@@ -269,7 +269,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/claudemd-line-cap.py\"",
+            "command": "python \".claude/hooks/claudemd-line-cap.py\"",
             "timeout": 5
           }
         ]
@@ -279,7 +279,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-validate.py\"",
+            "command": "python \".claude/hooks/pre-commit-validate.py\"",
             "timeout": 120
           }
         ]
@@ -289,7 +289,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pr-gate.py\"",
+            "command": "python \".claude/hooks/pr-gate.py\"",
             "timeout": 30
           }
         ]
@@ -299,7 +299,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/checkout-guard.py\"",
+            "command": "python \".claude/hooks/checkout-guard.py\"",
             "timeout": 5
           }
         ]
@@ -309,7 +309,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-guard.py\"",
+            "command": "python \".claude/hooks/review-guard.py\"",
             "timeout": 5
           }
         ]
@@ -319,7 +319,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -329,7 +329,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -339,7 +339,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -349,7 +349,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -359,7 +359,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -369,7 +369,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
+            "command": "python \".claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -379,8 +379,108 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py\"",
+            "command": "python \".claude/hooks/shakedown-safety.py\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/skill-line-cap.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/skill-line-cap.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/retro-html-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git worktree remove:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/worktree-safety.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/taskcreate-cap.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(dotnet test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(npm test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(npm run test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/settings-json-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/settings-json-guard.py\"",
+            "timeout": 5
           }
         ]
       }
@@ -391,8 +491,78 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-commit-state.py\"",
+            "command": "python \".claude/hooks/post-commit-state.py\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git worktree remove:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/worktree-safety.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(dotnet test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(npm test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(npm run test:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/debug-first.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gh pr merge:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git branch -D:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git branch -d:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
           }
         ]
       }
@@ -402,7 +572,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-workflow.py\"",
+            "command": "python \".claude/hooks/session-start-workflow.py\"",
             "timeout": 10
           }
         ]
@@ -414,7 +584,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-hook-watchdog.py\"",
+            "command": "python \".claude/hooks/stop-hook-watchdog.py\"",
             "timeout": 5
           }
         ]
@@ -423,7 +593,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-stop-workflow.py\"",
+            "command": "python \".claude/hooks/session-stop-workflow.py\"",
             "timeout": 30
           }
         ]
@@ -432,7 +602,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-readonly-guard.py\"",
+            "command": "python \".claude/hooks/shakedown-readonly-guard.py\"",
             "timeout": 10
           }
         ]

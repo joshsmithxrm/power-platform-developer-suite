@@ -273,7 +273,7 @@ def test_stop_hook_allows(ctx: ScenarioContext) -> ScenarioResult:
         )
     non_enforcing = [
         "starting", "investigating", "design", "reviewing",
-        "qa", "shakedown", "retro", "pr",
+        "qa", "shakedown", "retro",
     ]
     for phase in non_enforcing:
         ctx.write_state({

@@ -152,7 +152,7 @@ git worktree remove --force .worktrees/<name>
 `--force` handles worktrees with uncommitted changes. Report each removal including whether force was needed.
 
 **Safety rules:**
-- NEVER remove the main worktree (the repo root)
+- NEVER remove the main worktree (the repo root) <!-- enforcement: T1 hook:worktree-safety -->
 - Skip locked worktrees — report them as skipped with reason
 - Report any removal failures and continue with the next worktree
 

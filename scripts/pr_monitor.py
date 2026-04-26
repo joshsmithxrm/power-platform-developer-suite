@@ -40,7 +40,7 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 3600          # 60 minutes max for CI
+CI_MAX_WAIT = 900           # 15 minutes max for CI (AC-125)
 CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
 CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
@@ -141,10 +141,16 @@ def read_result(worktree):
 
 def write_result(worktree, result):
     path = _result_path(worktree)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(result, f, indent=2)
-        f.write("\n")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(result, f, indent=2)
+            f.write("\n")
+    except OSError as e:
+        # Fail-open: a write_result error must not crash the monitor.
+        sys.stderr.write(
+            f"[pr-monitor] write_result failed: {e}\n"
+        )
 
 
 def _empty_result():
@@ -417,6 +423,20 @@ def _fetch_latest_gemini_review_body(worktree, pr_number):
     return (latest or {}).get("body") or ""
 
 
+def _build_triage_cmd(full_prompt):
+    """Build argv for the gemini-triage claude session.
+
+    Extracted so tests can assert on the cmd shape without mocking the full
+    run_triage flow (subprocess, file I/O, polling).
+    """
+    return [
+        "claude", "-p", full_prompt,
+        "--verbose", "--output-format", "stream-json",
+        "--model", "sonnet",
+        "--agent", "gemini-triage",
+    ]
+
+
 def run_triage(worktree, pr_number, comments, logger):
     """Spawn claude -p with gemini-triage agent. Returns triage result list or None."""
     if SHAKEDOWN:
@@ -440,11 +460,7 @@ def run_triage(worktree, pr_number, comments, logger):
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-triage.jsonl")
 
-    cmd = [
-        "claude", "-p", full_prompt,
-        "--verbose", "--output-format", "stream-json",
-        "--agent", "gemini-triage",
-    ]
+    cmd = _build_triage_cmd(full_prompt)
 
     logger.log("triage", "START", comments=len(comments))
 
@@ -829,6 +845,19 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
         write_result(worktree, result)
 
 
+def _build_retro_cmd(prompt):
+    """Build argv for the retro claude session.
+
+    Extracted so tests can assert on the cmd shape without mocking the full
+    run_retro flow.
+    """
+    return [
+        "claude", "-p", prompt, "--verbose",
+        "--output-format", "stream-json",
+        "--model", "sonnet",
+    ]
+
+
 def run_retro(worktree, logger):
     """Run claude -p '/retro' for retrospective."""
     if SHAKEDOWN:
@@ -849,8 +878,7 @@ def run_retro(worktree, logger):
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-retro.jsonl")
 
-    cmd = ["claude", "-p", prompt, "--verbose",
-           "--output-format", "stream-json"]
+    cmd = _build_retro_cmd(prompt)
 
     logger.log("retro", "START")
 
@@ -963,6 +991,44 @@ def mark_step(result, step_name, status):
     }
 
 
+_DEREGISTERED_BRANCHES: "set[str]" = set()
+
+
+def _deregister_inflight(worktree, logger):
+    """Deregister the worktree's branch from the in-flight registry.
+
+    Called before terminal notification so the registry reflects "no
+    longer working on this" before the user sees the notification.
+    Best-effort — failures do not block the notify path.
+
+    Idempotent (I-8): once a branch has been deregistered in this
+    process, subsequent calls early-return so multiple terminal paths
+    (CI fail, ready-flip, retro/notify) cannot double-deregister.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=worktree, capture_output=True, text=True, timeout=10,
+        )
+        branch = (result.stdout or "").strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return
+    if not branch:
+        return
+    if branch in _DEREGISTERED_BRANCHES:
+        return
+    try:
+        subprocess.run(
+            [sys.executable, "scripts/inflight-deregister.py", "--branch", branch],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        logger.log("inflight", "DEREGISTERED", branch=branch)
+        _DEREGISTERED_BRANCHES.add(branch)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("inflight", "DEREGISTER_FAILED",
+                   branch=branch, error=str(e))
+
+
 def _notify_terminal(worktree, pr_number, logger, message):
     """Best-effort notification on any terminal non-success state.
 
@@ -971,7 +1037,12 @@ def _notify_terminal(worktree, pr_number, logger, message):
     when the monitor aborts (CI fail, CI timeout, exception) — previously
     only the clean-success path fired a notification, so crashes were
     invisible until the user happened to check the PR.
+
+    Also deregisters the worktree's branch from the in-flight registry
+    (AC-178) so terminal states clean up automatically without waiting
+    for `gh pr merge` or manual `/cleanup`.
     """
+    _deregister_inflight(worktree, logger)
     try:
         run_notify(worktree, pr_number, logger, message=message)
     except Exception as notify_err:  # noqa: BLE001 — best-effort
@@ -1012,10 +1083,9 @@ def run_monitor(worktree, pr_number, resume=False):
                 result["status"] = "ci_failed"
                 write_result(worktree, result)
                 _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI failed — "
-                                 f"continuing to triage")
+                                 f"PR #{pr_number} CI failed — continuing to triage")
                 logger.log("monitor", "CI_FAILED_CONTINUE",
-                           reason="CI failed, proceeding to Gemini/triage")
+                           reason="CI failed, continuing to Gemini triage (AC-108)")
 
             if ci_status == "timeout":
                 result["status"] = "ci_timeout"
@@ -1154,6 +1224,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
         # ---- Step 6: Notify ----
         if not (resume and step_completed(result, "notify")):
+            _deregister_inflight(worktree, logger)
             _step_notify(worktree, pr_number, logger, result)
 
         result["status"] = "complete"

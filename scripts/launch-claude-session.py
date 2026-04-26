@@ -47,12 +47,24 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from typing import List, Optional
 
 
 PROMPT_TERMINATOR = "'@"
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_name(name: Optional[str]) -> None:
+    """Reject --name values that would unsafely interpolate into PowerShell (S2)."""
+    if name is None:
+        return
+    if not _NAME_RE.match(name):
+        print("--name must match [A-Za-z0-9_-]+", file=sys.stderr)
+        sys.exit(2)
 
 
 def build_launch_script(
@@ -85,7 +97,7 @@ def build_launch_script(
         f"{prompt}\n"
         "'@\n"
         "\n"
-        f'& "{claude_path}" --model claude-opus-4-6 $prompt\n'
+        f'& "{claude_path}" --model opus $prompt\n'
     )
 
 
@@ -189,8 +201,8 @@ def launch(
     cmd = build_spawn_command(script_win)
 
     if dry_run:
-        print(f"script: {script_path}")
-        print(f"spawn:  {' '.join(cmd)}")
+        print(f"script: {script_path}", file=sys.stderr)
+        print(f"spawn:  {' '.join(cmd)}", file=sys.stderr)
         return 0
 
     try:
@@ -211,8 +223,8 @@ def launch(
         _print_manual_fallback(target_win, prompt, claude_win)
         return 2
 
-    print(f"spawned new session in {target}")
-    print(f"  script: {script_path}")
+    print(f"spawned new session in {target}", file=sys.stderr)
+    print(f"  script: {script_path}", file=sys.stderr)
     return 0
 
 
@@ -225,7 +237,7 @@ def _print_manual_fallback(target_win: str, prompt: str, claude_win: str) -> Non
         "  $prompt = @'\n"
         f"{prompt}\n"
         "'@\n"
-        f"  & '{claude_escaped}' --model claude-opus-4-6 $prompt\n"
+        f"  & '{claude_escaped}' --model opus $prompt\n"
     )
 
 
@@ -256,6 +268,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
+    _validate_name(args.name)
     if not os.path.exists(args.prompt_file):
         sys.stderr.write(f"prompt file not found: {args.prompt_file}\n")
         return 1

@@ -348,7 +348,7 @@ Before committing panel changes:
 - `npm run lint:css` — Stylelint for CSS files
 - `npm run typecheck:all` — both host and webview tsconfigs
 - `npm run test` — Vitest unit tests
-- **Visual verification (MANDATORY for UI changes):** After any CSS, layout, HTML template, or message wiring change, use @ext-verify to take a screenshot and verify rendering. A passing typecheck is not proof of correct rendering. See @ext-verify skill for the verification protocol.
+- **Visual verification (MANDATORY for UI changes):** After any CSS, layout, HTML template, or message wiring change, use @ext-verify to take a screenshot and verify rendering. A passing typecheck is not proof of correct rendering. See @ext-verify skill for the verification protocol. <!-- enforcement: T3 -->
 - **Blind QA (recommended):** For non-trivial features, run `/qa extension` to dispatch a fresh agent that tests the panel without seeing source code.
 
 ## Reference Implementations

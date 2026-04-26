@@ -78,6 +78,28 @@ STAGE_OUTCOMES = {
 STALL_LIMIT = 5    # consecutive idle heartbeats before kill (5 min at 60s interval)
 HARD_CEILING = 7200  # max duration per AI invocation in seconds (120 min, overridable via --max-stage-seconds). Applied per run_claude call; stages with retries or converge rounds can accumulate multiple invocations.
 
+# Per-stage model routing (v9.0). Floating IDs — not pinned to a specific
+# version. Headless executor stages run on Sonnet for cost; Opus is reserved
+# for user-facing orchestration (design, investigate, spec) which inherits the
+# CLI default by passing no --model flag (value None).
+STAGE_MODELS = {
+    "implement": "sonnet",
+    "gates": "sonnet",
+    "verify": "sonnet",
+    "qa": "sonnet",
+    "review": "sonnet",
+    "converge": "sonnet",
+    "pr": "sonnet",
+    "retro": "sonnet",
+    "design": None,
+    "investigate": None,
+    "spec": None,
+}
+
+# Override applied via --model CLI flag; when set, takes precedence over
+# STAGE_MODELS for every stage in the run.
+MODEL_OVERRIDE = None
+
 
 class PipelineFailure(Exception):
     """Raised by _pipeline_fail to exit the stage loop without sys.exit."""
@@ -216,17 +238,21 @@ def find_last_completed_stage(log_path):
                     except ValueError:
                         continue  # Malformed log line — skip
                     stage_name = line[bracket_start:bracket_end]
-                    # Normalize converge round names back to base stage
+                    # Normalize converge round names. Sub-stage rounds
+                    # (gates-rN, verify-rN, qa-rN, review-rN) map to
+                    # "review" (the stage immediately before converge)
+                    # so --resume re-enters the converge loop instead of
+                    # skipping past it.
                     if stage_name.startswith("converge"):
                         stage_name = "converge"
                     elif stage_name.startswith("gates-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("verify-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("qa-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     elif stage_name.startswith("review-r"):
-                        stage_name = "converge"
+                        stage_name = "review"
                     if stage_name in STAGES:
                         last_done = stage_name
     except OSError:
@@ -343,9 +369,11 @@ def auto_commit_stranded(worktree_path, stage, logger, *,
         )
         if dirty.returncode != 0 or not dirty.stdout.strip():
             return False
-        add_flag = "-A" if add_all else "-u"
+        # Use -A so untracked files (which the porcelain status above
+        # detects) are also staged. -u alone would only stage already-
+        # tracked modifications, leaving untracked files stranded.
         subprocess.run(
-            ["git", "add", add_flag], cwd=worktree_path,
+            ["git", "add", "-A"], cwd=worktree_path,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
@@ -447,7 +475,11 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
     full_prompt = HEADLESS_PREAMBLE + prompt
 
     effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
-    log(logger, stage, "START", ceiling=f"{effective_ceiling}s")
+    effective_model = MODEL_OVERRIDE if MODEL_OVERRIDE is not None else STAGE_MODELS.get(stage)
+    log_kwargs = {"ceiling": f"{effective_ceiling}s"}
+    if effective_model:
+        log_kwargs["model"] = effective_model
+    log(logger, stage, "START", **log_kwargs)
 
     if dry_run:
         time.sleep(0.1)  # Simulate
@@ -472,6 +504,8 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
 
     cmd = ["claude", "-p", full_prompt, "--verbose",
            "--output-format", "stream-json"]
+    if effective_model:
+        cmd.extend(["--model", effective_model])
     if agent:
         cmd.extend(["--agent", agent])
 
@@ -644,7 +678,7 @@ def create_worktree(repo_root, name, branch, logger):
 
     # Initialize workflow state
     result = subprocess.run(
-        ["python", "scripts/workflow-state.py", "init", branch],
+        [sys.executable, "scripts/workflow-state.py", "init", branch],
         cwd=worktree_path,
         capture_output=True,
         text=True,
@@ -1088,7 +1122,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
 
     # 3. Read issues from state
     issues_result = subprocess.run(
-        ["python", "scripts/workflow-state.py", "get", "issues"],
+        [sys.executable, "scripts/workflow-state.py", "get", "issues"],
         cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     issues = []
@@ -1168,7 +1202,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
         ["set", "pr.created", "now"],
     ]:
         subprocess.run(
-            ["python", "scripts/workflow-state.py"] + cmd_args,
+            [sys.executable, "scripts/workflow-state.py"] + cmd_args,
             cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
 
@@ -1363,7 +1397,22 @@ def main():
     parser.add_argument("--worktree", help="Use existing worktree instead of creating one")
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
+    parser.add_argument(
+        "--model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Override the per-stage model for every stage in this run "
+            "(e.g., 'sonnet', 'opus', or a pinned ID). When unset, stages "
+            "use STAGE_MODELS routing; design/investigate/spec inherit the "
+            "CLI default."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.model:
+        global MODEL_OVERRIDE
+        MODEL_OVERRIDE = args.model
 
     if args.max_stage_seconds is not None and args.max_stage_seconds <= 0:
         parser.error("--max-stage-seconds must be a positive integer")
@@ -1472,7 +1521,7 @@ def main():
         # Write pipeline phase to state (if worktree exists)
         if worktree_path and os.path.exists(worktree_path):
             subprocess.run(
-                ["python", "scripts/workflow-state.py", "set", "phase", "pipeline"],
+                [sys.executable, "scripts/workflow-state.py", "set", "phase", "pipeline"],
                 cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
 
@@ -1528,12 +1577,12 @@ def main():
                     ["set", "started", "now"],
                 ]:
                     subprocess.run(
-                        ["python", "scripts/workflow-state.py"] + state_args,
+                        [sys.executable, "scripts/workflow-state.py"] + state_args,
                         cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     )
 
                 if args.issue:
-                    cmd = ["python", "scripts/workflow-state.py", "append", "issues"] + [str(n) for n in args.issue]
+                    cmd = [sys.executable, "scripts/workflow-state.py", "append", "issues"] + [str(n) for n in args.issue]
                     subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
                     log(logger, "worktree", "ISSUES_LINKED", issues=args.issue)
 
@@ -1689,7 +1738,7 @@ def main():
 
             # Compute and emit RESUME_HINT
             resume_stage = compute_resume_stage(_failed_stage)
-            resume_parts = ["python", "scripts/pipeline.py"]
+            resume_parts = [sys.executable, "scripts/pipeline.py"]
             if plan_path:
                 resume_parts.extend(["--plan", source_rel])
             elif spec_path:

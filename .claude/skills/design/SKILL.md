@@ -190,7 +190,7 @@ hook allows clean exit.
 | Pattern | Fix |
 |---------|-----|
 | "This is too simple for a design" | Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/verify` + `/pr`). Enhancements with existing specs use `/implement` directly. Short designs are fine. |
-| Jumping to implementation | Design MUST be approved before any code |
+| Jumping to implementation | Design MUST be approved before any code | <!-- enforcement: T3 -->
 | Asking 5 questions at once | One question per message |
 | Proposing only one approach | Always propose 2-3 with trade-offs |
 | Skipping the spec | The spec IS the deliverable of this skill |

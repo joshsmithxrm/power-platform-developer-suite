@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-25",
-  "total_retros": 9,
+  "last_updated": "2026-04-26",
+  "total_retros": 12,
   "findings_by_category": {
     "external": [
       {
@@ -100,6 +100,26 @@
         "date": "2026-04-25",
         "branch": "feat/bap-api-auth-tests",
         "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-05"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-07"
       }
     ],
     "design": [
@@ -173,6 +193,16 @@
       {
         "date": "2026-04-25",
         "branch": "feat/bap-api-auth-tests",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-03"
       }
     ],
@@ -251,6 +281,16 @@
         "date": "2026-04-25",
         "branch": "feat/bap-api-auth-tests",
         "finding_id": "R-05"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-06"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-08"
       }
     ],
     "setup": [
@@ -267,8 +307,8 @@
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.4098,
-    "pipeline_success_rate": 0.4939,
-    "avg_convergence_rounds": 2.5911
+    "avg_fix_ratio": 0.749,
+    "pipeline_success_rate": 0.370,
+    "avg_convergence_rounds": 2.41
   }
 }
