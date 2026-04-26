@@ -262,6 +262,20 @@ def main():
         print(_AGENT_BYPASS_MESSAGE, file=sys.stderr)
         sys.exit(2)
 
+    # -----------------------------------------------------------------
+    # Converge-phase guard (#954): block PR creation while pipeline is
+    # mid-converge. PR should only be created after convergence completes.
+    # -----------------------------------------------------------------
+    pipeline_section = state.get("pipeline") or {}
+    if pipeline_section.get("converging"):
+        print(
+            "PR blocked. Pipeline is mid-converge.\n"
+            "  PR creation is only allowed after the converge loop finishes.\n"
+            "  Wait for convergence to complete, then invoke /pr.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # Get current HEAD
     head_sha = None
     try:

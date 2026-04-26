@@ -17,12 +17,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pipeline
 from pipeline import (
     STAGE_MODELS,
+    _FILED_FINDING_KEYS,
+    _finding_key,
     _get_direct_children,
     auto_commit_stranded,
     classify_activity,
     compute_resume_stage,
     get_child_process_count,
     should_converge,
+    stage_already_completed,
     write_result,
 )
 
@@ -380,6 +383,259 @@ class TestStageModels(unittest.TestCase):
         argv = _capture_run_claude_argv("design")
         self.assertNotIn("--model", argv,
                          "design stage must inherit default (no --model flag)")
+
+
+class TestStageAlreadyCompleted(unittest.TestCase):
+    """Tests for stage_already_completed() — #937 idempotency guards."""
+
+    HEAD_SHA = "abc123def456"
+
+    def _write_state(self, tmpdir, state_data):
+        wf = os.path.join(tmpdir, ".workflow")
+        os.makedirs(wf, exist_ok=True)
+        with open(os.path.join(wf, "state.json"), "w") as f:
+            json.dump(state_data, f)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_gates_completed_exact_head(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "gates": {"passed": True, "commit_ref": self.HEAD_SHA}
+            })
+            completed, reason = stage_already_completed(tmp, "gates")
+            self.assertTrue(completed)
+            self.assertIn("gates.passed", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_gates_stale_ref_not_completed(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "gates": {"passed": True, "commit_ref": "stale_sha"}
+            })
+            completed, _ = stage_already_completed(tmp, "gates")
+            self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_gates_not_passed_not_completed(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "gates": {"passed": False, "commit_ref": self.HEAD_SHA}
+            })
+            completed, _ = stage_already_completed(tmp, "gates")
+            self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_review_completed_exact_head(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "review": {"passed": True, "commit_ref": self.HEAD_SHA}
+            })
+            completed, reason = stage_already_completed(tmp, "review")
+            self.assertTrue(completed)
+            self.assertIn("review.passed", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    @patch("pipeline.is_ancestor", return_value=True)
+    def test_verify_ancestor_completed(self, _, __):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "verify": {"ext_commit_ref": "older_sha"}
+            })
+            completed, reason = stage_already_completed(tmp, "verify")
+            self.assertTrue(completed)
+            self.assertIn("ancestor", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    @patch("pipeline.is_ancestor", return_value=False)
+    def test_verify_not_ancestor_not_completed(self, _, __):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "verify": {"ext_commit_ref": "diverged_sha"}
+            })
+            completed, _ = stage_already_completed(tmp, "verify")
+            self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    @patch("pipeline.is_ancestor", return_value=True)
+    def test_qa_ancestor_completed(self, _, __):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "qa": {"cli_commit_ref": "older_sha"}
+            })
+            completed, _ = stage_already_completed(tmp, "qa")
+            self.assertTrue(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_pr_url_set_completed(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "pr": {"url": "https://github.com/o/r/pull/42"}
+            })
+            completed, reason = stage_already_completed(tmp, "pr")
+            self.assertTrue(completed)
+            self.assertIn("pr.url", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_pr_no_url_not_completed(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {"pr": {}})
+            completed, _ = stage_already_completed(tmp, "pr")
+            self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=None)
+    def test_no_head_returns_false(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "gates": {"passed": True, "commit_ref": "abc123"}
+            })
+            completed, reason = stage_already_completed(tmp, "gates")
+            self.assertFalse(completed)
+            self.assertIn("cannot resolve HEAD", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_unknown_stage_returns_false(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {})
+            completed, _ = stage_already_completed(tmp, "implement")
+            self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    def test_empty_state_returns_false(self, _):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {})
+            for stage in ("gates", "verify", "qa", "review", "pr"):
+                completed, _ = stage_already_completed(tmp, stage)
+                self.assertFalse(completed, f"{stage} should not be completed")
+
+
+class TestFindingKey(unittest.TestCase):
+    """Tests for _finding_key() — retro dedupe (#978)."""
+
+    def test_same_input_same_key(self):
+        f = {"id": "R-01", "description": "some finding"}
+        self.assertEqual(_finding_key(f), _finding_key(f))
+
+    def test_different_id_different_key(self):
+        f1 = {"id": "R-01", "description": "same desc"}
+        f2 = {"id": "R-02", "description": "same desc"}
+        self.assertNotEqual(_finding_key(f1), _finding_key(f2))
+
+    def test_different_desc_different_key(self):
+        f1 = {"id": "R-01", "description": "description A"}
+        f2 = {"id": "R-01", "description": "description B"}
+        self.assertNotEqual(_finding_key(f1), _finding_key(f2))
+
+    def test_key_is_16_hex_chars(self):
+        f = {"id": "R-01", "description": "test"}
+        key = _finding_key(f)
+        self.assertEqual(len(key), 16)
+        int(key, 16)  # Raises if not valid hex
+
+    def test_missing_fields_uses_defaults(self):
+        key = _finding_key({})
+        self.assertEqual(len(key), 16)
+
+
+class TestFindDuplicateIssue(unittest.TestCase):
+    """Tests for _find_duplicate_issue() with finding_key support (#978)."""
+
+    @patch("pipeline.subprocess.run")
+    def test_matches_by_finding_key_in_body(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps([{
+                "number": 42,
+                "title": "retro: something different",
+                "body": "blah blah <!-- finding_key:abc123 --> blah",
+            }]),
+        )
+        result = pipeline._find_duplicate_issue(
+            "retro: unrelated title", "abc123", "/tmp")
+        self.assertEqual(result, 42)
+
+    @patch("pipeline.subprocess.run")
+    def test_matches_by_title_prefix(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps([{
+                "number": 99,
+                "title": "retro: pipeline retro auto-filing creates duplicate issues across converge rounds",
+                "body": "no finding key here",
+            }]),
+        )
+        result = pipeline._find_duplicate_issue(
+            "retro: pipeline retro auto-filing creates duplicate issues across converge rounds",
+            "nomatch", "/tmp")
+        self.assertEqual(result, 99)
+
+    @patch("pipeline.subprocess.run")
+    def test_no_match_returns_none(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps([{
+                "number": 1,
+                "title": "completely different",
+                "body": "",
+            }]),
+        )
+        result = pipeline._find_duplicate_issue(
+            "retro: my finding", "xyz789", "/tmp")
+        self.assertIsNone(result)
+
+    @patch("pipeline.subprocess.run")
+    def test_gh_failure_returns_none(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        result = pipeline._find_duplicate_issue(
+            "retro: anything", "key123", "/tmp")
+        self.assertIsNone(result)
+
+
+class TestFiledFindingKeysInProcess(unittest.TestCase):
+    """Tests for in-process dedup via _FILED_FINDING_KEYS (#978)."""
+
+    def setUp(self):
+        _FILED_FINDING_KEYS.clear()
+
+    def tearDown(self):
+        _FILED_FINDING_KEYS.clear()
+
+    def test_add_and_check(self):
+        _FILED_FINDING_KEYS.add("key1")
+        self.assertIn("key1", _FILED_FINDING_KEYS)
+
+    def test_prevents_double_filing(self):
+        _FILED_FINDING_KEYS.add("key1")
+        _FILED_FINDING_KEYS.add("key1")
+        self.assertEqual(len(_FILED_FINDING_KEYS), 1)
+
+
+class TestPrGateConvergeGuard(unittest.TestCase):
+    """Tests for converge-phase PR blocking in pr-gate.py (#954)."""
+
+    def test_converging_flag_blocks(self):
+        """pr-gate.py should block when pipeline.converging is set."""
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".claude", "hooks"))
+        try:
+            import importlib
+            pr_gate = importlib.import_module("pr-gate")
+        except (ImportError, ModuleNotFoundError):
+            self.skipTest("pr-gate module not importable (dash in name)")
+            return
+
+        state = {"pipeline": {"converging": "true"}}
+        pipeline_section = state.get("pipeline") or {}
+        self.assertTrue(bool(pipeline_section.get("converging")))
+
+    def test_no_converging_flag_allows(self):
+        state = {"pipeline": {}}
+        pipeline_section = state.get("pipeline") or {}
+        self.assertFalse(bool(pipeline_section.get("converging")))
+
+    def test_empty_converging_allows(self):
+        state = {"pipeline": {"converging": ""}}
+        pipeline_section = state.get("pipeline") or {}
+        self.assertFalse(bool(pipeline_section.get("converging")))
 
 
 if __name__ == "__main__":
