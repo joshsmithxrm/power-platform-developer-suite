@@ -54,7 +54,6 @@ from typing import List, Optional
 
 
 PROMPT_TERMINATOR = "'@"
-_TERMINATOR_RE = re.compile(r"^[ \t]*'@")
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -76,16 +75,17 @@ def build_launch_script(
     """Return the full text of the `.ps1` launch script.
 
     The prompt is wrapped in a PowerShell single-quoted here-string
-    (`@' ... '@`). The only content that breaks that here-string is a
-    line whose first two characters are `'@` — we defensively check for
-    it and raise, rather than silently corrupting the script.
+    (`@' ... '@`). The only content that terminates that here-string is
+    a line that is exactly `'@` (no leading or trailing whitespace) —
+    we defensively check for it and raise, rather than silently
+    corrupting the script.
     """
     for lineno, line in enumerate(prompt.splitlines(), start=1):
-        if _TERMINATOR_RE.match(line):
+        if line == PROMPT_TERMINATOR:
             raise ValueError(
-                f"prompt line {lineno} matches {PROMPT_TERMINATOR!r} (possibly "
-                f"with leading whitespace), which would terminate the PowerShell "
-                f"here-string. Reword or prefix with a non-whitespace character."
+                f"prompt line {lineno} is exactly {PROMPT_TERMINATOR!r}, which "
+                f"would terminate the PowerShell here-string. Reword or prefix "
+                f"with a space."
             )
 
     # Note: `claude $prompt` is a bare positional argument, which keeps
@@ -276,7 +276,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     _validate_name(args.name)
     if args.prompt_stdin:
-        prompt = sys.stdin.read()
+        prompt = sys.stdin.buffer.read().decode("utf-8")
     else:
         if not os.path.exists(args.prompt_file):
             sys.stderr.write(f"prompt file not found: {args.prompt_file}\n")

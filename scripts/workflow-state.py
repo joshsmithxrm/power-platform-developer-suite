@@ -166,7 +166,7 @@ def main():
                 print("Usage: workflow-state.py set --value-stdin <key>", file=sys.stderr)
                 sys.exit(1)
             key = sys.argv[3]
-            value = sys.stdin.read()
+            value = sys.stdin.buffer.read().decode("utf-8")
         elif len(sys.argv) < 4:
             print("Usage: workflow-state.py set <key> <value>", file=sys.stderr)
             sys.exit(1)
