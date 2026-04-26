@@ -109,7 +109,54 @@ class TestCiFailContinuesToTriage:
     Pre-v9.1: CI failure continued to Gemini triage.
     v9.1: CI failure routes to CI-fix agent (see Phase 3 tests for AC-108 supersession).
     """
-    pass
+
+    def test_ci_fail_then_gemini_comment_is_triaged(self, tmp_path):
+        """AC-108 supersession: CI fails, CI-fix runs, CI becomes green,
+        Gemini comment is triaged — proving the state machine transitions
+        from CI-fix to Gemini-triage in a single run."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        gemini_comment = {
+            "id": 7001, "user": "gemini-code-assist[bot]",
+            "path": "src/Risky.cs", "line": 42,
+            "body": "security finding",
+        }
+
+        # poll_ci: initial call returns "fail", then "pass" after CI-fix
+        ci_calls = [0]
+        def ci_side_effect(*a, **kw):
+            ci_calls[0] += 1
+            return "pass" if ci_calls[0] > 1 else "fail"
+
+        triage_called = [False]
+        def mock_triage(*a, **kw):
+            triage_called[0] = True
+            return [{"id": 7001, "action": "dismissed",
+                     "description": "ok", "commit": None}]
+
+        with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
+             patch("pr_monitor.poll_gemini_comments",
+                   return_value=[gemini_comment]), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor.run_triage", side_effect=mock_triage), \
+             patch("pr_monitor._reconcile_replies"), \
+             patch("pr_monitor._dispatch_ci_fix_agent",
+                   return_value={"action": "fix", "files_touched": ["scripts/foo.py"],
+                                 "lines_added": 2, "lines_removed": 1,
+                                 "escalation_reason": None, "scope_violation": False,
+                                 "failure_summary": "test failed"}), \
+             patch("pr_monitor._write_ci_fix_decision"), \
+             patch("pr_monitor._check_thrash", return_value=False), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 858, resume=False)
+
+        assert exit_code == 0, f"Expected exit 0 (ready), got {exit_code}"
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ready"
+        assert triage_called[0], "Gemini triage must run after CI became green"
 
 
 class TestCiTimeout:
@@ -2122,6 +2169,13 @@ class TestSerializedAgentDispatch:
              patch("pr_monitor.get_unreplied_comments", return_value=[]), \
              patch("pr_monitor.run_triage", side_effect=triage_side_effect), \
              patch("pr_monitor._reconcile_replies"), \
+             patch("pr_monitor._dispatch_ci_fix_agent",
+                   return_value={"action": "fix", "files_touched": ["scripts/foo.py"],
+                                 "lines_added": 1, "lines_removed": 0,
+                                 "escalation_reason": None, "scope_violation": False,
+                                 "failure_summary": "test failed"}), \
+             patch("pr_monitor._write_ci_fix_decision"), \
+             patch("pr_monitor._check_thrash", return_value=False), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -2198,3 +2252,384 @@ class TestStateTransitionsLogged:
         for _, _, extra in transitions:
             assert "from" in extra, "STATE_TRANSITION must have 'from' field"
             assert "to" in extra, "STATE_TRANSITION must have 'to' field"
+
+
+# ---------------------------------------------------------------------------
+# AC-184 part 2: Flake pattern — rerun once, then real
+# ---------------------------------------------------------------------------
+
+
+class TestFlakePatternRerunOnceThenReal:
+    """AC-184 part 2: First flake match reruns; second match treats as real."""
+
+    def test_flake_pattern_rerun_once_then_real(self, tmp_path):
+        """_check_flake returns 'flake-rerun' on first match, 'real' on second."""
+        wt = _make_worktree(tmp_path)
+        sha = "deadbeef1234"
+
+        # First match: transient network error
+        result1 = pr_monitor._check_flake(
+            wt, "connection reset by peer in test run", sha
+        )
+        assert result1 == "flake-rerun", f"Expected flake-rerun, got {result1!r}"
+
+        # Second match for the same commit: treat as real
+        result2 = pr_monitor._check_flake(
+            wt, "connection reset by peer in test run again", sha
+        )
+        assert result2 == "flake-second-match", f"Expected flake-second-match, got {result2!r}"
+
+    def test_no_pattern_match_returns_real(self, tmp_path):
+        """_check_flake returns 'real' when log contains no known flake pattern."""
+        wt = _make_worktree(tmp_path)
+        result = pr_monitor._check_flake(
+            wt, "AssertionError: expected 1 got 2", "sha123"
+        )
+        assert result == "real"
+
+    def test_empty_log_returns_real(self, tmp_path):
+        """_check_flake returns 'real' for empty failure log."""
+        wt = _make_worktree(tmp_path)
+        assert pr_monitor._check_flake(wt, "", "sha123") == "real"
+        assert pr_monitor._check_flake(wt, None, "sha123") == "real"
+
+
+# ---------------------------------------------------------------------------
+# AC-185: CI-fix agent prompt payload
+# ---------------------------------------------------------------------------
+
+
+class TestCiFixAgentPromptPayload:
+    """AC-185: CI-fix agent receives all 6 required fields."""
+
+    def test_ci_fix_agent_prompt_payload(self, tmp_path):
+        """_dispatch_ci_fix_agent sends all 6 required fields to dispatch_subagent."""
+        wt = _make_worktree(tmp_path)
+
+        # Create a minimal .workflow/state.json for branch_acs
+        wf = os.path.join(wt, ".workflow")
+        os.makedirs(wf, exist_ok=True)
+        with open(os.path.join(wf, "state.json"), "w") as f:
+            json.dump({"spec": "specs/workflow-enforcement.md"}, f)
+
+        captured_payloads = []
+
+        def mock_dispatch(profile_name, payload, **kwargs):
+            captured_payloads.append((profile_name, payload))
+            return {"stdout": '{"action": "fix", "files_touched": [], "lines_added": 0, "lines_removed": 0, "escalation_reason": null, "scope_violation": false, "failure_summary": "ok"}',
+                    "stderr": "", "exit_code": 0}
+
+        with patch("pr_monitor.subprocess.run",
+                   return_value=subprocess.CompletedProcess(
+                       args=[], returncode=0, stdout="abc1234\n", stderr="")), \
+             patch("triage_common.dispatch_subagent", mock_dispatch):
+            pr_monitor._dispatch_ci_fix_agent(
+                wt, 42, "test suite failed on line 10",
+                "abc1234", round_num=1, gemini_comments=[],
+            )
+
+        assert len(captured_payloads) == 1
+        profile_name, payload = captured_payloads[0]
+        assert profile_name == "ci-fix"
+
+        # 6 required fields per AC-185
+        assert "failure_summary" in payload, "missing: failure_summary"
+        assert "diff" in payload, "missing: diff"
+        assert "branch_acs" in payload, "missing: branch_acs"
+        assert "gemini_comments" in payload, "missing: gemini_comments"
+        assert "constitution" in payload, "missing: constitution"
+        assert "commit_sha" in payload, "missing: commit_sha"
+
+
+# ---------------------------------------------------------------------------
+# AC-186: Thrash detection
+# ---------------------------------------------------------------------------
+
+
+class TestThrashDetection:
+    """AC-186: Thrash detection exits on repeated files_touched."""
+
+    def test_thrash_detection_exits_on_repeat_files(self, tmp_path):
+        """_check_thrash returns True when round N files == round N-1 files."""
+        wt = _make_worktree(tmp_path)
+        sha = "abc123"
+
+        # Write a prior decision (round 1)
+        prior_payload = {
+            "pr": 1,
+            "failure_summary": "test failed",
+            "files_touched": ["scripts/pr_monitor.py", "tests/test_pr_monitor.py"],
+            "lines_added": 3,
+            "lines_removed": 2,
+            "action": "fix",
+            "escalation_reason": None,
+            "scope_violation": False,
+        }
+        pr_monitor._write_ci_fix_decision(wt, sha, round_num=1, payload=prior_payload)
+
+        # Round 2 touches the exact same files (order-independent)
+        current_decision = {
+            "files_touched": ["tests/test_pr_monitor.py", "scripts/pr_monitor.py"],
+        }
+        result = pr_monitor._check_thrash(wt, sha, round_num=2, current_decision=current_decision)
+        assert result is True, "Should detect thrash when files_touched is identical"
+
+    def test_thrash_check_skipped_round_1(self, tmp_path):
+        """_check_thrash always returns False for round 1 (no prior round)."""
+        wt = _make_worktree(tmp_path)
+        sha = "abc123"
+
+        current = {"files_touched": ["scripts/pr_monitor.py"]}
+        result = pr_monitor._check_thrash(wt, sha, round_num=1, current_decision=current)
+        assert result is False, "Round 1 must never trigger thrash detection"
+
+    def test_thrash_check_different_files_no_thrash(self, tmp_path):
+        """Different files_touched in round N vs N-1 → no thrash."""
+        wt = _make_worktree(tmp_path)
+        sha = "abc123"
+
+        prior = {"pr": 1, "failure_summary": "x", "files_touched": ["a.py"],
+                 "lines_added": 1, "lines_removed": 0, "action": "fix",
+                 "escalation_reason": None, "scope_violation": False}
+        pr_monitor._write_ci_fix_decision(wt, sha, round_num=1, payload=prior)
+
+        current = {"files_touched": ["b.py"]}
+        result = pr_monitor._check_thrash(wt, sha, round_num=2, current_decision=current)
+        assert result is False, "Different files should not trigger thrash"
+
+
+# ---------------------------------------------------------------------------
+# AC-191: Single terminal notification per run
+# ---------------------------------------------------------------------------
+
+
+class TestSingleTerminalNotificationPerRun:
+    """AC-191: _notify_terminal fires exactly once, on terminal state."""
+
+    def test_single_terminal_notification_per_run(self, tmp_path):
+        """Happy path: exactly one run_notify call (via _step_notify)."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 0
+        # Exactly one notify: the terminal success notification from _step_notify
+        assert mock_notify.call_count == 1
+
+    def test_ci_timeout_exactly_one_notification(self, tmp_path):
+        """CI timeout terminal path fires exactly one notification."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="timeout"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert mock_notify.call_count == 1
+
+    def test_ci_fix_exhausted_exactly_one_notification(self, tmp_path):
+        """CI-fix-exhausted terminal path fires exactly one notification."""
+        wt = _make_worktree(tmp_path)
+
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert mock_notify.call_count == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "stuck-ci-fix-exhausted"
+
+    def test_triage_exhausted_exactly_one_notification(self, tmp_path):
+        """Triage-exhausted terminal path fires exactly one notification."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        comment = {"id": 1, "user": "gemini-code-assist[bot]",
+                   "path": "a.py", "line": 1, "body": "fix"}
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[comment]), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[comment]), \
+             patch("pr_monitor.run_triage", return_value=[]), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert mock_notify.call_count == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "stuck-triage-exhausted"
+
+    def test_flake_rerun_does_not_notify(self, tmp_path):
+        """A flake-rerun path emits NO notification (flakes are transparent)."""
+        wt = _make_worktree(tmp_path)
+
+        # CI: first call "fail" with flake log, second call "pass"
+        ci_calls = [0]
+        def ci_side_effect(*a, **kw):
+            ci_calls[0] += 1
+            return "pass" if ci_calls[0] > 1 else "fail"
+
+        # _check_flake returns "flake-rerun" for the first call
+        flake_calls = [0]
+        def flake_side_effect(*a, **kw):
+            flake_calls[0] += 1
+            return "flake-rerun"
+
+        with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._check_flake", side_effect=flake_side_effect), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        # Flake rerun must not emit an intermediate notification
+        # (only the terminal success notification at the end)
+        assert exit_code == 0
+        assert mock_notify.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# AC-192: No mid-loop notifications
+# ---------------------------------------------------------------------------
+
+
+class TestNoMidLoopNotifications:
+    """AC-192: No notifications during CI-fix loop or between triage iterations."""
+
+    def test_no_notification_during_ci_fix_loop(self, tmp_path):
+        """During CI-fix rounds (before terminal state), no notification fires."""
+        wt = _make_worktree(tmp_path)
+
+        # CI: first "fail", then "pass" after fix
+        ci_calls = [0]
+        def ci_side_effect(*a, **kw):
+            ci_calls[0] += 1
+            return "pass" if ci_calls[0] > 1 else "fail"
+
+        with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._dispatch_ci_fix_agent",
+                   return_value={"action": "fix", "files_touched": ["a.py"],
+                                 "lines_added": 1, "lines_removed": 0,
+                                 "escalation_reason": None, "scope_violation": False,
+                                 "failure_summary": "fixed"}), \
+             patch("pr_monitor._write_ci_fix_decision"), \
+             patch("pr_monitor._check_thrash", return_value=False), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 0
+        # Only one notification: the final success notification
+        assert mock_notify.call_count == 1
+
+    def test_no_notification_between_triage_iterations(self, tmp_path):
+        """Between triage iterations (while comments remain), no intermediate notification."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        comment = {"id": 1, "user": "gemini-code-assist[bot]",
+                   "path": "a.py", "line": 1, "body": "issue"}
+
+        # Triage iteration 1: returns a result, unreplied comments then resolve
+        triage_calls = [0]
+        def triage_side_effect(*a, **kw):
+            triage_calls[0] += 1
+            return [{"id": 1, "action": "dismissed", "description": "ok", "commit": None}]
+
+        unreplied_calls = [0]
+        def unreplied_side_effect(*a, **kw):
+            unreplied_calls[0] += 1
+            # Return empty on first call (comments resolved)
+            return []
+
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[comment]), \
+             patch("pr_monitor.get_unreplied_comments",
+                   side_effect=unreplied_side_effect), \
+             patch("pr_monitor.run_triage", side_effect=triage_side_effect), \
+             patch("pr_monitor._reconcile_replies"), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 0
+        # Only one notification: the terminal success notification
+        assert mock_notify.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# AC-193: Terminal notification format
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalNotificationFormat:
+    """AC-193: Terminal notification body format."""
+
+    def test_terminal_notification_format(self, tmp_path):
+        """_build_terminal_notification produces the required fields."""
+        wt = _make_worktree(tmp_path)
+        result = pr_monitor._empty_result()
+        result["ci_result"] = "fail"
+        result["gemini_review_posted"] = False
+        result["triage_summary"] = []
+
+        msg = pr_monitor._build_terminal_notification(
+            pr_number=42,
+            terminal_state="stuck-ci-fix-exhausted",
+            result=result,
+            ci_fix_rounds_used=3,
+            triage_rounds_used=0,
+            worktree=wt,
+        )
+
+        assert "PR #42:" in msg
+        assert "stuck-ci-fix-exhausted" in msg
+        assert "CI: fail" in msg
+        assert "CI-fix rounds used: 3/" in msg
+        assert "Triage rounds used: 0/" in msg
+        assert "Last decision:" in msg
+
+
+# ---------------------------------------------------------------------------
+# AC-108 superseded behavior
+# ---------------------------------------------------------------------------
+
+
+class TestCiFailureRoutesToFixLoop:
+    """AC-108 superseded: CI failure routes to CI-fix agent, not a mid-loop notification."""
+
+    def test_ci_failure_routes_to_fix_loop(self, tmp_path):
+        """When CI fails, _dispatch_ci_fix_agent is called (not _notify_terminal mid-loop)."""
+        wt = _make_worktree(tmp_path)
+
+        ci_calls = [0]
+        def ci_side_effect(*a, **kw):
+            ci_calls[0] += 1
+            return "fail"  # Always fail → exhaust rounds
+
+        with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        assert exit_code == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "stuck-ci-fix-exhausted"
+        # Only ONE notification at the terminal state (not mid-loop)
+        assert mock_notify.call_count == 1

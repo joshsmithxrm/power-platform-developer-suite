@@ -1079,6 +1079,149 @@ def _notify_terminal(worktree, pr_number, logger, message):
         logger.log("notify", "TERMINAL_NOTIFY_ERROR", error=str(notify_err))
 
 
+def _check_flake(worktree, failure_log, commit_sha):
+    """Classify a CI failure as a flake or a real failure.
+
+    On the first match of any KNOWN_FLAKE_PATTERNS substring in failure_log
+    for this commit_sha, returns "flake-rerun" and records the match.
+    On a second match for the same commit, returns "real" (not a transient flake).
+    When no pattern matches, returns "real" immediately.
+
+    Rerun history is persisted in .workflow/ci-fix-rerun-history.json.
+    """
+    if not failure_log:
+        return "real"
+
+    failure_lower = failure_log.lower()
+    matched = any(p.lower() in failure_lower for p in KNOWN_FLAKE_PATTERNS)
+    if not matched:
+        return "real"
+
+    history_path = os.path.join(worktree, ".workflow", "ci-fix-rerun-history.json")
+    try:
+        with open(history_path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        history = {}
+
+    if commit_sha in history:
+        return "flake-second-match"
+
+    history[commit_sha] = _timestamp()
+    try:
+        os.makedirs(os.path.dirname(history_path), exist_ok=True)
+        with open(history_path, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+    except OSError:
+        pass
+
+    return "flake-rerun"
+
+
+def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
+                            round_num, gemini_comments):
+    """Invoke the CI-fix agent via triage_common.dispatch_subagent.
+
+    Returns the agent's decision dict with fields:
+        action: "fix" | "escalate"
+        files_touched: list[str]
+        lines_added: int
+        lines_removed: int
+        escalation_reason: str | None
+        scope_violation: bool
+        failure_summary: str
+
+    Falls back to a "escalate" decision on dispatch failure.
+    """
+    from triage_common import dispatch_subagent
+
+    # Build the diff for scope context (G1)
+    diff_output = ""
+    try:
+        diff_proc = subprocess.run(
+            ["git", "diff", "main...HEAD"],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        if diff_proc.returncode == 0:
+            diff_output = diff_proc.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # Read branch ACs from workflow state
+    branch_acs = ""
+    state_path = os.path.join(worktree, ".workflow", "state.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        branch_acs = state.get("spec", "")
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    payload = {
+        "failure_summary": failure_log[:4000],   # truncated for token budget
+        "diff": diff_output[:8000],
+        "branch_acs": branch_acs,
+        "gemini_comments": gemini_comments or [],
+        "constitution": "specs/CONSTITUTION.md",
+        "commit_sha": commit_sha,
+    }
+
+    result = dispatch_subagent(
+        profile_name="ci-fix",
+        payload=payload,
+        model="sonnet",
+        worktree=worktree,
+        timeout=1800,
+    )
+
+    if result["exit_code"] != 0:
+        return {
+            "action": "escalate",
+            "files_touched": [],
+            "lines_added": 0,
+            "lines_removed": 0,
+            "escalation_reason": f"agent dispatch failed: {result['stderr'][:200]}",
+            "scope_violation": False,
+            "failure_summary": failure_log[:200],
+        }
+
+    # Parse agent output — look for JSON in stdout
+    from triage_common import parse_triage_json
+    decision = parse_triage_json(result["stdout"])
+    if not isinstance(decision, dict):
+        # Fallback: treat missing/malformed output as escalation
+        return {
+            "action": "escalate",
+            "files_touched": [],
+            "lines_added": 0,
+            "lines_removed": 0,
+            "escalation_reason": "agent output did not contain a valid JSON decision",
+            "scope_violation": False,
+            "failure_summary": failure_log[:200],
+        }
+    return decision
+
+
+def _check_thrash(worktree, sha, round_num, current_decision):
+    """Return True if this CI-fix round is repeating the same files as the prior round.
+
+    For round_num >= 2 (AC-186), loads round_num-1's decision file and compares
+    files_touched as a set. Order-independent. Round 1 always returns False.
+    """
+    if round_num < 2:
+        return False
+
+    prior = _load_prior_decision(worktree, sha)
+    if prior is None:
+        return False
+
+    current_files = set(current_decision.get("files_touched") or [])
+    prior_files = set(prior.get("files_touched") or [])
+
+    return bool(current_files and current_files == prior_files)
+
+
 def _write_ci_fix_decision(worktree, sha, round_num, payload):
     """Write a CI-fix decision file to .workflow/ci-fix-decisions/<sha>.json.
 
@@ -1268,8 +1411,102 @@ def run_monitor(worktree, pr_number, resume=False):
                 ci_fix_rounds_used += 1
                 logger.log("monitor", "CI_FIX_DISPATCH",
                            round=ci_fix_rounds_used, of=MAX_CI_FIX_ROUNDS)
-                # Phase 2 placeholder: CI-fix agent wired in Phase 3.
-                # Re-poll CI to check if the issue resolved.
+
+                # Get current commit SHA for decision file and flake history
+                try:
+                    sha_proc = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=worktree, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=10,
+                    )
+                    commit_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else "unknown"
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    commit_sha = "unknown"
+
+                # Get recent CI failure log (best-effort)
+                failure_log = result.get("_last_failure_log", "")
+
+                # Flake check (AC-184)
+                flake_result = _check_flake(worktree, failure_log, commit_sha)
+                logger.log("monitor", "FLAKE_CHECK",
+                           result=flake_result, round=ci_fix_rounds_used)
+
+                if flake_result == "flake-rerun":
+                    # Trigger a rerun of failed CI checks (no notification, no round consumed)
+                    ci_fix_rounds_used -= 1  # don't consume a round for a flake
+                    logger.log("monitor", "FLAKE_RERUN",
+                               commit=commit_sha, round=ci_fix_rounds_used)
+                    try:
+                        subprocess.run(
+                            ["gh", "run", "list", "--limit", "1",
+                             "--json", "databaseId", "--jq", ".[0].databaseId"],
+                            cwd=worktree, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=30,
+                        )
+                        # Best-effort rerun — if we can't get the run ID, just re-poll
+                    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                        pass
+                    # Re-poll CI after rerun
+                    ci_status = _step_ci(worktree, pr_number, logger,
+                                         step_suffix=f"_flake_r{ci_fix_rounds_used}")
+                    result["ci_result"] = ci_status
+                    write_result(worktree, result)
+                    if ci_status in ("pass", "timeout"):
+                        if ci_status == "timeout":
+                            result["status"] = "ci-timeout"
+                            write_result(worktree, result)
+                            _notify_terminal(
+                                worktree, pr_number, logger,
+                                _build_terminal_notification(
+                                    pr_number, "ci-timeout", result,
+                                    ci_fix_rounds_used, triage_rounds_used, worktree))
+                            logger.close()
+                            return 1
+                        comments = _step_gemini(worktree, pr_number, logger, result,
+                                                step_suffix=f"_post_flake_{ci_fix_rounds_used}")
+                    continue
+
+                # Real failure — dispatch CI-fix agent (AC-185)
+                decision = _dispatch_ci_fix_agent(
+                    worktree, pr_number, failure_log, commit_sha,
+                    ci_fix_rounds_used, comments,
+                )
+
+                # Write decision file (AC-187)
+                decision["pr"] = pr_number
+                _write_ci_fix_decision(worktree, commit_sha, ci_fix_rounds_used, decision)
+                logger.log("monitor", "CI_FIX_DECISION",
+                           action=decision.get("action"),
+                           files=len(decision.get("files_touched") or []))
+
+                # Thrash check (AC-186)
+                if _check_thrash(worktree, commit_sha, ci_fix_rounds_used, decision):
+                    logger.log("monitor", "THRASH_DETECTED",
+                               round=ci_fix_rounds_used, files=decision.get("files_touched"))
+                    result["status"] = "stuck-thrash-detected"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "stuck-thrash-detected", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
+
+                if decision.get("action") == "escalate":
+                    logger.log("monitor", "CI_FIX_ESCALATED",
+                               reason=decision.get("escalation_reason", ""))
+                    result["status"] = "stuck-ci-fix-exhausted"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "stuck-ci-fix-exhausted", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
+
+                # Re-poll CI after agent fix attempt
                 ci_status = _step_ci(worktree, pr_number, logger,
                                      step_suffix=f"_ci_fix_r{ci_fix_rounds_used}")
                 result["ci_result"] = ci_status
