@@ -985,6 +985,34 @@ def mark_step(result, step_name, status):
     }
 
 
+def _deregister_inflight(worktree, logger):
+    """Deregister the worktree's branch from the in-flight registry.
+
+    Called before terminal notification so the registry reflects "no
+    longer working on this" before the user sees the notification.
+    Best-effort — failures do not block the notify path.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=worktree, capture_output=True, text=True, timeout=10,
+        )
+        branch = (result.stdout or "").strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return
+    if not branch:
+        return
+    try:
+        subprocess.run(
+            ["python", "scripts/inflight-deregister.py", "--branch", branch],
+            cwd=worktree, capture_output=True, text=True, timeout=15,
+        )
+        logger.log("inflight", "DEREGISTERED", branch=branch)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("inflight", "DEREGISTER_FAILED",
+                   branch=branch, error=str(e))
+
+
 def _notify_terminal(worktree, pr_number, logger, message):
     """Best-effort notification on any terminal non-success state.
 
@@ -993,7 +1021,12 @@ def _notify_terminal(worktree, pr_number, logger, message):
     when the monitor aborts (CI fail, CI timeout, exception) — previously
     only the clean-success path fired a notification, so crashes were
     invisible until the user happened to check the PR.
+
+    Also deregisters the worktree's branch from the in-flight registry
+    (AC-178) so terminal states clean up automatically without waiting
+    for `gh pr merge` or manual `/cleanup`.
     """
+    _deregister_inflight(worktree, logger)
     try:
         run_notify(worktree, pr_number, logger, message=message)
     except Exception as notify_err:  # noqa: BLE001 — best-effort
@@ -1176,6 +1209,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
         # ---- Step 6: Notify ----
         if not (resume and step_completed(result, "notify")):
+            _deregister_inflight(worktree, logger)
             _step_notify(worktree, pr_number, logger, result)
 
         result["status"] = "complete"

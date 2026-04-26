@@ -1486,9 +1486,9 @@ After all skills in this spec are implemented:
 | AC-175 | **(v9.0 — CLAUDE.md)** `debug-first.py` blocks test/build re-invocation after a failure unless `/debug` was run since the failure | `test_hooks.py::test_debug_first_blocks_retry` | ✅ |
 | AC-176 | **(v9.0 — Escape)** Stop hook allows session exit after 3 consecutive blocks for the same reason within one session, logs `OVERRIDE_GRANTED`, and `/retro` flags the override as a finding | `test_hooks.py::test_three_strike_escape_valve` | ✅ |
 | AC-177 | **(v9.0 — Report)** `audit-enforcement.py --report` produces `.workflow/audit-snapshot.md` containing: total directive count (dated), T1/T2/T3 breakdown with percentages, per-skill counts, hook coverage %, per-file unmarked count, top 5 longest SKILL.md files. Output is valid markdown and parseable. | `test_audit_enforcement.py::test_report_snapshot` | ✅ |
-| AC-178 | **(v9.0 — Inflight)** `pr_monitor.py` terminal step (any of complete, ci_failed, gemini_timeout) calls `inflight-deregister.py --branch <branch>` before final notification | `test_pr_monitor.py::test_terminal_deregisters_inflight` | 🔲 |
-| AC-179 | **(v9.0 — Inflight)** PostToolUse hook on `Bash(gh pr merge:*)` deregisters the branch from in-flight registry on exit 0 | `test_hooks.py::test_inflight_deregister_on_merge` | 🔲 |
-| AC-180 | **(v9.0 — Inflight)** `inflight-check.py` reports registrations older than 7 days with no live worktree as `[stale]` in conflict output (informational, not blocking) | `test_inflight.py::test_stale_ttl_detection` | 🔲 |
+| AC-178 | **(v9.0 — Inflight)** `pr_monitor.py` terminal step (any of complete, ci_failed, gemini_timeout) calls `inflight-deregister.py --branch <branch>` before final notification | `test_pr_monitor.py::test_terminal_deregisters_inflight` | ✅ |
+| AC-179 | **(v9.0 — Inflight)** PostToolUse hook on `Bash(gh pr merge:*)` deregisters the branch from in-flight registry on exit 0 | `test_hooks.py::test_inflight_deregister_on_merge` | ✅ |
+| AC-180 | **(v9.0 — Inflight)** `inflight-check.py` reports registrations older than 7 days with no live worktree as `[stale]` in conflict output (informational, not blocking) | `test_inflight.py::test_stale_ttl_detection` | ✅ |
 
 ### Edge Cases
 

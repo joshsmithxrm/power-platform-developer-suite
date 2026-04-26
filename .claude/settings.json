@@ -505,6 +505,36 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Bash(gh pr merge:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git branch -D:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git branch -d:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "SessionStart": [

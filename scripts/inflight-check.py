@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from datetime import datetime, timezone
 
 from inflight_common import find_conflicts, locked_state, prune_stale, write_locked_state
+
+STALE_TTL_DAYS = 7
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -63,6 +67,56 @@ def check(*, area: str | None = None, issue: int | None = None,
         )
 
 
+def _live_worktree_branches() -> set[str]:
+    """Branches that currently have a checked-out worktree (`git worktree list`)."""
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return set()
+    if result.returncode != 0:
+        return set()
+    branches: set[str] = set()
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("branch "):
+            ref = line.split(None, 1)[1].strip()
+            branches.add(ref.removeprefix("refs/heads/"))
+    return branches
+
+
+def _is_stale(entry: dict, live_branches: set[str]) -> bool:
+    """AC-180: registered > 7 days ago AND no live worktree on the branch."""
+    started = entry.get("started")
+    if not started:
+        return False
+    try:
+        ts = datetime.fromisoformat(started.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    if age <= STALE_TTL_DAYS * 86400:
+        return False
+    branch = entry.get("branch", "")
+    return branch and branch not in live_branches
+
+
+def annotate_stale(conflicts: list[dict]) -> list[dict]:
+    """Append ' [stale]' to the printable summary of stale entries.
+    Informational only — does not change exit code."""
+    if not conflicts:
+        return conflicts
+    live = _live_worktree_branches()
+    annotated: list[dict] = []
+    for entry in conflicts:
+        copy = dict(entry)
+        if _is_stale(copy, live):
+            copy["stale"] = True
+        annotated.append(copy)
+    return annotated
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.area is None and args.issue is None:
@@ -74,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         exclude_session=args.session,
         do_prune=not args.no_prune,
     )
+    conflicts = annotate_stale(conflicts)
     payload = {
         "area": args.area,
         "issue": args.issue,
@@ -81,6 +136,12 @@ def main(argv: list[str] | None = None) -> int:
     }
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+    # Emit a one-line annotated form for human-readable inspection (does not
+    # change exit code; informational per AC-180).
+    for entry in conflicts:
+        suffix = " [stale]" if entry.get("stale") else ""
+        line = f"  {entry.get('session_id', '?')[:8]} {entry.get('branch', '?')}{suffix}"
+        print(line, file=sys.stderr)
     return 1 if conflicts else 0
 
 

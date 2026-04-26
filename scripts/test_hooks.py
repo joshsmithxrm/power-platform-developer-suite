@@ -437,5 +437,97 @@ class TestDebugFirst(unittest.TestCase):
         )
 
 
+class TestInflightAutoDeregister(unittest.TestCase):
+    """AC-179: PostToolUse on `gh pr merge`/`git branch -D` deregisters branch."""
+
+    def _setup_registry(self, project_dir: str, branch: str):
+        state_dir = os.path.join(project_dir, ".claude", "state")
+        os.makedirs(state_dir, exist_ok=True)
+        path = os.path.join(state_dir, "in-flight-issues.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "version": 1,
+                "updated": datetime.now(timezone.utc).isoformat(),
+                "open_work": [{
+                    "session_id": "deadbeef",
+                    "started": datetime.now(timezone.utc).isoformat(),
+                    "branch": branch,
+                    "issues": [42],
+                    "areas": ["x/"],
+                }],
+            }, f)
+        # Copy helper scripts the hook shells out to.
+        scripts_src = REPO_ROOT / "scripts"
+        scripts_dst = os.path.join(project_dir, "scripts")
+        os.makedirs(scripts_dst, exist_ok=True)
+        for fname in ("inflight-deregister.py", "inflight_common.py"):
+            shutil.copy(scripts_src / fname, os.path.join(scripts_dst, fname))
+        return path
+
+    def _read_registry(self, project_dir: str):
+        path = os.path.join(project_dir, ".claude", "state", "in-flight-issues.json")
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_inflight_deregister_on_merge(self):
+        """Successful `git branch -D feat/foo` removes the entry from the registry.
+
+        Runs against the real repo's scripts/ + a tempdir registry. We use
+        CLAUDE_PROJECT_DIR=REPO_ROOT so the hook can find scripts/, and override
+        the registry path via PPDS_INFLIGHT_STATE_FILE if supported, otherwise
+        we patch the registry and restore.
+        """
+        # Stage a fake scripts/ in a tempdir that mirrors the real repo's
+        # scripts/inflight-deregister.py + scripts/inflight_common.py.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        scripts_dst = os.path.join(tmp, "scripts")
+        os.makedirs(scripts_dst, exist_ok=True)
+        for fname in ("inflight-deregister.py", "inflight_common.py"):
+            shutil.copy(os.path.join(REPO_ROOT, "scripts", fname),
+                        os.path.join(scripts_dst, fname))
+        self._setup_registry(tmp, "feat/foo")
+
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git branch -D feat/foo"},
+            "tool_response": {"exit_code": 0},
+        }
+        proc = _run_hook("inflight-auto-deregister.py", payload, project_dir=tmp)
+        self.assertEqual(proc.returncode, 0,
+                         msg=f"hook stderr: {proc.stderr!r}")
+
+        state = self._read_registry(tmp)
+        branches = [e.get("branch") for e in state.get("open_work", [])]
+        self.assertNotIn("feat/foo", branches,
+                         "Successful merge/delete must deregister branch (AC-179)")
+
+    def test_inflight_no_deregister_on_failure(self):
+        """Non-zero exit (failed merge/delete) leaves the registry untouched."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        scripts_dst = os.path.join(tmp, "scripts")
+        os.makedirs(scripts_dst, exist_ok=True)
+        for fname in ("inflight-deregister.py", "inflight_common.py"):
+            shutil.copy(os.path.join(REPO_ROOT, "scripts", fname),
+                        os.path.join(scripts_dst, fname))
+        self._setup_registry(tmp, "feat/keep")
+
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git branch -D feat/keep"},
+            "tool_response": {"exit_code": 1},
+        }
+        proc = _run_hook("inflight-auto-deregister.py", payload, project_dir=tmp)
+        self.assertEqual(proc.returncode, 0)
+
+        state = self._read_registry(tmp)
+        branches = [e.get("branch") for e in state.get("open_work", [])]
+        self.assertIn("feat/keep", branches,
+                      "Failed merge/delete must NOT deregister")
+
+
 if __name__ == "__main__":
     unittest.main()

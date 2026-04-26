@@ -122,5 +122,56 @@ class TestMonitorUsesSonnet(unittest.TestCase):
         )
 
 
+class TestTerminalDeregistersInflight(unittest.TestCase):
+    """AC-178: pr_monitor terminal step calls inflight-deregister before notify."""
+
+    def test_terminal_deregisters_inflight(self):
+        """_notify_terminal must call _deregister_inflight before run_notify."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            call_order = []
+            with patch("pr_monitor._deregister_inflight",
+                       side_effect=lambda *a, **k: call_order.append("deregister")), \
+                 patch("pr_monitor.run_notify",
+                       side_effect=lambda *a, **k: call_order.append("notify")):
+                pr_monitor._notify_terminal(worktree, 123, logger, "msg")
+
+        self.assertIn("deregister", call_order,
+                      "_notify_terminal must call _deregister_inflight (AC-178)")
+        self.assertIn("notify", call_order)
+        self.assertLess(call_order.index("deregister"), call_order.index("notify"),
+                        "deregister must happen BEFORE notify")
+
+    def test_deregister_inflight_calls_script(self):
+        """_deregister_inflight invokes scripts/inflight-deregister.py with --branch."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            logger = _FakeLogger()
+            captured = {}
+
+            def _fake_run(cmd, **kwargs):
+                captured.setdefault("calls", []).append(list(cmd))
+                m = MagicMock()
+                m.returncode = 0
+                m.stdout = "feat/test-branch\n"
+                m.stderr = ""
+                return m
+
+            with patch("pr_monitor.subprocess.run", side_effect=_fake_run):
+                pr_monitor._deregister_inflight(worktree, logger)
+
+            calls = captured.get("calls", [])
+            # First call is git rev-parse to get branch; second is the deregister script.
+            self.assertGreaterEqual(len(calls), 2)
+            deregister_call = calls[1]
+            self.assertIn("scripts/inflight-deregister.py", deregister_call)
+            self.assertIn("--branch", deregister_call)
+            self.assertIn("feat/test-branch", deregister_call)
+
+
 if __name__ == "__main__":
     unittest.main()
