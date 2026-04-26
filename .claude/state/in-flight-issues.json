@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-04-25T02:24:51Z",
+  "updated": "2026-04-26T01:38:08Z",
   "open_work": [
     {
       "session_id": "7ce1ca2d",
@@ -56,6 +56,19 @@
         "extension"
       ],
       "intent": "Fix docs plugin-registration 404 page"
+    },
+    {
+      "session_id": "e1e3659e",
+      "started": "2026-04-26T01:38:08Z",
+      "branch": "feat/workflow-skill-redesign",
+      "worktree": ".worktrees/workflow-skill-redesign",
+      "issues": [],
+      "areas": [
+        "workflow",
+        "skills",
+        "hooks"
+      ],
+      "intent": "Redesign skills+hooks for deterministic workflow enforcement; switch executors to Sonnet"
     }
   ]
 }
