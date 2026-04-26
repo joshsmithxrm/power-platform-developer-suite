@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-04-26",
-  "total_retros": 10,
+  "total_retros": 11,
   "findings_by_category": {
     "external": [
       {
@@ -110,6 +110,11 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-04"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-07"
       }
     ],
     "design": [
@@ -281,6 +286,16 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-06"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-08"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/workflow-skill-redesign",
+        "finding_id": "R-09"
       }
     ],
     "setup": [
@@ -297,8 +312,8 @@
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.3688,
-    "pipeline_success_rate": 0.4445,
-    "avg_convergence_rounds": 2.5911
+    "avg_fix_ratio": 0.608,
+    "pipeline_success_rate": 0.4041,
+    "avg_convergence_rounds": 2.4465
   }
 }
