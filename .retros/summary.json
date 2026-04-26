@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-04-26",
-  "total_retros": 12,
+  "total_retros": 13,
   "findings_by_category": {
     "external": [
       {
@@ -304,11 +304,18 @@
         "branch": "verify/v1-shakedown",
         "finding_id": "R-05"
       }
+    ],
+    "code": [
+      {
+        "date": "2026-04-26",
+        "branch": "feat/cli-e2e-data-migration",
+        "finding_id": "R-01"
+      }
     ]
   },
   "metrics": {
     "avg_fix_ratio": 0.749,
-    "pipeline_success_rate": 0.370,
-    "avg_convergence_rounds": 2.41
+    "pipeline_success_rate": 0.418,
+    "avg_convergence_rounds": 2.302
   }
 }
