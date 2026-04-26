@@ -91,6 +91,11 @@ class TestCiFailure:
 
         with patch("pr_monitor.poll_ci", return_value="fail"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._dispatch_ci_fix_agent",
+                   return_value={"action": "fix", "files_touched": [],
+                                 "lines_added": 0, "lines_removed": 0,
+                                 "escalation_reason": None, "scope_violation": False,
+                                 "failure_summary": "still failing"}), \
              patch("pr_monitor.run_notify") as mock_notify:
             exit_code = pr_monitor.run_monitor(wt, 99, resume=False)
 
@@ -2049,21 +2054,38 @@ class TestCiFixDecisionsDirNotGitignored:
         import subprocess as sp
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        # git check-ignore returns non-zero when path is NOT ignored
-        result = sp.run(
-            ["git", "check-ignore", "-v",
-             ".workflow/ci-fix-decisions/.gitkeep"],
-            cwd=repo_root,
-            stdin=sp.DEVNULL,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            text=True,
-        )
-        # Non-zero means "not ignored" — that's what we want
-        assert result.returncode != 0, (
-            ".workflow/ci-fix-decisions/.gitkeep must NOT be gitignored. "
-            f"git check-ignore says: {result.stdout.strip()!r}"
-        )
+        # Check a real .json audit file — this is the actual payload AC-188 protects.
+        # (Using a synthetic SHA-looking path so no real file needs to exist on disk;
+        # git check-ignore works on paths that don't exist.)
+        for check_path in [
+            ".workflow/ci-fix-decisions/abc123def456.json",
+            ".workflow/ci-fix-decisions/.gitkeep",
+        ]:
+            result = sp.run(
+                ["git", "check-ignore", "-v", check_path],
+                cwd=repo_root,
+                stdin=sp.DEVNULL,
+                stdout=sp.PIPE,
+                stderr=sp.PIPE,
+                text=True,
+            )
+            # git check-ignore exit codes: 0 = matched a rule (positive or negation),
+            # 1 = no rule matched (also means not-ignored).
+            # When the last matching rule is a negation ("!pattern"), git prints
+            # the "!"-prefixed rule in stdout and returns 0.
+            # In both not-matched (rc=1) and negation-un-ignored (rc=0, stdout has "!")
+            # the file is NOT ignored — that is what AC-188 requires.
+            is_negation_match = (
+                result.returncode == 0
+                and result.stdout.strip()
+                and "\t" in result.stdout
+                and result.stdout.split("\t")[0].rsplit(":", 1)[-1].startswith("!")
+            )
+            file_is_ignored = result.returncode == 0 and not is_negation_match
+            assert not file_is_ignored, (
+                f"{check_path} must NOT be gitignored (AC-188: audit trail "
+                f"must be committable). git check-ignore says: {result.stdout.strip()!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -2375,7 +2397,7 @@ class TestThrashDetection:
         current_decision = {
             "files_touched": ["tests/test_pr_monitor.py", "scripts/pr_monitor.py"],
         }
-        result = pr_monitor._check_thrash(wt, round_num=2, current_decision=current_decision)
+        result = pr_monitor._check_thrash(wt, pr_number=1, round_num=2, current_decision=current_decision)
         assert result is True, "Should detect thrash when files_touched is identical"
 
     def test_thrash_check_skipped_round_1(self, tmp_path):
@@ -2383,7 +2405,7 @@ class TestThrashDetection:
         wt = _make_worktree(tmp_path)
 
         current = {"files_touched": ["scripts/pr_monitor.py"]}
-        result = pr_monitor._check_thrash(wt, round_num=1, current_decision=current)
+        result = pr_monitor._check_thrash(wt, pr_number=1, round_num=1, current_decision=current)
         assert result is False, "Round 1 must never trigger thrash detection"
 
     def test_thrash_check_different_files_no_thrash(self, tmp_path):
@@ -2397,7 +2419,7 @@ class TestThrashDetection:
         pr_monitor._write_ci_fix_decision(wt, sha, round_num=1, payload=prior)
 
         current = {"files_touched": ["b.py"]}
-        result = pr_monitor._check_thrash(wt, round_num=2, current_decision=current)
+        result = pr_monitor._check_thrash(wt, pr_number=1, round_num=2, current_decision=current)
         assert result is False, "Different files should not trigger thrash"
 
 
@@ -2628,6 +2650,11 @@ class TestCiFailureRoutesToFixLoop:
 
         with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._dispatch_ci_fix_agent",
+                   return_value={"action": "fix", "files_touched": [],
+                                 "lines_added": 0, "lines_removed": 0,
+                                 "escalation_reason": None, "scope_violation": False,
+                                 "failure_summary": "still failing"}), \
              patch("pr_monitor.run_notify") as mock_notify:
             exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
 
@@ -2636,3 +2663,43 @@ class TestCiFailureRoutesToFixLoop:
         assert result["status"] == "stuck-ci-fix-exhausted"
         # Only ONE notification at the terminal state (not mid-loop)
         assert mock_notify.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: failure_summary from dispatch payload must survive into decision
+# ---------------------------------------------------------------------------
+
+
+class TestCiFixFailureSummaryPropagation:
+    """failure_summary from the dispatch call propagates into the returned decision."""
+
+    @pytest.mark.parametrize("agent_json,expected_contains", [
+        pytest.param(
+            '{"action": "fix", "files_touched": [], "lines_added": 0, '
+            '"lines_removed": 0, "escalation_reason": null, "scope_violation": false}',
+            "run list failed",
+            id="0",
+        ),
+    ])
+    def test_ci_failure_routes_to_fix(self, tmp_path, agent_json, expected_contains):
+        """_dispatch_ci_fix_agent preserves failure_log as failure_summary when agent omits it."""
+        wt = _make_worktree(tmp_path)
+        failure_log = (
+            "(run list failed: failed to determine base repo: failed to run git: "
+            "fatal: not a git repository (or any of the parent directories): .git\n\n)"
+        )
+
+        def mock_dispatch(profile_name, payload, **kwargs):
+            return {"stdout": agent_json, "stderr": "", "exit_code": 0}
+
+        with patch("pr_monitor.subprocess.run",
+                   return_value=subprocess.CompletedProcess(
+                       args=[], returncode=1, stdout="", stderr="")), \
+             patch("triage_common.dispatch_subagent", mock_dispatch):
+            decision = pr_monitor._dispatch_ci_fix_agent(
+                wt, 42, failure_log, "unknown", round_num=1, gemini_comments=[],
+            )
+
+        assert expected_contains in decision.get("failure_summary", ""), (
+            f"failure_summary must preserve failure_log; got: {decision.get('failure_summary')!r}"
+        )

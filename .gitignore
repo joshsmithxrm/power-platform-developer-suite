@@ -51,7 +51,10 @@ Thumbs.db
 # Claude Code settings (local)
 .claude/settings.local.json
 *.local.json
-.workflow/
+# .workflow/** (not .workflow/) so negations below can re-include subdirs.
+# A directory-level match (.workflow/) prevents git from examining subdirs
+# for negation patterns entirely.
+.workflow/*
 !.workflow/ci-fix-decisions/
 !.workflow/ci-fix-decisions/**
 
