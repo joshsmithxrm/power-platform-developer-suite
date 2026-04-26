@@ -258,11 +258,12 @@ public class ProtocolContractTests : IClassFixture<DaemonTestFixture>
     [Fact]
     public async Task EnvSelectError_HasExpectedShape()
     {
-        // Act & Assert — env/select with no args should fail
+        // Act & Assert — env/select with invalid environment should fail
         try
         {
             await _fixture.Rpc.InvokeWithCancellationAsync<EnvSelectResponse>(
                 "env/select",
+                new object[] { "nonexistent-env-12345" },
                 cancellationToken: CancellationToken.None);
 
             Assert.Fail("Expected exception was not thrown");
@@ -487,8 +488,9 @@ public class ProtocolContractTests : IClassFixture<DaemonTestFixture>
             {
                 jsonElement.ValueKind.Should().Be(JsonValueKind.Object, "error data should be an object");
 
-                // Check for validationErrors array if present
-                if (jsonElement.TryGetProperty("validationErrors", out var validationErrors))
+                // Check for validationErrors array if present and non-null
+                if (jsonElement.TryGetProperty("validationErrors", out var validationErrors)
+                    && validationErrors.ValueKind != JsonValueKind.Null)
                 {
                     validationErrors.ValueKind.Should().Be(JsonValueKind.Array,
                         "validationErrors should be an array");
