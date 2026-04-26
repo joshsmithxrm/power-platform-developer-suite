@@ -53,7 +53,7 @@ def _make_fake_repo(skill_files: dict[str, str], hook_names: list[str],
             ]
         }
     }
-    with open(os.path.join(tmp, ".claude", "settings.json"), "w") as f:
+    with open(os.path.join(tmp, ".claude", "settings.json"), "w", encoding="utf-8") as f:
         json.dump(settings, f)
     if claude_md is not None:
         with open(os.path.join(tmp, "CLAUDE.md"), "w", encoding="utf-8") as f:

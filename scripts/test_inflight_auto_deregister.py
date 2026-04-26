@@ -23,7 +23,7 @@ def _make_repo_with_state(entries):
     state_dir = os.path.join(tmp, ".claude", "state")
     os.makedirs(state_dir, exist_ok=True)
     state = {"version": 1, "updated": "now", "open_work": entries}
-    with open(os.path.join(state_dir, "in-flight-issues.json"), "w") as f:
+    with open(os.path.join(state_dir, "in-flight-issues.json"), "w", encoding="utf-8") as f:
         json.dump(state, f)
     scripts_src = REPO_ROOT / "scripts"
     scripts_dst = os.path.join(tmp, "scripts")
@@ -62,7 +62,7 @@ class TestInflightDeregisterOnMerge(unittest.TestCase):
         proc = _run_hook(payload, tmp)
         self.assertEqual(proc.returncode, 0)
         with open(os.path.join(tmp, ".claude", "state",
-                              "in-flight-issues.json")) as f:
+                              "in-flight-issues.json"), encoding="utf-8") as f:
             state = json.load(f)
         branches = {e["branch"] for e in state["open_work"]}
         self.assertNotIn("feat/x", branches,
@@ -81,7 +81,7 @@ class TestInflightDeregisterOnMerge(unittest.TestCase):
         proc = _run_hook(payload, tmp)
         self.assertEqual(proc.returncode, 0)
         with open(os.path.join(tmp, ".claude", "state",
-                              "in-flight-issues.json")) as f:
+                              "in-flight-issues.json"), encoding="utf-8") as f:
             state = json.load(f)
         branches = {e["branch"] for e in state["open_work"]}
         self.assertIn("feat/x", branches,

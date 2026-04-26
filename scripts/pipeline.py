@@ -132,7 +132,7 @@ def log(logger, stage, event, **extra):
 def open_logger(log_path, mode="a"):
     """Open log file. Separates open from use to allow close/reopen between stages."""
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    return open(log_path, mode)
+    return open(log_path, mode, encoding="utf-8")
 
 
 def read_state(worktree_path):
@@ -141,7 +141,7 @@ def read_state(worktree_path):
     if not os.path.exists(state_path):
         return {}
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -317,7 +317,7 @@ def find_last_completed_stage(log_path):
         return None
     last_done = None
     try:
-        with open(log_path, "r") as f:
+        with open(log_path, "r", encoding="utf-8") as f:
             for line in f:
                 if "] DONE" in line:
                     # Extract stage name from "[stage] DONE"
@@ -366,7 +366,7 @@ def acquire_lock(lock_path, logger):
     """Acquire pipeline lock. Returns True if acquired, False if conflict."""
     if os.path.exists(lock_path):
         try:
-            with open(lock_path, "r") as f:
+            with open(lock_path, "r", encoding="utf-8") as f:
                 existing_pid = int(f.read().strip())
             if is_pid_alive(existing_pid):
                 print(
@@ -382,7 +382,7 @@ def acquire_lock(lock_path, logger):
             os.remove(lock_path)  # Corrupted lock file
 
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    with open(lock_path, "w") as f:
+    with open(lock_path, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
     return True
 
@@ -533,7 +533,7 @@ def extract_text_from_jsonl(jsonl_path):
     result_text_parts = []
     assistant_text_parts = []
     try:
-        with open(jsonl_path, "r", errors="replace") as f:
+        with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -599,7 +599,7 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
     stage_jsonl_path = os.path.join(stage_log_dir, f"{stage}.jsonl")
 
     try:
-        stage_log_file = open(stage_jsonl_path, "w")
+        stage_log_file = open(stage_jsonl_path, "w", encoding="utf-8")
     except OSError as e:
         log(logger, stage, "ERROR", reason=f"Cannot open stage log: {e}")
         return 1, logger
@@ -717,14 +717,14 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
     stage_log_path = os.path.join(stage_log_dir, f"{stage}.log")
     extracted_text = extract_text_from_jsonl(stage_jsonl_path)
     try:
-        with open(stage_log_path, "w", errors="replace") as f:
+        with open(stage_log_path, "w", encoding="utf-8", errors="replace") as f:
             f.write(extracted_text)
     except OSError:
         pass
 
     # Read last 20 lines of human-readable log (not JSONL) for pipeline.log
     try:
-        with open(stage_log_path, "r", errors="replace") as f:
+        with open(stage_log_path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
             for line in lines[-20:]:
                 log(logger, stage, "OUTPUT", line=line.strip()[:200])
@@ -922,7 +922,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
         return
 
     try:
-        with open(findings_path, "r") as f:
+        with open(findings_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         log(logger, "retro", "FINDINGS_PARSE_ERROR")
@@ -1018,7 +1018,7 @@ def ensure_retro_summary_updated(worktree_path, logger, repo_root):
     # Check if summary.json was already updated today (by the retro skill's Step 10)
     if os.path.exists(summary_path):
         try:
-            with open(summary_path, "r") as f:
+            with open(summary_path, "r", encoding="utf-8") as f:
                 store = json.load(f)
             if store.get("last_updated") == today:
                 return  # Already updated — retro skill completed Step 10
@@ -1029,7 +1029,7 @@ def ensure_retro_summary_updated(worktree_path, logger, repo_root):
 
     # Load findings
     try:
-        with open(findings_path, "r") as f:
+        with open(findings_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return
@@ -1071,7 +1071,7 @@ def ensure_retro_summary_updated(worktree_path, logger, repo_root):
     # Write back
     os.makedirs(os.path.dirname(summary_path), exist_ok=True)
     try:
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(store, f, indent=2)
         log(logger, "retro", "SUMMARY_FALLBACK_WRITTEN", path=summary_path)
     except OSError as e:
@@ -1305,7 +1305,7 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
     pr_title = f"feat: {branch}"
     pr_body_summary = ""
     try:
-        with open(summary_log, "r", errors="replace") as f:
+        with open(summary_log, "r", encoding="utf-8", errors="replace") as f:
             lines = [l.strip() for l in f.readlines() if l.strip()]
             if lines:
                 pr_title = lines[0][:70]
@@ -1469,7 +1469,7 @@ def _read_last_lines(worktree_path, stage_name, n=50):
             log_path = candidates[-1]
 
     try:
-        with open(log_path, "r", errors="replace") as f:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
             return [line.rstrip() for line in lines[-n:] if line.strip()]
     except OSError:
@@ -1505,7 +1505,7 @@ def write_result(worktree_path, status, duration, stages, pr_url=None,
 
     result_path = os.path.join(worktree_path, ".workflow", "pipeline-result.json")
     try:
-        with open(result_path, "w") as f:
+        with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2)
     except OSError:
         pass

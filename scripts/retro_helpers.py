@@ -14,7 +14,7 @@ def extract_transcript_signals(jsonl_path):
     command_counts = {}
 
     try:
-        with open(jsonl_path, "r", errors="replace") as f:
+        with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -129,7 +129,7 @@ def extract_enforcement_signals(state_path):
         "stop_hook_last": None,
     }
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
         signals["stop_hook_count"] = state.get("stop_hook_count", 0)
         signals["stop_hook_blocked"] = state.get("stop_hook_blocked", False)

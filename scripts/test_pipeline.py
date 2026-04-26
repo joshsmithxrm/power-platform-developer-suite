@@ -174,7 +174,7 @@ class TestWriteResultResumeCommand(unittest.TestCase):
             cmd = "python scripts/pipeline.py --from converge --worktree /tmp/wt"
             write_result(tmpdir, "failed", 100, {},
                          failed_stage="converge", resume_command=cmd)
-            with open(os.path.join(wf, "pipeline-result.json")) as f:
+            with open(os.path.join(wf, "pipeline-result.json"), encoding="utf-8") as f:
                 data = json.load(f)
             self.assertEqual(data["resume_command"], cmd)
             self.assertEqual(data["status"], "failed")
@@ -185,7 +185,7 @@ class TestWriteResultResumeCommand(unittest.TestCase):
             wf = os.path.join(tmpdir, ".workflow")
             os.makedirs(wf)
             write_result(tmpdir, "complete", 100, {})
-            with open(os.path.join(wf, "pipeline-result.json")) as f:
+            with open(os.path.join(wf, "pipeline-result.json"), encoding="utf-8") as f:
                 data = json.load(f)
             self.assertNotIn("resume_command", data)
 
@@ -195,7 +195,7 @@ class TestWriteResultResumeCommand(unittest.TestCase):
             os.makedirs(wf)
             write_result(tmpdir, "failed", 100, {},
                          failed_stage="converge", resume_command=None)
-            with open(os.path.join(wf, "pipeline-result.json")) as f:
+            with open(os.path.join(wf, "pipeline-result.json"), encoding="utf-8") as f:
                 data = json.load(f)
             self.assertNotIn("resume_command", data)
 

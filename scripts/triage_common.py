@@ -283,7 +283,7 @@ def build_triage_prompt(worktree, pr_number, comments):
     state_path = os.path.join(worktree, ".workflow", "state.json")
     spec_path = ""
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
         spec_path = state.get("spec", "")
     except (json.JSONDecodeError, OSError):
@@ -330,7 +330,7 @@ def parse_triage_jsonl(jsonl_path):
     """
     text_parts = []
     try:
-        with open(jsonl_path, "r", errors="replace") as f:
+        with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -363,7 +363,7 @@ def parse_triage_stage_log(stage_log_path):
     Returns list or None.
     """
     try:
-        with open(stage_log_path, "r", errors="replace") as f:
+        with open(stage_log_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except OSError:
         return None

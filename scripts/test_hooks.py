@@ -307,7 +307,7 @@ class TestWorktreeSafety(unittest.TestCase):
         wf = os.path.join(tmp, ".workflow")
         os.makedirs(wf, exist_ok=True)
         # Use the test runner's own PID — guaranteed alive.
-        with open(os.path.join(wf, "worktree-remove.lock"), "w") as f:
+        with open(os.path.join(wf, "worktree-remove.lock"), "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
         # Target a different worktree path so the main-root check doesn't fire.
         payload = {
@@ -343,7 +343,7 @@ class TestTaskCreateCap(unittest.TestCase):
         entries = [
             {"id": f"#{i}", "status": "active"} for i in range(count)
         ]
-        with open(os.path.join(d, "in-flight-issues.json"), "w") as f:
+        with open(os.path.join(d, "in-flight-issues.json"), "w", encoding="utf-8") as f:
             json.dump({"open_work": entries}, f)
 
     def test_taskcreate_cap_blocks_fourth(self):
@@ -387,7 +387,7 @@ class TestDebugFirst(unittest.TestCase):
     def _record_failure(self, project_dir: str, command: str = "dotnet test"):
         wf = os.path.join(project_dir, ".workflow")
         os.makedirs(wf, exist_ok=True)
-        with open(os.path.join(wf, "last_failure"), "w") as f:
+        with open(os.path.join(wf, "last_failure"), "w", encoding="utf-8") as f:
             json.dump({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "command": command,

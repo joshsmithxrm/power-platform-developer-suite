@@ -126,11 +126,18 @@ If the user elects to skip or only NITs are reported, proceed to step 4.
 Opens as draft. Monitor flips to ready via `pr_monitor.py` auto-ready-flip logic (added in #834) once CI green + Gemini reviewed + no unreplied comments.
 
 ```bash
-gh pr create --draft --title "<title>" --body "$(cat <<'EOF'
+# Write PR body to a temp file (no heredocs — avoids shell-quoting issues).
+PR_BODY=$(mktemp -t pr-body-XXXXXX.md)
+# Use Write tool to write body content to $PR_BODY.
+gh pr create --draft --title "<title>" --body-file "$PR_BODY"
+rm -f "$PR_BODY"
+```
+
+PR body template (write to the temp file):
+```
 ## Summary
 <1-3 bullet points>
 
-Closes #NNN
 Closes #NNN
 
 ## Test Plan
@@ -143,8 +150,6 @@ Closes #NNN
 - [x] /review completed (findings: N)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
-EOF
-)"
 ```
 
 Omit the `Closes` lines if there are no linked issues. Keep title under 70 characters. Use conventional commit format.

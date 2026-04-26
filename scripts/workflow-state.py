@@ -8,6 +8,7 @@ Usage:
   python scripts/workflow-state.py set gates.commit_ref abc123def
   python scripts/workflow-state.py set review.findings 3
   python scripts/workflow-state.py set pr.gemini_triaged true
+  echo 'complex value' | python scripts/workflow-state.py set --value-stdin my.key
   python scripts/workflow-state.py set-null gates.passed
   python scripts/workflow-state.py append issues 602
   python scripts/workflow-state.py get issues
@@ -73,7 +74,7 @@ def read_state():
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -81,7 +82,7 @@ def read_state():
 
 def write_state(state):
     path = get_state_path()
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
         f.write("\n")
     print(f"Updated {path}", file=sys.stderr)
@@ -160,11 +161,18 @@ def main():
         sys.exit(0)
 
     if command == "set":
-        if len(sys.argv) < 4:
+        if len(sys.argv) >= 3 and sys.argv[2] == "--value-stdin":
+            if len(sys.argv) < 4:
+                print("Usage: workflow-state.py set --value-stdin <key>", file=sys.stderr)
+                sys.exit(1)
+            key = sys.argv[3]
+            value = sys.stdin.buffer.read().decode("utf-8")
+        elif len(sys.argv) < 4:
             print("Usage: workflow-state.py set <key> <value>", file=sys.stderr)
             sys.exit(1)
-        key = sys.argv[2]
-        value = coerce_value(sys.argv[3])
+        else:
+            key = sys.argv[2]
+            value = coerce_value(sys.argv[3])
         state = read_state()
         set_nested(state, key, value)
         write_state(state)

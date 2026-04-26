@@ -87,7 +87,7 @@ def main():
     if hook_event == "PostToolUse":
         # AC-164: release the PID lock once the removal completes (success or failure).
         try:
-            with open(lock_path, "r") as f:
+            with open(lock_path, "r", encoding="utf-8") as f:
                 owner = int(f.read().strip() or "0")
         except (OSError, ValueError):
             owner = 0
@@ -107,7 +107,7 @@ def main():
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     if os.path.exists(lock_path):
         try:
-            with open(lock_path, "r") as f:
+            with open(lock_path, "r", encoding="utf-8") as f:
                 other_pid = int(f.read().strip() or "0")
         except (OSError, ValueError):
             other_pid = 0
@@ -120,7 +120,7 @@ def main():
             sys.exit(2)
     # Write current parent PID (Bash invoker) so the PostToolUse cleanup matches.
     try:
-        with open(lock_path, "w") as f:
+        with open(lock_path, "w", encoding="utf-8") as f:
             f.write(str(os.getppid()))
     except OSError:
         pass

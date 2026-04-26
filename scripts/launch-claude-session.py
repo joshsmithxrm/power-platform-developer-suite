@@ -75,14 +75,15 @@ def build_launch_script(
     """Return the full text of the `.ps1` launch script.
 
     The prompt is wrapped in a PowerShell single-quoted here-string
-    (`@' ... '@`). The only content that breaks that here-string is a
-    line whose first two characters are `'@` — we defensively check for
-    it and raise, rather than silently corrupting the script.
+    (`@' ... '@`). The only content that terminates that here-string is
+    a line that is exactly `'@` (no leading or trailing whitespace) —
+    we defensively check for it and raise, rather than silently
+    corrupting the script.
     """
     for lineno, line in enumerate(prompt.splitlines(), start=1):
-        if line.startswith(PROMPT_TERMINATOR):
+        if line == PROMPT_TERMINATOR:
             raise ValueError(
-                f"prompt line {lineno} starts with {PROMPT_TERMINATOR!r}, which "
+                f"prompt line {lineno} is exactly {PROMPT_TERMINATOR!r}, which "
                 f"would terminate the PowerShell here-string. Reword or prefix "
                 f"with a space."
             )
@@ -245,10 +246,15 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--target", required=True, help="target worktree directory")
     p.add_argument("--name", required=True, help="short name (for script filename)")
-    p.add_argument(
+    prompt_group = p.add_mutually_exclusive_group(required=True)
+    prompt_group.add_argument(
         "--prompt-file",
-        required=True,
         help="path to a file containing the prompt verbatim",
+    )
+    prompt_group.add_argument(
+        "--prompt-stdin",
+        action="store_true",
+        help="read prompt from stdin (avoids shell-quoting entirely)",
     )
     p.add_argument(
         "--claude-path",
@@ -269,11 +275,14 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     _validate_name(args.name)
-    if not os.path.exists(args.prompt_file):
-        sys.stderr.write(f"prompt file not found: {args.prompt_file}\n")
-        return 1
-    with open(args.prompt_file, "r", encoding="utf-8") as f:
-        prompt = f.read()
+    if args.prompt_stdin:
+        prompt = sys.stdin.buffer.read().decode("utf-8")
+    else:
+        if not os.path.exists(args.prompt_file):
+            sys.stderr.write(f"prompt file not found: {args.prompt_file}\n")
+            return 1
+        with open(args.prompt_file, "r", encoding="utf-8") as f:
+            prompt = f.read()
     return launch(
         target=args.target,
         name=args.name,

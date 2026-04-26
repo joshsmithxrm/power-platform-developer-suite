@@ -59,7 +59,7 @@ def main():
         sys.exit(0)
 
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
@@ -102,7 +102,7 @@ def main():
             state["stop_hook_blocked"] = True
             state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
             state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
-            with open(state_path, "w") as f:
+            with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
                 f.write("\n")
         except OSError:
@@ -142,7 +142,7 @@ def main():
                 state["stop_hook_blocked"] = True
                 state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
                 state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
-                with open(state_path, "w") as f:
+                with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
                     f.write("\n")
             except OSError:
@@ -306,7 +306,7 @@ def main():
             state["stop_hook_blocked"] = True
             state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
             state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
-            with open(state_path, "w") as f:
+            with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
                 f.write("\n")
         except OSError:
