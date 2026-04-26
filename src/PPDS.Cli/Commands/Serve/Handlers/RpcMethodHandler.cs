@@ -2579,6 +2579,44 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
+    /// Validates SQL text and returns structured diagnostics for editor squiggles.
+    /// Parse-only mode (no metadata required) — does not connect to a profile/environment.
+    /// FetchXML validation is a non-goal: returns empty diagnostics for language=="xml".
+    /// </summary>
+    [JsonRpcMethod("query/validate")]
+    public async Task<QueryValidateResponse> QueryValidateAsync(
+        QueryValidateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // FetchXML validation is a non-goal — return empty diagnostics.
+        if (string.Equals(request.Language, "xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return new QueryValidateResponse();
+        }
+
+        // Short-circuit on empty/whitespace or trivially short input.
+        if (string.IsNullOrWhiteSpace(request.Sql) || request.Sql.Trim().Length < 3)
+        {
+            return new QueryValidateResponse();
+        }
+
+        // Parse-only mode: no metadata provider, no environment connection required.
+        var validator = new SqlValidator(metadataProvider: null);
+        var diagnostics = await validator.ValidateAsync(request.Sql, cancellationToken);
+
+        return new QueryValidateResponse
+        {
+            Diagnostics = diagnostics.Select(d => new DiagnosticDto
+            {
+                Start = d.Start,
+                Length = d.Length,
+                Severity = d.Severity.ToString().ToLowerInvariant(),
+                Message = d.Message,
+            }).ToList(),
+        };
+    }
+
+    /// <summary>
     /// Executes a FetchXML query against Dataverse.
     /// Maps to: ppds query fetch --json
     /// </summary>
@@ -2659,6 +2697,19 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
                 {
+                    var diagnostics = ExtractParseDiagnostics(ex, request.Sql);
+                    if (diagnostics is { Count: > 0 })
+                    {
+                        throw new RpcException(
+                            ErrorCodes.Query.ParseError,
+                            ex.UserMessage,
+                            new RpcErrorData
+                            {
+                                Code = ErrorCodes.Query.ParseError,
+                                Message = ex.UserMessage,
+                                Diagnostics = diagnostics,
+                            });
+                    }
                     throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
                 }
             }
@@ -2761,6 +2812,19 @@ public class RpcMethodHandler : IDisposable
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
             {
+                var diagnostics = ExtractParseDiagnostics(ex, request.Sql);
+                if (diagnostics is { Count: > 0 })
+                {
+                    throw new RpcException(
+                        ErrorCodes.Query.ParseError,
+                        ex.UserMessage,
+                        new RpcErrorData
+                        {
+                            Code = ErrorCodes.Query.ParseError,
+                            Message = ex.UserMessage,
+                            Diagnostics = diagnostics,
+                        });
+                }
                 throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
@@ -3437,6 +3501,59 @@ public class RpcMethodHandler : IDisposable
             (sp, _, _, ct) => action(sp, ct),
             cancellationToken,
             callerName);
+
+    /// <summary>
+    /// Extracts <see cref="DiagnosticDto"/> items from a <see cref="QueryParseException"/>
+    /// chained inside a <see cref="PpdsException"/>. Returns null if no parse exception
+    /// is found in the chain.
+    /// </summary>
+    private static List<DiagnosticDto>? ExtractParseDiagnostics(Exception ex, string sql)
+    {
+        QueryParseException? parseEx = null;
+        Exception? current = ex;
+        while (current != null)
+        {
+            if (current is QueryParseException qpe)
+            {
+                parseEx = qpe;
+                break;
+            }
+            current = current.InnerException;
+        }
+        if (parseEx == null || parseEx.Errors.Count == 0) return null;
+
+        var result = new List<DiagnosticDto>(parseEx.Errors.Count);
+        foreach (var pe in parseEx.Errors)
+        {
+            var offset = CalculateOffset(sql, pe.Line, pe.Column);
+            var length = Math.Max(1, Math.Min(10, sql.Length - offset));
+            result.Add(new DiagnosticDto
+            {
+                Start = offset,
+                Length = length,
+                Severity = "error",
+                Message = pe.Message,
+            });
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Converts 1-based line/column to a 0-based character offset in the SQL text.
+    /// Mirrors <see cref="PPDS.Query.Intellisense.SqlValidator.CalculateOffset"/>.
+    /// </summary>
+    private static int CalculateOffset(string sql, int line, int column)
+    {
+        var offset = 0;
+        var currentLine = 1;
+        for (var i = 0; i < sql.Length && currentLine < line; i++)
+        {
+            if (sql[i] == '\n') currentLine++;
+            offset = i + 1;
+        }
+        offset += Math.Max(0, column - 1);
+        return Math.Min(offset, sql.Length);
+    }
 
     #endregion
 
@@ -6820,6 +6937,37 @@ public class QueryCompleteRequest
     [JsonPropertyName("language")] public string? Language { get; set; }
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
     [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
+}
+
+/// <summary>
+/// Request DTO for query/validate method.
+/// </summary>
+public class QueryValidateRequest
+{
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("language")] public string? Language { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("profileName")] public string? ProfileName { get; set; }
+}
+
+/// <summary>
+/// Response DTO for query/validate method.
+/// </summary>
+public class QueryValidateResponse
+{
+    [JsonPropertyName("diagnostics")] public List<DiagnosticDto> Diagnostics { get; set; } = [];
+}
+
+/// <summary>
+/// A single diagnostic (error/warning/info) on query text.
+/// Maps to Monaco IMarkerData on the webview side.
+/// </summary>
+public class DiagnosticDto
+{
+    [JsonPropertyName("start")] public int Start { get; set; }
+    [JsonPropertyName("length")] public int Length { get; set; }
+    [JsonPropertyName("severity")] public string Severity { get; set; } = "error";
+    [JsonPropertyName("message")] public string Message { get; set; } = "";
 }
 
 /// <summary>
