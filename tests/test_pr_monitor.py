@@ -1893,3 +1893,99 @@ class TestMsysPathconvNotInherited:
         env = mock_popen.call_args.kwargs.get("env", {})
         assert "MSYS_NO_PATHCONV" not in env, \
             "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
+
+
+# ---------------------------------------------------------------------------
+# PR #956: CI poll-error escalation
+# ---------------------------------------------------------------------------
+
+
+class TestCiEscalation:
+    """PR #956: escalate when CI checks aren't posted after sustained POLL_ERROR."""
+
+    def test_poll_error_below_threshold_does_not_escalate(self, tmp_path):
+        """Fewer than CI_ESCALATION_THRESHOLD errors: no notification."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        call_count = [0]
+
+        def mock_run(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1,
+                    stdout="", stderr="no checks reported")
+            return _gh_checks_json([
+                {"name": "build", "state": "COMPLETED", "bucket": "pass"},
+            ])
+
+        with patch("pr_monitor.subprocess.run", side_effect=mock_run), \
+             patch("pr_monitor.run_notify") as mock_notify, \
+             patch("pr_monitor.CI_POLL_INTERVAL", 0), \
+             patch("pr_monitor.CI_ESCALATION_MIN_ELAPSED", 0):
+            result = pr_monitor.poll_ci(wt, 42, logger)
+
+        assert result == "pass"
+        mock_notify.assert_not_called()
+
+    def test_poll_error_at_threshold_escalates_once(self, tmp_path):
+        """>=CI_ESCALATION_THRESHOLD errors: run_notify fires exactly once."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        call_count = [0]
+
+        def mock_run(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 5:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1,
+                    stdout="", stderr="no checks reported")
+            return _gh_checks_json([
+                {"name": "build", "state": "COMPLETED", "bucket": "pass"},
+            ])
+
+        with patch("pr_monitor.subprocess.run", side_effect=mock_run), \
+             patch("pr_monitor.run_notify") as mock_notify, \
+             patch("pr_monitor.CI_POLL_INTERVAL", 0), \
+             patch("pr_monitor.CI_ESCALATION_THRESHOLD", 3), \
+             patch("pr_monitor.CI_ESCALATION_MIN_ELAPSED", 0):
+            result = pr_monitor.poll_ci(wt, 42, logger)
+
+        assert result == "pass"
+        mock_notify.assert_called_once()
+        msg = mock_notify.call_args.kwargs.get("message", "")
+        assert "no CI checks reported" in msg
+        assert "42" in msg
+
+    def test_poll_error_recovers_after_escalation_logs_recovery(self, tmp_path):
+        """After escalation, checks posting triggers RECOVERED log entry."""
+        wt = _make_worktree(tmp_path)
+        log_path = str(tmp_path / "test.log")
+        logger = pr_monitor.Logger(log_path)
+
+        call_count = [0]
+
+        def mock_run(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 4:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1,
+                    stdout="", stderr="no checks reported")
+            return _gh_checks_json([
+                {"name": "build", "state": "COMPLETED", "bucket": "pass"},
+            ])
+
+        with patch("pr_monitor.subprocess.run", side_effect=mock_run), \
+             patch("pr_monitor.run_notify"), \
+             patch("pr_monitor.CI_POLL_INTERVAL", 0), \
+             patch("pr_monitor.CI_ESCALATION_THRESHOLD", 3), \
+             patch("pr_monitor.CI_ESCALATION_MIN_ELAPSED", 0):
+            result = pr_monitor.poll_ci(wt, 42, logger)
+
+        assert result == "pass"
+        with open(log_path) as f:
+            log_contents = f.read()
+        assert "RECOVERED" in log_contents
+        assert "ci_checks_posting=True" in log_contents
