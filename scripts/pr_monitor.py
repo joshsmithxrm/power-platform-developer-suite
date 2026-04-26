@@ -97,7 +97,7 @@ class Logger:
 
     def __init__(self, log_path):
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        self._fh = open(log_path, "a")
+        self._fh = open(log_path, "a", encoding="utf-8")
 
     def log(self, step, event, **extra):
         parts = [f"{_timestamp()} [{step}] {event}"]
@@ -133,7 +133,7 @@ def read_result(worktree):
     if not os.path.exists(path):
         return _empty_result()
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return _empty_result()
@@ -143,7 +143,7 @@ def write_result(worktree, result):
     path = _result_path(worktree)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2)
             f.write("\n")
     except OSError as e:
@@ -184,7 +184,7 @@ def _pid_path(worktree):
 def write_pid(worktree):
     path = _pid_path(worktree)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
 
@@ -465,7 +465,7 @@ def run_triage(worktree, pr_number, comments, logger):
     logger.log("triage", "START", comments=len(comments))
 
     try:
-        stage_log_file = open(stage_jsonl_path, "a")  # Append — preserve previous triage rounds
+        stage_log_file = open(stage_jsonl_path, "a", encoding="utf-8")  # Append — preserve previous triage rounds
     except OSError as e:
         logger.log("triage", "ERROR", reason=f"Cannot open stage log: {e}")
         return None
@@ -883,7 +883,7 @@ def run_retro(worktree, logger):
     logger.log("retro", "START")
 
     try:
-        stage_log_file = open(stage_jsonl_path, "w")
+        stage_log_file = open(stage_jsonl_path, "w", encoding="utf-8")
     except OSError as e:
         logger.log("retro", "ERROR", reason=f"Cannot open stage log: {e}")
         return "error"
@@ -938,7 +938,7 @@ def run_notify(worktree, pr_number, logger, message=None):
     state_path = os.path.join(worktree, ".workflow", "state.json")
     pr_url = None
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
         pr_url = (state.get("pr") or {}).get("url")
     except (json.JSONDecodeError, OSError):

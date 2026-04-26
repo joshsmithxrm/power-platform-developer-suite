@@ -34,7 +34,7 @@ def _read_state(project_dir: str) -> dict:
     if not os.path.exists(state_path):
         return {}
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}

@@ -44,7 +44,7 @@ LOCK_STALE_SECONDS = 30.0  # reclaim orphaned locks older than this
 def _load_counts(state_path):
     """Load counts file; return {} on any error (graceful fallback)."""
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             return {}
@@ -94,7 +94,7 @@ def _release_lock(fd, lock_path):
 def _atomic_write(state_path, counts):
     """Write counts to state_path atomically (temp file + os.replace)."""
     tmp_path = state_path + ".tmp"
-    with open(tmp_path, "w") as f:
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(counts, f)
         f.flush()
         try:

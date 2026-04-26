@@ -123,7 +123,7 @@ def main():
         sys.exit(0)
 
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
         print(

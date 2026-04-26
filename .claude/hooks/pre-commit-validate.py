@@ -112,14 +112,13 @@ def main():
             has_ext_changes = True  # If git check fails, run lint to be safe
 
         if has_ext_changes and os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
-            # shell=True required on Windows where npm is a .cmd batch file
+            npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
             lint_result = subprocess.run(
-                "npm run lint",
+                [npm_cmd, "run", "lint"],
                 cwd=extension_dir,
                 capture_output=True,
                 text=True,
                 timeout=60,
-                shell=True
             )
 
             if lint_result.returncode != 0:
@@ -169,7 +168,7 @@ def _gates_fresh(project_dir):
         return False
 
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
         return False
@@ -223,7 +222,7 @@ def _check_workflow_state(project_dir):
         return
 
     try:
-        with open(state_path, "r") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
         return

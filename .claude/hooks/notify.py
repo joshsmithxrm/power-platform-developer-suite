@@ -47,7 +47,7 @@ def get_pr_url(cwd):
     if not os.path.exists(state_path):
         return None
     try:
-        with open(state_path) as f:
+        with open(state_path, encoding="utf-8") as f:
             state = json.load(f)
         return (state.get("pr") or {}).get("url")
     except (json.JSONDecodeError, OSError):
