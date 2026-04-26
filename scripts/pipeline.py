@@ -27,6 +27,7 @@ Options:
     --dry-run           Run orchestration logic without invoking claude -p
 """
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -161,6 +162,94 @@ def get_commit_count(worktree_path):
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
         pass
     return 0
+
+
+def get_head_sha(worktree_path):
+    """Get current HEAD commit SHA."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
+def is_ancestor(commit_ref, head_sha, worktree_path):
+    """Check if commit_ref is an ancestor of (or equal to) head_sha."""
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit_ref, head_sha],
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _has_staged_changes(worktree_path):
+    """Return True if there are staged changes in the worktree."""
+    try:
+        return subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "HEAD"],
+            cwd=worktree_path,
+        ).returncode != 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def stage_already_completed(worktree_path, stage):
+    """Check if a stage outcome is already satisfied for current HEAD.
+
+    Follows pr-gate.py commit-ref validation tiers:
+      - gates/review: exact HEAD match on commit_ref
+      - verify/qa: ALL recorded surface commit_refs are ancestors-of-HEAD AND no staged changes
+      - pr: pr.url already set
+
+    Returns (completed, reason) tuple.
+    """
+    state = read_state(worktree_path)
+    head_sha = get_head_sha(worktree_path)
+    if not head_sha:
+        return False, "cannot resolve HEAD"
+
+    if stage == "gates":
+        gates = state.get("gates", {})
+        if gates.get("passed") and gates.get("commit_ref") == head_sha:
+            return True, f"gates.passed at HEAD {head_sha[:8]}"
+
+    elif stage == "review":
+        review = state.get("review", {})
+        if review.get("passed") and review.get("commit_ref") == head_sha:
+            return True, f"review.passed at HEAD {head_sha[:8]}"
+
+    elif stage in ("verify", "qa"):
+        section = state.get(stage, {})
+        refs = [ref for k, ref in section.items() if k.endswith("_commit_ref") and ref]
+        if not refs:
+            return False, ""
+        if _has_staged_changes(worktree_path):
+            return False, "staged changes detected"
+        for ref in refs:
+            if not is_ancestor(ref, head_sha, worktree_path):
+                return False, ""
+        return True, f"all recorded {stage} surfaces are ancestors of HEAD"
+
+    elif stage == "pr":
+        pr = state.get("pr", {})
+        if pr.get("url"):
+            return True, f"pr.url already set: {pr['url']}"
+
+    return False, ""
 
 
 def verify_outcome(worktree_path, stage, pre_commit_count):
@@ -747,19 +836,35 @@ def check_pr_created(worktree_path):
     return pr.get("url")
 
 
-def _find_duplicate_issue(title, repo_root):
-    """Check for existing open issue with matching title prefix."""
+# In-process tracking of filed findings (#978). Prevents duplicate filing
+# within a single pipeline run when GitHub search index lags behind.
+_FILED_FINDING_KEYS: "set[str]" = set()
+
+
+def _finding_key(finding):
+    """Generate a stable key for a retro finding for dedup matching."""
+    finding_id = finding.get("id", "R-??")
+    desc = finding.get("description", "")[:60]
+    raw = f"{finding_id}:{desc}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _find_duplicate_issue(title, finding_key, repo_root):
+    """Check for existing open issue with matching title prefix or finding key."""
     prefix = title[:50]
     try:
         result = subprocess.run(
-            ["gh", "issue", "list", "--search", prefix, "--state", "open",
-             "--json", "number,title", "--limit", "5"],
+            ["gh", "issue", "list", "--search", f'"finding_key:{finding_key}"', "--state", "open",
+             "--json", "number,title,body", "--limit", "20"],
             cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode != 0:
             return None
         issues = json.loads(result.stdout)
         for issue in issues:
+            body = issue.get("body") or ""
+            if f"finding_key:{finding_key}" in body:
+                return issue["number"]
             if issue["title"].startswith(prefix):
                 return issue["number"]
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
@@ -853,12 +958,20 @@ def process_retro_findings(worktree_path, logger, repo_root):
         fix = finding.get("fix_description", "")
         finding_id = finding.get("id", "R-??")
         title = f"retro: {desc[:70]}"
+        fkey = _finding_key(finding)
+
+        # In-process dedup (#978): skip if already filed in this pipeline run
+        if fkey in _FILED_FINDING_KEYS:
+            log(logger, "retro", "SKIPPED_IN_PROCESS_DEDUP",
+                finding=finding_id, key=fkey)
+            continue
 
         try:
-            existing = _find_duplicate_issue(title, repo_root)
+            existing = _find_duplicate_issue(title, fkey, repo_root)
         except Exception:
-            existing = None  # Best-effort dedup — file new issue on failure
+            existing = None
         if existing:
+            _FILED_FINDING_KEYS.add(fkey)
             _handle_duplicate(finding, existing, repo_root, logger, worktree_path)
             continue
 
@@ -867,6 +980,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
             body += "\n\n**Root cause chain:**\n"
             for i, cause in enumerate(finding["root_cause_chain"]):
                 body += f"{'  ' * i}→ {cause}\n"
+        body += f"\n\n<!-- finding_key:{fkey} -->"
         body += "\n\n---\n*Filed automatically by pipeline retro.*"
 
         try:
@@ -875,7 +989,8 @@ def process_retro_findings(worktree_path, logger, repo_root):
                 cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=True,
                 env=gh_env,
             )
-            log(logger, "retro", "ISSUE_CREATED", finding=finding_id)
+            _FILED_FINDING_KEYS.add(fkey)
+            log(logger, "retro", "ISSUE_CREATED", finding=finding_id, key=fkey)
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
             log(logger, "retro", "ISSUE_FAILED", finding=finding_id)
 
@@ -1082,6 +1197,31 @@ def run_pr_stage(worktree_path, logger, dry_run=False, ceiling=None):
     effective_ceiling = ceiling if ceiling is not None else HARD_CEILING
     log(logger, "pr", "START", ceiling=f"{effective_ceiling}s")
     start = time.time()
+
+    # Idempotency guard (#953): skip creation if PR already exists.
+    state = read_state(worktree_path)
+    existing_pr_url = (state.get("pr") or {}).get("url")
+    if existing_pr_url:
+        pr_number_candidate = existing_pr_url.rstrip("/").split("/")[-1]
+        if pr_number_candidate.isdigit():
+            try:
+                check = subprocess.run(
+                    ["gh", "pr", "view", pr_number_candidate,
+                     "--json", "state", "--jq", ".state"],
+                    cwd=worktree_path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=15,
+                )
+                if check.returncode == 0 and check.stdout.strip() in (
+                        "OPEN", "MERGED"):
+                    log(logger, "pr", "SKIPPED_EXISTING",
+                        url=existing_pr_url,
+                        state=check.stdout.strip())
+                    log(logger, "pr", "DONE", exit=0,
+                        duration=f"{int(time.time() - start)}s",
+                        mode="idempotent")
+                    return 0, logger
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                pass  # Fall through to normal creation flow
 
     # PPDS_SHAKEDOWN: skip PR creation entirely
     if os.environ.get("PPDS_SHAKEDOWN"):
@@ -1556,6 +1696,16 @@ def main():
             stage_start_time = time.time()
             exit_code = 0  # Default; overwritten by run_claude() calls
 
+            # Stage idempotency — skip stages whose outcomes are already
+            # satisfied for current HEAD (#937, #953).
+            if (stage in ("gates", "verify", "qa", "review", "pr")
+                    and worktree_path and not args.dry_run):
+                completed, reason = stage_already_completed(
+                    worktree_path, stage)
+                if completed:
+                    log(logger, stage, "SKIPPED_IDEMPOTENT", reason=reason)
+                    continue
+
             if stage == "worktree":
                 if worktree_path and os.path.exists(worktree_path):
                     log(logger, "worktree", "EXISTS", path=worktree_path)
@@ -1651,6 +1801,15 @@ def main():
                     continue
                 log(logger, "converge", "TRIGGERED", reason=reason)
 
+                # Set converging flag (#954) — blocks /pr invocation
+                # from within converge AI sessions via pr-gate.py.
+                subprocess.run(
+                    [sys.executable, "scripts/workflow-state.py",
+                     "set", "pipeline.converging", "true"],
+                    cwd=worktree_path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=10,
+                )
+
                 for round_num in range(args.max_converge):
                     log(logger, "converge", "ROUND_START", round=round_num + 1, max=args.max_converge)
 
@@ -1693,6 +1852,14 @@ def main():
                     print(f"\nFAILED: Could not converge after {args.max_converge} rounds.", file=sys.stderr)
                     _pipeline_fail("converge", "max rounds exceeded",
                                     log_stage=f"review-r{args.max_converge}")
+
+                # Clear converging flag (#954) — allow /pr after convergence.
+                subprocess.run(
+                    [sys.executable, "scripts/workflow-state.py",
+                     "set", "pipeline.converging", ""],
+                    cwd=worktree_path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=10,
+                )
 
             elif stage == "pr":
                 exit_code, logger = run_pr_stage(
