@@ -1956,15 +1956,19 @@ class TestCiFixRoundBudget:
 
     def test_ci_fix_round_budget_default_and_override(self, monkeypatch):
         """MAX_CI_FIX_ROUNDS defaults to 3 and is overridable via PPDS_MAX_CI_FIX_ROUNDS."""
+        import importlib
+
         # Default value
         assert pr_monitor.MAX_CI_FIX_ROUNDS == 3
 
-        # Override via environment variable (by checking the expression)
-        import importlib
+        # Override via environment variable — must reload module so the constant is re-evaluated
         monkeypatch.setenv("PPDS_MAX_CI_FIX_ROUNDS", "5")
-        # Verify the constant is read from env at module load time
-        override_val = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
-        assert override_val == 5
+        importlib.reload(pr_monitor)
+        try:
+            assert pr_monitor.MAX_CI_FIX_ROUNDS == 5
+        finally:
+            monkeypatch.delenv("PPDS_MAX_CI_FIX_ROUNDS", raising=False)
+            importlib.reload(pr_monitor)  # restore to default
 
 
 # ---------------------------------------------------------------------------

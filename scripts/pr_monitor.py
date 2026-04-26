@@ -1233,7 +1233,6 @@ def _write_ci_fix_decision(worktree, sha, round_num, payload):
     Returns the Path written.
     """
     decisions_dir = os.path.join(worktree, ".workflow", "ci-fix-decisions")
-    os.makedirs(decisions_dir, exist_ok=True)
     path = os.path.join(decisions_dir, f"{sha}.json")
     record = {
         "round": round_num,
@@ -1248,6 +1247,7 @@ def _write_ci_fix_decision(worktree, sha, round_num, payload):
         "scope_violation": bool(payload.get("scope_violation", False)),
     }
     try:
+        os.makedirs(decisions_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2)
             f.write("\n")
@@ -1699,8 +1699,10 @@ def run_monitor(worktree, pr_number, resume=False):
         write_result(worktree, result)
         logger.log("monitor", "ERROR", error=str(e))
         _notify_terminal(worktree, pr_number, logger,
-                         f"PR #{pr_number} monitor crashed: "
-                         f"{type(e).__name__}: {str(e)[:120]}")
+                         _build_terminal_notification(
+                             pr_number, "monitor-crash", result,
+                             ci_fix_rounds_used, triage_rounds_used, worktree,
+                         ) + f"\n  Exception: {type(e).__name__}: {str(e)[:120]}")
         logger.close()
         return 1
 
