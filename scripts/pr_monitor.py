@@ -1121,15 +1121,64 @@ def _load_prior_decision(worktree, sha):
         return None
 
 
+def _classify(ci_result, has_gemini_comments):
+    """Map (ci_result, has_gemini_comments) to an Action string.
+
+    Decision table (AC-182):
+      ci_result="running" / None → "wait"
+      ci_result="timeout"        → "terminal_state"
+      ci_result="fail"           → "dispatch_ci_fix"
+      ci_result="pass", comments → "dispatch_gemini_triage"
+      ci_result="pass", no comments → "done"
+    """
+    if ci_result in ("running", None):
+        return "wait"
+    if ci_result == "timeout":
+        return "terminal_state"
+    if ci_result == "fail":
+        return "dispatch_ci_fix"
+    if ci_result == "pass":
+        return "dispatch_gemini_triage" if has_gemini_comments else "done"
+    return "wait"
+
+
+def _build_terminal_notification(pr_number, terminal_state, result,
+                                  ci_fix_rounds_used, triage_rounds_used, worktree):
+    """Build the terminal notification body per AC-193."""
+    ci = result.get("ci_result") or "unknown"
+    gemini_raw = "none"
+    if result.get("gemini_review_posted"):
+        gemini_raw = "triaged" if result.get("triage_summary") else "pending"
+
+    decisions_dir = os.path.join(worktree, ".workflow", "ci-fix-decisions")
+    last_decision = "-"
+    if os.path.isdir(decisions_dir):
+        files = sorted(
+            (os.path.join(decisions_dir, f) for f in os.listdir(decisions_dir)
+             if f.endswith(".json")),
+            key=os.path.getmtime,
+        )
+        if files:
+            last_decision = os.path.relpath(files[-1], worktree)
+
+    return (
+        f"PR #{pr_number}: {terminal_state}\n"
+        f"  CI: {ci}\n"
+        f"  Gemini: {gemini_raw}\n"
+        f"  CI-fix rounds used: {ci_fix_rounds_used}/{MAX_CI_FIX_ROUNDS}\n"
+        f"  Triage rounds used: {triage_rounds_used}/{MAX_TRIAGE_ITERATIONS}\n"
+        f"  Last decision: {last_decision}"
+    )
+
+
 def run_monitor(worktree, pr_number, resume=False):
-    """Main monitor loop — run all steps in sequence."""
+    """Main monitor loop — state-machine orchestrator (v9.1)."""
     workflow_dir = os.path.join(worktree, ".workflow")
     os.makedirs(workflow_dir, exist_ok=True)
 
     log_path = os.path.join(workflow_dir, "pr-monitor.log")
     logger = Logger(log_path)
 
-    # PID management
     write_pid(worktree)
     atexit.register(cleanup_pid, worktree)
 
@@ -1138,155 +1187,176 @@ def run_monitor(worktree, pr_number, resume=False):
     result["timestamp"] = _timestamp()
     write_result(worktree, result)
 
-    logger.log("monitor", "START",
-               pr=pr_number, resume=resume, pid=os.getpid())
+    logger.log("monitor", "START", pr=pr_number, resume=resume, pid=os.getpid())
 
-    triage_iteration = 0
+    ci_fix_rounds_used = 0
+    triage_rounds_used = 0
 
     try:
-        # ---- Step 1: CI polling ----
+        # --- Phase A: Initial CI poll ---
         if not (resume and step_completed(result, "ci")):
             ci_status = _step_ci(worktree, pr_number, logger)
             result["ci_result"] = ci_status
             mark_step(result, "ci", ci_status)
             write_result(worktree, result)
+        else:
+            ci_status = result.get("ci_result", "pass")
 
-            if ci_status == "fail":
-                result["status"] = "ci_failed"
-                write_result(worktree, result)
-                _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI failed — continuing to triage")
-                logger.log("monitor", "CI_FAILED_CONTINUE",
-                           reason="CI failed, continuing to Gemini triage (AC-108)")
+        # ci-timeout from initial poll → terminal immediately
+        if ci_status == "timeout":
+            result["status"] = "ci-timeout"
+            write_result(worktree, result)
+            _notify_terminal(worktree, pr_number, logger,
+                             _build_terminal_notification(
+                                 pr_number, "ci-timeout", result,
+                                 ci_fix_rounds_used, triage_rounds_used, worktree))
+            logger.log("monitor", "ABORT", reason="CI timeout")
+            logger.close()
+            return 1
 
-            if ci_status == "timeout":
-                result["status"] = "ci_timeout"
-                write_result(worktree, result)
-                _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI timed out after "
-                                 f"{CI_MAX_WAIT // 60} min")
-                logger.log("monitor", "ABORT", reason="CI timeout")
-                logger.close()
-                return 1
-
-        # ---- Step 2: Gemini comment polling ----
+        # --- Phase B: Initial Gemini poll ---
         comments = []
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
         else:
-            # Resumed — re-fetch comments so the triage loop can resume
-            # pending iterations (otherwise inline_count stays 0 and the
-            # loop is skipped entirely).
             logger.log("gemini", "RESUMED")
             comments = poll_gemini_comments(worktree, pr_number, logger)
 
-        # ---- Step 3: Triage loop (if inline comments) ----
-        inline_count = len(comments)
-        while inline_count > 0 and triage_iteration < MAX_TRIAGE_ITERATIONS:
-            triage_iteration += 1
-            step_key = f"triage_{triage_iteration}"
+        # --- Phase C: Classifier loop ---
+        HARD_CEILING = MAX_CI_FIX_ROUNDS + MAX_TRIAGE_ITERATIONS + 4
+        prev_action = None
 
-            if resume and step_completed(result, step_key):
-                logger.log("triage", "RESUMED", iteration=triage_iteration)
-                # Re-poll to get fresh comments for next iteration;
-                # without this, the loop would reuse stale comments/inline_count.
-                comments = _step_gemini(worktree, pr_number, logger, result,
-                                        step_suffix=f"_r{triage_iteration}")
-                inline_count = len(comments)
-                continue
+        for _iteration in range(HARD_CEILING):
+            ci_status = result.get("ci_result", "pass")
+            action = _classify(ci_status, bool(comments))
 
-            logger.log("triage", "ITERATION",
-                       round=triage_iteration, comments=inline_count)
+            # Log state transitions (AC bonus)
+            if action != prev_action:
+                logger.log("monitor", "STATE_TRANSITION",
+                           **{"from": prev_action or "start", "to": action})
+                prev_action = action
 
-            triage_results = _step_triage(
-                worktree, pr_number, comments, logger, result,
-                step_key, triage_iteration,
-            )
-
-            # Post threaded replies + reconciliation loop (AC-140)
-            if triage_results:
-                _reconcile_replies(
-                    worktree, pr_number, triage_results, logger, result,
-                    triage_iteration,
-                )
-
-            # Re-poll CI after triage commits
-            ci_recheck_key = f"ci_recheck_{triage_iteration}"
-            ci_status = _step_ci(worktree, pr_number, logger,
-                                 step_suffix=f"_r{triage_iteration}")
-            result["ci_result"] = ci_status
-            mark_step(result, ci_recheck_key, ci_status)
-            write_result(worktree, result)
-
-            if ci_status == "fail":
-                result["status"] = "ci_failed"
-                write_result(worktree, result)
-                _notify_terminal(
-                    worktree, pr_number, logger,
-                    f"PR #{pr_number} CI failed after triage round "
-                    f"{triage_iteration}")
-                logger.log("monitor", "CI_FAILED_CONTINUE",
-                           reason=f"CI failed after triage round "
-                           f"{triage_iteration}, exiting triage loop")
-                break
-
-            if ci_status == "timeout":
-                result["status"] = "ci_timeout"
+            if action == "terminal_state":
+                result["status"] = "ci-timeout"
                 write_result(worktree, result)
                 _notify_terminal(worktree, pr_number, logger,
-                                 f"PR #{pr_number} CI timed out after triage "
-                                 f"round {triage_iteration}")
-                logger.log("monitor", "ABORT",
-                           reason=f"CI timeout after triage round {triage_iteration}")
+                                 _build_terminal_notification(
+                                     pr_number, "ci-timeout", result,
+                                     ci_fix_rounds_used, triage_rounds_used, worktree))
                 logger.close()
                 return 1
 
-            # Re-poll Gemini for new comments after triage. PR #864
-            # double-reply regression: the pulls/comments endpoint returns
-            # every Gemini-authored comment, including ones we already
-            # replied to, so the loop used to re-ingest them and post a
-            # second reply (often with a different LLM-classified action).
-            # On rounds 2+, restrict to genuinely unreplied bot comments.
-            # Fail-open on transient errors — don't abort the monitor run
-            # (matches _step_gemini and _ready_flip_gates patterns).
-            poll_step = f"gemini_r{triage_iteration}"
-            try:
-                comments = get_unreplied_comments(
-                    worktree, pr_number, shakedown=bool(SHAKEDOWN),
+            elif action == "wait":
+                time.sleep(CI_POLL_INTERVAL)
+                ci_status = _step_ci(worktree, pr_number, logger)
+                result["ci_result"] = ci_status
+                write_result(worktree, result)
+                continue
+
+            elif action == "dispatch_ci_fix":
+                if ci_fix_rounds_used >= MAX_CI_FIX_ROUNDS:
+                    result["status"] = "stuck-ci-fix-exhausted"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "stuck-ci-fix-exhausted", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
+
+                ci_fix_rounds_used += 1
+                logger.log("monitor", "CI_FIX_DISPATCH",
+                           round=ci_fix_rounds_used, of=MAX_CI_FIX_ROUNDS)
+                # Phase 2 placeholder: CI-fix agent wired in Phase 3.
+                # Re-poll CI to check if the issue resolved.
+                ci_status = _step_ci(worktree, pr_number, logger,
+                                     step_suffix=f"_ci_fix_r{ci_fix_rounds_used}")
+                result["ci_result"] = ci_status
+                write_result(worktree, result)
+
+                if ci_status == "timeout":
+                    result["status"] = "ci-timeout"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "ci-timeout", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
+
+                # Re-poll Gemini after CI-fix attempt
+                comments = _step_gemini(worktree, pr_number, logger, result,
+                                        step_suffix=f"_post_ci_fix_{ci_fix_rounds_used}")
+                continue
+
+            elif action == "dispatch_gemini_triage":
+                if triage_rounds_used >= MAX_TRIAGE_ITERATIONS:
+                    result["status"] = "stuck-triage-exhausted"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "stuck-triage-exhausted", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
+
+                triage_rounds_used += 1
+                step_key = f"triage_{triage_rounds_used}"
+                logger.log("triage", "ITERATION",
+                           round=triage_rounds_used, comments=len(comments))
+
+                triage_results = _step_triage(
+                    worktree, pr_number, comments, logger, result,
+                    step_key, triage_rounds_used,
                 )
-                result["comment_counts"][poll_step] = len(comments)
-                mark_step(result, poll_step, "done")
-            except Exception as e:  # noqa: BLE001 — fail-open per repo pattern
-                logger.log("triage", "POLL_ERROR",
-                           round=triage_iteration, error=str(e))
-                mark_step(result, poll_step, "error")
-                comments = []
-            write_result(worktree, result)
-            logger.log("triage", "POLL_UNREPLIED",
-                       round=triage_iteration, comments=len(comments))
-            inline_count = len(comments)
 
-        # Triage-complete notification when CI was failing (#860)
-        if result.get("ci_result") == "fail" and result.get("triage_summary"):
-            total = sum(len(s.get("results", []))
-                        for s in result["triage_summary"])
-            _notify_terminal(
-                worktree, pr_number, logger,
-                f"PR #{pr_number} triage complete — "
-                f"{total} item(s) triaged (CI still failing)")
+                if triage_results:
+                    _reconcile_replies(
+                        worktree, pr_number, triage_results, logger, result,
+                        triage_rounds_used,
+                    )
 
-        # ---- Step 4: Mark PR ready ----
-        if not (resume and step_completed(result, "ready")):
-            _step_ready(worktree, pr_number, logger, result)
+                # Re-poll CI after triage commits
+                ci_recheck_key = f"ci_recheck_{triage_rounds_used}"
+                ci_status = _step_ci(worktree, pr_number, logger,
+                                     step_suffix=f"_r{triage_rounds_used}")
+                result["ci_result"] = ci_status
+                mark_step(result, ci_recheck_key, ci_status)
+                write_result(worktree, result)
 
-        # ---- Step 5: Retro ----
-        if not (resume and step_completed(result, "retro")):
-            _step_retro(worktree, logger, result)
+                if ci_status == "timeout":
+                    result["status"] = "ci-timeout"
+                    write_result(worktree, result)
+                    _notify_terminal(
+                        worktree, pr_number, logger,
+                        _build_terminal_notification(
+                            pr_number, "ci-timeout", result,
+                            ci_fix_rounds_used, triage_rounds_used, worktree))
+                    logger.close()
+                    return 1
 
-        # Exit early on CI failure — _step_ready already sent a descriptive
-        # notification explaining why the PR remains in draft. Skipping
-        # _step_notify avoids a misleading "PR is ready" message right
-        # before the monitor exits with an error code.
+                # Re-poll Gemini for remaining unreplied comments
+                try:
+                    comments = get_unreplied_comments(
+                        worktree, pr_number, shakedown=bool(SHAKEDOWN),
+                    )
+                    result["comment_counts"][f"gemini_r{triage_rounds_used}"] = len(comments)
+                    mark_step(result, f"gemini_r{triage_rounds_used}", "done")
+                except Exception as e:  # noqa: BLE001
+                    logger.log("triage", "POLL_ERROR",
+                               round=triage_rounds_used, error=str(e))
+                    mark_step(result, f"gemini_r{triage_rounds_used}", "error")
+                    comments = []
+                write_result(worktree, result)
+                continue
+
+            elif action == "done":
+                break
+
+        # --- Phase D: CI still failing after loop? ---
         if result.get("ci_result") == "fail":
             result["status"] = "ci_failed"
             write_result(worktree, result)
@@ -1294,12 +1364,18 @@ def run_monitor(worktree, pr_number, resume=False):
             logger.close()
             return 1
 
-        # ---- Step 6: Notify ----
+        # --- Phase E: Ready → Retro → Notify ---
+        if not (resume and step_completed(result, "ready")):
+            _step_ready(worktree, pr_number, logger, result)
+
+        if not (resume and step_completed(result, "retro")):
+            _step_retro(worktree, logger, result)
+
         if not (resume and step_completed(result, "notify")):
             _deregister_inflight(worktree, logger)
             _step_notify(worktree, pr_number, logger, result)
 
-        result["status"] = "complete"
+        result["status"] = "ready"
         write_result(worktree, result)
         logger.log("monitor", "COMPLETE", pr=pr_number)
         logger.close()
@@ -1313,7 +1389,7 @@ def run_monitor(worktree, pr_number, resume=False):
         return 130
 
     except Exception as e:
-        result["status"] = "error"
+        result["status"] = "monitor-crash"
         result["error"] = str(e)
         write_result(worktree, result)
         logger.log("monitor", "ERROR", error=str(e))

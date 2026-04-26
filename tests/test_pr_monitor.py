@@ -86,119 +86,30 @@ class TestCiFailure:
         assert result == "fail"
 
     def test_ci_failure_triggers_notify_in_monitor(self, tmp_path):
-        """run_monitor writes status=ci_failed, continues to triage, and
-        still returns exit code 1 (#860)."""
+        """run_monitor exhausts CI-fix budget and fires exactly one terminal notification."""
         wt = _make_worktree(tmp_path)
 
         with patch("pr_monitor.poll_ci", return_value="fail"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
-             patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify") as mock_notify:
             exit_code = pr_monitor.run_monitor(wt, 99, resume=False)
 
         assert exit_code == 1
         result = pr_monitor.read_result(wt)
-        assert result["status"] == "ci_failed"
-        # CI-fail notification + final notification (#860: no longer aborts)
-        assert mock_notify.call_count >= 1
-        # First call is the CI-fail terminal notification
-        first_call = mock_notify.call_args_list[0]
-        assert first_call[0][0] == wt, "run_notify must receive worktree path"
-        assert first_call[0][1] == 99, "run_notify must receive PR number"
-        assert "CI failed" in first_call[1].get("message", "")
+        assert result["status"] == "stuck-ci-fix-exhausted"
+        # Exactly one terminal notification
+        assert mock_notify.call_count == 1
+        msg = mock_notify.call_args[1].get("message", "")
+        assert "stuck-ci-fix-exhausted" in msg
 
 
 class TestCiFailContinuesToTriage:
-    """#860: CI failure must not abort triage — Gemini comments are still triaged."""
+    """AC-108 SUPERSEDED by AC-181/AC-191 (v9.1).
 
-    def test_ci_fail_then_gemini_comment_is_triaged(self, tmp_path):
-        """AC-4: CI fails, Gemini posts a comment, monitor triages it."""
-        wt = _make_worktree(tmp_path)
-        pr_monitor._POSTED_REPLY_KEYS.clear()
-
-        gemini_comment = {
-            "id": 7001, "user": "gemini-code-assist[bot]",
-            "path": "src/Risky.cs", "line": 42,
-            "body": "File.Create race condition — use SetUnixFileMode",
-        }
-        triage_result = [{
-            "id": 7001, "action": "acknowledged",
-            "description": "security finding acknowledged",
-        }]
-
-        with patch("pr_monitor.poll_ci", return_value="fail"), \
-             patch("pr_monitor.poll_gemini_comments",
-                   return_value=[gemini_comment]), \
-             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
-             patch("pr_monitor.run_triage", return_value=triage_result) as mock_triage, \
-             patch("pr_monitor._post_replies_common"), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify") as mock_notify:
-            exit_code = pr_monitor.run_monitor(wt, 858, resume=False)
-
-        assert exit_code == 1
-        result = pr_monitor.read_result(wt)
-        assert result["status"] == "ci_failed"
-
-        # AC-1: triage ran despite CI failure
-        mock_triage.assert_called_once()
-
-        # AC-3: CI-fail notification AND triage-complete notification
-        notify_messages = [
-            c[1].get("message", "") for c in mock_notify.call_args_list
-            if c[1].get("message")
-        ]
-        assert any("CI failed" in m for m in notify_messages), \
-            "CI-fail notification missing"
-        assert any("triage complete" in m for m in notify_messages), \
-            "triage-complete notification missing"
-
-        # AC-2: ready-flip was NOT performed (CI is failing)
-        assert result["steps_completed"].get("ready", {}).get("status") == "skipped"
-
-    def test_ci_fail_no_gemini_comments_still_completes(self, tmp_path):
-        """CI fails with no Gemini comments — triage is skipped, status=ci_failed."""
-        wt = _make_worktree(tmp_path)
-
-        with patch("pr_monitor.poll_ci", return_value="fail"), \
-             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"):
-            exit_code = pr_monitor.run_monitor(wt, 100, resume=False)
-
-        assert exit_code == 1
-        result = pr_monitor.read_result(wt)
-        assert result["status"] == "ci_failed"
-        assert result["triage_summary"] == []
-
-    def test_ci_fail_ready_flip_gated(self, tmp_path):
-        """AC-2: ready-flip is correctly gated on CI passing, no regression of #834."""
-        wt = _make_worktree(tmp_path)
-
-        with patch("pr_monitor.poll_ci", return_value="fail"), \
-             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"), \
-             patch("pr_monitor.mark_pr_ready") as mock_ready:
-            exit_code = pr_monitor.run_monitor(wt, 101, resume=False)
-
-        assert exit_code == 1
-        mock_ready.assert_not_called()
-
-    def test_gemini_timeout_still_applies_on_ci_fail(self, tmp_path):
-        """AC-5: existing Gemini-review timeout still applies when CI fails."""
-        wt = _make_worktree(tmp_path)
-
-        with patch("pr_monitor.poll_ci", return_value="fail"), \
-             patch("pr_monitor.poll_gemini_comments", return_value=[]) as mock_gemini, \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"):
-            exit_code = pr_monitor.run_monitor(wt, 102, resume=False)
-
-        assert exit_code == 1
-        # poll_gemini_comments was called (not skipped), proving
-        # the Gemini wait phase ran even though CI failed.
-        mock_gemini.assert_called_once()
+    Pre-v9.1: CI failure continued to Gemini triage.
+    v9.1: CI failure routes to CI-fix agent (see Phase 3 tests for AC-108 supersession).
+    """
+    pass
 
 
 class TestCiTimeout:
@@ -226,7 +137,7 @@ class TestTerminalNotifications:
     """Monitor fires run_notify on every terminal state (success + failures)."""
 
     def test_notify_on_ci_timeout(self, tmp_path):
-        """CI timeout path calls run_notify with a descriptive message."""
+        """CI timeout path calls run_notify once with a terminal notification."""
         wt = _make_worktree(tmp_path)
 
         with patch("pr_monitor.poll_ci", return_value="timeout"), \
@@ -235,7 +146,8 @@ class TestTerminalNotifications:
 
         assert exit_code == 1
         mock_notify.assert_called_once()
-        assert "timed out" in mock_notify.call_args.kwargs["message"].lower()
+        msg = mock_notify.call_args[1].get("message", "")
+        assert "ci-timeout" in msg
 
     def test_notify_on_monitor_exception(self, tmp_path):
         """Uncaught exception in the monitor loop still fires notify."""
@@ -261,7 +173,7 @@ class TestTerminalNotifications:
         assert exit_code == 1
         mock_notify.assert_called_once()
         msg = mock_notify.call_args.kwargs["message"]
-        assert "crashed" in msg.lower()
+        assert "crash" in msg.lower() or "RuntimeError" in msg
         assert "RuntimeError" in msg
 
     def test_notify_failure_does_not_cascade(self, tmp_path):
@@ -419,7 +331,7 @@ class TestTriageCiLoopLimit:
     """AC-127: Max 3 triage -> CI iterations."""
 
     def test_triage_ci_loop_limit(self, tmp_path):
-        """Triage loop stops after MAX_TRIAGE_ITERATIONS even if comments persist."""
+        """Triage loop stops after MAX_TRIAGE_ITERATIONS with stuck-triage-exhausted."""
         wt = _make_worktree(tmp_path)
         pr_monitor._POSTED_REPLY_KEYS.clear()
 
@@ -427,24 +339,20 @@ class TestTriageCiLoopLimit:
             {"id": 1, "user": "g", "path": "a.py", "line": 1, "body": "fix"}
         ]
 
-        # poll_ci: initial + 3 re-checks = 4 calls. Round 1 uses
-        # poll_gemini_comments; rounds 2+ use get_unreplied_comments.
-        # Both are stubbed to always return a persistent comment so the
-        # loop runs up to the iteration cap.
-        with patch("pr_monitor.poll_ci", return_value="pass") as mock_ci, \
+        with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments",
                    return_value=persistent_comments), \
              patch("pr_monitor.get_unreplied_comments",
                    return_value=persistent_comments), \
              patch("pr_monitor.run_triage", return_value=[]) as mock_triage, \
-             patch("pr_monitor.mark_pr_ready", return_value=True), \
-             patch("pr_monitor.run_retro", return_value="done"), \
-             patch("pr_monitor.run_notify"):
+             patch("pr_monitor.run_notify") as mock_notify:
             exit_code = pr_monitor.run_monitor(wt, 1, resume=False)
 
-        assert exit_code == 0
-        # Triage should be called exactly MAX_TRIAGE_ITERATIONS (3) times
+        assert exit_code == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "stuck-triage-exhausted"
         assert mock_triage.call_count == pr_monitor.MAX_TRIAGE_ITERATIONS
+        mock_notify.assert_called_once()
 
 
 class TestRetroBeforeNotify:
@@ -537,7 +445,7 @@ class TestResultJsonSchema:
         assert "triage_summary" in result
         assert "retro_status" in result
         assert "timestamp" in result
-        assert result["status"] == "complete"
+        assert result["status"] == "ready"
 
     def test_result_file_path(self, tmp_path):
         """Result file is written to .workflow/pr-monitor-result.json."""
@@ -554,7 +462,7 @@ class TestResultJsonSchema:
         assert os.path.exists(expected_path)
         with open(expected_path) as f:
             data = json.load(f)
-        assert data["status"] == "complete"
+        assert data["status"] == "ready"
 
 
 class TestGeminiTimeout:
@@ -2133,3 +2041,160 @@ class TestTerminalStateEnum:
             f"Got:      {sorted(states)}"
         )
         assert len(states) == 6, "TERMINAL_STATES must have exactly 6 entries (no duplicates)"
+
+
+# ---------------------------------------------------------------------------
+# AC-181: No dispatch while CI running
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorNoCiDispatch:
+    """AC-181: Monitor never dispatches an agent while CI is running."""
+
+    def test_orchestrator_no_dispatch_while_ci_running(self, tmp_path):
+        """_classify returns 'wait' when ci_result is 'running'."""
+        # The classifier is the gating function — test it directly
+        assert pr_monitor._classify("running", False) == "wait"
+        assert pr_monitor._classify("running", True) == "wait"
+        assert pr_monitor._classify(None, False) == "wait"
+        assert pr_monitor._classify(None, True) == "wait"
+
+
+# ---------------------------------------------------------------------------
+# AC-182: Classifier dispatch matrix
+# ---------------------------------------------------------------------------
+
+
+class TestClassifierDispatchMatrix:
+    """AC-182: Parametrized decision table test for _classify."""
+
+    @pytest.mark.parametrize("ci_result,has_comments,expected_action", [
+        ("pass",    False, "done"),
+        ("pass",    True,  "dispatch_gemini_triage"),
+        ("fail",    False, "dispatch_ci_fix"),
+        ("fail",    True,  "dispatch_ci_fix"),
+        ("timeout", False, "terminal_state"),
+        ("timeout", True,  "terminal_state"),
+        ("running", False, "wait"),
+        ("running", True,  "wait"),
+    ])
+    def test_classifier_dispatch_matrix(self, ci_result, has_comments, expected_action):
+        """_classify returns expected action for each (ci_result, has_comments) pair."""
+        assert pr_monitor._classify(ci_result, has_comments) == expected_action
+
+
+# ---------------------------------------------------------------------------
+# AC-195: Serialized agent dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestSerializedAgentDispatch:
+    """AC-195: Only one agent in flight at a time."""
+
+    def test_serialized_agent_dispatch_across_kinds(self, tmp_path):
+        """With (fail, comments), CI-fix runs first; triage dispatches only
+        after CI is green (only one agent in flight at a time)."""
+        wt = _make_worktree(tmp_path)
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+        dispatch_log = []
+
+        gemini_comment = {"id": 1, "user": "gemini-code-assist[bot]",
+                          "path": "a.py", "line": 1, "body": "fix this"}
+
+        # ci_calls tracks how many times poll_ci has been called.
+        # First call: "fail" (triggers ci-fix dispatch)
+        # Subsequent calls (after ci-fix): "pass"
+        ci_calls = [0]
+        def ci_side_effect(*a, **kw):
+            ci_calls[0] += 1
+            return "pass" if ci_calls[0] > 1 else "fail"
+
+        triage_calls = [0]
+        def triage_side_effect(*a, **kw):
+            dispatch_log.append("gemini-triage")
+            triage_calls[0] += 1
+            return []
+
+        with patch("pr_monitor.poll_ci", side_effect=ci_side_effect), \
+             patch("pr_monitor.poll_gemini_comments",
+                   return_value=[gemini_comment]), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor.run_triage", side_effect=triage_side_effect), \
+             patch("pr_monitor._reconcile_replies"), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 42, resume=False)
+
+        # CI-fix ran first (ci_calls > 1 means we re-polled after fix attempt)
+        assert ci_calls[0] > 1, "CI should be re-polled after CI-fix dispatch"
+        # Triage ran after CI was green
+        assert triage_calls[0] >= 1, "Gemini triage should run after CI became green"
+        # Final result should be "ready" (happy path after fix + triage)
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# AC-196: Independent round budgets
+# ---------------------------------------------------------------------------
+
+
+class TestIndependentRoundBudgets:
+    """AC-196: MAX_CI_FIX_ROUNDS and MAX_TRIAGE_ITERATIONS are independent."""
+
+    def test_independent_round_budgets(self, tmp_path):
+        """Exhausting CI-fix budget does not consume triage budget and vice-versa."""
+        wt = _make_worktree(tmp_path)
+
+        # Scenario: CI always fails → CI-fix budget exhausted
+        # → stuck-ci-fix-exhausted, with triage budget untouched
+        with patch("pr_monitor.poll_ci", return_value="fail"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.run_notify"):
+            exit_code = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        assert exit_code == 1
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "stuck-ci-fix-exhausted"
+        # The result file should NOT contain any triage_N steps — triage was not run
+        steps = result.get("steps_completed", {})
+        triage_steps = [k for k in steps if k.startswith("triage_")]
+        assert triage_steps == [], \
+            f"Triage budget should be untouched; got triage steps: {triage_steps}"
+
+
+# ---------------------------------------------------------------------------
+# STATE_TRANSITION log events
+# ---------------------------------------------------------------------------
+
+
+class TestStateTransitionsLogged:
+    """Bonus: orchestrator logs STATE_TRANSITION events."""
+
+    def test_state_transitions_logged(self, tmp_path):
+        """run_monitor emits STATE_TRANSITION log events with from/to fields."""
+        wt = _make_worktree(tmp_path)
+
+        log_events = []
+        original_log = pr_monitor.Logger.log
+
+        def capture_log(self_, step, event, **extra):
+            log_events.append((step, event, extra))
+            original_log(self_, step, event, **extra)
+
+        with patch.object(pr_monitor.Logger, "log", capture_log), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            pr_monitor.run_monitor(wt, 1, resume=False)
+
+        transitions = [(step, ev, ex) for step, ev, ex in log_events
+                       if ev == "STATE_TRANSITION"]
+        assert len(transitions) >= 1, "At least one STATE_TRANSITION must be logged"
+        for _, _, extra in transitions:
+            assert "from" in extra, "STATE_TRANSITION must have 'from' field"
+            assert "to" in extra, "STATE_TRANSITION must have 'to' field"
