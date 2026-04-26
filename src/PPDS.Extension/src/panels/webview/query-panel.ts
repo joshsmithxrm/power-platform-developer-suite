@@ -53,6 +53,8 @@ try {
 }
 
 let currentLanguage = 'sql';
+let validationRequestId = 0;
+let validationTimeout: ReturnType<typeof setTimeout> | undefined;
 let manualOverride = false;
 
 // ── Resize handle (editor height splitter) ──
@@ -303,7 +305,10 @@ function detectLang(content: string): string {
 function updateLanguage(lang: string): void {
     if (lang !== currentLanguage) {
         currentLanguage = lang;
-        if (editor) monaco.editor.setModelLanguage(editor.getModel()!, lang);
+        if (editor) {
+            monaco.editor.setModelLanguage(editor.getModel()!, lang);
+            monaco.editor.setModelMarkers(editor.getModel()!, 'ppds', []);
+        }
     }
     // Update pill toggle state
     langToggle.querySelectorAll('.lang-seg').forEach(btn => {
@@ -320,6 +325,23 @@ if (editor) editor.onDidChangeModelContent(() => {
     if (!manualOverride) {
         const detected = detectLang(editor.getValue());
         updateLanguage(detected);
+    }
+    // Clear stale markers and debounce re-validation
+    const model = editor.getModel();
+    if (model) monaco.editor.setModelMarkers(model, 'ppds', []);
+    clearTimeout(validationTimeout);
+    const sql = editor.getValue();
+    const language = currentLanguage;
+    if (sql.trim().length >= 3) {
+        validationTimeout = setTimeout(() => {
+            validationRequestId++;
+            vscode.postMessage({
+                command: 'requestValidation',
+                requestId: validationRequestId,
+                sql,
+                language,
+            } as QueryPanelWebviewToHost);
+        }, 300);
     }
 });
 
@@ -830,6 +852,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
     if (!msg || typeof msg !== 'object' || !('command' in msg)) return;
     switch (msg.command) {
         case 'queryResult':
+            if (editor) monaco.editor.setModelMarkers(editor.getModel()!, 'ppds', []);
             handleQueryResult(msg.data);
             break;
         case 'appendResults':
@@ -837,6 +860,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
             break;
         case 'queryError':
             showError(msg.error);
+            if (msg.diagnostics?.length) setDiagnosticMarkers(msg.diagnostics);
             break;
         case 'executionStarted':
             isExecuting = true;
@@ -896,6 +920,15 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
                     range: pending.range,
                 }));
                 pending.resolve({ suggestions });
+            }
+            break;
+        }
+        case 'validationResult': {
+            if (msg.requestId !== validationRequestId) break;
+            if (msg.diagnostics?.length) {
+                setDiagnosticMarkers(msg.diagnostics);
+            } else if (editor) {
+                monaco.editor.setModelMarkers(editor.getModel()!, 'ppds', []);
             }
             break;
         }
@@ -979,6 +1012,28 @@ function handleAppendResults(data: QueryResultResponse): void {
     resultsFilter.setItems(allRows);
     updateStatus(data);
     loadMoreBar.style.display = moreRecords ? '' : 'none';
+}
+
+function setDiagnosticMarkers(diagnostics: Array<{ start: number; length: number; severity: string; message: string }>): void {
+    const model = editor?.getModel();
+    if (!model || !diagnostics.length) return;
+    const markers = diagnostics.map(d => {
+        const startPos = model.getPositionAt(d.start);
+        const endPos = model.getPositionAt(d.start + d.length);
+        return {
+            severity: d.severity === 'warning'
+                ? monaco.MarkerSeverity.Warning
+                : d.severity === 'info'
+                    ? monaco.MarkerSeverity.Info
+                    : monaco.MarkerSeverity.Error,
+            startLineNumber: startPos.lineNumber,
+            startColumn: startPos.column,
+            endLineNumber: endPos.lineNumber,
+            endColumn: endPos.column,
+            message: d.message,
+        };
+    });
+    monaco.editor.setModelMarkers(model, 'ppds', markers);
 }
 
 function showError(error: string): void {

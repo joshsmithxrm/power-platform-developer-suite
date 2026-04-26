@@ -125,6 +125,12 @@ public class RpcErrorData
     /// </summary>
     [JsonPropertyName("resourceId")]
     public string? ResourceId { get; set; }
+
+    /// <summary>
+    /// Optional structured diagnostics for parse errors (from <see cref="QueryParseException"/>).
+    /// </summary>
+    [JsonPropertyName("diagnostics")]
+    public List<DiagnosticDto>? Diagnostics { get; set; }
 }
 
 /// <summary>

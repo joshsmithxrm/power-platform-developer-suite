@@ -25,6 +25,7 @@ export type QueryPanelWebviewToHost =
     | { command: 'openRecordUrl'; url: string }
     | { command: 'requestClipboard' }
     | { command: 'requestCompletions'; requestId: number; sql: string; cursorOffset: number; language: string }
+    | { command: 'requestValidation'; requestId: number; sql: string; language: string }
     | { command: 'webviewError'; error: string; stack?: string }
     | { command: 'cancelQuery' }
     | { command: 'convertQuery'; sql: string; fromLanguage: string; toLanguage: string }
@@ -38,10 +39,11 @@ export type QueryPanelHostToWebview =
     | { command: 'executionStarted' }
     | { command: 'queryResult'; data: QueryResultResponse }
     | { command: 'queryCancelled' }
-    | { command: 'queryError'; error: string }
+    | { command: 'queryError'; error: string; diagnostics?: Array<{ start: number; length: number; severity: string; message: string }> }
     | { command: 'appendResults'; data: QueryResultResponse }
     | { command: 'clipboardContent'; text: string }
     | { command: 'completionResult'; requestId: number; items: CompletionItemDto[] }
+    | { command: 'validationResult'; requestId: number; diagnostics: Array<{ start: number; length: number; severity: string; message: string }> }
     | { command: 'daemonReconnected' }
     | { command: 'queryConverted'; content: string; language: string }
     | { command: 'conversionFailed'; error: string; language: string };

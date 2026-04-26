@@ -72,6 +72,7 @@ public class EnvironmentResolutionTests
     }
 
     [Theory]
+    [Trait("Category", "Integration")]
     [InlineData(AuthMethod.InteractiveBrowser)]
     [InlineData(AuthMethod.DeviceCode)]
     public async Task Interactive_NameIdentifier_RoutesGlobalDiscovery(AuthMethod authMethod)
