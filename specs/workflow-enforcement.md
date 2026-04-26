@@ -1467,10 +1467,10 @@ After all skills in this spec are implemented:
 | AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | ✅ |
 | AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | ✅ |
 | AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | ✅ |
-| AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | 🔲 |
-| AC-160 | **(v9.0 — Split)** backlog SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_backlog_skill_line_count` | 🔲 |
-| AC-161 | **(v9.0 — Split)** retro SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_retro_skill_line_count` | 🔲 |
-| AC-162 | **(v9.0 — Split)** `.claude/skills/TWO-FILE-PATTERN.md` defines the split heuristic, reference syntax, and worked example | `test_skill_structure.py::test_two_file_pattern_doc_exists` | 🔲 |
+| AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | ✅ |
+| AC-160 | **(v9.0 — Split)** backlog SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_backlog_skill_line_count` | ✅ |
+| AC-161 | **(v9.0 — Split)** retro SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_retro_skill_line_count` | ✅ |
+| AC-162 | **(v9.0 — Split)** `.claude/skills/TWO-FILE-PATTERN.md` defines the split heuristic, reference syntax, and worked example | `test_skill_structure.py::test_two_file_pattern_doc_exists` | ✅ |
 | AC-163 | **(v9.0 — Safety)** `worktree-safety.py` blocks `git worktree remove` on main repo root | `test_hooks.py::test_worktree_safety_blocks_main` | ✅ |
 | AC-164 | **(v9.0 — Safety)** `worktree-safety.py` blocks concurrent worktree removals | `test_hooks.py::test_worktree_safety_blocks_parallel` | ✅ |
 | AC-165 | **(v9.0 — Harness)** `audit-enforcement.py --strict` exits 0 when all T1 markers have matching hook files AND those hooks are wired in `.claude/settings.json` | `test_audit_enforcement.py::test_strict_pass` | ✅ |
