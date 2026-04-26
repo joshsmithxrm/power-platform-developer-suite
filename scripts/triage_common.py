@@ -326,6 +326,29 @@ def parse_triage_json(content):
     return None
 
 
+def parse_triage_json_obj(content):
+    """Find and parse a triage JSON object from raw text content.
+
+    Scans right-to-left for '{', returns the first valid dict decoded.
+    Optional fields with explicit null values are coalesced to safe defaults
+    by the caller; this function returns the raw decoded dict or None.
+    """
+    decoder = json.JSONDecoder()
+    search_from = len(content)
+    while search_from > 0:
+        pos = content.rfind("{", 0, search_from)
+        if pos == -1:
+            return None
+        try:
+            obj, _ = decoder.raw_decode(content[pos:])
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+        search_from = pos
+    return None
+
+
 def parse_triage_jsonl(jsonl_path):
     """Parse triage results from JSONL stream output (pr_monitor style).
 

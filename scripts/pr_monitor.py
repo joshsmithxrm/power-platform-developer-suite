@@ -1139,7 +1139,7 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
     diff_output = ""
     try:
         diff_proc = subprocess.run(
-            ["git", "diff", "main...HEAD"],
+            ["git", "diff", "origin/main...HEAD"],
             cwd=worktree, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
         )
@@ -1186,9 +1186,9 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
             "failure_summary": failure_log[:200],
         }
 
-    # Parse agent output — look for JSON in stdout
-    from triage_common import parse_triage_json
-    decision = parse_triage_json(result["stdout"])
+    # Parse agent output — look for JSON object in stdout
+    from triage_common import parse_triage_json_obj
+    decision = parse_triage_json_obj(result["stdout"])
     if not isinstance(decision, dict):
         # Fallback: treat missing/malformed output as escalation
         return {
@@ -1441,8 +1441,45 @@ def run_monitor(worktree, pr_number, resume=False):
                 except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                     commit_sha = "unknown"
 
-                # Get recent CI failure log (best-effort)
-                failure_log = result.get("_last_failure_log", "")
+                # Resolve current branch for run filtering (shared by log fetch + flake rerun)
+                current_branch = ""
+                try:
+                    br_proc = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=worktree, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=10,
+                    )
+                    if br_proc.returncode == 0:
+                        current_branch = br_proc.stdout.strip()
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    pass
+
+                # Fetch the most recent failed-job log via gh run view --log-failed (best-effort)
+                failure_log = ""
+                try:
+                    branch_args = ["--branch", current_branch] if current_branch else []
+                    id_proc2 = subprocess.run(
+                        ["gh", "run", "list", *branch_args, "--limit", "1",
+                         "--json", "databaseId", "--jq", ".[0].databaseId"],
+                        cwd=worktree, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=30,
+                    )
+                    if id_proc2.returncode == 0:
+                        run_id2 = id_proc2.stdout.strip()
+                        if run_id2:
+                            log_proc = subprocess.run(
+                                ["gh", "run", "view", run_id2, "--log-failed"],
+                                cwd=worktree, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=60,
+                            )
+                            if log_proc.returncode == 0:
+                                failure_log = log_proc.stdout
+                            else:
+                                failure_log = f"(log fetch failed: {log_proc.stderr[:200]})"
+                    else:
+                        failure_log = f"(run list failed: {id_proc2.stderr[:200]})"
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    pass
 
                 # Flake check (AC-184)
                 flake_result = _check_flake(worktree, failure_log, commit_sha)
@@ -1455,8 +1492,9 @@ def run_monitor(worktree, pr_number, resume=False):
                     logger.log("monitor", "FLAKE_RERUN",
                                commit=commit_sha, round=ci_fix_rounds_used)
                     try:
+                        branch_args = ["--branch", current_branch] if current_branch else []
                         id_proc = subprocess.run(
-                            ["gh", "run", "list", "--limit", "1",
+                            ["gh", "run", "list", *branch_args, "--limit", "1",
                              "--json", "databaseId", "--jq", ".[0].databaseId"],
                             cwd=worktree, capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=30,
