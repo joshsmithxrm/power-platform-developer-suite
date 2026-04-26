@@ -66,12 +66,88 @@ def main():
 
     # If stop hook has already blocked 3+ times, allow stop to prevent infinite loop
     if state.get("stop_hook_count", 0) >= 3:
+        print(
+            "OVERRIDE_GRANTED: stop hook has blocked 3+ times this session — "
+            "allowing exit. /retro will flag this as a finding.",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
     # Phase-aware bypass: non-implementing phases don't need workflow enforcement
+    # Note: "pr" is intentionally excluded — pr phase goes through the
+    # monitor gate (5b) below.
     phase = state.get("phase")
-    if phase in ("starting", "investigating", "design", "reviewing", "qa", "shakedown", "retro", "pr"):
+    if phase in ("starting", "investigating", "design", "reviewing", "qa", "shakedown", "retro"):
         sys.exit(0)
+
+    # --- 5b: monitor gate (AC-147, AC-148, AC-149) ---
+    # When phase=pr, require pr.monitor_launched to be set (timestamp or
+    # "fallback: <reason>"). Both truthy values allow exit.
+    if phase == "pr":
+        monitor_launched = state.get("pr", {}).get("monitor_launched")
+        if monitor_launched:
+            sys.exit(0)
+        output = {
+            "decision": "block",
+            "reason": (
+                "BLOCKED — phase is 'pr' but pr.monitor_launched is missing.\n"
+                "The /pr skill must launch the background pr_monitor before "
+                "exiting. If launch failed, /pr must record "
+                'pr.monitor_launched="fallback: <reason>".'
+            ),
+        }
+        print(json.dumps(output))
+        # Increment block counter for the 3-strike escape valve
+        try:
+            state["stop_hook_blocked"] = True
+            state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
+            state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2)
+                f.write("\n")
+        except OSError:
+            pass
+        sys.exit(2)
+
+    # --- 5c: pr-invocation gate (AC-169, AC-170, AC-171) ---
+    # If commits exist ahead of origin/main and /pr was not invoked via the
+    # skill, block. phase=pr is handled by 5b above.
+    PR_INVOCATION_BYPASS_PHASES = {"pr", "design", "investigating", "starting"}
+    if phase not in PR_INVOCATION_BYPASS_PHASES:
+        commits_ahead = 0
+        try:
+            result = subprocess.run(
+                ["git", "rev-list", "--count", "origin/main..HEAD"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                commits_ahead = int(result.stdout.strip() or 0)
+        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+            commits_ahead = 0
+
+        if commits_ahead > 0 and not state.get("pr", {}).get("invoked_via_skill"):
+            output = {
+                "decision": "block",
+                "reason": (
+                    f"BLOCKED — {commits_ahead} commit(s) ahead of origin/main "
+                    "but /pr was not invoked. You MUST run /pr to ship — "
+                    "do not call gh pr create directly."
+                ),
+            }
+            print(json.dumps(output))
+            try:
+                state["stop_hook_blocked"] = True
+                state["stop_hook_count"] = state.get("stop_hook_count", 0) + 1
+                state["stop_hook_last"] = datetime.now(timezone.utc).isoformat()
+                with open(state_path, "w") as f:
+                    json.dump(state, f, indent=2)
+                    f.write("\n")
+            except OSError:
+                pass
+            sys.exit(2)
 
     # Get current HEAD for staleness check
     head_sha = None

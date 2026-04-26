@@ -1455,36 +1455,36 @@ After all skills in this spec are implemented:
 | AC-144 | ~~pr_monitor polls CodeQL check status via `gh pr checks`~~ — **retracted**: `poll_ci` already waits for CodeQL to reach a terminal state; dedicated CodeQL poll was redundant. Latent risk (comment delivery lag after terminal status) is pre-existing and unchanged by the retraction | — | ✂️ |
 | AC-145 | pr_monitor triages CodeQL + Gemini comments in single triage pass | `test_pr_monitor.py::test_unified_triage_pass` | 🔲 |
 | AC-146 | Converge fix commits do not invalidate verify/qa (ancestor-of-HEAD check passes) | `test_pipeline.py::test_converge_preserves_verify_qa` | 🔲 |
-| AC-147 | **(v9.0 — F-2)** Stop hook blocks session exit when `phase=pr` and `pr.monitor_launched` is missing from workflow state | `test_hooks.py::test_stop_hook_blocks_pr_without_monitor` | 🔲 |
-| AC-148 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains a timestamp | `test_hooks.py::test_stop_hook_allows_pr_with_monitor` | 🔲 |
-| AC-149 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains `fallback: <reason>` | `test_hooks.py::test_stop_hook_allows_pr_with_fallback` | 🔲 |
-| AC-150 | **(v9.0 — F-7)** `retro-html-guard.py` blocks Write to `.retros/*.html` when `PPDS_PIPELINE` is not set | `test_hooks.py::test_retro_html_guard_blocks_interactive` | 🔲 |
-| AC-151 | **(v9.0 — F-7)** `retro-html-guard.py` allows Write to `.retros/*.html` when `PPDS_PIPELINE=1` | `test_hooks.py::test_retro_html_guard_allows_pipeline` | 🔲 |
+| AC-147 | **(v9.0 — F-2)** Stop hook blocks session exit when `phase=pr` and `pr.monitor_launched` is missing from workflow state | `test_hooks.py::test_stop_hook_blocks_pr_without_monitor` | ✅ |
+| AC-148 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains a timestamp | `test_hooks.py::test_stop_hook_allows_pr_with_monitor` | ✅ |
+| AC-149 | **(v9.0 — F-2)** Stop hook allows session exit when `phase=pr` and `pr.monitor_launched` contains `fallback: <reason>` | `test_hooks.py::test_stop_hook_allows_pr_with_fallback` | ✅ |
+| AC-150 | **(v9.0 — F-7)** `retro-html-guard.py` blocks Write to `.retros/*.html` when `PPDS_PIPELINE` is not set | `test_hooks.py::test_retro_html_guard_blocks_interactive` | ✅ |
+| AC-151 | **(v9.0 — F-7)** `retro-html-guard.py` allows Write to `.retros/*.html` when `PPDS_PIPELINE=1` | `test_hooks.py::test_retro_html_guard_allows_pipeline` | ✅ |
 | AC-152 | **(v9.0 — Model)** `pipeline.py` passes `--model sonnet` for implement, gates, verify, qa, review, converge, pr, retro stages (floating ID, not pinned) | `test_pipeline.py::test_stage_models_sonnet` | ✅ |
 | AC-153 | **(v9.0 — Model)** `pipeline.py` passes no `--model` flag for design, investigate, spec stages (inherits default) | `test_pipeline.py::test_stage_models_opus_default` | ✅ |
 | AC-154 | **(v9.0 — Model)** `pipeline.py --model <id>` overrides STAGE_MODELS for all stages | `test_pipeline.py::test_stage_model_override` | ✅ |
 | AC-155 | **(v9.0 — Model)** `pr_monitor.py` passes `--model sonnet` when spawning triage and retro sessions (floating ID) | `test_pr_monitor.py::test_monitor_uses_sonnet` | ✅ |
 | AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | ✅ |
-| AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | 🔲 |
-| AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | 🔲 |
+| AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | ✅ |
+| AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | ✅ |
 | AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | 🔲 |
 | AC-160 | **(v9.0 — Split)** backlog SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_backlog_skill_line_count` | 🔲 |
 | AC-161 | **(v9.0 — Split)** retro SKILL.md is ≤150 lines after split | `test_skill_structure.py::test_retro_skill_line_count` | 🔲 |
 | AC-162 | **(v9.0 — Split)** `.claude/skills/TWO-FILE-PATTERN.md` defines the split heuristic, reference syntax, and worked example | `test_skill_structure.py::test_two_file_pattern_doc_exists` | 🔲 |
-| AC-163 | **(v9.0 — Safety)** `worktree-safety.py` blocks `git worktree remove` on main repo root | `test_hooks.py::test_worktree_safety_blocks_main` | 🔲 |
-| AC-164 | **(v9.0 — Safety)** `worktree-safety.py` blocks concurrent worktree removals | `test_hooks.py::test_worktree_safety_blocks_parallel` | 🔲 |
+| AC-163 | **(v9.0 — Safety)** `worktree-safety.py` blocks `git worktree remove` on main repo root | `test_hooks.py::test_worktree_safety_blocks_main` | ✅ |
+| AC-164 | **(v9.0 — Safety)** `worktree-safety.py` blocks concurrent worktree removals | `test_hooks.py::test_worktree_safety_blocks_parallel` | ✅ |
 | AC-165 | **(v9.0 — Harness)** `audit-enforcement.py --strict` exits 0 when all T1 markers have matching hook files AND those hooks are wired in `.claude/settings.json` | `test_audit_enforcement.py::test_strict_pass` | 🔲 |
 | AC-166 | **(v9.0 — Harness)** `audit-enforcement.py --strict` exits 1 when a T1 marker references a missing hook | `test_audit_enforcement.py::test_strict_fail_missing_hook` | 🔲 |
 | AC-167 | **(v9.0 — Harness)** `audit-enforcement.py --discover` reports all MANDATORY/MUST/NEVER/ALWAYS directives without enforcement markers | `test_audit_enforcement.py::test_discover_mode` | 🔲 |
 | AC-168 | **(v9.0 — Audit)** Every T1 directive in all SKILL.md files and CLAUDE.md has a `<!-- enforcement: T1 hook:<name> -->` marker | `test_audit_enforcement.py::test_all_t1_directives_marked` | 🔲 |
-| AC-169 | **(v9.0 — F-2b)** Stop hook blocks session exit when commits-ahead-of-origin/main > 0 AND phase ∉ {pr, design, investigating, starting} AND `pr.invoked_via_skill` != true | `test_hooks.py::test_stop_hook_blocks_no_pr_invocation` | 🔲 |
-| AC-170 | **(v9.0 — F-2b)** Stop hook allows session exit when `phase=pr` regardless of pr.invoked_via_skill | `test_hooks.py::test_stop_hook_allows_pr_phase` | 🔲 |
-| AC-171 | **(v9.0 — F-2b)** Stop hook allows session exit when no commits ahead of origin/main (nothing to ship) | `test_hooks.py::test_stop_hook_allows_no_commits` | 🔲 |
+| AC-169 | **(v9.0 — F-2b)** Stop hook blocks session exit when commits-ahead-of-origin/main > 0 AND phase ∉ {pr, design, investigating, starting} AND `pr.invoked_via_skill` != true | `test_hooks.py::test_stop_hook_blocks_no_pr_invocation` | ✅ |
+| AC-170 | **(v9.0 — F-2b)** Stop hook allows session exit when `phase=pr` regardless of pr.invoked_via_skill | `test_hooks.py::test_stop_hook_allows_pr_phase` | ✅ |
+| AC-171 | **(v9.0 — F-2b)** Stop hook allows session exit when no commits ahead of origin/main (nothing to ship) | `test_hooks.py::test_stop_hook_allows_no_commits` | ✅ |
 | AC-172 | **(v9.0 — Audit)** After PR-2a lands, `audit-enforcement.py --report` snapshot shows 0 unmarked directives across all SKILL.md files and CLAUDE.md. Snapshot attached to PR-2a description as proof. | `test_audit_enforcement.py::test_zero_unmarked_after_audit` | 🔲 |
-| AC-173 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` blocks TaskCreate when 3 background tasks are already in-flight | `test_hooks.py::test_taskcreate_cap_blocks_fourth` | 🔲 |
-| AC-174 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` allows TaskCreate when fewer than 3 tasks are in-flight | `test_hooks.py::test_taskcreate_cap_allows_under_limit` | 🔲 |
-| AC-175 | **(v9.0 — CLAUDE.md)** `debug-first.py` blocks test/build re-invocation after a failure unless `/debug` was run since the failure | `test_hooks.py::test_debug_first_blocks_retry` | 🔲 |
-| AC-176 | **(v9.0 — Escape)** Stop hook allows session exit after 3 consecutive blocks for the same reason within one session, logs `OVERRIDE_GRANTED`, and `/retro` flags the override as a finding | `test_hooks.py::test_three_strike_escape_valve` | 🔲 |
+| AC-173 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` blocks TaskCreate when 3 background tasks are already in-flight | `test_hooks.py::test_taskcreate_cap_blocks_fourth` | ✅ |
+| AC-174 | **(v9.0 — CLAUDE.md)** `taskcreate-cap.py` allows TaskCreate when fewer than 3 tasks are in-flight | `test_hooks.py::test_taskcreate_cap_allows_under_limit` | ✅ |
+| AC-175 | **(v9.0 — CLAUDE.md)** `debug-first.py` blocks test/build re-invocation after a failure unless `/debug` was run since the failure | `test_hooks.py::test_debug_first_blocks_retry` | ✅ |
+| AC-176 | **(v9.0 — Escape)** Stop hook allows session exit after 3 consecutive blocks for the same reason within one session, logs `OVERRIDE_GRANTED`, and `/retro` flags the override as a finding | `test_hooks.py::test_three_strike_escape_valve` | ✅ |
 | AC-177 | **(v9.0 — Report)** `audit-enforcement.py --report` produces `.workflow/audit-snapshot.md` containing: total directive count (dated), T1/T2/T3 breakdown with percentages, per-skill counts, hook coverage %, per-file unmarked count, top 5 longest SKILL.md files. Output is valid markdown and parseable. | `test_audit_enforcement.py::test_report_snapshot` | 🔲 |
 | AC-178 | **(v9.0 — Inflight)** `pr_monitor.py` terminal step (any of complete, ci_failed, gemini_timeout) calls `inflight-deregister.py --branch <branch>` before final notification | `test_pr_monitor.py::test_terminal_deregisters_inflight` | 🔲 |
 | AC-179 | **(v9.0 — Inflight)** PostToolUse hook on `Bash(gh pr merge:*)` deregisters the branch from in-flight registry on exit 0 | `test_hooks.py::test_inflight_deregister_on_merge` | 🔲 |
