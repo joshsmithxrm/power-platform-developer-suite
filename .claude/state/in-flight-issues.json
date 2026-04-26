@@ -1,62 +1,7 @@
 {
   "version": 1,
-  "updated": "2026-04-26T01:38:08Z",
+  "updated": "2026-04-26T06:57:51Z",
   "open_work": [
-    {
-      "session_id": "7ce1ca2d",
-      "started": "2026-04-25T02:24:51Z",
-      "branch": "feat/profile-env-ux",
-      "worktree": ".worktrees/profile-env-ux",
-      "issues": [
-        887,
-        888,
-        903
-      ],
-      "areas": [
-        "extension"
-      ],
-      "intent": "Profile/environment UX redesign: status bar grouping, panel vs status bar, cmd palette filtering"
-    },
-    {
-      "session_id": "14ad7d38",
-      "started": "2026-04-25T02:24:51Z",
-      "branch": "feat/plugin-reg-styling",
-      "worktree": ".worktrees/plugin-reg-styling",
-      "issues": [
-        896,
-        897
-      ],
-      "areas": [
-        "extension"
-      ],
-      "intent": "Plugin Registration styling: unstyled buttons and collapse arrow sizing"
-    },
-    {
-      "session_id": "c54fdb3d",
-      "started": "2026-04-25T02:24:51Z",
-      "branch": "feat/metadata-browser-config",
-      "worktree": ".worktrees/metadata-browser-config",
-      "issues": [
-        901
-      ],
-      "areas": [
-        "extension"
-      ],
-      "intent": "Metadata Browser: add entity configuration tab and global optionset details"
-    },
-    {
-      "session_id": "eb69b7d9",
-      "started": "2026-04-25T02:24:51Z",
-      "branch": "feat/docs-plugin-reg",
-      "worktree": ".worktrees/docs-plugin-reg",
-      "issues": [
-        900
-      ],
-      "areas": [
-        "extension"
-      ],
-      "intent": "Fix docs plugin-registration 404 page"
-    },
     {
       "session_id": "e1e3659e",
       "started": "2026-04-26T01:38:08Z",
