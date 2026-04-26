@@ -9,7 +9,7 @@ End-to-end PR lifecycle: rebase, create, wait for Gemini review, triage comments
 
 ## Canonical Entry Point
 
-This skill is the ONLY sanctioned path for automated PR creation in this repo. Agents and automations MUST invoke `/pr` — directly calling `gh pr create`, `hub pull-request`, or the GitHub API outside of this skill is forbidden for agent-spawned PRs. (The skill itself calls `gh pr create` internally in Step 3 — that is the sanctioned invocation.) Rationale: <!-- enforcement: T1 hook:pr-invocation-gate -->
+This skill is the ONLY sanctioned path for automated PR creation in this repo. Agents and automations MUST invoke `/pr` — directly calling `gh pr create`, `hub pull-request`, or the GitHub API outside of this skill is forbidden for agent-spawned PRs. (The skill itself calls `gh pr create` internally in Step 3 — that is the sanctioned invocation.) Rationale: <!-- enforcement: T1 hook:pr-gate -->
 
 - Direct invocation bypasses draft-open (defeating #834's ready-flip gate)
 - Direct invocation bypasses `pr_monitor.py` spawn (no polling, no Gemini wait, no triage)
@@ -156,11 +156,11 @@ python scripts/workflow-state.py set pr.url "{pr-url}"
 python scripts/workflow-state.py set pr.created now
 ```
 
-### 5. Launch Background Monitor (MANDATORY — state-tracked) <!-- enforcement: T1 hook:pr-monitor-launch -->
+### 5. Launch Background Monitor (MANDATORY — state-tracked) <!-- enforcement: T1 hook:session-stop-workflow -->
 
 The pr-monitor handles the entire post-creation lifecycle: CI polling, Gemini review wait (with overload detection + retry), CodeQL check wait, triage dispatch, threaded replies, reconciliation, draft→ready conversion, retro, and notification. It runs as a detached background process that survives session exit.
 
-**This step is MANDATORY. Do not skip it. Do not manually triage comments via `gh api` instead.** <!-- enforcement: T1 hook:pr-monitor-launch -->
+**This step is MANDATORY. Do not skip it. Do not manually triage comments via `gh api` instead.** <!-- enforcement: T1 hook:session-stop-workflow -->
 
 > **Retro-enforced (PR #868):** Agent skipped the monitor, manually replied to 3 of 9 review comments via `gh api`, missed all CodeQL comments. User had to force monitor invocation. Manual comment triage is never an acceptable substitute — the monitor handles Gemini, CodeQL, ready-flip, and notification as a unit.
 
@@ -185,7 +185,7 @@ If the monitor fails to launch (e.g., `claude` command not found), fall back to 
 python scripts/workflow-state.py set pr.monitor_launched "fallback: <reason>"
 ```
 
-### 6. Completion Gate (MANDATORY) <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:pr-completion-gate -->
+### 6. Completion Gate (MANDATORY) <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:session-stop-workflow -->
 
 Before reporting success, verify both output artifacts:
 

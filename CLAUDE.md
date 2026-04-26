@@ -13,7 +13,7 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Write CLI status messages to `stdout` — use `Console.Error.WriteLine`. `stdout` is reserved for data. <!-- enforcement: T2 hook:stdout-discipline -->
 - Throw raw exceptions from Application Services — wrap in `PpdsException` with an `ErrorCode`. <!-- enforcement: T2 hook:exception-wrap-check -->
 - Trust an agent research summary without reading the underlying code yourself. <!-- enforcement: T3 -->
-- Edit `PublicAPI.Unshipped.txt` during a rebase — accept `--theirs` and let it regenerate; manual edits produce phantom API-drift conflicts. <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:unshipped-protect structural-elimination-preferred -->
+- Edit `PublicAPI.Unshipped.txt` during a rebase — accept `--theirs` and let it regenerate; manual edits produce phantom API-drift conflicts. <!-- since: PR#956 rationale --> <!-- enforcement: T3 escape-hatch: rebase-context detection too brittle for hook -->
 
 ## ALWAYS <!-- enforcement: T3 not-a-directive -->
 

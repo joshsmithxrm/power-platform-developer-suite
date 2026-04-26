@@ -17,7 +17,7 @@ Artifacts vary by mode:
 - `.workflow/retro-findings.json` — machine-readable findings, consumed by `scripts/pipeline.py`.
 - `.retros/summary.json` — rolling cross-retro metrics (append-only).
 
-## Phase Registration (MUST run first) <!-- enforcement: T1 hook:retro-phase-register -->
+## Phase Registration (MUST run first) <!-- enforcement: T3 -->
 
 ```bash
 python scripts/workflow-state.py set phase retro

@@ -60,7 +60,7 @@ For large diffs (>10 files), use per-file chunking instead of a single subagent:
 5. Merge findings from all subagents, deduplicate by file:line
 
 
-Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, and ACs. This is the bias prevention mechanism: the reviewer sees code, not intent. <!-- enforcement: T1 hook:review-bias-isolation -->
+Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, and ACs. This is the bias prevention mechanism: the reviewer sees code, not intent. <!-- enforcement: T3 -->
 
 Subagent prompt:
 

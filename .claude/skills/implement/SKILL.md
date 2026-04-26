@@ -77,7 +77,7 @@ Before dispatching any agents, load the specification context that will be injec
 Construct a text block that will be prepended to every subagent prompt:
 
 ```
-## Constitution (MUST comply — violations are defects) <!-- enforcement: T1 hook:constitution-compliance -->
+## Constitution (MUST comply — violations are defects) <!-- enforcement: T3 -->
 {full CONSTITUTION.md content}
 
 ## Relevant Specifications — Acceptance Criteria
@@ -136,7 +136,7 @@ For EACH phase in the plan, repeat this cycle:
   - Build verification command to run before finishing
   - Test command to run and verify
   - The spec context block from Step 2 (constitution + relevant AC tables)
-  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values. <!-- enforcement: T1 hook:behavioral-test-check -->
+  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values. <!-- enforcement: T3 -->
   - Reminder: no shell redirections (2>&1, >, >>)
   - Self-check gate: before reporting completion, run the relevant gate checks for your changed files. For TypeScript/extension changes: `npm run typecheck:all --prefix src/PPDS.Extension` and `npx eslint --quiet {changed-files}`. For C# changes: `dotnet build {project}.csproj -v q`. Report gate results in your summary — do not silently suppress failures.
 - Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
@@ -165,7 +165,7 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
   1. The spec AC table `Test` column is filled in (not empty, not "❌ no test yet")
   2. The referenced test method exists in the codebase
   3. The test passes: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
-  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes. <!-- enforcement: T1 hook:behavioral-test-check -->
+  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes. <!-- enforcement: T3 -->
   5. **Negative verification:** For bug-fix or threshold ACs, the test SHOULD demonstrate failure when the condition is not met (e.g., assert the function returns a different value with wrong input), not just that the happy path works.
   If any AC is missing a test or has only a structural/source-inspection test, the phase gate FAILS. Do not proceed — dispatch an agent to write proper behavioral tests. This is not optional — Constitution I6 makes untested ACs a defect.
 - If the phase touches extension code (`src/PPDS.Extension/` directory):

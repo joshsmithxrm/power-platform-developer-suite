@@ -129,6 +129,15 @@ To find governing specs: grep all `specs/*.md` files for `**Code:**` lines. Matc
 - For TypeScript tests: `npx vitest run -t "{method}" --prefix src/PPDS.Extension`
 - Report which ACs pass and which fail
 
+**Gate 7: Enforcement Audit** (always)
+
+```bash
+python scripts/audit-enforcement.py --strict
+```
+
+Pass: every T1 enforcement marker references a hook file that exists and is wired in `.claude/settings.json`.
+Fail: report the missing or unwired hooks; reclassify the marker (T2/T3) or add the hook before proceeding.
+
 ### Step 3: Report
 
 ```
