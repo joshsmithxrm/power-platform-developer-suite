@@ -22,7 +22,8 @@ _spec.loader.exec_module(launch_claude_session)
 class TestLaunchUsesOpus(unittest.TestCase):
     """AC-156: launch-claude-session.py uses --model opus (floating)."""
 
-    def test_build_launch_script_uses_opus(self):
+    def test_launch_uses_opus(self):
+        """AC-156 named test: build_launch_script emits --model opus (floating)."""
         script = launch_claude_session.build_launch_script(
             target_windows_path=r"C:\repo",
             claude_path=r"C:\bin\claude.exe",
@@ -32,6 +33,10 @@ class TestLaunchUsesOpus(unittest.TestCase):
         # Negative: must not contain a pinned Opus version (the fix for AC-156).
         self.assertNotIn("claude-opus-4-6", script)
         self.assertNotIn("claude-opus-4-7", script)
+
+    def test_build_launch_script_uses_opus(self):
+        # Retained alias of test_launch_uses_opus for back-compat.
+        self.test_launch_uses_opus()
 
     def test_no_pinned_opus_in_module_source(self):
         with open(_SOURCE, encoding="utf-8") as f:

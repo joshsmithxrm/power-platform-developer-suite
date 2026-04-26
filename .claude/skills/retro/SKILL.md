@@ -17,7 +17,7 @@ Artifacts vary by mode:
 - `.workflow/retro-findings.json` — machine-readable findings, consumed by `scripts/pipeline.py`.
 - `.retros/summary.json` — rolling cross-retro metrics (append-only).
 
-## Phase Registration (MUST run first)
+## Phase Registration (MUST run first) <!-- enforcement: T1 hook:retro-phase-register -->
 
 ```bash
 python scripts/workflow-state.py set phase retro
@@ -29,7 +29,7 @@ Enables the stop-hook bypass for the retro phase.
 
 - Commit messages are the AI's self-reported summary — exactly the thing that needs verification.
 - Do NOT grade sessions (no letter grades, no "successful" labels). Present evidence, let the user decide.
-- **Mechanical extraction MAY run as a subprocess; LLM transcript judgment MUST stay in the main session.** See "Lane discipline" below. Agents previously reported "zero user corrections" when the user was furious, because they were asked to judge what they'd read instead of just extracting signals.
+- **Mechanical extraction MAY run as a subprocess; LLM transcript judgment MUST stay in the main session.** See "Lane discipline" below. Agents previously reported "zero user corrections" when the user was furious, because they were asked to judge what they'd read instead of just extracting signals. <!-- enforcement: T3 -->
 - Do NOT use `grep` on JSONL transcripts — lines are too long on Windows and results get `[Omitted]`. Use the Python extraction helpers in `scripts/retro_helpers.py`.
 
 ## Lane discipline — who reads what

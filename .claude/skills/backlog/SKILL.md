@@ -48,7 +48,7 @@ cat docs/BACKLOG.md
 
 ##### Pre-flight: In-Flight Conflict Check
 
-Before `gh issue create`, ALWAYS check whether a sibling session is
+Before `gh issue create`, ALWAYS check whether a sibling session is <!-- enforcement: T2 hook:inflight-check -->
 already working on the same area or has already filed a related issue
 (prevents the duplicate-work pattern from retro B3 / #802):
 
@@ -62,7 +62,7 @@ If exit `1`, surface the conflict to the operator and ASK before filing:
 > with intent `<intent>`. They may already be addressing this — file
 > anyway, or coordinate first?"
 
-The same check MUST be repeated before `gh issue close`: if a sibling
+The same check MUST be repeated before `gh issue close`: if a sibling <!-- enforcement: T2 hook:inflight-check -->
 session has open work referencing the issue, surface the related branch
 so the closer does not misattribute the fix to the wrong PR.
 
@@ -316,7 +316,7 @@ on the lane assignment in `.claude/interaction-patterns.md` §1:
   operator wants a live foreground session per worktree). The
   dispatcher still creates the worktree + state, then emits a single
   copy-pasteable `claude … -p "<prompt>"` command per entry. The
-  prompt MUST be inline — spawning without a prompt is what forced
+  prompt MUST be inline — spawning without a prompt is what forced <!-- enforcement: T3 -->
   the 5-terminal babysitting of session `cd0c578e` and is now
   forbidden (meta-retro #11).
 
@@ -557,7 +557,7 @@ not survive the next dispatcher write.
    decide. Auto-resolution risks the exact duplicate-work pattern the
    in-flight registry was built to prevent (#802).
 4. **Prompt is mandatory.** Every spawn — D.1 Agent call or D.2
-   launch command — MUST carry an inline prompt referencing
+   launch command — MUST carry an inline prompt referencing <!-- enforcement: T3 -->
    `.plans/context.md` and the pipeline to run. A `TaskCreate` / bare
    `claude` without a prompt is forbidden (meta-retro #11 root
    cause: session `cd0c578e` spawned 6 worktrees with no prompt and

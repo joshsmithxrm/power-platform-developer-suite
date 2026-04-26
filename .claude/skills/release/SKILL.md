@@ -333,7 +333,7 @@ Expected sequence (typical timing):
 For each package:
 ```bash
 # Check listing exists at expected version.
-# IMPORTANT: the v3-flatcontainer path segment MUST be lowercase (e.g. ppds.auth, ppds.cli),
+# IMPORTANT: the v3-flatcontainer path segment MUST be lowercase (e.g. ppds.auth, ppds.cli), <!-- enforcement: T3 not-a-directive -->
 # even though the canonical PackageId is PPDS.<Name>. Mixed case returns 404.
 curl -s https://api.nuget.org/v3-flatcontainer/<package-id-lowercase>/index.json | jq '.versions' | tail -5
 ```

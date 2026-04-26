@@ -154,7 +154,7 @@ To find governing specs: grep all `specs/*.md` files for `**Code:**` lines. Matc
 
 Gates are necessary but NOT sufficient. After gates pass:
 
-- **If changed files include webview TS/CSS/HTML** (`src/PPDS.Extension/src/panels/`): You MUST also run `/verify extension` and/or `/qa extension` for visual verification. Gates prove code compiles and tests pass — they do NOT prove it renders correctly or works as the user would experience.
+- **If changed files include webview TS/CSS/HTML** (`src/PPDS.Extension/src/panels/`): You MUST also run `/verify extension` and/or `/qa extension` for visual verification. Gates prove code compiles and tests pass — they do NOT prove it renders correctly or works as the user would experience. <!-- enforcement: T2 hook:webview-verify-check -->
 - **If changed files include CLI commands** (`src/PPDS.Cli/Commands/`, not `Serve/`): Run the command and verify the output.
 - **If changed files include MCP tools** (`src/PPDS.Mcp/`): Call the tool and verify the response.
 - **If changed files include TUI** (`src/PPDS.Cli/Tui/`): Run `/verify tui` for interactive verification (Gate 5.5 covers snapshot regression, but interactive testing catches what snapshots can't).
@@ -170,7 +170,7 @@ python scripts/workflow-state.py set gates.passed now
 python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
 ```
 
-## Workflow Continuation — MANDATORY
+## Workflow Continuation — MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
 
 Gates are ONE step in the shipping pipeline — not the last one.
 
@@ -181,7 +181,7 @@ python scripts/workflow-state.py get phase
 ```
 
 - **If phase is `implementing`:** return gate results to the `/implement` orchestrator. It manages the remaining pipeline steps.
-- **Otherwise (standalone invocation):** you MUST continue the pipeline yourself. Do NOT stop after reporting gate results. Do NOT wait for the user to tell you what to do next. Execute the following chain:
+- **Otherwise (standalone invocation):** you MUST continue the pipeline yourself. Do NOT stop after reporting gate results. Do NOT wait for the user to tell you what to do next. Execute the following chain: <!-- enforcement: T1 hook:session-stop-workflow -->
 
   1. `/verify` for each affected surface (extension, cli, tui, mcp)
   2. `/pr` to create the pull request
