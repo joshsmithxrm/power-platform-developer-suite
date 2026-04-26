@@ -432,14 +432,14 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
 
 
 def dispatch_subagent(profile_name, payload, model="sonnet", worktree=".", timeout=1800):
-    """Invoke ``claude -p`` with an agent profile, passing payload via stdin.
+    """Invoke ``claude -p`` with an agent profile, passing payload as the -p prompt argument.
 
-    Centralises the Windows-quoting / UTF-8 stdin / shell=False (Constitution S2)
+    Centralises the Windows-quoting / UTF-8 / shell=False (Constitution S2)
     invocation pattern so CI-fix and Gemini-triage dispatchers share one code path.
 
     Args:
         profile_name: agent profile name (matches .claude/agents/<name>.md)
-        payload: dict to pass as JSON via stdin to the claude process
+        payload: dict serialized as JSON and passed as the -p prompt argument
         model: model slug (floating name, no version pin)
         worktree: working directory for the subprocess
         timeout: seconds before the process is killed (default 30 min)

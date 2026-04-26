@@ -1084,8 +1084,8 @@ def _check_flake(worktree, failure_log, commit_sha):
 
     On the first match of any KNOWN_FLAKE_PATTERNS substring in failure_log
     for this commit_sha, returns "flake-rerun" and records the match.
-    On a second match for the same commit, returns "real" (not a transient flake).
-    When no pattern matches, returns "real" immediately.
+    On a second match for the same commit, returns "flake-second-match" (treated
+    as a real failure by the caller). When no pattern matches, returns "real".
 
     Rerun history is persisted in .workflow/ci-fix-rerun-history.json.
     """
@@ -1203,16 +1203,20 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
     return decision
 
 
-def _check_thrash(worktree, sha, round_num, current_decision):
+def _check_thrash(worktree, round_num, current_decision):
     """Return True if this CI-fix round is repeating the same files as the prior round.
 
     For round_num >= 2 (AC-186), loads round_num-1's decision file and compares
     files_touched as a set. Order-independent. Round 1 always returns False.
+
+    Decision files are keyed by SHA (the failing commit before each dispatch), so
+    the prior round is found by scanning for any file whose "round" field equals
+    round_num-1 rather than by SHA (which changes after each fix commit).
     """
     if round_num < 2:
         return False
 
-    prior = _load_prior_decision(worktree, sha)
+    prior = _load_prior_decision(worktree, round_num - 1)
     if prior is None:
         return False
 
@@ -1243,25 +1247,39 @@ def _write_ci_fix_decision(worktree, sha, round_num, payload):
         "escalation_reason": payload.get("escalation_reason"),
         "scope_violation": bool(payload.get("scope_violation", False)),
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
-        f.write("\n")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+            f.write("\n")
+    except OSError:
+        pass  # fail-open; audit trail is best-effort
     return Path(path)
 
 
-def _load_prior_decision(worktree, sha):
-    """Load the most recent CI-fix decision file for the given commit SHA.
+def _load_prior_decision(worktree, prior_round):
+    """Load the CI-fix decision file for the given round number.
 
-    Returns the parsed dict or None if no file exists.
+    Scans .workflow/ci-fix-decisions/ for any .json file whose "round" field
+    equals prior_round. Returns the parsed dict or None if not found.
+
+    Using round-based lookup (not SHA-based) so the comparison works correctly
+    across multiple rounds even though the commit SHA changes after each fix commit.
     """
-    path = os.path.join(worktree, ".workflow", "ci-fix-decisions", f"{sha}.json")
-    if not os.path.exists(path):
+    decisions_dir = os.path.join(worktree, ".workflow", "ci-fix-decisions")
+    if not os.path.isdir(decisions_dir):
         return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
+    for fname in os.listdir(decisions_dir):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(decisions_dir, fname)
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("round") == prior_round:
+                return data
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
 
 
 def _classify(ci_result, has_gemini_comments):
@@ -1481,7 +1499,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
                 # Thrash check (AC-186) — BEFORE writing decision file so
                 # _load_prior_decision reads round N-1, not the current round.
-                if _check_thrash(worktree, commit_sha, ci_fix_rounds_used, decision):
+                if _check_thrash(worktree, ci_fix_rounds_used, decision):
                     logger.log("monitor", "THRASH_DETECTED",
                                round=ci_fix_rounds_used, files=decision.get("files_touched"))
                     result["status"] = "stuck-thrash-detected"

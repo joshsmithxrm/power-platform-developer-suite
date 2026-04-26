@@ -2371,16 +2371,15 @@ class TestThrashDetection:
         current_decision = {
             "files_touched": ["tests/test_pr_monitor.py", "scripts/pr_monitor.py"],
         }
-        result = pr_monitor._check_thrash(wt, sha, round_num=2, current_decision=current_decision)
+        result = pr_monitor._check_thrash(wt, round_num=2, current_decision=current_decision)
         assert result is True, "Should detect thrash when files_touched is identical"
 
     def test_thrash_check_skipped_round_1(self, tmp_path):
         """_check_thrash always returns False for round 1 (no prior round)."""
         wt = _make_worktree(tmp_path)
-        sha = "abc123"
 
         current = {"files_touched": ["scripts/pr_monitor.py"]}
-        result = pr_monitor._check_thrash(wt, sha, round_num=1, current_decision=current)
+        result = pr_monitor._check_thrash(wt, round_num=1, current_decision=current)
         assert result is False, "Round 1 must never trigger thrash detection"
 
     def test_thrash_check_different_files_no_thrash(self, tmp_path):
@@ -2394,7 +2393,7 @@ class TestThrashDetection:
         pr_monitor._write_ci_fix_decision(wt, sha, round_num=1, payload=prior)
 
         current = {"files_touched": ["b.py"]}
-        result = pr_monitor._check_thrash(wt, sha, round_num=2, current_decision=current)
+        result = pr_monitor._check_thrash(wt, round_num=2, current_decision=current)
         assert result is False, "Different files should not trigger thrash"
 
 
