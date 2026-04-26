@@ -1075,7 +1075,7 @@ class TestPrGeminiStabilization:
             "state": "COMMENTED",
         }
         inline_comments = [
-            {"id": i, "user": {"login": "x"}, "path": "a.py",
+            {"id": i, "user": {"login": triage_common.GEMINI_BOT_LOGIN}, "path": "a.py",
              "line": i, "body": f"c{i}", "created_at": "2026-04-19T05:00:00Z"}
             for i in range(3)
         ]
