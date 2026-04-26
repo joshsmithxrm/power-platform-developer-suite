@@ -11,11 +11,6 @@ namespace PPDS.LiveTests.Cli;
 public class DataExportCommandE2ETests : CliE2ETestBase
 {
     /// <summary>
-    /// Unique identifier prefix for test artifacts to avoid conflicts.
-    /// </summary>
-    private readonly string _testPrefix = $"PPDS_E2EExport_{Guid.NewGuid():N}";
-
-    /// <summary>
     /// Profile name used across Tier 2 tests in this class.
     /// </summary>
     private string? _profileName;
