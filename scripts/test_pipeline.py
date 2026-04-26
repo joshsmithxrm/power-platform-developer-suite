@@ -436,7 +436,8 @@ class TestStageAlreadyCompleted(unittest.TestCase):
 
     @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
     @patch("pipeline.is_ancestor", return_value=True)
-    def test_verify_ancestor_completed(self, _, __):
+    @patch("pipeline._has_staged_changes", return_value=False)
+    def test_verify_ancestor_completed(self, _, __, ___):
         with tempfile.TemporaryDirectory() as tmp:
             self._write_state(tmp, {
                 "verify": {"ext_commit_ref": "older_sha"}
@@ -456,8 +457,40 @@ class TestStageAlreadyCompleted(unittest.TestCase):
             self.assertFalse(completed)
 
     @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    @patch("pipeline._has_staged_changes", return_value=False)
+    def test_verify_multi_surface_one_not_ancestor(self, _, __):
+        """Multi-surface: ALL refs must be ancestors; one diverged ref must fail."""
+        call_count = {"n": 0}
+
+        def is_ancestor_side_effect(ref, head, path):
+            call_count["n"] += 1
+            return ref == "good_sha"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "verify": {"cli_commit_ref": "good_sha", "ext_commit_ref": "diverged_sha"}
+            })
+            with patch("pipeline.is_ancestor", side_effect=is_ancestor_side_effect):
+                completed, _ = stage_already_completed(tmp, "verify")
+        self.assertFalse(completed)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
     @patch("pipeline.is_ancestor", return_value=True)
-    def test_qa_ancestor_completed(self, _, __):
+    @patch("pipeline._has_staged_changes", return_value=True)
+    def test_verify_staged_changes_not_completed(self, _, __, ___):
+        """Staged changes should prevent skipping verify."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_state(tmp, {
+                "verify": {"ext_commit_ref": "older_sha"}
+            })
+            completed, reason = stage_already_completed(tmp, "verify")
+        self.assertFalse(completed)
+        self.assertIn("staged", reason)
+
+    @patch("pipeline.get_head_sha", return_value=HEAD_SHA)
+    @patch("pipeline.is_ancestor", return_value=True)
+    @patch("pipeline._has_staged_changes", return_value=False)
+    def test_qa_ancestor_completed(self, _, __, ___):
         with tempfile.TemporaryDirectory() as tmp:
             self._write_state(tmp, {
                 "qa": {"cli_commit_ref": "older_sha"}

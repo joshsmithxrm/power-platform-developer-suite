@@ -196,12 +196,23 @@ def is_ancestor(commit_ref, head_sha, worktree_path):
         return False
 
 
+def _has_staged_changes(worktree_path):
+    """Return True if there are staged changes in the worktree."""
+    try:
+        return subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "HEAD"],
+            cwd=worktree_path,
+        ).returncode != 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def stage_already_completed(worktree_path, stage):
     """Check if a stage outcome is already satisfied for current HEAD.
 
     Follows pr-gate.py commit-ref validation tiers:
       - gates/review: exact HEAD match on commit_ref
-      - verify/qa: any surface commit_ref is ancestor-of-HEAD
+      - verify/qa: ALL recorded surface commit_refs are ancestors-of-HEAD AND no staged changes
       - pr: pr.url already set
 
     Returns (completed, reason) tuple.
@@ -221,19 +232,17 @@ def stage_already_completed(worktree_path, stage):
         if review.get("passed") and review.get("commit_ref") == head_sha:
             return True, f"review.passed at HEAD {head_sha[:8]}"
 
-    elif stage == "verify":
-        verify = state.get("verify", {})
-        for key, ref in verify.items():
-            if key.endswith("_commit_ref") and ref:
-                if is_ancestor(ref, head_sha, worktree_path):
-                    return True, f"verify {key} is ancestor of HEAD"
-
-    elif stage == "qa":
-        qa = state.get("qa", {})
-        for key, ref in qa.items():
-            if key.endswith("_commit_ref") and ref:
-                if is_ancestor(ref, head_sha, worktree_path):
-                    return True, f"qa {key} is ancestor of HEAD"
+    elif stage in ("verify", "qa"):
+        section = state.get(stage, {})
+        refs = [ref for k, ref in section.items() if k.endswith("_commit_ref") and ref]
+        if not refs:
+            return False, ""
+        if _has_staged_changes(worktree_path):
+            return False, "staged changes detected"
+        for ref in refs:
+            if not is_ancestor(ref, head_sha, worktree_path):
+                return False, ""
+        return True, f"all recorded {stage} surfaces are ancestors of HEAD"
 
     elif stage == "pr":
         pr = state.get("pr", {})
@@ -845,8 +854,8 @@ def _find_duplicate_issue(title, finding_key, repo_root):
     prefix = title[:50]
     try:
         result = subprocess.run(
-            ["gh", "issue", "list", "--search", prefix, "--state", "open",
-             "--json", "number,title,body", "--limit", "10"],
+            ["gh", "issue", "list", "--search", f'"finding_key:{finding_key}"', "--state", "open",
+             "--json", "number,title,body", "--limit", "20"],
             cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         if result.returncode != 0:
