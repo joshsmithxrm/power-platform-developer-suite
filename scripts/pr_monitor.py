@@ -284,6 +284,7 @@ def poll_ci(worktree, pr_number, logger):
                        ci_checks_posting=True, after_polls=consecutive_errors)
         consecutive_errors = 0
         first_error_time = None
+        escalated = False
 
         # `gh pr checks` returns `bucket` as the conclusion category:
         #   pass | fail | pending | skipping | cancel
