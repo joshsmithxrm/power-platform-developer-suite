@@ -129,7 +129,7 @@ public class DataImportCommandE2ETests : CliE2ETestBase
             "data", "schema",
             "--entities", "account",
             "--output", schemaPath,
-            "--filter", $"account:name eq '{accountName}'",
+            "--filter", $"account:name = '{accountName}'",
             "--profile", _profileName!);
         schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
 
@@ -179,7 +179,7 @@ public class DataImportCommandE2ETests : CliE2ETestBase
             "data", "schema",
             "--entities", "account",
             "--output", schemaPath,
-            "--filter", $"account:name eq '{accountName}'",
+            "--filter", $"account:name = '{accountName}'",
             "--profile", _profileName!);
         schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
 
@@ -229,7 +229,7 @@ public class DataImportCommandE2ETests : CliE2ETestBase
             "data", "schema",
             "--entities", "account",
             "--output", schemaPath,
-            "--filter", $"account:name eq '{accountName}'",
+            "--filter", $"account:name = '{accountName}'",
             "--profile", profileName);
         schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
 

@@ -54,7 +54,7 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
             "data", "schema",
             "--entities", "account",
             "--output", schemaPath,
-            "--filter", $"account:name eq '{name}'",
+            "--filter", $"account:name = '{name}'",
             "--profile", _profileName!);
 
         schemaResult.ExitCode.Should().Be(0, $"Schema generation failed: {schemaResult.StdErr}");
@@ -110,7 +110,7 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
             "data", "schema",
             "--entities", "account",
             "--output", schemaPath,
-            "--filter", $"account:name eq '{name}'",
+            "--filter", $"account:name = '{name}'",
             "--profile", _profileName!);
 
         schemaResult.ExitCode.Should().Be(0, $"Schema generation failed: {schemaResult.StdErr}");
