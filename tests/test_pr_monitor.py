@@ -2687,6 +2687,13 @@ class TestCiFixFailureSummaryPropagation:
             "run list failed",
             id="0",
         ),
+        pytest.param(
+            '{"action": "fix", "files_touched": [], "lines_added": 0, '
+            '"lines_removed": 0, "escalation_reason": null, "scope_violation": false, '
+            '"failure_summary": "agent-provided context: type error at line 42"}',
+            "agent-provided context",
+            id="agent_provided",
+        ),
     ])
     def test_ci_failure_routes_to_fix(self, tmp_path, agent_json, expected_contains):
         """_dispatch_ci_fix_agent preserves failure_log as failure_summary when agent omits it."""
