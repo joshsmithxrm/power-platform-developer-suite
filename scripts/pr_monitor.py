@@ -73,6 +73,8 @@ TERMINAL_STATES = (
     "stuck-ci-fix-exhausted",
     "stuck-triage-exhausted",
     "stuck-thrash-detected",
+    "stuck-uncommitted-triage",
+    "stuck-dirty-worktree-on-ready-flip",
     "ci-timeout",
     "monitor-crash",
 )
@@ -108,6 +110,71 @@ def _gemini_effectively_done(review_body):
         return False
     body_lower = review_body.lower()
     return any(p in body_lower for p in _GEMINI_CLEAN_PATTERNS)
+
+# ---------------------------------------------------------------------------
+# Worktree state helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_worktree_dirty_files(worktree):
+    """Return list of modified/untracked tracked files in the worktree.
+
+    Uses ``git status --porcelain`` so untracked NEW files (``??`` prefix)
+    are NOT reported — only files already known to git that have been
+    modified/deleted/staged are returned. This is the right signal for
+    AC-92: we care whether the triage agent made changes without committing
+    them, not whether scratch files exist in the tree.
+
+    Returns an empty list on any error (fail-open — the gate above this call
+    is the hard stop, so a git failure here should not silently pass the gate;
+    callers must treat a non-empty list as "dirty" and treat a git failure as
+    "unknown" and refuse to proceed).
+
+    Raises ``OSError`` / ``subprocess.SubprocessError`` on subprocess failure
+    so callers can distinguish "clean" from "git unavailable".
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=10,
+    )
+    if result.returncode != 0:
+        raise OSError(
+            f"git status --porcelain failed (rc={result.returncode}): "
+            f"{result.stderr.strip()[:200]}"
+        )
+    dirty = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        xy = line[:2]
+        path = line[3:].strip().strip('"')
+        # Skip purely-untracked files (??); they don't represent uncommitted changes
+        if xy == "??":
+            continue
+        dirty.append(path)
+    return dirty
+
+
+class _UncommittedTriageError(Exception):
+    """Raised by _reconcile_replies when the AC-92 dirty-worktree gate fires.
+
+    Propagated up to run_monitor so the terminal state is set and a
+    notification is fired — not caught by the generic ``except Exception``
+    that handles normal operational errors.
+    """
+
+
+class _DirtyWorktreeOnReadyFlipError(Exception):
+    """Raised by _step_ready when a dirty worktree is detected before rebase.
+
+    Propagated up to run_monitor so the terminal state is set to
+    ``stuck-dirty-worktree-on-ready-flip`` and a notification is fired.
+    Belt-and-suspenders guard for the case where Bug 1 (_UncommittedTriageError)
+    somehow did not fire (e.g. the monitor resumed, or a user manually ran with
+    dirty state).
+    """
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -799,17 +866,54 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                        triage_iteration):
     """Post replies then reconcile unreplied comments (up to 3 rounds).
 
-    1. Posts replies for the initial triage_results.
-    2. Checks for unreplied comments via get_unreplied_comments().
-    3. If any remain, re-triages with only the delta comments (up to 3 rounds).
-    4. After 3 rounds with still-unreplied, posts "manual review needed".
+    1. AC-92 gate: refuse to post replies if the working tree has uncommitted
+       tracked changes post-triage.  A dirty tree means the triage agent made
+       fixes without committing them; posting "Fixed in <SHA>" with a stale SHA
+       would be misleading.  Sets result status to ``stuck-uncommitted-triage``
+       and returns without posting.
+    2. Posts replies for the initial triage_results.
+    3. Checks for unreplied comments via get_unreplied_comments().
+    4. If any remain, re-triages with only the delta comments (up to 3 rounds).
+    5. After 3 rounds with still-unreplied, posts "manual review needed".
     """
     MAX_RECONCILIATION_ROUNDS = 3
+
+    # --- AC-92 gate: abort if triage agent left uncommitted changes ---
+    # Skip this check in shakedown mode (no real git repo).
+    if not SHAKEDOWN:
+        try:
+            dirty = _get_worktree_dirty_files(worktree)
+        except (OSError, subprocess.SubprocessError) as _e:
+            # git status unavailable (e.g. not a git repo, git not installed).
+            # Fail-open: we can't verify cleanness but we also can't confirm
+            # dirtiness. Log and continue — the gate only blocks when we have
+            # positive evidence of dirty files.
+            logger.log("replies", "AC92_GIT_STATUS_UNAVAILABLE",
+                       error=str(_e)[:200], iteration=triage_iteration)
+            dirty = []
+        if dirty:
+            logger.log("replies", "AC92_BLOCKED_DIRTY_WORKTREE",
+                       files=",".join(dirty[:10]),
+                       iteration=triage_iteration)
+            result["status"] = "stuck-uncommitted-triage"
+            result["stuck_reason"] = (
+                f"AC-92: {len(dirty)} uncommitted file(s) post-triage — "
+                "replies refused. Dirty files: " + ", ".join(dirty[:5])
+            )
+            mark_step(result, f"replies_{triage_iteration}", "blocked_dirty")
+            write_result(worktree, result)
+            # Signal to run_monitor that we hit a terminal state
+            raise _UncommittedTriageError(
+                f"AC-92 violation: {len(dirty)} dirty file(s) post-triage: "
+                + ", ".join(dirty[:5])
+            )
 
     # Initial reply posting
     try:
         post_replies(worktree, pr_number, triage_results, logger)
         mark_step(result, f"replies_{triage_iteration}", "done")
+    except _UncommittedTriageError:
+        raise  # propagate up — do not swallow
     except Exception as e:
         logger.log("replies", "EXCEPTION", error=str(e))
         mark_step(result, f"replies_{triage_iteration}", "error")
@@ -1200,23 +1304,34 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
             "scope_violation": False,
             "failure_summary": failure_log[:200],
         }
+    # Coalesce explicit null values to safe defaults (agent may omit or null optional fields)
+    if decision.get("files_touched") is None:
+        decision["files_touched"] = []
+    if decision.get("lines_added") is None:
+        decision["lines_added"] = 0
+    if decision.get("lines_removed") is None:
+        decision["lines_removed"] = 0
+    if decision.get("scope_violation") is None:
+        decision["scope_violation"] = False
+    if not decision.get("failure_summary"):
+        decision["failure_summary"] = failure_log[:200]
     return decision
 
 
-def _check_thrash(worktree, round_num, current_decision):
+def _check_thrash(worktree, pr_number, round_num, current_decision):
     """Return True if this CI-fix round is repeating the same files as the prior round.
 
     For round_num >= 2 (AC-186), loads round_num-1's decision file and compares
     files_touched as a set. Order-independent. Round 1 always returns False.
 
     Decision files are keyed by SHA (the failing commit before each dispatch), so
-    the prior round is found by scanning for any file whose "round" field equals
-    round_num-1 rather than by SHA (which changes after each fix commit).
+    the prior round is found by scanning for any file whose "round" and "pr" fields
+    match, preventing false thrash detection across concurrent PRs.
     """
     if round_num < 2:
         return False
 
-    prior = _load_prior_decision(worktree, round_num - 1)
+    prior = _load_prior_decision(worktree, pr_number, round_num - 1)
     if prior is None:
         return False
 
@@ -1256,14 +1371,13 @@ def _write_ci_fix_decision(worktree, sha, round_num, payload):
     return Path(path)
 
 
-def _load_prior_decision(worktree, prior_round):
-    """Load the CI-fix decision file for the given round number.
+def _load_prior_decision(worktree, pr_number, prior_round):
+    """Load the CI-fix decision file for the given PR and round number.
 
-    Scans .workflow/ci-fix-decisions/ for any .json file whose "round" field
-    equals prior_round. Returns the parsed dict or None if not found.
-
-    Using round-based lookup (not SHA-based) so the comparison works correctly
-    across multiple rounds even though the commit SHA changes after each fix commit.
+    Scans .workflow/ci-fix-decisions/ for any .json file whose "pr" field
+    matches pr_number AND "round" field equals prior_round. Returns the parsed
+    dict or None if not found. PR-scoped lookup prevents false thrash detection
+    when the decisions directory is shared across concurrent PRs.
     """
     decisions_dir = os.path.join(worktree, ".workflow", "ci-fix-decisions")
     if not os.path.isdir(decisions_dir):
@@ -1275,7 +1389,7 @@ def _load_prior_decision(worktree, prior_round):
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if data.get("round") == prior_round:
+            if data.get("pr") == pr_number and data.get("round") == prior_round:
                 return data
         except (json.JSONDecodeError, OSError):
             continue
@@ -1332,8 +1446,51 @@ def _build_terminal_notification(pr_number, terminal_state, result,
     )
 
 
-def run_monitor(worktree, pr_number, resume=False):
-    """Main monitor loop — state-machine orchestrator (v9.1)."""
+def _parse_github_repo(remote_url):
+    """Parse an owner/repo slug from a GitHub remote URL.
+
+    Handles:
+      - HTTPS: ``https://github.com/owner/repo.git`` → ``owner/repo``
+      - HTTPS (no .git): ``https://github.com/owner/repo`` → ``owner/repo``
+      - SSH: ``git@github.com:owner/repo.git`` → ``owner/repo``
+      - SSH (no .git): ``git@github.com:owner/repo`` → ``owner/repo``
+
+    GitHub Enterprise and non-standard SSH ports are out of scope.
+    Returns ``None`` if the URL cannot be parsed.
+    """
+    if not remote_url:
+        return None
+    url = remote_url.strip()
+
+    import re
+    # HTTPS pattern: https://github.com/owner/repo[.git]
+    https_match = re.match(
+        r"https?://[^/]+/([^/]+/[^/]+?)(?:\.git)?$", url
+    )
+    if https_match:
+        return https_match.group(1)
+
+    # SSH pattern: git@github.com:owner/repo[.git]
+    ssh_match = re.match(
+        r"git@[^:]+:([^/]+/[^/]+?)(?:\.git)?$", url
+    )
+    if ssh_match:
+        return ssh_match.group(1)
+
+    return None
+
+
+def run_monitor(worktree, pr_number, resume=False, repo=None):
+    """Main monitor loop — state-machine orchestrator (v9.1).
+
+    Args:
+        worktree: absolute path to the git worktree
+        pr_number: pull request number
+        resume: if True, skip already-completed steps
+        repo: optional ``owner/repo`` slug for ``gh`` calls; resolved from
+            ``git remote get-url origin`` if not provided.  Passing it
+            explicitly avoids a subprocess call and makes unit tests cleaner.
+    """
     workflow_dir = os.path.join(worktree, ".workflow")
     os.makedirs(workflow_dir, exist_ok=True)
 
@@ -1342,6 +1499,21 @@ def run_monitor(worktree, pr_number, resume=False):
 
     write_pid(worktree)
     atexit.register(cleanup_pid, worktree)
+
+    # Resolve GitHub repo slug once at startup for gh run list / view calls
+    # (Bug 2 fix: gh CLI needs --repo when cwd has no git remote context)
+    if repo is None:
+        try:
+            remote_proc = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=worktree, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=5,
+            )
+            if remote_proc.returncode == 0:
+                repo = _parse_github_repo(remote_proc.stdout.strip())
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    repo_args = ["--repo", repo] if repo else []
 
     result = read_result(worktree) if resume else _empty_result()
     result["status"] = "running"
@@ -1459,7 +1631,7 @@ def run_monitor(worktree, pr_number, resume=False):
                 try:
                     branch_args = ["--branch", current_branch] if current_branch else []
                     id_proc2 = subprocess.run(
-                        ["gh", "run", "list", *branch_args, "--limit", "1",
+                        ["gh", "run", "list", *repo_args, *branch_args, "--limit", "1",
                          "--json", "databaseId", "--jq", ".[0].databaseId"],
                         cwd=worktree, capture_output=True, text=True,
                         encoding="utf-8", errors="replace", timeout=30,
@@ -1468,7 +1640,7 @@ def run_monitor(worktree, pr_number, resume=False):
                         run_id2 = id_proc2.stdout.strip()
                         if run_id2:
                             log_proc = subprocess.run(
-                                ["gh", "run", "view", run_id2, "--log-failed"],
+                                ["gh", "run", "view", *repo_args, run_id2, "--log-failed"],
                                 cwd=worktree, capture_output=True, text=True,
                                 encoding="utf-8", errors="replace", timeout=60,
                             )
@@ -1494,7 +1666,7 @@ def run_monitor(worktree, pr_number, resume=False):
                     try:
                         branch_args = ["--branch", current_branch] if current_branch else []
                         id_proc = subprocess.run(
-                            ["gh", "run", "list", *branch_args, "--limit", "1",
+                            ["gh", "run", "list", *repo_args, *branch_args, "--limit", "1",
                              "--json", "databaseId", "--jq", ".[0].databaseId"],
                             cwd=worktree, capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=30,
@@ -1503,7 +1675,7 @@ def run_monitor(worktree, pr_number, resume=False):
                             run_id = id_proc.stdout.strip()
                             if run_id:
                                 subprocess.run(
-                                    ["gh", "run", "rerun", run_id, "--failed"],
+                                    ["gh", "run", "rerun", *repo_args, run_id, "--failed"],
                                     cwd=worktree, capture_output=True, text=True,
                                     encoding="utf-8", errors="replace", timeout=30,
                                 )
@@ -1537,7 +1709,7 @@ def run_monitor(worktree, pr_number, resume=False):
 
                 # Thrash check (AC-186) — BEFORE writing decision file so
                 # _load_prior_decision reads round N-1, not the current round.
-                if _check_thrash(worktree, ci_fix_rounds_used, decision):
+                if _check_thrash(worktree, pr_number, ci_fix_rounds_used, decision):
                     logger.log("monitor", "THRASH_DETECTED",
                                round=ci_fix_rounds_used, files=decision.get("files_touched"))
                     result["status"] = "stuck-thrash-detected"
@@ -1615,10 +1787,22 @@ def run_monitor(worktree, pr_number, resume=False):
                 )
 
                 if triage_results:
-                    _reconcile_replies(
-                        worktree, pr_number, triage_results, logger, result,
-                        triage_rounds_used,
-                    )
+                    try:
+                        _reconcile_replies(
+                            worktree, pr_number, triage_results, logger, result,
+                            triage_rounds_used,
+                        )
+                    except _UncommittedTriageError:
+                        # AC-92: triage agent left uncommitted changes.
+                        # result["status"] already set to stuck-uncommitted-triage
+                        # by _reconcile_replies. Fire terminal notification and exit.
+                        _notify_terminal(
+                            worktree, pr_number, logger,
+                            _build_terminal_notification(
+                                pr_number, "stuck-uncommitted-triage", result,
+                                ci_fix_rounds_used, triage_rounds_used, worktree))
+                        logger.close()
+                        return 1
 
                 # Re-poll CI after triage commits
                 ci_recheck_key = f"ci_recheck_{triage_rounds_used}"
@@ -1685,6 +1869,34 @@ def run_monitor(worktree, pr_number, resume=False):
         logger.log("monitor", "COMPLETE", pr=pr_number)
         logger.close()
         return 0
+
+    except _UncommittedTriageError as e:
+        # result["status"] already set to stuck-uncommitted-triage by _reconcile_replies.
+        # This path is only hit if the inner try/except in dispatch_gemini_triage
+        # did not catch it (belt-and-suspenders).
+        write_result(worktree, result)
+        logger.log("monitor", "ABORT", reason=f"uncommitted-triage: {e}")
+        _notify_terminal(
+            worktree, pr_number, logger,
+            _build_terminal_notification(
+                pr_number, "stuck-uncommitted-triage", result,
+                ci_fix_rounds_used, triage_rounds_used, worktree,
+            ) + f"\n  {e}")
+        logger.close()
+        return 1
+
+    except _DirtyWorktreeOnReadyFlipError as e:
+        # result["status"] already set to stuck-dirty-worktree-on-ready-flip
+        write_result(worktree, result)
+        logger.log("monitor", "ABORT", reason=f"dirty-worktree-ready-flip: {e}")
+        _notify_terminal(
+            worktree, pr_number, logger,
+            _build_terminal_notification(
+                pr_number, "stuck-dirty-worktree-on-ready-flip", result,
+                ci_fix_rounds_used, triage_rounds_used, worktree,
+            ) + f"\n  {e}")
+        logger.close()
+        return 1
 
     except KeyboardInterrupt:
         result["status"] = "interrupted"
@@ -1833,6 +2045,35 @@ def _step_ready(worktree, pr_number, logger, result):
                 logger.log("ready", "NOTIFY_ERROR", error=str(e))
             return
 
+        # Bug 4 / belt-and-suspenders: refuse rebase+ready-flip if the worktree
+        # has uncommitted tracked changes.  A dirty tree at this point means
+        # either AC-92 failed to catch an uncommitted triage, or the user/another
+        # process modified the worktree without committing.  Rebase will abort
+        # immediately with "cannot rebase: You have unstaged changes" and the
+        # abort itself would fail ("no rebase in progress"), leaving the tree in
+        # an unknown state.  Hard-stop here instead.
+        if not SHAKEDOWN:
+            try:
+                dirty = _get_worktree_dirty_files(worktree)
+            except (OSError, subprocess.SubprocessError) as _e:
+                # git status unavailable — fail-open (same policy as AC-92 gate).
+                logger.log("ready", "GIT_STATUS_UNAVAILABLE", error=str(_e)[:200])
+                dirty = []
+            if dirty:
+                logger.log("ready", "BLOCKED_DIRTY_WORKTREE",
+                           files=",".join(dirty[:10]))
+                result["status"] = "stuck-dirty-worktree-on-ready-flip"
+                result["stuck_reason"] = (
+                    f"{len(dirty)} uncommitted file(s) at ready-flip: "
+                    + ", ".join(dirty[:5])
+                )
+                mark_step(result, "ready", "blocked_dirty")
+                write_result(worktree, result)
+                raise _DirtyWorktreeOnReadyFlipError(
+                    f"{len(dirty)} dirty file(s) at ready-flip: "
+                    + ", ".join(dirty[:5])
+                )
+
         # Finding #6: rebase source branch before flipping to ready.
         rebased = _rebase_source_branch(worktree, pr_number, logger)
         if not rebased:
@@ -1851,6 +2092,8 @@ def _step_ready(worktree, pr_number, logger, result):
         success = mark_pr_ready(worktree, pr_number, logger)
         mark_step(result, "ready", "done" if success else "error")
         write_result(worktree, result)
+    except (_DirtyWorktreeOnReadyFlipError, _UncommittedTriageError):
+        raise  # propagate terminal-state errors to run_monitor
     except Exception as e:
         logger.log("ready", "EXCEPTION", error=str(e))
         mark_step(result, "ready", "error")
@@ -1898,6 +2141,9 @@ def main():
                         help="Pull request number")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last completed step")
+    parser.add_argument("--repo",
+                        help="GitHub owner/repo slug (e.g. owner/repo). "
+                             "Resolved from git remote if omitted.")
     args = parser.parse_args()
 
     worktree = str(Path(args.worktree).resolve())
@@ -1907,7 +2153,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    exit_code = run_monitor(worktree, args.pr, resume=args.resume)
+    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo)
     sys.exit(exit_code)
 
 
