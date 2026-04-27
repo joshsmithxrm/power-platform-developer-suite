@@ -634,7 +634,7 @@
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
-    "monaco-editor": "0.53.0",
+    "monaco-editor": "0.55.1",
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
