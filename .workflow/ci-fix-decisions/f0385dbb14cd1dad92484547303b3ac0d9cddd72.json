@@ -1,0 +1,12 @@
+{
+  "round": 1,
+  "timestamp": "2026-04-26T22:59:54Z",
+  "pr": 986,
+  "failure_summary": "",
+  "files_touched": [],
+  "lines_added": 0,
+  "lines_removed": 0,
+  "action": "escalate",
+  "escalation_reason": "agent output did not contain a valid JSON decision",
+  "scope_violation": false
+}

@@ -1,8 +1,8 @@
 # Workflow Enforcement
 
-**Status:** Draft (v9.0 — hook-over-skill enforcement, model routing, two-file skill pattern, enforcement harness)
-**Version:** 9.0
-**Last Updated:** 2026-04-25
+**Status:** Draft (v9.1 — autonomous CI-fix loop, terminal-only notifications, state-machine PR monitor)
+**Version:** 9.1
+**Last Updated:** 2026-04-26
 **Code:** [.claude/](../.claude/) | [scripts/pipeline.py](../scripts/pipeline.py) | [scripts/pr_monitor.py](../scripts/pr_monitor.py) | [.claude/hooks/](../.claude/hooks/) | [.claude/skills/](../.claude/skills/)
 **Surfaces:** N/A
 
@@ -804,6 +804,164 @@ On `--resume`, the monitor reads `steps_completed` and skips any step marked `tr
 
 **Session independence:** The monitor writes its own log (`.workflow/pr-monitor.log`) and result file. It does not read from or write to any Claude session. It can outlive the session, the terminal, even a system restart (re-launch with `--resume`).
 
+#### CI-Fix Loop and State-Machine Orchestrator (v9.1)
+
+**Problem this solves.** The v7.0 monitor was mostly linear — `_step_ci → _step_gemini → _step_triage → _step_ready`. Two real failure modes surfaced after the v9.0 retro:
+
+1. **Mid-loop notification spam.** A single non-terminal trajectory could fire `_notify_terminal()` 4× in one run (`pr_monitor.py:1085-1086`, `1152-1155`, `1198-1204`, plus the real terminal at `_step_ready`). Operators only care about the final state — every intermediate ping is noise.
+2. **No autonomy on CI fixes.** A CI failure with no Gemini comment to pivot on (build error, test assertion, typo) was logged-and-exit. Mechanical one-line fixes that an agent could absolutely have done required human re-launch.
+
+The CI-fix loop adds an **autonomous fix path** alongside the existing Gemini triage path, both driven by a unified **state-machine orchestrator** that replaces the linear step chain.
+
+**State machine.** The monitor runs three states:
+
+| State | Description | Transitions |
+|-------|-------------|-------------|
+| `WAITING` | CI poll + Gemini poll both run in parallel; no agent active. | When both signals are terminal → `CLASSIFY` |
+| `FIXING` | Exactly one agent active (CI-fix or Gemini-triage). Agent commit + push exits this state. | After agent commit → back to `WAITING` (CI restarts on push) |
+| `DONE` | Both signals clean, no fixes pending. Single terminal notification emitted. | Exit |
+
+**Classifier (at every settle point):**
+
+| `(ci_state, gemini_state)` | Action | Round counter |
+|---|---|---|
+| `(pass, no comments)` | → `DONE` (ready) | — |
+| `(pass, comments pending)` | wait for Gemini stabilization | — |
+| `(pass, comments posted)` | dispatch Gemini-triage agent | `triage_round++` |
+| `(fail, any)` | classify failure log → flake / real | (see flake handling) |
+| `(timeout, any)` | → terminal `ci-timeout` | — |
+
+**Why parallel monitoring + serialized writes:** A push *resets CI* but does not invalidate posted Gemini comments. Pushing during an in-flight CI run kills that run and burns 5–15 minutes. So the orchestrator polls both sources concurrently (free), but only commits when CI is in a settled state (cheap → expensive transition). At any moment exactly one of three things is happening: (a) CI running, no agent active; (b) CI settled, one agent active; (c) DONE. No git races.
+
+**Flake detection (CI fail → reroute):**
+
+```python
+KNOWN_FLAKE_PATTERNS = [
+    r"ETIMEDOUT", r"ECONNRESET", r"ECONNREFUSED",
+    r"Resource temporarily unavailable",
+    r"429 Too Many Requests", r"50[23] (Bad Gateway|Service Unavailable)",
+    r"actions/checkout.*network",
+    r"npm ERR! network",
+    r"dotnet restore.*timeout",
+]
+```
+
+On CI fail, fetch failed-job logs (`gh run view --log-failed --job <id>`) and grep against `KNOWN_FLAKE_PATTERNS`. **First match per commit** triggers `gh run rerun --failed <run-id>` (no round consumed). **Second match on the same commit** = treat as real failure, dispatch agent. Patterns are codified in `pr_monitor.py` as a single constant for grep-audit and incremental extension.
+
+**CI-fix agent dispatch.** When the classifier picks "real CI failure":
+
+```
+claude -p --model sonnet --agent ci-fix
+  prompt:
+    - failure log excerpt (last N lines of failed job)
+    - git diff main...HEAD (the diff under test)
+    - branch ACs from .workflow/state.json
+    - Gemini comments as JSON (context-only, NOT action items)
+    - constitution + scope-guardrails (G1/G5/G6 below)
+  agent commits + pushes; orchestrator returns to WAITING
+```
+
+**Agent profile location:** `.claude/agents/ci-fix.md`. Restricted toolset: `Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`. No `Agent` (no subagents), no web. Model: `sonnet` (floating, matches `gemini-triage` precedent).
+
+**Round budget.**
+
+| Constant | Default | Env override | Purpose |
+|---|---|---|---|
+| `MAX_CI_FIX_ROUNDS` | `3` | `PPDS_MAX_CI_FIX_ROUNDS` | Independent of triage rounds — different failure modes |
+| `MAX_TRIAGE_ITERATIONS` | `3` (existing) | (existing) | Gemini-triage cycles |
+
+Each push from either agent resets the relevant counter only. The orchestrator's outer wall-clock is bounded by `HARD_CEILING = 7200s` (existing).
+
+**Scope guardrails (v1 — loose-by-design).**
+
+The agent must NOT (a) silently bail with "preexisting" cop-outs nor (b) lurch into rewriting half the codebase. v1 ships the minimum guardrails to prevent existential risks (runaway loop, thrash); finer-grained limits are deferred until we have audit data.
+
+| ID | Mechanism | Notes |
+|---|---|---|
+| **G1: Diff-scope visibility** | Prompt rule + audit field `files_touched`. Agent is told to stay within files touched by `git diff main...HEAD`; if it edits outside that set, the audit file records it for retro grep. | No pre-commit hook in v1 — prompt + visibility first. Hook-enforcement only if prompt discipline fails in observed runs. |
+| **G5: Audit trail** | Mandatory `.workflow/ci-fix-decisions/<commit-sha>.json` per round. Schema below. Committed to repo (not gitignored) — auditable across PRs. | Source of truth for v2 guardrail decisions. |
+| **G6: Convergence/thrash** | Orchestrator check: round N's `files_touched` identical to round N-1's = thrash → exit `stuck-thrash-detected`. Round 1 has no comparison; round 2 compares to round 1; round 3+ compares to N-1. | Prevents infinite-loop pathology even within `MAX_CI_FIX_ROUNDS`. |
+| Deferred to v2 | line budget (G2), tests-fix-tests rule (G3), escalation enum (G4), pre-commit hook enforcement | Tracked in follow-up issue gated on data from ≥5 real loop runs. |
+
+**Decision file schema (`.workflow/ci-fix-decisions/<commit-sha>.json`):**
+
+```json
+{
+  "round": 1,
+  "timestamp": "2026-04-26T14:23:11Z",
+  "pr": 985,
+  "failure_summary": "5 tests in CliSmokeTests.DataSchemaFilter failed: filter syntax mismatch",
+  "files_touched": ["tests/PPDS.Cli.Tests/CliSmokeTests/DataSchemaFilterTests.cs"],
+  "lines_added": 12,
+  "lines_removed": 12,
+  "action": "fix",
+  "escalation_reason": null,
+  "scope_violation": false
+}
+```
+
+When the agent escalates instead of fixing, `action: "escalate"` and `escalation_reason` is free-text. The retro skill greps these for "preexisting" / "existing" / "not related" patterns and surfaces them as findings — that's the v1 "preexisting cop-out" detector. No enum in v1; pattern emerges from data.
+
+**Composition with Gemini triage (AC-108 supersession).** The pre-v9.1 behavior described in AC-108 (CI fail → notify + continue to Gemini triage + exit 1) is replaced. The new behavior:
+
+- CI fail (real) → CI-fix agent (Gemini comments visible as context-only). The agent's mandate is to fix CI; it may use Gemini comments as hints but does not own the Gemini-triage replies.
+- After the CI-fix agent commits, the orchestrator returns to WAITING and re-polls both signals from scratch.
+- Once CI is green AND Gemini has comments, the Gemini-triage agent dispatches separately (existing `_step_triage` path, unchanged in scope).
+- `MAX_CI_FIX_ROUNDS` and `MAX_TRIAGE_ITERATIONS` are independent — exhausting one does not consume the other.
+
+**Thrash detection scope (G6 is CI-fix-only by design).** The convergence check (AC-186) applies only to CI-fix rounds. Gemini-triage rounds are *expected* to re-edit the same files across iterations as the agent refines its replies to a stable comment set; that is normal triage behavior, not thrash. Triage runaway is bounded by `MAX_TRIAGE_ITERATIONS` alone. If observed v9.1 runs show triage thrash patterns that the round budget doesn't catch, an analogous G6-for-triage check is a v2 candidate.
+
+**Decision-file durability (deferred to v2).** v1 writes `.workflow/ci-fix-decisions/<sha>.json` with a single `open()`/`json.dump()`/close. A monitor crash mid-write could leave a partial file that breaks retro grep silently. Deferred because (a) `pr_monitor.py` crashes are the explicit terminal `monitor-crash` state and produce a notification; (b) atomic write (write-temp + rename) is a small follow-up; (c) the v2 follow-up issue covers this alongside the other deferred guardrails.
+
+#### Notification Policy: Terminal-Only (v9.1)
+
+**Rule:** `_notify_terminal()` fires **exactly once per monitor run**, on a terminal state.
+
+**Removed mid-loop calls in `pr_monitor.py`:**
+
+| Line(s) | Pre-v9.1 message | v9.1 disposition |
+|---|---|---|
+| 1085–1086 | "PR #N CI failed — continuing to triage" | Removed. CI failure during recovery is not user-actionable. |
+| 1152–1155 | "PR #N CI failed after triage round 1" | Removed. Mid-loop CI fail is internal. |
+| 1198–1204 | "triage complete — N items triaged (CI still failing)" | Removed. The state machine handles re-loop. |
+
+**Retained / new terminal-notification sites:**
+
+| Site | Trigger | Status |
+|---|---|---|
+| `_step_ready` (~1376) | PR ready (success path) | Retained (rewritten to use new format) |
+| `_step_notify` (~1419) | PR ready (terminal notify) | Retained |
+| CI timeout (~1093/1164) | `CI_MAX_WAIT` exceeded | Retained |
+| Monitor crash (~1248) | Uncaught exception | Retained |
+| **NEW** Max CI-fix rounds | `MAX_CI_FIX_ROUNDS` exhausted | New terminal site |
+| **NEW** Thrash detected | G6 convergence check fired | New terminal site |
+
+**Notification payload format** (one of these strings, sent via `notify.py`):
+
+```
+PR #<N>: <terminal-state>
+  CI: <pass|fail|timeout>
+  Gemini: <triaged|none|pending>
+  CI-fix rounds used: X/<MAX_CI_FIX_ROUNDS>
+  Triage rounds used: Y/<MAX_TRIAGE_ITERATIONS>
+  Last decision: .workflow/ci-fix-decisions/<sha>.json
+```
+
+(The denominators render as the *effective* values at runtime — `MAX_CI_FIX_ROUNDS` is overridable via `PPDS_MAX_CI_FIX_ROUNDS`. Hard-coding `/3` would mislead operators using a non-default budget.)
+
+**Terminal state enum:**
+
+| State | Meaning |
+|---|---|
+| `ready` | PR converted draft → ready, all checks green, all comments addressed |
+| `stuck-ci-fix-exhausted` | `MAX_CI_FIX_ROUNDS` rounds used; CI still red |
+| `stuck-triage-exhausted` | `MAX_TRIAGE_ITERATIONS` rounds used; Gemini comments still pending |
+| `stuck-thrash-detected` | G6 fired — rounds N and N-1 touched the same files identically |
+| `stuck-uncommitted-triage` | AC-92 gate fired — triage agent left uncommitted changes; replies refused |
+| `stuck-dirty-worktree-on-ready-flip` | Dirty worktree detected before rebase at ready-flip (belt-and-suspenders for AC-92) |
+| `ci-timeout` | `CI_MAX_WAIT` exceeded (existing) |
+| `monitor-crash` | Uncaught exception in orchestrator (existing) |
+
 #### Workflow Shakedown
 
 **Skill entrypoint:** `/shakedown workflow` (Workflow Mode of the `/shakedown` skill — PR #842 folded the former standalone `/shakedown-workflow` into `/shakedown`).
@@ -1415,7 +1573,7 @@ After all skills in this spec are implemented:
 | AC-105 | Every skill that writes to state sets the `phase` field: `/start` → `starting`, `/investigate` → `investigating`, `/design` → `design`, `/implement` → `implementing`, `/review` → `reviewing`, `/qa` → `qa`, `/shakedown workflow` → `shakedown`, `/pr` → `pr`, `pipeline.py` → `pipeline` | `test_all_skills_set_phase` (grep each SKILL.md for `workflow-state.py set phase`) | 🔲 |
 | AC-106 | `pr_monitor.py` runs as a detached background process — survives parent session exit | Manual: launch pr-monitor, exit session, verify monitor still running | 🔲 |
 | AC-107 | `pr_monitor.py` polls CI status via `gh pr checks` at 30s intervals until all checks complete (pass or fail) | `test_pr_monitor.py::test_ci_polling` | 🔲 |
-| AC-108 | `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, sends a CI-failed notification, continues to Gemini polling/triage so reviewer comments are still addressed (#860), then exits 1 after triage completes (or when no inline comments are pending) | `test_pr_monitor.py::test_ci_failure_notify_and_exit`, `test_pr_monitor.py::test_ci_fail_then_gemini_comment_is_triaged` | 🔲 |
+| AC-108 | **(superseded by AC-181/AC-191 in v9.1 — terminal-only notifications + state-machine orchestrator)** `pr_monitor.py` on CI failure: writes result with `status: "ci_failed"`, classifier routes to CI-fix agent (no mid-loop notification); Gemini comments remain visible as context-only and are triaged in a separate phase once CI is green | `test_pr_monitor.py::test_ci_failure_routes_to_fix_loop`, `test_pr_monitor.py::test_ci_fail_then_gemini_comment_is_triaged` | ✅ |
 | AC-109 | `pr_monitor.py --resume` skips already-completed steps by reading `pr-monitor-result.json` | `test_pr_monitor.py::test_resume_skips_completed` | 🔲 |
 | AC-110 | `pr_monitor.py` spawns `claude -p` triage when inline comments > 0, waits for completion, posts threaded replies | `test_pr_monitor.py::test_triage_on_inline_comments` | 🔲 |
 | AC-111 | `pr_monitor.py` re-polls CI after triage commits (loop back to CI check) | `test_pr_monitor.py::test_repoll_ci_after_triage` | 🔲 |
@@ -1434,7 +1592,7 @@ After all skills in this spec are implemented:
 | AC-124 | Pipeline heartbeat uses `origin/main..HEAD` for commit count (not local `main`) | `test_pipeline.py::test_heartbeat_uses_origin_main` | 🔲 |
 | AC-125 | `pr_monitor.py` exits with `ci_timeout` status after 15 min (`CI_MAX_WAIT = 900`) if CI checks are still pending | `test_pr_monitor.py::test_ci_timeout` | 🔲 |
 | AC-126 | `pr_monitor.py` stops Gemini polling after 5 min max, proceeds with whatever comments exist | `test_pr_monitor.py::test_gemini_timeout` | 🔲 |
-| AC-127 | `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with notification | `test_pr_monitor.py::test_triage_ci_loop_limit` | 🔲 |
+| AC-127 | **(superseded by AC-183/AC-196 (separate budgets) and AC-186 (convergence) in v9.1)** `pr_monitor.py` triage→CI re-poll loop exits after max 3 iterations with terminal notification; v9.1 separates this into `MAX_CI_FIX_ROUNDS` and `MAX_TRIAGE_ITERATIONS` and adds a convergence/thrash check | `test_pr_monitor.py::test_triage_ci_loop_limit` | ✅ |
 | AC-128 | `pr_monitor.py` writes PID file on startup and cleans it up on exit (normal and error) | `test_pr_monitor.py::test_pid_file_lifecycle` | 🔲 |
 
 | AC-129 | PR gate requires `gates.commit_ref == HEAD` (exact match) | `test_pipeline.py::test_pr_gate_exact_head_gates` | 🔲 |
@@ -1489,6 +1647,22 @@ After all skills in this spec are implemented:
 | AC-178 | **(v9.0 — Inflight)** `pr_monitor.py` terminal step (any of complete, ci_failed, gemini_timeout) calls `inflight-deregister.py --branch <branch>` before final notification | `test_pr_monitor.py::test_terminal_deregisters_inflight` | ✅ |
 | AC-179 | **(v9.0 — Inflight)** PostToolUse hook on `Bash(gh pr merge:*)` deregisters the branch from in-flight registry on exit 0 | `test_hooks.py::test_inflight_deregister_on_merge` | ✅ |
 | AC-180 | **(v9.0 — Inflight)** `inflight-check.py` reports registrations older than 7 days with no live worktree as `[stale]` in conflict output (informational, not blocking) | `test_inflight.py::test_stale_ttl_detection` | ✅ |
+| AC-181 | **(v9.1 — Orchestrator)** `pr_monitor.py` polls CI and Gemini in parallel and never dispatches an agent while CI is in progress (no commits during in-flight CI runs) | `test_pr_monitor.py::test_orchestrator_no_dispatch_while_ci_running` | ✅ |
+| AC-182 | **(v9.1 — Orchestrator)** Classifier dispatches at every settle point: `(pass, no comments)` → DONE; `(pass, comments)` → Gemini-triage agent; `(fail, any)` → CI-fix agent (after flake check); `(timeout, any)` → terminal `ci-timeout` | `test_pr_monitor.py::test_classifier_dispatch_matrix` | ✅ |
+| AC-183 | **(v9.1 — CI-Fix)** `MAX_CI_FIX_ROUNDS = 3` (default), overridable via `PPDS_MAX_CI_FIX_ROUNDS` env var; counter independent of `MAX_TRIAGE_ITERATIONS` | `test_pr_monitor.py::test_ci_fix_round_budget_default_and_override` | ✅ |
+| AC-184 | **(v9.1 — Flake)** `KNOWN_FLAKE_PATTERNS` constant in `pr_monitor.py`; on first match per commit the monitor calls `gh run rerun --failed <run-id>` and does not consume a CI-fix round; second match on the same commit treats failure as real and dispatches the agent | `test_pr_monitor.py::test_flake_pattern_rerun_once_then_real`, `test_pr_monitor.py::test_known_flake_patterns_constant_exists` | ✅ |
+| AC-185 | **(v9.1 — CI-Fix)** CI-fix agent receives: failed-job log excerpt, `git diff main...HEAD`, branch ACs from `.workflow/state.json`, Gemini comments as JSON (context-only), constitution, scope-guardrails preamble | `test_pr_monitor.py::test_ci_fix_agent_prompt_payload` | ✅ |
+| AC-186 | **(v9.1 — Convergence)** For CI-fix round N where N≥2 (i.e., a prior round's decision file exists), the orchestrator exits with terminal `stuck-thrash-detected` when `files_touched` in round N's decision file equals round N-1's `files_touched` as a set (order-independent). Round 1 has no comparison and never trips this check. | `test_pr_monitor.py::test_thrash_detection_exits_on_repeat_files`, `test_pr_monitor.py::test_thrash_check_skipped_round_1` | ✅ |
+| AC-187 | **(v9.1 — Audit)** Each CI-fix round writes `.workflow/ci-fix-decisions/<commit-sha>.json` with typed fields: `round` (int, 1-indexed), `timestamp` (ISO 8601 UTC string), `pr` (int), `failure_summary` (string), `files_touched` (string array of repo-relative paths), `lines_added` (int), `lines_removed` (int), `action` (enum: `"fix"` \| `"escalate"`), `escalation_reason` (string \| null — required when action="escalate"), `scope_violation` (bool — true when `files_touched` ⊄ `git diff main...HEAD --name-only`) | `test_pr_monitor.py::test_decision_file_schema_typed_fields` | ✅ |
+| AC-188 | **(v9.1 — Audit)** `.workflow/ci-fix-decisions/` is committed to the repo (NOT gitignored) so the audit trail persists across PRs and is grep-able for retro analysis | `test_pr_monitor.py::test_ci_fix_decisions_dir_not_gitignored` | ✅ |
+| AC-189 | **(v9.1 — Guardrail G1)** CI-fix agent prompt includes scope-guardrails preamble that (a) instructs the agent to keep edits within `git diff main...HEAD`, (b) records `files_touched` and `scope_violation` in the decision file when it strays, (c) forbids "preexisting" cop-outs and requires `escalation_reason` text on `action: "escalate"` | `test_ci_fix_agent.py::test_prompt_contains_scope_guardrails` | ✅ |
+| AC-190 | **(v9.1 — Agent)** `.claude/agents/ci-fix.md` exists with `model: sonnet` (floating, no version pin — verified by absence of date suffix in the model field) and restricted tools (`Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob` — no `Agent`, no web) | `test_ci_fix_agent.py::test_agent_profile_exists_with_restricted_tools_and_floating_model` | ✅ |
+| AC-191 | **(v9.1 — Notification)** `_notify_terminal()` is called exactly once per `pr_monitor.py` run, on a terminal state — verified by hooking the function and counting invocations across each test scenario, including: ready path, CI-fix-exhausted path, triage-exhausted path, thrash path, ci-timeout path, monitor-crash path, AND a flake-rerun-then-pass path (flake reruns must NOT notify) | `test_pr_monitor.py::test_single_terminal_notification_per_run`, `test_pr_monitor.py::test_flake_rerun_does_not_notify` | ✅ |
+| AC-192 | **(v9.1 — Notification)** The three pre-v9.1 mid-loop `_notify_terminal` call sites are removed: (1) the "CI failed — continuing to triage" call before triage starts, (2) the "CI failed after triage round N" call between triage iterations, (3) the "triage complete — N items triaged (CI still failing)" call. CI failure during the autonomous fix loop does not emit a notification at any intermediate step. (Footnote: pre-v9.1 these were at `pr_monitor.py:1085-1086`, `1152-1155`, `1198-1204` respectively; line numbers are pre-edit references and will drift post-implementation.) | `test_pr_monitor.py::test_no_notification_during_ci_fix_loop`, `test_pr_monitor.py::test_no_notification_between_triage_iterations` | ✅ |
+| AC-193 | **(v9.1 — Notification)** Terminal notification body includes: `PR #<N>: <terminal-state>`, `CI: <pass\|fail\|timeout>`, `Gemini: <triaged\|none\|pending>`, `CI-fix rounds used: X/N`, `Triage rounds used: Y/N`, `Last decision: <path>` | `test_pr_monitor.py::test_terminal_notification_format` | ✅ |
+| AC-194 | **(v9.1 — Notification)** Terminal-state enum is exactly: `ready`, `stuck-ci-fix-exhausted`, `stuck-triage-exhausted`, `stuck-thrash-detected`, `stuck-uncommitted-triage`, `stuck-dirty-worktree-on-ready-flip`, `ci-timeout`, `monitor-crash` — written to `.workflow/pr-monitor-result.json` `status` field and to the notification body. (`stuck-uncommitted-triage` fires when the AC-92 gate detects uncommitted changes post-triage; `stuck-dirty-worktree-on-ready-flip` fires as belt-and-suspenders when the ready-flip rebase finds uncommitted changes.) | `test_pr_monitor.py::test_terminal_state_enum` | ✅ |
+| AC-195 | **(v9.1 — Composition)** Only one agent (CI-fix OR Gemini-triage) is in flight at any time on a given branch; the orchestrator does not dispatch a second agent of *either* kind until the first has committed (or returned without committing). Verified by simulating concurrent classifier dispatch on `(fail, comments)` and asserting strict ordering. | `test_pr_monitor.py::test_serialized_agent_dispatch_across_kinds` | ✅ |
+| AC-196 | **(v9.1 — Composition)** `MAX_CI_FIX_ROUNDS` and `MAX_TRIAGE_ITERATIONS` are independent counters: exhausting one does not consume budget from the other; both share the outer `HARD_CEILING` wall-clock | `test_pr_monitor.py::test_independent_round_budgets` | ✅ |
 
 ### Edge Cases
 
@@ -1829,6 +2003,68 @@ After all skills in this spec are implemented:
 - Positive: Retro runs as final step — every PR gets a retro regardless of session state.
 - Negative: Another background process to manage. Mitigated by PID file, logging, and cleanup in `/cleanup` skill.
 
+### Why a State-Machine Orchestrator Instead of Sequential or Parallel CI/Triage? (v9.1)
+
+**Context:** The pre-v9.1 monitor was mostly linear: `_step_ci → _step_gemini → _step_triage → _step_ready`. Adding an autonomous CI-fix path raised the question: should CI-fix and Gemini-triage run sequentially (one then the other) or in parallel (both agents working the diff at once)?
+
+**Decision:** Neither — both are wrong. The right model is **parallel monitoring, serialized writes, batched fixes per commit**.
+
+**Why "sequential CI-fix-first" was wrong:** Sequential means Gemini's review *wall-clock* sits idle while CI runs. Gemini often finishes review before CI does; making Gemini wait until CI settles wastes the parallel time we already pay for.
+
+**Why "parallel agents" was wrong:** Two agents committing to the same worktree race on `git commit && git push`. Beyond the literal git race, both pushes reset CI — doubling CI cost per round.
+
+**Why this works:** Polling is free; commits are expensive. The orchestrator polls both signals in parallel (we don't lose Gemini's wall-clock), but only dispatches an agent when CI is in a *settled* state. A push from any agent restarts CI exactly once. At any moment exactly one of three things is happening: (a) CI running with no agent active, (b) CI settled with one agent active, (c) DONE.
+
+**Alternatives considered:**
+- Pure sequential CI→Gemini: rejected — wastes Gemini wall-clock.
+- Pure parallel agents: rejected — git races + doubled CI cost.
+- "Selective" routing (CI-fix only when no Gemini comment covers the failure): rejected — classification heuristic is fragile; Gemini comments are often nitpicks unrelated to the CI failure, leading to false routing.
+
+**Consequences:**
+- Positive: maximal information-gathering parallelism without commit races.
+- Positive: each fix gets exactly one CI cycle, not two — predictable round budgets.
+- Positive: orchestrator's classifier is small and testable (a 5-row decision table).
+- Negative: more state in `pr_monitor.py` than the linear chain. Mitigated by explicit state enum and per-state unit tests.
+
+### Why Loose-v1 Scope Guardrails Instead of Tight-from-Day-1? (v9.1)
+
+**Context:** The CI-fix agent has two failure modes the operator explicitly called out: (a) the "preexisting, not my problem" cop-out (silently bailing on a fix it could make), and (b) lurching — rewriting half the codebase to silence one error. Tight guardrails (line budgets, tests-fix-tests rules, escalation enums, pre-commit hooks) would prevent both — but at the cost of locking in arbitrary thresholds before we have data on what the agent actually does.
+
+**Decision:** Ship v1 with three guardrails (G1 prompt + audit, G5 audit schema, G6 convergence check). Defer line budgets, tests-fix-tests rules, escalation enums, and pre-commit hook enforcement to v2, gated on data from ≥5 real loop runs.
+
+**Why this is the right call:**
+- The two **existential** risks are fully covered: runaway loop (`MAX_CI_FIX_ROUNDS = 3`) and thrash (G6 convergence). Both are tight even in v1.
+- The remaining guardrails are about *quality* of fixes, and quality bars without measurement are guesswork. A 30-line cap might be too loose (agent makes 3-line fixes) or too tight (agent legitimately needs 50 lines for a config rename across 10 files).
+- The audit files (G5) make the agent's decisions *visible* — every commit produces a JSON record. We can grep for "preexisting" cop-outs and look at the actual line-count distribution after a few real runs.
+- Worst observable v1 outcome: agent makes a sloppy fix on a PR. The diff is visible in `gh pr view`; one `git revert <sha>` reverts it. Blast radius = one PR, fully recoverable.
+
+**Alternatives considered:**
+- Tight-from-day-1 (line budget + tests-fix-tests + enum + pre-commit hooks): rejected — codifies guesses as policy; harder to relax than to tighten; 4× the implementation work for v1.
+- No guardrails at all (just round budget): rejected — leaves G6 thrash uncovered, leaves audit blind for retro analysis.
+
+**Consequences:**
+- Positive: v1 ships fast with the structural protections that matter most.
+- Positive: audit data drives v2 thresholds with real numbers behind them.
+- Negative: a sloppy v1 fix could land before v2 guardrails catch it. Mitigated by visible diff + revert-ability + retro grep on audit files.
+
+**v1 → v2 trigger:** after the loop runs on ≥5 real PRs, retro the `.workflow/ci-fix-decisions/` files. Anything that fired (or *should* have fired but didn't) becomes a v2 guardrail with measured thresholds. Tracked in a follow-up issue filed alongside this spec.
+
+### Why Terminal-Only Notifications? (v9.1)
+
+**Context:** The pre-v9.1 monitor fired `_notify_terminal()` 4× across a single non-terminal trajectory when CI failed and triage recovered. Operator quote: "I only really care about the notification when the PR is done or the PR can't be completed because of some issue... why would I want the notification that some CI failed that doesn't require my action?"
+
+**Decision:** `_notify_terminal()` fires exactly once per monitor run, on a terminal state (ready, stuck-*, ci-timeout, monitor-crash). All mid-loop notifications are removed.
+
+**Alternatives considered:**
+- Status-line updates instead of suppression: rejected — notifications are the operator's signal that the PR needs attention; muting them entirely is correct, half-muting them with a different channel is more complexity for no clarity gain.
+- Configurable verbosity (`--quiet` / `--verbose`): rejected — YAGNI. The signal we want is "PR done or stuck"; nobody asked for "CI flapped twice during recovery."
+- PR comment summary on terminal-stuck states: considered (Option C in design), rejected — adds public side effect; `.workflow/ci-fix-decisions/<sha>.json` path in the notification body is sufficient locally; cross-machine context is a v2 concern.
+
+**Consequences:**
+- Positive: one ping per run; matches operator expectation.
+- Positive: notification format encodes everything needed (state + counts + audit path) in one payload.
+- Negative: live progress visibility moves from notifications to `.workflow/pr-monitor.log` tail. Acceptable — operators who want live progress already use `tail -f`.
+
 ### Why Workflow Shakedown Instead of Unit Tests for Skills?
 
 **Context:** Workflow changes (hooks, skills, pipeline scripts) need behavioral testing. Unit tests verify code correctness but not process correctness. The stop hook Python parses correctly but fires at the wrong time — a unit test for parsing wouldn't catch this.
@@ -1933,6 +2169,7 @@ All skills live in `.claude/skills/{name}/SKILL.md`. The `.claude/commands/` dir
 
 | Date | Change |
 |------|--------|
+| 2026-04-26 | v9.1 — Autonomous CI-fix loop + terminal-only notifications: (1) State-machine orchestrator replaces the linear `_step_*` chain in `pr_monitor.py` — parallel monitoring of CI + Gemini, serialized writes, classifier-driven dispatch (AC-181, AC-182). (2) Autonomous CI-fix agent (`.claude/agents/ci-fix.md`, sonnet) dispatched on real CI failures; Gemini comments visible as context-only (AC-185, AC-190). (3) `MAX_CI_FIX_ROUNDS = 3` (env override `PPDS_MAX_CI_FIX_ROUNDS`), independent from `MAX_TRIAGE_ITERATIONS` (AC-183, AC-196). (4) Flake detection via `KNOWN_FLAKE_PATTERNS` allow-list — first match per commit triggers `gh run rerun --failed`, second = real (AC-184). (5) Convergence/thrash check exits on identical `files_touched` between consecutive rounds (AC-186). (6) v1 scope guardrails: G1 (prompt + audit visibility), G5 (audit schema in `.workflow/ci-fix-decisions/<sha>.json`, committed), G6 (convergence). G2 line budget, G3 tests-fix-tests, G4 escalation enum, hook-enforcement deferred to v2 follow-up issue gated on ≥5 real loop runs (AC-187, AC-188, AC-189). (7) Terminal-only notifications: `_notify_terminal()` fires exactly once per monitor run on terminal state; mid-loop calls at `pr_monitor.py:1085-1086`, `1152-1155`, `1198-1204` removed (AC-191, AC-192). (8) Notification payload format + terminal-state enum (`ready`, `stuck-ci-fix-exhausted`, `stuck-triage-exhausted`, `stuck-thrash-detected`, `ci-timeout`, `monitor-crash`) (AC-193, AC-194). (9) AC-108 and AC-127 marked superseded with pointers to new ACs. |
 | 2026-04-25 | v9.0 — Hook-over-skill enforcement redesign: (1) Enforcement tier model (T1/T2/T3) with audit of all 270+ directives across 32 skills + CLAUDE.md, structural-elimination column for each T1. (2) Two-file skill pattern (SKILL.md ≤150 lines + REFERENCE.md with section-anchored loading). (3) Model routing via STAGE_MODELS dict — Sonnet (floating) for pipeline executors, Opus for user-facing. (4) F-2 monitor gate: Stop hook step 5b blocks exit when phase=pr but pr.monitor_launched missing. (5) PR-invocation gate: Stop hook step 5c blocks exit when commits ahead but /pr never invoked (R-01 fix). (6) F-7 retro HTML guard: blocks .retros/*.html writes in interactive mode. (7) CLAUDE.md hooks: taskcreate-cap.py (≤3 cap), debug-first.py (enforce /debug before retry), PublicAPI.Unshipped.txt (structural elimination preferred). (8) Worktree safety hook. (9) Skill line cap hook. (10) Hook test harness (audit-enforcement.py) — CI validates T1 markers match actual hooks across SKILL.md + CLAUDE.md. (11) 3-strike escape valve documented as canonical. (12) CLAUDE.md rewrite reduced to 2-line pointer. PR sequence: PR-1 Sonnet switch → PR-2a audit markers → PR-2b new hooks → PR-2c activate enforcement + --report → PR-3 two-file split (release, backlog, retro) → PR-4 in-flight auto-deregister. Gap-8 revision: hand-transcribed counts replaced with audit-snapshot.md links; --report mode added. Gap-9 revision: in-flight registry auto-deregistration at lifecycle termini (pr_monitor terminal step, PostToolUse on merge/branch-delete, 7-day TTL fallback). |
 | 2026-03-20 | Initial spec (v1.0) |
 | 2026-03-22 | v2.0 — skill renames, /design, /start, /pr, main branch bootstrap |

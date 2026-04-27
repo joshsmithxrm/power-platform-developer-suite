@@ -305,10 +305,11 @@ def build_triage_prompt(worktree, pr_number, comments):
 
 
 def parse_triage_json(content):
-    """Find and parse triage JSON array from raw text content.
+    """Find and parse a triage JSON array from raw text content.
 
-    Works for both direct stage log content (pipeline) and
-    pre-extracted text (pr_monitor). Returns list or None.
+    Scans right-to-left for '[' and returns the last valid JSON array found.
+    For CI-fix agent output (which is a JSON object), use parse_triage_json_obj.
+    Returns list or None.
     """
     decoder = json.JSONDecoder()
     search_from = len(content)
@@ -319,6 +320,29 @@ def parse_triage_json(content):
         try:
             obj, _ = decoder.raw_decode(content[pos:])
             if isinstance(obj, list):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+        search_from = pos
+    return None
+
+
+def parse_triage_json_obj(content):
+    """Find and parse a triage JSON object from raw text content.
+
+    Scans right-to-left for '{', returns the first valid dict decoded.
+    Optional fields with explicit null values are coalesced to safe defaults
+    by the caller; this function returns the raw decoded dict or None.
+    """
+    decoder = json.JSONDecoder()
+    search_from = len(content)
+    while search_from > 0:
+        pos = content.rfind("{", 0, search_from)
+        if pos == -1:
+            return None
+        try:
+            obj, _ = decoder.raw_decode(content[pos:])
+            if isinstance(obj, dict):
                 return obj
         except (json.JSONDecodeError, ValueError):
             pass
@@ -429,3 +453,51 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
                 log_fn("POSTED", comment_id=comment_id, action=action)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             log_fn("FAILED", comment_id=comment_id)
+
+
+def dispatch_subagent(profile_name, payload, model="sonnet", worktree=".", timeout=1800):
+    """Invoke ``claude -p`` with an agent profile, passing payload as the -p prompt argument.
+
+    Centralises the Windows-quoting / UTF-8 / shell=False (Constitution S2)
+    invocation pattern so CI-fix and Gemini-triage dispatchers share one code path.
+
+    Args:
+        profile_name: agent profile name (matches .claude/agents/<name>.md)
+        payload: dict serialized as JSON and passed as the -p prompt argument
+        model: model slug (floating name, no version pin)
+        worktree: working directory for the subprocess
+        timeout: seconds before the process is killed (default 30 min)
+
+    Returns:
+        dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int)
+    """
+    prompt = json.dumps(payload)
+    cmd = [
+        "claude", "-p", prompt,
+        "--verbose", "--output-format", "stream-json",
+        "--model", model,
+        "--agent", profile_name,
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=worktree,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return {"stdout": "", "stderr": "timeout", "exit_code": -1}
+        return {
+            "stdout": stdout_bytes.decode("utf-8", errors="replace"),
+            "stderr": stderr_bytes.decode("utf-8", errors="replace"),
+            "exit_code": proc.returncode,
+        }
+    except FileNotFoundError:
+        return {"stdout": "", "stderr": "claude command not found", "exit_code": -1}
+    except OSError as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": -1}
