@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-04-26",
-  "total_retros": 13,
+  "total_retros": 14,
   "findings_by_category": {
     "external": [
       {
@@ -120,6 +120,16 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-07"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/monitor-autonomy",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/monitor-autonomy",
+        "finding_id": "R-02"
       }
     ],
     "design": [
@@ -291,6 +301,16 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-08"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/monitor-autonomy",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/monitor-autonomy",
+        "finding_id": "R-04"
       }
     ],
     "setup": [
@@ -310,12 +330,17 @@
         "date": "2026-04-26",
         "branch": "feat/cli-e2e-data-migration",
         "finding_id": "R-01"
+      },
+      {
+        "date": "2026-04-26",
+        "branch": "feat/monitor-autonomy",
+        "finding_id": "R-05"
       }
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.749,
-    "pipeline_success_rate": 0.418,
-    "avg_convergence_rounds": 2.302
+    "avg_fix_ratio": 0.724,
+    "pipeline_success_rate": 0.388,
+    "avg_convergence_rounds": 2.281
   }
 }
