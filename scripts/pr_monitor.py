@@ -1242,8 +1242,12 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
     # Build the diff for scope context (G1)
     diff_output = ""
     try:
+        subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=worktree, capture_output=True, timeout=30, check=False,
+        )
         diff_proc = subprocess.run(
-            ["git", "diff", "origin/main...HEAD"],
+            ["git", "diff", "--", "origin/main...HEAD"],
             cwd=worktree, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
         )
@@ -1503,16 +1507,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None):
     # Resolve GitHub repo slug once at startup for gh run list / view calls
     # (Bug 2 fix: gh CLI needs --repo when cwd has no git remote context)
     if repo is None:
-        try:
-            remote_proc = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=worktree, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=5,
-            )
-            if remote_proc.returncode == 0:
-                repo = _parse_github_repo(remote_proc.stdout.strip())
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
+        repo = get_repo_slug(worktree)
     repo_args = ["--repo", repo] if repo else []
 
     result = read_result(worktree) if resume else _empty_result()
@@ -1681,7 +1676,8 @@ def run_monitor(worktree, pr_number, resume=False, repo=None):
                                 )
                     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                         pass
-                    # Re-poll CI after rerun
+                    # Re-poll CI after rerun — wait briefly for the rerun to register
+                    time.sleep(10)
                     ci_status = _step_ci(worktree, pr_number, logger,
                                          step_suffix=f"_flake_r{ci_fix_rounds_used}")
                     result["ci_result"] = ci_status
