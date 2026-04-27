@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-26
+
+Stable-channel release (even minor per odd/even convention). Post-GA polish across all panels.
+
+### Added
+- **Diagnostic markers** — Monaco squiggles for SQL and FetchXML syntax errors in notebooks (#650, #966).
+- **Metadata Browser** entity configuration tab and global optionset details (#924).
+- **Per-panel profile and environment scoping** — each panel tracks its own active Dataverse context independently (#887, #888, #903, #936).
+
+### Changed
+- Standardized toolbar layout and search bar placement across all panels (#898, #899, #933).
+
+### Fixed
+- Profiles tree view no longer stuck in infinite spinner — added RPC timeouts and error states (#904, #909).
+- Sync Deployment Settings no longer hangs on large environments (#893, #908).
+- Import Jobs panel no longer opens two XML documents on single click (#891, #919).
+- Plugin Traces toggle now shows visual feedback when changing trace settings (#895, #919).
+- Environment Variables and Connection References "Active only / All" toggle clarified (#894, #919).
+- Solutions panel no longer shows fabricated "All Solutions" entry; component type names auto-synced (#890, #892, #916).
+- Solution filter state now syncs to webview on panel open (#902, #918).
+- Plugin Registration toolbar buttons and tree collapse toggles styled correctly (#896, #897, #922).
+- Plugin Registration help link updated to main docs page (#900, #921).
+
 ## [1.0.0] - 2026-04-18
 
 > Enjoying PPDS v1.0? Please [leave a review on the Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite&ssr=false#review-details) — reviews are the single biggest conversion signal for new users.
