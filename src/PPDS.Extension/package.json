@@ -651,7 +651,7 @@
     "stylelint-config-standard": "^40.0.0",
     "typescript": ">=6.0.2 <6.1.0",
     "typescript-eslint": "^8.58.0",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.5"
   },
   "repository": {
     "type": "git",
