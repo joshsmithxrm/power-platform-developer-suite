@@ -1,5 +1,7 @@
 #nullable enable
+*REMOVED*static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
 PPDS.Auth.AuthDebugLog
+PPDS.Auth.AuthErrorCodes
 PPDS.Auth.AuthenticationOutput
 PPDS.Auth.Cloud.CloudEndpoints
 PPDS.Auth.Cloud.CloudEnvironment
@@ -237,6 +239,10 @@ PPDS.Auth.Credentials.UsernamePasswordCredentialProvider.UsernamePasswordCredent
 PPDS.Auth.DependencyInjection.ServiceCollectionExtensions
 PPDS.Auth.Discovery.AmbiguousMatchException
 PPDS.Auth.Discovery.AmbiguousMatchException.AmbiguousMatchException(string! message) -> void
+PPDS.Auth.Discovery.BapEnvironmentService
+PPDS.Auth.Discovery.BapEnvironmentService.BapEnvironmentService(System.Net.Http.HttpClient! httpClient, string! bapApiUrl, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>! tokenProvider) -> void
+PPDS.Auth.Discovery.BapEnvironmentService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
+PPDS.Auth.Discovery.BapEnvironmentService.Dispose() -> void
 PPDS.Auth.Discovery.DiscoveredEnvironment
 PPDS.Auth.Discovery.DiscoveredEnvironment.ApiUrl.get -> string!
 PPDS.Auth.Discovery.DiscoveredEnvironment.ApiUrl.set -> void
@@ -272,6 +278,7 @@ PPDS.Auth.Discovery.DiscoveredEnvironment.Version.get -> string?
 PPDS.Auth.Discovery.DiscoveredEnvironment.Version.set -> void
 PPDS.Auth.Discovery.EnvironmentResolutionResult
 PPDS.Auth.Discovery.EnvironmentResolutionResult.Environment.get -> PPDS.Auth.Profiles.EnvironmentInfo?
+PPDS.Auth.Discovery.EnvironmentResolutionResult.ErrorCode.get -> string?
 PPDS.Auth.Discovery.EnvironmentResolutionResult.ErrorMessage.get -> string?
 PPDS.Auth.Discovery.EnvironmentResolutionResult.Method.get -> PPDS.Auth.Discovery.ResolutionMethod
 PPDS.Auth.Discovery.EnvironmentResolutionResult.Success.get -> bool
@@ -285,9 +292,12 @@ PPDS.Auth.Discovery.GlobalDiscoveryService.CapturedHomeAccountId.get -> string?
 PPDS.Auth.Discovery.GlobalDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
 PPDS.Auth.Discovery.GlobalDiscoveryService.Dispose() -> void
 PPDS.Auth.Discovery.GlobalDiscoveryService.GlobalDiscoveryService(PPDS.Auth.Cloud.CloudEnvironment cloud = PPDS.Auth.Cloud.CloudEnvironment.Public, string? tenantId = null, string? homeAccountId = null, PPDS.Auth.Profiles.AuthMethod? preferredAuthMethod = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> void
+PPDS.Auth.Discovery.IEnvironmentDiscoveryService
+PPDS.Auth.Discovery.IEnvironmentDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
 PPDS.Auth.Discovery.IGlobalDiscoveryService
 PPDS.Auth.Discovery.IGlobalDiscoveryService.DiscoverEnvironmentsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>!>!
 PPDS.Auth.Discovery.ResolutionMethod
+PPDS.Auth.Discovery.ResolutionMethod.BapDiscovery = 2 -> PPDS.Auth.Discovery.ResolutionMethod
 PPDS.Auth.Discovery.ResolutionMethod.DirectConnection = 0 -> PPDS.Auth.Discovery.ResolutionMethod
 PPDS.Auth.Discovery.ResolutionMethod.GlobalDiscovery = 1 -> PPDS.Auth.Discovery.ResolutionMethod
 PPDS.Auth.EnvironmentVariableAuth
@@ -540,6 +550,11 @@ PPDS.Auth.ServiceClientFactory.CreateFromProfileNameAsync(string! profileName, s
 PPDS.Auth.ServiceClientFactory.CreateFromProfileNamesAsync(System.Collections.Generic.IEnumerable<string!>! profileNames, string? environmentUrl = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Microsoft.PowerPlatform.Dataverse.Client.ServiceClient!>!>!
 PPDS.Auth.ServiceClientFactory.Dispose() -> void
 PPDS.Auth.ServiceClientFactory.ServiceClientFactory(PPDS.Auth.Profiles.ProfileStore? profileStore = null, System.Action<PPDS.Auth.Credentials.DeviceCodeInfo!>? deviceCodeCallback = null) -> void
+const PPDS.Auth.AuthErrorCodes.BapApiError = "Auth.BapApiError" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiForbidden = "Auth.BapApiForbidden" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiTimeout = "Auth.BapApiTimeout" -> string!
+const PPDS.Auth.AuthErrorCodes.BapApiUnauthorized = "Auth.BapApiUnauthorized" -> string!
+const PPDS.Auth.AuthErrorCodes.EnvironmentNotFound = "Auth.EnvironmentNotFound" -> string!
 const PPDS.Auth.Credentials.CredentialProviderFactory.SpnSecretEnvVar = "PPDS_SPN_SECRET" -> string!
 const PPDS.Auth.Credentials.CredentialProviderFactory.TestClientSecretEnvVar = "PPDS_TEST_CLIENT_SECRET" -> string!
 const PPDS.Auth.EnvironmentVariableAuth.ClientIdVar = "PPDS_CLIENT_ID" -> string!
@@ -573,6 +588,7 @@ static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityBaseUrl(PPDS.Auth.Cloud.CloudE
 static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityHost(PPDS.Auth.Cloud.CloudEnvironment cloud) -> System.Uri!
 static PPDS.Auth.Cloud.CloudEndpoints.GetAuthorityUrl(PPDS.Auth.Cloud.CloudEnvironment cloud, string? tenantId = null) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetAzureCloudInstance(PPDS.Auth.Cloud.CloudEnvironment cloud) -> Microsoft.Identity.Client.AzureCloudInstance
+static PPDS.Auth.Cloud.CloudEndpoints.GetBapApiUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetFlowPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetGlobalDiscoveryUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
 static PPDS.Auth.Cloud.CloudEndpoints.GetMakerPortalUrl(PPDS.Auth.Cloud.CloudEnvironment cloud) -> string!
@@ -606,7 +622,10 @@ static PPDS.Auth.Credentials.PowerPlatformTokenProvider.FromProfile(PPDS.Auth.Pr
 static PPDS.Auth.Credentials.PowerPlatformTokenProvider.FromProfileWithSecret(PPDS.Auth.Profiles.AuthProfile! profile, string! clientSecret) -> PPDS.Auth.Credentials.PowerPlatformTokenProvider!
 static PPDS.Auth.Credentials.TokenCacheManager.ClearAllCachesAsync(string? tokenCachePath = null) -> System.Threading.Tasks.Task!
 static PPDS.Auth.DependencyInjection.ServiceCollectionExtensions.AddAuthServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static PPDS.Auth.Discovery.BapEnvironmentService.FromProfileAsync(PPDS.Auth.Profiles.AuthProfile! profile, PPDS.Auth.Credentials.ISecureCredentialStore? credentialStore = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Discovery.BapEnvironmentService!>!
+static PPDS.Auth.Discovery.BapEnvironmentService.SupportsAuthMethod(PPDS.Auth.Profiles.AuthMethod authMethod) -> bool
 static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
+static PPDS.Auth.Discovery.EnvironmentResolutionResult.Failed(string! errorMessage, string? errorCode = null) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
 static PPDS.Auth.Discovery.EnvironmentResolutionResult.Succeeded(PPDS.Auth.Profiles.EnvironmentInfo! environment, PPDS.Auth.Discovery.ResolutionMethod method) -> PPDS.Auth.Discovery.EnvironmentResolutionResult!
 static PPDS.Auth.Discovery.EnvironmentResolver.Resolve(System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>! environments, string! identifier) -> PPDS.Auth.Discovery.DiscoveredEnvironment?
 static PPDS.Auth.Discovery.EnvironmentResolver.ResolveByUrl(System.Collections.Generic.IReadOnlyList<PPDS.Auth.Discovery.DiscoveredEnvironment!>! environments, string! url) -> PPDS.Auth.Discovery.DiscoveredEnvironment?
