@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-26
+
+### Added
+- BAP (Business Application Platform) environment discovery for service principals — environments can now be resolved by friendly name for SPN-authenticated profiles (#99, #956).
+- Unit tests for all credential providers (#133, #956).
+
+### Fixed
+- Sovereign-cloud Maker Portal and Flow Portal URLs in `CloudEndpoints` — added `GetMakerPortalUrl` and `GetFlowPortalUrl` with per-cloud URL tables (#879, #947).
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.8` series. Targets `net8.0`, `net9.0`, `net10.0`.

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-26
+
+### Added
+- **Web resources** `pull` and `push` commands with content-hash tracking for change detection (#950).
+- **`data schema --filter`** option to filter schema generation to specific entities using SQL-like expressions (#502, #948).
+- **TUI per-tab profile switching** — individual tabs can target different Dataverse profiles (#927, #935).
+- **Diagnostic markers** for SQL and FetchXML syntax errors surfaced via daemon RPC to the extension (#650, #966).
+- **Metadata Browser** entity configuration tab and global optionset details in daemon endpoints (#924).
+- Unit tests for query models and CLI query commands (#945).
+- RPC contract tests for the Extension-CLI daemon protocol (#672, #966).
+
+### Changed
+- Per-panel profile and environment scoping — each extension panel tracks its own active context via daemon RPC (#887, #888, #903, #936).
+
+### Fixed
+- Solutions panel no longer shows fabricated "All Solutions" entry; component type names auto-synced from metadata (#890, #892, #916).
+- Added direct `Microsoft.Data.SqlClient` reference — fixes TDS endpoint assembly-not-found error (#889, #905).
+- Sovereign-cloud URL hardcoding in metadata mutation hooks (#870, #947).
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.14` series.
