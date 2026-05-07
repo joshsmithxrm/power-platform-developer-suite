@@ -374,6 +374,48 @@ public class MetadataAuthoringServiceTests
         dtAttr!.Format.Should().Be(DateTimeFormat.DateOnly);
     }
 
+    // Issue #1009: UpdateColumnAsync executes UpdateAttributeRequest but never publishes,
+    // so the change is invisible to consumers until something else publishes. Spec
+    // (metadata-authoring.md "Why no auto-publish?") forbids auto-publish, so the success
+    // message must explicitly tell the user to run publish.
+    [Fact]
+    public async Task UpdateColumnAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingAttr = new StringAttributeMetadata { LogicalName = "new_myfield", MaxLength = 100 };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var infoMessages = new System.Collections.Generic.List<string>();
+        var reporter = new Mock<IMetadataAuthoringProgressReporter>();
+        reporter.Setup(r => r.ReportInfo(It.IsAny<string>()))
+            .Callback<string>(infoMessages.Add);
+
+        var request = new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_myfield",
+            RequiredLevel = "Required"
+        };
+
+        await _service.UpdateColumnAsync(request, reporter.Object);
+
+        infoMessages.Should().ContainSingle();
+        var message = infoMessages[0];
+        message.Should().Contain("publish",
+            because: "users must know publish is required for the change to take effect (#1009)");
+        message.Should().Contain("ppds metadata publish account",
+            because: "the message should include the exact command to run");
+    }
+
     #endregion
 
     #region UpdateRelationshipAsync
