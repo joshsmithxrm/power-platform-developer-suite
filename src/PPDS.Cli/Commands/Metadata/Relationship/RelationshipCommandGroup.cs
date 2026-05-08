@@ -421,15 +421,27 @@ public static class RelationshipCommandGroup
 
             await authoringService.UpdateRelationshipAsync(request, ct: cancellationToken);
 
+            // Relationships span two entities; the request DTO doesn't carry them, so suggest publish --all.
+            const string publishHint = "ppds publish --all";
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { name, updated = true, dryRun });
+                writer.WriteSuccess(new
+                {
+                    name,
+                    updated = true,
+                    dryRun,
+                    requiresPublish = !dryRun,
+                    publishHint = dryRun ? null : publishHint
+                });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine(dryRun
-                    ? "[Dry-Run] Validation passed. No changes persisted."
-                    : $"Relationship '{name}' updated successfully.");
+                Console.Error.WriteLine($"Relationship '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

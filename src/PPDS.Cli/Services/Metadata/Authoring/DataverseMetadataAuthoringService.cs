@@ -215,7 +215,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
-        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated successfully.");
+        // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
+        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
     }
 
@@ -382,7 +383,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
-        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Run 'ppds metadata publish {request.EntityLogicalName}' to publish changes.");
+        // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
+        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
     }
 
@@ -627,7 +629,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         // invalidate all entity caches to ensure stale relationship data is cleared.
         _cacheProvider?.InvalidateAll();
 
-        reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated.");
+        reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated relationship {SchemaName}", request.SchemaName);
     }
 
@@ -786,7 +788,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateGlobalOptionSets();
 
-        reporter?.ReportInfo($"Global choice '{request.Name}' updated.");
+        reporter?.ReportInfo($"Global choice '{request.Name}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated global choice {Name}", request.Name);
     }
 
