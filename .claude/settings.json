@@ -1,7 +1,7 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": false,
-    "procode-toolkit@procode-toolkit": false
+    "picasso@picasso": false
   },
   "safety": {
     "shakedown_safe_envs": [
