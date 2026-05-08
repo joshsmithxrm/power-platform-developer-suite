@@ -32,7 +32,8 @@ public class MetadataRelationshipCreateE2ETests : CliE2ETestBase
         await RunCliAsync("auth", "select", "--name", profileName);
 
         // Account and contact are system entities present in every Dataverse env.
-        var schemaName = $"{Prefix}_acct_contact_{Guid.NewGuid():N}".Substring(0, 40);
+        var rawName = $"{Prefix}_acct_contact_{Guid.NewGuid():N}";
+        var schemaName = rawName[..Math.Min(40, rawName.Length)];
 
         try
         {

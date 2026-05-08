@@ -209,7 +209,7 @@ public sealed class SchemaValidator
     public void ValidateCreateManyToManyRequest(
         CreateManyToManyRequest request,
         string publisherPrefix,
-        string? resolvedIntersectSchemaName = null)
+        string? resolvedIntersectSchemaName)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -222,14 +222,13 @@ public sealed class SchemaValidator
         CollectIfInvalid(messages, () => ValidatePrefix(request.SchemaName, publisherPrefix));
 
         // The Dataverse CreateManyToManyRequest message requires IntersectEntitySchemaName.
-        // Callers may default it to SchemaName before validation; we re-validate the resolved value here so
+        // The caller defaults it to SchemaName before validation; we re-validate the resolved value so
         // dry-run rejects a missing or malformed intersect name (which would otherwise only fail at execute time).
-        var intersect = resolvedIntersectSchemaName ?? request.IntersectEntitySchemaName;
-        CollectIfInvalid(messages, () => ValidateRequiredString(intersect!, "IntersectEntitySchemaName"));
-        if (!string.IsNullOrWhiteSpace(intersect))
+        CollectIfInvalid(messages, () => ValidateRequiredString(resolvedIntersectSchemaName!, "IntersectEntitySchemaName"));
+        if (!string.IsNullOrWhiteSpace(resolvedIntersectSchemaName))
         {
-            CollectIfInvalid(messages, () => ValidateSchemaName(intersect));
-            CollectIfInvalid(messages, () => ValidatePrefix(intersect, publisherPrefix));
+            CollectIfInvalid(messages, () => ValidateSchemaName(resolvedIntersectSchemaName));
+            CollectIfInvalid(messages, () => ValidatePrefix(resolvedIntersectSchemaName, publisherPrefix));
         }
 
         ThrowIfErrors(messages);

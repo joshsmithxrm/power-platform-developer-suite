@@ -191,6 +191,13 @@ public static class RelationshipCommandGroup
 
             if (type == "many-to-many")
             {
+                if (!globalOptions.IsJsonMode &&
+                    (lookupName is not null || lookupDisplayName is not null ||
+                     cascadeDelete.HasValue || cascadeAssign.HasValue))
+                {
+                    Console.Error.WriteLine("Warning: --lookup-name, --lookup-display-name, --cascade-delete, and --cascade-assign apply to one-to-many only and are ignored for many-to-many.");
+                }
+
                 var request = new CreateManyToManyRequest
                 {
                     SolutionUniqueName = solution,
@@ -205,6 +212,11 @@ public static class RelationshipCommandGroup
             }
             else
             {
+                if (!globalOptions.IsJsonMode && intersectEntity is not null)
+                {
+                    Console.Error.WriteLine("Warning: --intersect-entity applies to many-to-many only and is ignored for one-to-many.");
+                }
+
                 var request = new CreateOneToManyRequest
                 {
                     SolutionUniqueName = solution,
