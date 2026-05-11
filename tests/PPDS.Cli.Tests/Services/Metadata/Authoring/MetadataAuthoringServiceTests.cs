@@ -328,6 +328,80 @@ public class MetadataAuthoringServiceTests
 
     #endregion
 
+    #region CreateManyToManyAsync
+
+    [Fact]
+    public async Task CreateManyToManyAsync_WhenIntersectEntitySchemaNameNotSet_DefaultsToSchemaName()
+    {
+        Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest? capturedRequest = null;
+
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest cmm)
+                {
+                    capturedRequest = cmm;
+                    return Task.FromResult<OrganizationResponse>(response);
+                }
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new PPDS.Dataverse.Metadata.Authoring.CreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm"
+            // IntersectEntitySchemaName intentionally left unset — reproduces #1008
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.ManyToManyRelationship.IntersectEntityName.Should().NotBeNullOrWhiteSpace(
+            "Dataverse rejects CreateManyToMany requests with a missing IntersectEntitySchemaName (#1008)");
+        capturedRequest.ManyToManyRelationship.IntersectEntityName.Should().Be("new_account_contact_mm");
+    }
+
+    [Fact]
+    public async Task CreateManyToManyAsync_WhenIntersectEntitySchemaNameSet_UsesProvidedValue()
+    {
+        Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest? capturedRequest = null;
+
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest cmm)
+                {
+                    capturedRequest = cmm;
+                    return Task.FromResult<OrganizationResponse>(response);
+                }
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new PPDS.Dataverse.Metadata.Authoring.CreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            IntersectEntitySchemaName = "new_custom_intersect"
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.ManyToManyRelationship.IntersectEntityName.Should().Be("new_custom_intersect");
+    }
+
+    #endregion
+
     #region ReorderOptionsAsync
 
     [Fact]

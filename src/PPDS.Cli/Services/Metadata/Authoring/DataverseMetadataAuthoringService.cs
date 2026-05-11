@@ -522,12 +522,18 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Creating N:N relationship", request.SchemaName);
 
+        // Dataverse's CreateManyToMany requires IntersectEntityName; default to the
+        // relationship schema name when the caller doesn't supply one explicitly.
+        var intersectEntityName = string.IsNullOrWhiteSpace(request.IntersectEntitySchemaName)
+            ? request.SchemaName
+            : request.IntersectEntitySchemaName;
+
         var relationship = new ManyToManyRelationshipMetadata
         {
             SchemaName = request.SchemaName,
             Entity1LogicalName = request.Entity1LogicalName,
             Entity2LogicalName = request.Entity2LogicalName,
-            IntersectEntityName = request.IntersectEntitySchemaName
+            IntersectEntityName = intersectEntityName
         };
 
         if (!string.IsNullOrEmpty(request.Entity1NavigationPropertyName))

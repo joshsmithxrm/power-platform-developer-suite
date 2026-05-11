@@ -1,5 +1,19 @@
 {
   "version": 1,
-  "updated": "2026-04-26T23:40:58Z",
-  "open_work": []
+  "updated": "2026-05-11T13:58:21Z",
+  "open_work": [
+    {
+      "session_id": "8ebd3468",
+      "started": "2026-05-11T13:58:21Z",
+      "branch": "feat/m2m-relationship-create",
+      "worktree": ".worktrees/m2m-relationship-create",
+      "issues": [
+        1008
+      ],
+      "areas": [
+        "m2m-relationship-create"
+      ],
+      "intent": "Fix many-to-many relationship creation failing with missing IntersectEntitySchemaName field"
+    }
+  ]
 }
