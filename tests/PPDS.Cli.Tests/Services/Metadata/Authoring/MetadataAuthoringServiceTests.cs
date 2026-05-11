@@ -277,6 +277,101 @@ public class MetadataAuthoringServiceTests
         capturedRequest!.Attribute.RequiredLevel!.Value.Should().Be(AttributeRequiredLevel.ApplicationRequired);
     }
 
+    // Regression for #1009: the retrieve-then-mutate pattern silently dropped the
+    // RequiredLevel change on the wire (the CLI reported success but Dataverse never
+    // applied the new value). The fix is to send a fresh, minimal AttributeMetadata
+    // of the same SDK type rather than the populated object returned by Retrieve.
+    [Fact]
+    public async Task UpdateColumnAsync_SendsFreshAttributeWithOnlyRequestedFields()
+    {
+        var existingAttr = new StringAttributeMetadata
+        {
+            LogicalName = "new_myfield",
+            SchemaName = "new_myfield",
+            MaxLength = 100,
+            DisplayName = new Label("Original Display", 1033),
+            Description = new Label("Original Description", 1033),
+            RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.None)
+        };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        UpdateAttributeRequest? capturedRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                if (req is UpdateAttributeRequest ua)
+                    capturedRequest = ua;
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_myfield",
+            RequiredLevel = "Required"
+        };
+
+        await _service.UpdateColumnAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Attribute.Should().NotBeSameAs(existingAttr,
+            "retrieve-then-mutate doesn't reliably persist RequiredLevel — #1009");
+        capturedRequest.Attribute.Should().BeOfType<StringAttributeMetadata>();
+        capturedRequest.Attribute.LogicalName.Should().Be("new_myfield");
+        capturedRequest.Attribute.RequiredLevel!.Value.Should().Be(AttributeRequiredLevel.ApplicationRequired);
+        capturedRequest.Attribute.DisplayName.Should().BeNull(
+            "the caller did not request a DisplayName change, so it must not appear on the update payload");
+        capturedRequest.Attribute.Description.Should().BeNull(
+            "the caller did not request a Description change, so it must not appear on the update payload");
+    }
+
+    // Same silent-no-op class as #1009: --format on a DateTime column was being dropped
+    // because ApplyTypeSpecificUpdates had no DateTimeAttributeMetadata case.
+    [Fact]
+    public async Task UpdateColumnAsync_AppliesDateTimeFormatChange()
+    {
+        var existingAttr = new DateTimeAttributeMetadata
+        {
+            LogicalName = "new_eventdate",
+            SchemaName = "new_eventdate",
+            Format = DateTimeFormat.DateAndTime
+        };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        UpdateAttributeRequest? capturedRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                if (req is UpdateAttributeRequest ua)
+                    capturedRequest = ua;
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_eventdate",
+            Format = "dateonly"
+        };
+
+        await _service.UpdateColumnAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        var dtAttr = capturedRequest!.Attribute as DateTimeAttributeMetadata;
+        dtAttr.Should().NotBeNull();
+        dtAttr!.Format.Should().Be(DateTimeFormat.DateOnly);
+    }
+
     #endregion
 
     #region UpdateRelationshipAsync
