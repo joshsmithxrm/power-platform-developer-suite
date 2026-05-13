@@ -464,15 +464,27 @@ public static class ColumnCommandGroup
 
             await authoringService.UpdateColumnAsync(request, ct: cancellationToken);
 
+            var publishHint = $"ppds metadata publish {entity}";
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { entity, column, updated = true, dryRun });
+                writer.WriteSuccess(new
+                {
+                    entity,
+                    column,
+                    updated = true,
+                    dryRun,
+                    requiresPublish = !dryRun,
+                    publishHint = dryRun ? null : publishHint
+                });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine(dryRun
-                    ? "[Dry-Run] Validation passed. No changes persisted."
-                    : $"Column '{column}' on '{entity}' updated successfully.");
+                Console.Error.WriteLine($"Column '{column}' on '{entity}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

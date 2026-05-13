@@ -374,6 +374,130 @@ public class MetadataAuthoringServiceTests
         dtAttr!.Format.Should().Be(DateTimeFormat.DateOnly);
     }
 
+    // Issue #1009: UpdateColumnAsync executes UpdateAttributeRequest but never publishes,
+    // so the change is invisible to consumers until something else publishes. Spec
+    // (metadata-authoring.md "Why no auto-publish?") forbids auto-publish, so the service
+    // success message must signal the publish requirement. The service stays UI-agnostic;
+    // surface-specific guidance (CLI command string) is added by each surface.
+    [Fact]
+    public async Task UpdateColumnAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingAttr = new StringAttributeMetadata { LogicalName = "new_myfield", MaxLength = 100 };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateColumnAsync(new UpdateColumnRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                EntityLogicalName = "account",
+                ColumnLogicalName = "new_myfield",
+                RequiredLevel = "Required"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "users must know publish is required for the change to take effect (#1009)");
+        message.Should().NotContain("ppds ",
+            because: "the service is UI-agnostic and must not embed a CLI command string (F-4)");
+    }
+
+    [Fact]
+    public async Task UpdateTableAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateTableAsync(new UpdateTableRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                EntityLogicalName = "account",
+                DisplayName = "Account"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "table updates carry the same silent-failure shape as #1009");
+        message.Should().NotContain("ppds ");
+    }
+
+    [Fact]
+    public async Task UpdateRelationshipAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingRel = new OneToManyRelationshipMetadata
+        {
+            SchemaName = "new_account_contact",
+            CascadeConfiguration = new CascadeConfiguration()
+        };
+        var retrieveResponse = new RetrieveRelationshipResponse();
+        retrieveResponse.Results["RelationshipMetadata"] = existingRel;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveRelationshipRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateRelationshipAsync(new AuthoringUpdateRelationshipRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                SchemaName = "new_account_contact",
+                CascadeConfiguration = new CascadeConfigurationDto { Delete = CascadeBehavior.Restrict }
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "relationship cascade changes aren't visible until publish");
+        message.Should().NotContain("ppds ");
+    }
+
+    [Fact]
+    public async Task UpdateGlobalChoiceAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingOs = new OptionSetMetadata { Name = "new_priority" };
+        var retrieveResponse = new RetrieveOptionSetResponse();
+        retrieveResponse.Results["OptionSetMetadata"] = existingOs;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveOptionSetRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                Name = "new_priority",
+                DisplayName = "Priority"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "choice label changes aren't visible until publish");
+        message.Should().NotContain("ppds ");
+    }
+
+    private static async Task<string> CaptureSingleInfoMessageAsync(Func<IMetadataAuthoringProgressReporter, Task> act)
+    {
+        var infoMessages = new System.Collections.Generic.List<string>();
+        var reporter = new Mock<IMetadataAuthoringProgressReporter>();
+        reporter.Setup(r => r.ReportInfo(It.IsAny<string>()))
+            .Callback<string>(infoMessages.Add);
+
+        await act(reporter.Object);
+
+        infoMessages.Should().ContainSingle();
+        return infoMessages[0];
+    }
+
     #endregion
 
     #region UpdateRelationshipAsync
