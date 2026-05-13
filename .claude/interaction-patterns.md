@@ -124,6 +124,25 @@ To change a rule in this document:
 3. Open a PR with a `## Rule change` section per §7.
 4. Main-session judgment (not subagent) decides.
 
+## 9. Agent View — multi-session observability
+
+Anthropic's Agent View (May 2026) is PPDS's multi-session observability surface. Each Claude Code session shows as one row across CLI, desktop, IDE, claude.ai/code, and Slack.
+
+**Source of truth.** `scripts/pipeline.py` owns ship-stage status — `/gates`, `/verify`, `/pr` succeed or fail there. Agent View row state is **informational** and does NOT map 1:1 to pipeline stages.
+
+**Agent View states (informational only):** `working`, `waiting`, `completed`, `failed`, `idle`, `stopped`. None imply a pipeline-stage outcome. Consult `.workflow/state.json` and `gh pr view` for ship readiness; an Agent View row showing `completed` only means the session terminated, not that the PR is green.
+
+**Official surfaces for this team:**
+- **CLI** — primary control plane; same surface where `/gates`, `/verify`, `/pr` live.
+- **claude.ai/code** — primary multi-session dashboard.
+- **Slack** — optional, monitoring only; not authoritative.
+
+Desktop and IDE surfaces remain available but are not the team baseline.
+
+**In-session vs multi-session.** The CLAUDE.md ≤3 `TaskCreate` cap is per session. Agent View imposes no cap on the number of concurrent sessions; each session independently obeys ≤3.
+
+**Rationale (per §7 — decision records).** Agent View is observability over Claude Code background jobs, not a stage executor. Pipeline.py owns ship semantics; conflating row state with stage state would create two sources of truth. See epic #1025 (Decision §1) and #1026.
+
 ## References
 
 - `.plans/2026-04-19-retro-flow.md` — retro flow diagram (gitignored, local only)
