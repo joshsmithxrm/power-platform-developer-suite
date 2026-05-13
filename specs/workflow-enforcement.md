@@ -1253,7 +1253,7 @@ Retro replaces ext-panels as the third dogfood target because: (a) retro produce
 
 ### Model Routing (v9.0)
 
-**Problem:** All `claude -p` invocations in `scripts/pipeline.py` and `scripts/pr_monitor.py` run on the default model (Opus). `scripts/launch-claude-session.py` hardcodes `--model claude-opus-4-6`. Agent subagents already route correctly (gemini-triage=sonnet, fix-agent=sonnet, explorer=haiku, code-reviewer=opus, challenger=sonnet). But the pipeline — which runs 6-8 sessions per feature — burns Opus tokens on mechanical tasks.
+**Problem:** All `claude -p` invocations in `scripts/pipeline.py` and `scripts/pr_monitor.py` run on the default model (Opus). Agent subagents already route correctly (gemini-triage=sonnet, fix-agent=sonnet, explorer=haiku, code-reviewer=opus, challenger=sonnet). But the pipeline — which runs 6-8 sessions per feature — burns Opus tokens on mechanical tasks.
 
 **Anthropic guidance:** "Subagents help you control costs by routing tasks to faster, cheaper models like Haiku."
 
@@ -1279,8 +1279,6 @@ STAGE_MODELS = {
 Model IDs float (e.g., `"sonnet"` not `"claude-sonnet-4-6"`) — consistent with agent frontmatter (`model: sonnet` in gemini-triage.md). Floating means pipeline automatically uses the latest Sonnet version. Quality regressions are caught by the converge loop (bad Sonnet output fails gates/review). The `--model` override accepts either floating or pinned IDs.
 
 **`run_claude()` change:** When `STAGE_MODELS[stage]` is non-None, append `--model {model}` to the `cmd` list. When None, omit the flag (inherits the user's default, typically Opus).
-
-**`launch-claude-session.py` change:** Keep `--model claude-opus-4-6` — this script spawns user-facing interactive sessions. User-facing sessions need Opus-level reasoning for design, investigation, and open-ended work.
 
 **`pr_monitor.py` change:** When spawning `claude -p` for triage or retro, pass `--model claude-sonnet-4-6`. These are mechanical tasks: reading comments, applying fixes, generating summaries.
 
@@ -1622,7 +1620,7 @@ After all skills in this spec are implemented:
 | AC-153 | **(v9.0 — Model)** `pipeline.py` passes no `--model` flag for design, investigate, spec stages (inherits default) | `test_pipeline.py::test_stage_models_opus_default` | ✅ |
 | AC-154 | **(v9.0 — Model)** `pipeline.py --model <id>` overrides STAGE_MODELS for all stages | `test_pipeline.py::test_stage_model_override` | ✅ |
 | AC-155 | **(v9.0 — Model)** `pr_monitor.py` passes `--model sonnet` when spawning triage and retro sessions (floating ID) | `test_pr_monitor.py::test_monitor_uses_sonnet` | ✅ |
-| AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | ✅ |
+| AC-156 | **(v9.0 — Model)** `launch-claude-session.py` uses `--model opus` (floating, not pinned to specific version — consistent with Sonnet floating in STAGE_MODELS and gemini-triage agent). If pinning is needed later, both Opus and Sonnet pins should be updated together. | `test_launch_session.py::test_launch_uses_opus` | 🗑️ Obsoleted by #1032 — script deleted; model-routing now lives in start-bg-spawn.py via claude --bg defaults. |
 | AC-157 | **(v9.0 — Split)** `skill-line-cap.py` blocks Edit/Write on any SKILL.md exceeding 150 lines post-edit | `test_hooks.py::test_skill_line_cap_blocks` | ✅ |
 | AC-158 | **(v9.0 — Split)** `skill-line-cap.py` allows Edit/Write on SKILL.md at or under 150 lines | `test_hooks.py::test_skill_line_cap_allows` | ✅ |
 | AC-159 | **(v9.0 — Split)** release SKILL.md is ≤150 lines after split, with explicit `Read REFERENCE.md §N` directives | `test_skill_structure.py::test_release_skill_line_count` | ✅ |

@@ -203,11 +203,12 @@ shared across all worktrees).
 
 Deregistration is handled by `/cleanup` after the branch merges.
 
-### Step 6: Launch New Session with Inline Prompt
+### Step 6: Spawn the Background Session
 
-Construct a complete launch prompt from the current conversation and deliver it inline to the new session via `pwsh Start-Process` + here-string. **No context file is written.** The prompt is the entire handoff payload.
-
-Why inline: file-based handoffs (`.plans/context.md`) were observed being ignored or deprioritized by the receiving session. Content in the initial user prompt receives higher attention weight and is followed reliably.
+Construct the inline launch prompt (6a), write it to a temp file (6b), and
+hand off to `scripts/start-bg-spawn.py` (6c). The helper invokes
+`claude --bg`, returns the daemon short ID + full UUID, and is the only
+launch mechanism.
 
 #### 6a: Gather conversation context
 
@@ -221,143 +222,67 @@ Skip 6a if no issues and no investigation context — the prompt will contain on
 
 #### 6b: Build the launch prompt
 
-Target 1–5K chars. Hard cap 30K (PowerShell/CreateProcess limit is ~32K). Structure:
-
-```
-Task: <one-sentence description of the work>
-
-Branch: feat/<name>
-Worktree: .worktrees/<name>
-Work type: <confirmed work type>
-Issues: #N, #M
-
-Issue details:
-
-### #N: <title>
-<body>
-
-### #M: <title>
-<body>
-
-Investigation context (from prior /investigate):
-<verbatim relevant excerpts, if any>
-
-User intent:
-<anything the user stated that the new session needs to know>
-
-First action: <routing instruction based on confirmed launch command — see table below>
-
-Project context:
-- Constitution: specs/CONSTITUTION.md
-- Spec template: specs/SPEC-TEMPLATE.md
-- Tech stack and conventions: CLAUDE.md
-```
-
-Routing instruction by launch command:
-- `claude` (bug fix) → "Reproduce the bug, write a regression test that fails, fix the code to make it pass, then run `/gates` → `/verify` → `/pr`."
-- `claude '/implement'` → "Read the spec and plan referenced above, then invoke `/implement` to execute end-to-end."
-- `claude '/design'` → "Invoke `/design` to size the work and route to `/spec` → `/plan` → `/implement`."
-- `claude` (docs) → "Edit the relevant docs and commit. No design or implement needed. When done: `/pr`."
+Same structure as before (Task / Branch / Worktree / Work type / Issues /
+Issue details / Investigation / User intent / First action / Project
+context). Target 1–5K chars; hard cap 30K (Windows argv limit, verified
+2026-05-13).
 
 **Prompt rules:**
-- No `'@` at the start of a line in prompt content — that exact sequence terminates PowerShell's single-quoted here-string (`@' ... '@`). Apostrophes mid-line (`it's`, `Claude's`, `don't`) are fine. If a line must literally begin with `'@`, prefix it with a space or reword.
 - All paths relative to worktree root unless the reference is outside it.
-- Critical overrides go directly in the prompt — do not bury them in referenced files.
+- Critical overrides go directly in the prompt — do not bury them in
+  referenced files.
+- No PowerShell-specific escaping concerns (the prompt is delivered via
+  argv, not a here-string).
 
-#### 6c: Write the prompt to a file and invoke the launch helper
-
-**Use the `launch-claude-session.py` helper — do NOT open-code
-`Start-Process` or the here-string yourself.** The v1 dispatch AI
-substituted `start pwsh -NoExit -Command "..."` for the correct
-`Start-Process pwsh -ArgumentList '-NoExit','-File','...'` pattern, which
-runs `claude` without a TTY — claude exits immediately, leaving a dead
-pwsh shell. See bug 3 of issue #799's PR. The helper writes a
-PowerShell here-string `.ps1` and spawns via
-`Start-Process -File`, so claude always gets a real TTY.
-
-The helper also:
-- resolves the claude binary's absolute Windows path (node version
-  managers like fnm/nvm use session-scoped shims that don't persist
-  into the spawned shell — embedding the absolute path avoids that)
-- escapes nothing — the prompt body is read verbatim from a file
-- writes NO `.plans/context.md` or any other handoff file (see Rule 8
-  — file-based handoffs are deprioritized by the receiving session)
+#### 6c: Spawn via `start-bg-spawn.py`
 
 ```bash
-# 1. Write the prompt built in 6b to a temp file.
 PROMPT_FILE=$(mktemp -t start-prompt-XXXXXX.txt)
 cat > "$PROMPT_FILE" <<'PROMPT_EOF'
 <full prompt content from 6b, verbatim>
 PROMPT_EOF
 
-# 2. Invoke the helper from the main repo root.
-python scripts/launch-claude-session.py \
-  --target "<worktree-absolute-path>" \
-  --name <name> \
-  --prompt-file "$PROMPT_FILE"
+SPAWN_JSON=$(python scripts/start-bg-spawn.py \
+  --worktree-abs "<worktree-absolute-path>" \
+  --branch "<branch>" \
+  --prompt-file "$PROMPT_FILE")
 
-# 3. Clean up the temp prompt file once the helper exits.
 rm -f "$PROMPT_FILE"
+
+DAEMON_SHORT=$(printf '%s' "$SPAWN_JSON" | python -c "import json,sys;print(json.load(sys.stdin)['short'])")
 ```
 
-Exit codes:
-- `0` — spawned successfully
-- `1` — prompt missing or malformed (e.g., a line starts with `'@`,
-  which would terminate the PowerShell here-string). Fix the prompt
-  content and retry.
-- `2` — spawn failed (pwsh not on PATH, policy blocks unsigned scripts,
-  etc.). The helper prints a manual-fallback command to stderr — show
-  it to the user verbatim.
+Exit codes (see `specs/start-launch.md` Error Types):
+- `0` — spawned; `$SPAWN_JSON` parses to `{short,sessionId,cwd}`
+- `1` — caller / pre-spawn error (version too old, claude not on PATH,
+  bad arg, empty prompt). Surface stderr verbatim and stop.
+- `2` — daemon error (spawn failed, state file timeout, cwd mismatch).
+  Surface stderr verbatim and stop.
 
-**WSL2:** if `uname -r` contains `microsoft`, do not invoke the helper
-— WSL-local pwsh spawns inside WSL, not on the Windows host. Print the
-manual fallback (6d) directly.
-
-**Linux/Mac:** no reliable cross-distro terminal launch. Print the
-manual fallback (6d).
-
-#### 6d: Manual fallback
-
-If the helper returns non-zero or the platform has no reliable
-terminal-spawn path, print:
-
-```
-Could not open a new terminal automatically. Open PowerShell and run:
-
-  cd <worktree-absolute-path>
-  $prompt = @'
-  <full prompt content>
-  '@
-  claude --model claude-opus-4-6 $prompt
-```
-
-Note the bare `claude $prompt` — NOT `claude -p $prompt`. The `-p`
-flag is non-interactive (claude exits after one response); bare
-positional keeps the session interactive.
-
-On Linux/Mac, substitute shell-appropriate syntax (bash here-doc).
+Pass `$DAEMON_SHORT` to `inflight-register.py` in Step 5c (re-run that
+register call here with `--session $DAEMON_SHORT` if it was invoked
+earlier with a random hex).
 
 ### Step 7: Return Control to User
 
-After the new session is launched (or the manual fallback printed), summarize what happened and return control. The new session is self-contained — the inline prompt carries issues, investigation context, work-type routing, and the first-action instruction. Do NOT continue the work in this session.
+After the helper returns 0, summarize and return control:
 
 ```
-Worktree ready at .worktrees/<name> (branch feat/<name>)
-Issues linked: #N, #M
-Work type: <work type>
-Prompt: <chars> chars delivered inline to new session
+  Worktree ready at .worktrees/<name> (branch feat/<name>)
+  Issues linked: #N, #M
+  Work type: <work type>
+  Prompt: <chars> chars delivered verbatim to bg session <short>
+  Session ID: <short> (full UUID: <sessionId>)
 
-New session spawned. It will <first-action from routing table>.
-This session's job is done — continue in the new window.
+  Background session spawned. Watch in Agent View — every Claude Code
+  surface (CLI, desktop, IDE, claude.ai/code, Slack) shows the new row.
+  Open the session interactively any time with: claude attach <short>
+
+  This session's job is done.
 ```
 
-If the launcher fell through to the manual fallback, replace the "New session spawned" line with:
-
-```
-Could not spawn a new window automatically. Manual launch command printed above — paste it into a PowerShell terminal to start the session.
-```
-
-Do not re-derive or restate the first-action instructions — the prompt already contains them. The user only needs to know the session is ready and where to find it.
+If the helper returned non-zero, surface its stderr verbatim and stop —
+no manual-fallback prose to print.
 
 ## Rules
 
@@ -368,5 +293,9 @@ Do not re-derive or restate the first-action instructions — the prompt already
 5. **Workflow state** — always initialize state in the new worktree.
 6. **Freeform input** — never require structured flags. Parse what the user gives you.
 7. **Labels are hints** — work-type pre-selection from labels is a convenience; user confirms.
-8. **Inline prompt handoff — no context files.** The new session receives its task, issues, investigation context, and routing via an inline CLI-argument prompt. Do not write `.plans/context.md` or any other handoff file — file-based handoffs are deprioritized by the receiving session.
+8. **Inline prompt handoff via `claude --bg`.** The new session receives
+   its task, issues, investigation context, and routing via the
+   positional prompt argument to `claude --bg`. Do not write
+   `.plans/context.md` or any other handoff file — file-based handoffs
+   are deprioritized by the receiving session.
 9. **Return control after launch** — this session does not continue the work once the new session is spawned.
