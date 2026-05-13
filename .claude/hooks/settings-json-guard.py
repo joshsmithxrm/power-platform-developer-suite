@@ -99,8 +99,13 @@ def _check_write(content: str, project_dir: str) -> list[str]:
 
         hook_file = m.group(1)
 
-        # Resolve relative to project root.
-        full_path = os.path.normpath(os.path.join(project_dir, hook_file))
+        # Expand $CLAUDE_PROJECT_DIR / ${CLAUDE_PROJECT_DIR} against the
+        # resolved project_dir so the new absolute hook form validates.
+        expanded = hook_file.replace("${CLAUDE_PROJECT_DIR}", project_dir)
+        expanded = expanded.replace("$CLAUDE_PROJECT_DIR", project_dir)
+
+        # Resolve relative to project root (no-op if already absolute).
+        full_path = os.path.normpath(os.path.join(project_dir, expanded))
         if not os.path.exists(full_path):
             errors.append(
                 f"Hook command references a file that does not exist: {hook_file!r}\n"
