@@ -394,7 +394,7 @@ public class MetadataAuthoringServiceTests
                 return Task.FromResult(new OrganizationResponse());
             });
 
-        var message = CaptureSingleInfoMessage(reporter =>
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateColumnAsync(new UpdateColumnRequest
             {
                 SolutionUniqueName = "TestSolution",
@@ -412,7 +412,7 @@ public class MetadataAuthoringServiceTests
     [Fact]
     public async Task UpdateTableAsync_SuccessMessage_TellsUserToPublish()
     {
-        var message = CaptureSingleInfoMessage(reporter =>
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateTableAsync(new UpdateTableRequest
             {
                 SolutionUniqueName = "TestSolution",
@@ -444,7 +444,7 @@ public class MetadataAuthoringServiceTests
                 return Task.FromResult(new OrganizationResponse());
             });
 
-        var message = CaptureSingleInfoMessage(reporter =>
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateRelationshipAsync(new AuthoringUpdateRelationshipRequest
             {
                 SolutionUniqueName = "TestSolution",
@@ -472,7 +472,7 @@ public class MetadataAuthoringServiceTests
                 return Task.FromResult(new OrganizationResponse());
             });
 
-        var message = CaptureSingleInfoMessage(reporter =>
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
             {
                 SolutionUniqueName = "TestSolution",
@@ -485,14 +485,14 @@ public class MetadataAuthoringServiceTests
         message.Should().NotContain("ppds ");
     }
 
-    private static string CaptureSingleInfoMessage(Func<IMetadataAuthoringProgressReporter, Task> act)
+    private static async Task<string> CaptureSingleInfoMessageAsync(Func<IMetadataAuthoringProgressReporter, Task> act)
     {
         var infoMessages = new System.Collections.Generic.List<string>();
         var reporter = new Mock<IMetadataAuthoringProgressReporter>();
         reporter.Setup(r => r.ReportInfo(It.IsAny<string>()))
             .Callback<string>(infoMessages.Add);
 
-        act(reporter.Object).GetAwaiter().GetResult();
+        await act(reporter.Object);
 
         infoMessages.Should().ContainSingle();
         return infoMessages[0];

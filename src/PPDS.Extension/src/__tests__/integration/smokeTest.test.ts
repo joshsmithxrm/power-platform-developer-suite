@@ -203,14 +203,11 @@ describe('Extension Smoke Tests', () => {
         vi.resetModules();
     });
 
-    // Cold import of extension.js pulls in the full module graph (commands, panels,
-    // services); after vi.resetModules() this can exceed vitest's 5s default. Subsequent
-    // tests in this file share the warmed cache and run quickly.
     it('exports activate and deactivate functions', async () => {
         const ext = await import('../../extension.js');
         expect(typeof ext.activate).toBe('function');
         expect(typeof ext.deactivate).toBe('function');
-    }, 30000);
+    });
 
     it('activate registers expected commands', async () => {
         const vscode = await import('vscode');
