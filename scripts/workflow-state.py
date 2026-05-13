@@ -15,6 +15,7 @@ Usage:
   python scripts/workflow-state.py init feature/my-branch
   python scripts/workflow-state.py show
   python scripts/workflow-state.py delete
+  python scripts/workflow-state.py bump routing_gates.backlog.fired_count
 
 Magic values for 'set':
   now   → current UTC ISO 8601 timestamp
@@ -24,6 +25,7 @@ Magic values for 'set':
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -113,11 +115,37 @@ def set_nested(state, key, value):
     current[parts[-1]] = value
 
 
+KEY_PATTERN = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
+
+
+def bump_nested(state, key):
+    """Increment integer at dotted key path, initializing to 1 if absent.
+
+    Raises ValueError if the existing value is not an int.
+    Inherits main-branch blocking from the bump command handler's placement
+    in write_commands — same guard as set/append/delete.
+    """
+    parts = key.split(".")
+    current = state
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    final_key = parts[-1]
+    existing = current.get(final_key)
+    if existing is None:
+        current[final_key] = 1
+    elif isinstance(existing, int):
+        current[final_key] = existing + 1
+    else:
+        raise ValueError(key)
+
+
 def main():
     if len(sys.argv) < 2:
         print(
             "Usage: workflow-state.py <command> [args...]\n"
-            "Commands: set <key> <value>, set-null <key>, init <branch>, show, delete",
+            "Commands: set <key> <value>, set-null <key>, init <branch>, show, delete, bump <key>",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -125,7 +153,7 @@ def main():
     command = sys.argv[1]
 
     # Read-only commands are fine anywhere; writes are blocked on main
-    write_commands = ("set", "set-null", "init", "append", "delete")
+    write_commands = ("set", "set-null", "init", "append", "delete", "bump")
     if command in write_commands and _is_main_branch():
         print(
             "BLOCKED: Cannot write workflow state on main. "
@@ -225,6 +253,23 @@ def main():
             else:
                 sys.exit(0)
         print(json.dumps(current))
+        sys.exit(0)
+
+    if command == "bump":
+        if len(sys.argv) < 3:
+            print("Usage: workflow-state.py bump <key>", file=sys.stderr)
+            sys.exit(1)
+        key = sys.argv[2]
+        if not KEY_PATTERN.match(key):
+            print(f"ERROR: invalid key {key}", file=sys.stderr)
+            sys.exit(3)
+        state = read_state()
+        try:
+            bump_nested(state, key)
+        except ValueError:
+            print(f"ERROR: cannot bump non-integer value at {key}", file=sys.stderr)
+            sys.exit(4)
+        write_state(state)
         sys.exit(0)
 
     print(f"Unknown command: {command}", file=sys.stderr)
