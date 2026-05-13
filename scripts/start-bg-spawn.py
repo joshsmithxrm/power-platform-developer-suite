@@ -2,11 +2,12 @@
 from __future__ import annotations
 import argparse, json, os, re, subprocess, sys, time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 MIN_VERSION = (2, 1, 139)
 JOBS_DIR = Path(os.path.expanduser("~/.claude/jobs"))
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+ANSI_RE = re.compile(r"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[^[])")
 BANNER_RE = re.compile(r"backgrounded\s+·\s+([0-9a-f]{8})\b")
 POLL_BUDGET_SEC = 5.0
 POLL_INTERVAL_SEC = 0.1
@@ -88,11 +89,24 @@ def _scan_for_cwd(target_cwd: str, since: float, jobs_dir: Path | None = None) -
         if not child.is_dir():
             continue
         sp = child / "state.json"
-        if not sp.exists() or sp.stat().st_mtime < since:
+        if not sp.exists():
+            continue
+        # Fast pre-reject: skip files older than `since` by mtime before parsing JSON.
+        if sp.stat().st_mtime < since:
             continue
         data = _read_state(child.name, jobs_dir)
         if not data:
             continue
+        # Per spec AC-04: verify recency via state["createdAt"] (ISO-8601).
+        # Fall back to mtime (already pre-filtered above) when the field is absent.
+        created_at_str = data.get("createdAt")
+        if created_at_str:
+            try:
+                created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                if created_dt.timestamp() < since:
+                    continue
+            except (ValueError, OSError):
+                pass  # mtime pre-filter already applied
         if _norm(data.get("cwd", "")) == _norm(target_cwd):
             return child.name, data
     return None
@@ -106,14 +120,14 @@ def identify_session(
     if jobs_dir is None:
         jobs_dir = JOBS_DIR
     deadline = time.time() + POLL_BUDGET_SEC
-    spawn_floor = time.time() - FALLBACK_AGE_SEC
     while time.time() < deadline:
         if short_hint:
             data = _read_state(short_hint, jobs_dir)
             if data:
                 return short_hint, data
         else:
-            hit = _scan_for_cwd(worktree_abs, spawn_floor, jobs_dir)
+            # Recompute each iteration so the 10-second window stays anchored to now.
+            hit = _scan_for_cwd(worktree_abs, time.time() - FALLBACK_AGE_SEC, jobs_dir)
             if hit:
                 return hit
         time.sleep(POLL_INTERVAL_SEC)
@@ -160,7 +174,10 @@ def _validate(args) -> None:
         )
     if not os.path.exists(args.prompt_file):
         raise SpawnError("prompt file is empty or missing", 1)
-    text = Path(args.prompt_file).read_text(encoding="utf-8")
+    try:
+        text = Path(args.prompt_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SpawnError(f"could not read prompt file: {exc}", 1)
     if not text.strip():
         raise SpawnError("prompt file is empty or missing", 1)
 
@@ -173,7 +190,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         _validate(args)
-        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+        try:
+            prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SpawnError(f"could not read prompt file: {exc}", 1)
         result = spawn(args.worktree_abs, args.branch, prompt)
         json.dump(
             {"short": result.short, "sessionId": result.sessionId, "cwd": result.cwd},

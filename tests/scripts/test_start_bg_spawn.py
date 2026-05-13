@@ -48,6 +48,15 @@ def test_rejects_old_version(monkeypatch, capsys):
     assert "npm i -g @anthropic-ai/claude-code" in msg
 
 
+def test_accepts_exact_min_version(monkeypatch):
+    """AC-01 boundary: version exactly 2.1.139 must be accepted (not rejected)."""
+    def fake_run(argv, **kw):
+        return CompletedProcess(argv, 0, "2.1.139 (Claude Code)\n", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    require_min_version()  # must not raise
+
+
 # ---------------------------------------------------------------------------
 # AC-02: spawn argv + cwd, never shell=True
 # ---------------------------------------------------------------------------
@@ -149,13 +158,15 @@ def test_fallback_id_lookup(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    # monkeypatch time so spawn_floor is now - 10, which includes good but not old
-    real_time = time.time
+    # monkeypatch time so spawn_floor = now - 10 (includes good, excludes old).
+    # Return now for early calls so the loop enters; expire after many calls so
+    # a scan failure raises SpawnError rather than hanging forever.
     call_count = [0]
 
     def patched_time():
         call_count[0] += 1
-        # First call sets deadline; second sets spawn_floor; subsequent calls for loop
+        if call_count[0] > 20:
+            return now + 6.0  # past deadline — prevents hang on bad test setup
         return now
 
     monkeypatch.setattr(time, "time", patched_time)
@@ -175,15 +186,18 @@ def test_state_json_poll_timeout(tmp_path, monkeypatch, capsys):
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
 
-    # Advance time past the 5s budget immediately
+    # Advance time past the 5s budget after one loop iteration.
+    # Call sequence with spawn_floor computed inside loop:
+    #   call 1: deadline setup (time.time() + POLL_BUDGET_SEC)
+    #   call 2: while-check → enters loop body
+    #   call 3: spawn_floor inside loop (time.time() - FALLBACK_AGE_SEC)
+    #   call 4: while-check → past deadline → exits loop
     t_start = 1000.0
     call_n = [0]
 
     def fast_time():
         call_n[0] += 1
-        # first two calls: deadline = t_start + 5, spawn_floor = t_start - 10
-        # subsequent calls: return t_start + 6 (past deadline)
-        if call_n[0] <= 2:
+        if call_n[0] <= 3:
             return t_start
         return t_start + 6.0
 
