@@ -1,0 +1,52 @@
+name: Workflow Tests
+
+# Runs the Python regression tests that protect `.claude/` workflow
+# infrastructure — hook command paths, settings-json-guard, hook envelopes.
+#
+# Existed before this workflow: `tests/test_hook_paths.py` (added by PR #907)
+# asserted every hook in `.claude/settings.json` uses `$CLAUDE_PROJECT_DIR/`.
+# It was correct and would have failed on PR #973, which silently regressed
+# all 39 entries back to bare-relative paths — but nothing in CI invoked it.
+# This workflow closes that gap so the regression can't happen a third time.
+
+on:
+  pull_request:
+    paths:
+      - '.claude/**'
+      - 'tests/test_hook_paths.py'
+      - 'tests/test_hooks.py'
+      - 'tests/test_hook_envelope.py'
+      - '.github/workflows/workflow-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '.claude/**'
+      - 'tests/test_hook_paths.py'
+      - 'tests/test_hooks.py'
+      - 'tests/test_hook_envelope.py'
+      - '.github/workflows/workflow-tests.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-tests:
+    name: workflow-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run hook-path regression tests
+        run: pytest tests/test_hook_paths.py tests/test_hooks.py tests/test_hook_envelope.py -v
