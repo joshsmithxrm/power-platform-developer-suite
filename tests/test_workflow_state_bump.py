@@ -30,11 +30,14 @@ def _run(args, *, cwd=None, env=None):
 
 
 def _make_env(tmp_path: Path) -> dict:
-    """Return an env dict that points CLAUDE_PROJECT_DIR at tmp_path."""
+    """Return an env dict that isolates the script from the real git repo."""
     import os
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
-    env["GIT_DIR"] = "disabled"  # ensure _is_main_branch() → False (no git)
+    # WORKFLOW_STATE_SKIP_GIT=1 makes _is_main_branch() return False and
+    # _get_worktree_root() fall through to CLAUDE_PROJECT_DIR without
+    # calling git — a documented, controlled isolation mechanism.
+    env["WORKFLOW_STATE_SKIP_GIT"] = "1"
     return env
 
 
@@ -85,17 +88,24 @@ def test_workflow_state_bump_nested_path(tmp_path):
 
 # ---------------------------------------------------------------------------
 # AC-09: non-integer value at key → non-zero exit + stderr "non-integer"
+# Spec says "string, list, or dict"; also covers bool (subclass of int).
 # ---------------------------------------------------------------------------
 
-def test_workflow_state_bump_rejects_non_integer(tmp_path):
+@pytest.mark.parametrize("bad_value,label", [
+    ("hello", "string"),
+    ([1, 2], "list"),
+    ({"nested": 1}, "dict"),
+    (True, "bool"),
+])
+def test_workflow_state_bump_rejects_non_integer(tmp_path, bad_value, label):
     env = _make_env(tmp_path)
-    _write_state(tmp_path, {"foo": "hello"})
+    _write_state(tmp_path, {"foo": bad_value})
     result = _run(["bump", "foo"], env=env)
-    assert result.returncode != 0
-    assert "non-integer" in result.stderr
+    assert result.returncode != 0, f"Expected non-zero exit for {label} value"
+    assert "non-integer" in result.stderr, f"Expected 'non-integer' in stderr for {label} value"
     # State unchanged
     state = _read_state(tmp_path)
-    assert state["foo"] == "hello"
+    assert state["foo"] == bad_value, f"State must be unchanged for {label} value"
 
 
 # ---------------------------------------------------------------------------

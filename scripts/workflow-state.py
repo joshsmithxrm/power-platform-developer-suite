@@ -37,7 +37,11 @@ def _get_worktree_root():
     In a worktree this returns .worktrees/<name>/, on main it returns
     the repo root.  We use this instead of CLAUDE_PROJECT_DIR so that
     workflow state lands in the worktree, not the main repo.
+
+    Set WORKFLOW_STATE_SKIP_GIT=1 to skip the git subprocess (tests).
     """
+    if os.environ.get("WORKFLOW_STATE_SKIP_GIT"):
+        return os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -51,7 +55,12 @@ def _get_worktree_root():
 
 
 def _is_main_branch():
-    """Return True if the current branch is main/master."""
+    """Return True if the current branch is main/master.
+
+    Set WORKFLOW_STATE_SKIP_GIT=1 to skip the git subprocess (tests).
+    """
+    if os.environ.get("WORKFLOW_STATE_SKIP_GIT"):
+        return False
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -135,6 +144,9 @@ def bump_nested(state, key):
     existing = current.get(final_key)
     if existing is None:
         current[final_key] = 1
+    elif isinstance(existing, bool):
+        # bool is a subclass of int; must check before int to avoid silent corruption
+        raise ValueError(key)
     elif isinstance(existing, int):
         current[final_key] = existing + 1
     else:
