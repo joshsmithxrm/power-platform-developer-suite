@@ -330,7 +330,7 @@ def parse_triage_json(content):
 def parse_triage_json_obj(content):
     """Find and parse a triage JSON object from raw text content.
 
-    Scans right-to-left for '{', returns the first valid dict decoded.
+    Scans right-to-left for '{', returns the last (rightmost) valid dict decoded.
     Optional fields with explicit null values are coalesced to safe defaults
     by the caller; this function returns the raw decoded dict or None.
     """

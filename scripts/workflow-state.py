@@ -130,27 +130,44 @@ KEY_PATTERN = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
 def bump_nested(state, key):
     """Increment integer at dotted key path, initializing to 1 if absent.
 
-    Raises ValueError if the existing value is not an int.
+    Raises ValueError if the existing value is not an int, or is a bool
+    (bool is a subclass of int and is rejected to prevent silent type
+    corruption). Intermediate path segments must be dicts; any non-dict
+    intermediate raises ValueError without mutating state.
     Inherits main-branch blocking from the bump command handler's placement
     in write_commands — same guard as set/append/delete.
     """
     parts = key.split(".")
+    # Pass 1: validate the full path without mutating state. Reject any
+    # intermediate that exists and is not a dict, so a multi-segment key
+    # cannot silently destroy a non-dict value.
+    cursor = state
+    for part in parts[:-1]:
+        if part in cursor:
+            if not isinstance(cursor[part], dict):
+                raise ValueError(key)
+            cursor = cursor[part]
+        else:
+            cursor = None
+            break
+    final_key = parts[-1]
+    if cursor is not None and final_key in cursor:
+        existing = cursor[final_key]
+        if isinstance(existing, bool) or not isinstance(existing, int):
+            # bool is a subclass of int; reject before the int check.
+            raise ValueError(key)
+    # Pass 2: validation passed; create intermediate dicts as needed and
+    # increment (or initialize to 1).
     current = state
     for part in parts[:-1]:
-        if part not in current or not isinstance(current[part], dict):
+        if part not in current:
             current[part] = {}
         current = current[part]
-    final_key = parts[-1]
     existing = current.get(final_key)
     if existing is None:
         current[final_key] = 1
-    elif isinstance(existing, bool):
-        # bool is a subclass of int; must check before int to avoid silent corruption
-        raise ValueError(key)
-    elif isinstance(existing, int):
-        current[final_key] = existing + 1
     else:
-        raise ValueError(key)
+        current[final_key] = existing + 1
 
 
 def main():

@@ -59,18 +59,18 @@ Present side by side: **Investigation Summary** (Step 3, updated after challenge
 
 <!-- enforcement: T3 advisory — see specs/skill-routing-gates.md and issue #1023 -->
 
-Ask the human for a decision:
+As Step 7 renders, emit BEFORE presenting the options (so the counter fires every time Step 7 runs, not as an afterthought):
+
+```bash
+python scripts/workflow-state.py bump routing_gates.investigate.epic_offered_count
+```
+
+Then ask the human for a decision:
 
 1. **Go** — proceed with the recommended approach
 2. **Change X** — modify a specific aspect and re-evaluate (loops back to relevant step)
 3. **Not worth it** — abandon the investigation
 4. **File as epic** — research decomposes into N implementable items rather than a single deliverable; file the epic + child issues via `/backlog`
-
-When Step 7 renders, emit:
-
-```bash
-python scripts/workflow-state.py bump routing_gates.investigate.epic_offered_count
-```
 
 If the human picks option (4), additionally emit:
 

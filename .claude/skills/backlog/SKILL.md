@@ -45,13 +45,13 @@ Then offer to run /investigate (numbered options, redirect first):
 > 1. Run `/investigate` with this description as input (recommended)
 > 2. Continue with `/backlog create` as-is
 
-On (1): invoke `/investigate` via Skill tool with original description as args.
+On (1) — emit bump FIRST (Skill tool transfers execution), then invoke `/investigate` via Skill tool with original description as args:
 
 ```bash
 python scripts/workflow-state.py bump routing_gates.backlog.honored_count
 ```
 
-On (2): proceed to Step 1.
+On (2) — emit bump FIRST, then proceed to Step 1:
 
 ```bash
 python scripts/workflow-state.py bump routing_gates.backlog.overridden_count

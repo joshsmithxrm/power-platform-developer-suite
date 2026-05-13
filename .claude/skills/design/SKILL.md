@@ -72,11 +72,13 @@ On (2) — separate features: recommend filing N issues. Ask:
 > (a) File issues via `/backlog` (recommended)
 > (b) Continue with this design anyway
 
-On (2)(a) — split: invoke `/backlog` via Skill tool; exit `/design`; instruct user to `/start` a new worktree per issue.
+On (2)(a) — split: emit the bump FIRST (the Skill tool transfers execution, so anything after it never runs):
 
 ```bash
 python scripts/workflow-state.py bump routing_gates.design.split_count
 ```
+
+Then invoke `/backlog` via Skill tool; exit `/design`; instruct user to `/start` a new worktree per issue.
 
 On (2)(b) — proceed anyway: continue, flag as deliberate multi-concern design (cross-reference issue #989).
 

@@ -1196,6 +1196,12 @@ def _check_flake(worktree, failure_log, commit_sha):
     if not failure_log:
         return "real"
 
+    # Without a real commit SHA we cannot key flake history per-commit, and
+    # any sentinel value would falsely match across PRs sharing the
+    # decisions directory. Treat the failure as real instead.
+    if not commit_sha:
+        return "real"
+
     failure_lower = failure_log.lower()
     matched = any(p.lower() in failure_lower for p in KNOWN_FLAKE_PATTERNS)
     if not matched:
@@ -1247,7 +1253,7 @@ def _dispatch_ci_fix_agent(worktree, pr_number, failure_log, commit_sha,
             cwd=worktree, capture_output=True, timeout=30, check=False,
         )
         diff_proc = subprocess.run(
-            ["git", "diff", "--", "origin/main...HEAD"],
+            ["git", "diff", "origin/main...HEAD"],
             cwd=worktree, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
         )
@@ -1604,9 +1610,9 @@ def run_monitor(worktree, pr_number, resume=False, repo=None):
                         cwd=worktree, capture_output=True, text=True,
                         encoding="utf-8", errors="replace", timeout=10,
                     )
-                    commit_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else "unknown"
+                    commit_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else ""
                 except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                    commit_sha = "unknown"
+                    commit_sha = ""
 
                 # Resolve current branch for run filtering (shared by log fetch + flake rerun)
                 current_branch = ""

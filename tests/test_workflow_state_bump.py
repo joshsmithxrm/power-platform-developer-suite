@@ -86,9 +86,21 @@ def test_workflow_state_bump_nested_path(tmp_path):
     assert state["routing_gates"]["backlog"]["fired_count"] == 1
 
 
+def test_workflow_state_bump_rejects_non_dict_intermediate(tmp_path):
+    """Bumping `a.b` when `a` is a non-dict must fail without mutating state."""
+    env = _make_env(tmp_path)
+    _write_state(tmp_path, {"a": "scalar"})
+    result = _run(["bump", "a.b"], env=env)
+    assert result.returncode != 0
+    # Existing non-dict value at intermediate path must be preserved.
+    state = _read_state(tmp_path)
+    assert state == {"a": "scalar"}
+
+
 # ---------------------------------------------------------------------------
 # AC-09: non-integer value at key → non-zero exit + stderr "non-integer"
-# Spec says "string, list, or dict"; also covers bool (subclass of int).
+# Spec says "string, list, or dict"; bool is also rejected because it is a
+# subclass of int — bumping True would silently turn it into the integer 2.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("bad_value,label", [
@@ -118,4 +130,13 @@ def test_workflow_state_bump_validates_key(tmp_path):
     assert result.returncode != 0
     assert "invalid key" in result.stderr
     # State file must not be created or modified
+    assert not _state_file(tmp_path).exists()
+
+
+def test_workflow_state_bump_requires_key_argument(tmp_path):
+    """`bump` with no key prints usage to stderr and exits non-zero."""
+    env = _make_env(tmp_path)
+    result = _run(["bump"], env=env)
+    assert result.returncode != 0
+    assert "bump <key>" in result.stderr
     assert not _state_file(tmp_path).exists()
