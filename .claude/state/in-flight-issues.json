@@ -1,19 +1,5 @@
 {
   "version": 1,
   "updated": "2026-05-08T01:47:45Z",
-  "open_work": [
-    {
-      "session_id": "d131885c",
-      "started": "2026-05-08T01:47:45Z",
-      "branch": "feat/skill-routing-gates",
-      "worktree": ".worktrees/skill-routing-gates",
-      "issues": [
-        989
-      ],
-      "areas": [
-        "workflow"
-      ],
-      "intent": "Skill routing and readiness gates: backlog redirect, investigate epic handoff, design multi-concern checkpoint"
-    }
-  ]
+  "open_work": []
 }

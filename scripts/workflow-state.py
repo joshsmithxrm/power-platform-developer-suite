@@ -38,9 +38,9 @@ def _get_worktree_root():
     the repo root.  We use this instead of CLAUDE_PROJECT_DIR so that
     workflow state lands in the worktree, not the main repo.
 
-    Set WORKFLOW_STATE_SKIP_GIT=1 to skip the git subprocess (tests).
+    Set WORKFLOW_STATE_TEST_SKIP_GIT=1 to skip the git subprocess (tests).
     """
-    if os.environ.get("WORKFLOW_STATE_SKIP_GIT"):
+    if os.environ.get("WORKFLOW_STATE_TEST_SKIP_GIT"):
         return os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     try:
         result = subprocess.run(
@@ -57,9 +57,9 @@ def _get_worktree_root():
 def _is_main_branch():
     """Return True if the current branch is main/master.
 
-    Set WORKFLOW_STATE_SKIP_GIT=1 to skip the git subprocess (tests).
+    Set WORKFLOW_STATE_TEST_SKIP_GIT=1 to skip the git subprocess (tests).
     """
-    if os.environ.get("WORKFLOW_STATE_SKIP_GIT"):
+    if os.environ.get("WORKFLOW_STATE_TEST_SKIP_GIT"):
         return False
     try:
         result = subprocess.run(
@@ -300,7 +300,7 @@ def main():
         try:
             bump_nested(state, key)
         except ValueError:
-            print(f"ERROR: cannot bump non-integer value at {key}", file=sys.stderr)
+            print(f"ERROR: cannot bump value at {key} (intermediate path is not a dict or value is not an integer)", file=sys.stderr)
             sys.exit(4)
         write_state(state)
         sys.exit(0)

@@ -34,10 +34,10 @@ def _make_env(tmp_path: Path) -> dict:
     import os
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
-    # WORKFLOW_STATE_SKIP_GIT=1 makes _is_main_branch() return False and
+    # WORKFLOW_STATE_TEST_SKIP_GIT=1 makes _is_main_branch() return False and
     # _get_worktree_root() fall through to CLAUDE_PROJECT_DIR without
     # calling git — a documented, controlled isolation mechanism.
-    env["WORKFLOW_STATE_SKIP_GIT"] = "1"
+    env["WORKFLOW_STATE_TEST_SKIP_GIT"] = "1"
     return env
 
 
