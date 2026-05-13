@@ -52,6 +52,7 @@ def test_prompt_verbatim_5k(tmp_path):
         text=True,
         cwd=str(repo_root),
         timeout=60,
+        stdin=subprocess.DEVNULL,
     )
     assert result.returncode == 0, (
         f"start-bg-spawn.py failed (exit {result.returncode})\n"
