@@ -79,7 +79,7 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 
 ## Pre-Merge Gate Rules
 
-The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces three rules on every PR before merge. All three are **enforcing from day one** — there is no soft-warn period (per the v1-launch retro). Each rule is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check is what branch protection should require.
+The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces two rules on every PR before merge. Both are **enforcing from day one** — there is no soft-warn period (per the v1-launch retro). Each rule is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check is what branch protection should require.
 
 Rule logic lives in `scripts/ci/`. Bypass markers are **case-sensitive** in the PR title or body — a deliberate copy-paste is required, not a casual mention.
 
@@ -93,23 +93,6 @@ Blocks merge when:
 Bypass: `[size-waived: <reason>]` in the PR title or body. The reason must be non-empty (whitespace-only is rejected). Use sparingly and explain why review of a large diff is acceptable (e.g., vendored 3p code, codegen output, mechanical rename).
 
 Catches the failure mode from PR #792 (131 files / 7.5K LoC merged unreviewed).
-
-### Rule 2 — Workflow secret-ref drift (`scripts/ci/check_workflow_secrets.py`)
-
-For any PR that touches `.github/workflows/*.yml` or `*.yaml`:
-
-1. Parses every changed workflow file.
-2. Extracts every `${{ secrets.X }}` and `${{ vars.X }}` reference.
-3. Compares against the actual repo's secret/variable inventory (`gh secret list --json name`, `gh variable list --json name` — names only, never values).
-4. Blocks merge if any referenced name is missing.
-
-`GITHUB_TOKEN` is built-in and always considered present. Repo-level inventories only — environment-scoped secrets are not enumerated by default; if your workflow uses one, bypass it.
-
-**App token requirement.** Rule 2 requires the `ppds-pre-merge-gate` GitHub App installed with `secrets:read` and `variables:read`. The default `GITHUB_TOKEN` cannot enumerate repo secrets/variables (HTTP 403 — Resource not accessible by integration), so the workflow mints a short-lived App token via `actions/create-github-app-token@v1` for this rule only. App ID is stored at `vars.PPDS_GATE_APP_ID`; the private key (full `.pem`) is stored at `secrets.PPDS_GATE_APP_PRIVATE_KEY`.
-
-Bypass: `[secret-ref-allow: <NAME>]` in the PR title or body, repeated for each missing name. Use for legitimate cases such as secrets defined on a reusable workflow caller, environment-scoped secrets, or org-level secrets that the repo's `gh secret list` doesn't enumerate.
-
-Catches the failure mode from PR #797 / ppds-docs#15 (`AUDIT_REPO_TOKEN` referenced but didn't exist).
 
 ### Rule 3 — Major-bump test enforcement (`scripts/ci/check_major_bump_tested.py`)
 
