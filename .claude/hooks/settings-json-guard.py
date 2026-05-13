@@ -101,6 +101,9 @@ def _check_write(content: str, project_dir: str) -> list[str]:
 
         # Expand $CLAUDE_PROJECT_DIR / ${CLAUDE_PROJECT_DIR} against the
         # resolved project_dir so the new absolute hook form validates.
+        # Order matters: brace form first, otherwise the second replace
+        # would consume `$CLAUDE_PROJECT_DIR` inside `${CLAUDE_PROJECT_DIR}`
+        # and leave a stray `{}`.
         expanded = hook_file.replace("${CLAUDE_PROJECT_DIR}", project_dir)
         expanded = expanded.replace("$CLAUDE_PROJECT_DIR", project_dir)
 
