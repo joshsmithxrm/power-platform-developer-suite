@@ -19,6 +19,8 @@ using PPDS.Dataverse.Pooling;
 using Xunit;
 using AuthoringUpdateRelationshipRequest = PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest;
 using AuthoringUpdateStateValueRequest = PPDS.Dataverse.Metadata.Authoring.UpdateStateValueRequest;
+using AuthoringCreateManyToManyRequest = PPDS.Dataverse.Metadata.Authoring.CreateManyToManyRequest;
+using SdkCreateManyToManyRequest = Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -324,6 +326,94 @@ public class MetadataAuthoringServiceTests
         updatedRel!.CascadeConfiguration.Should().NotBeNull();
         updatedRel.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
         updatedRel.CascadeConfiguration.Assign.Should().Be(CascadeType.Cascade);
+    }
+
+    #endregion
+
+    #region CreateManyToManyAsync
+
+    [Fact]
+    public async Task CreateManyToManyAsync_OmittedIntersect_DefaultsToSchemaNameOnSdkRequest()
+    {
+        // Regression guard for issue #1008: previously the CLI never populated IntersectEntitySchemaName,
+        // and the service set it on the wrong field (ManyToManyRelationshipMetadata.IntersectEntityName)
+        // instead of the SDK request's IntersectEntitySchemaName, so every M:N create failed at execute time.
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        SdkCreateManyToManyRequest? capturedRequest = null;
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
+            })
+            .ReturnsAsync(response);
+
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm"
+            // IntersectEntitySchemaName intentionally omitted
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.IntersectEntitySchemaName.Should().Be("new_account_contact_mm",
+            "the service must default IntersectEntitySchemaName to SchemaName when omitted (Power Apps Maker convention; required by the SDK)");
+    }
+
+    [Fact]
+    public async Task CreateManyToManyAsync_ExplicitIntersect_PassesThroughOnSdkRequest()
+    {
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        SdkCreateManyToManyRequest? capturedRequest = null;
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
+            })
+            .ReturnsAsync(response);
+
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            IntersectEntitySchemaName = "new_AccountContactLink"
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.IntersectEntitySchemaName.Should().Be("new_AccountContactLink");
+        capturedRequest.ManyToManyRelationship.SchemaName.Should().Be("new_account_contact_mm",
+            "the relationship schema name and intersect entity schema name remain independently set when overridden");
+    }
+
+    [Fact]
+    public async Task CreateManyToManyAsync_DryRun_DoesNotCallSdk()
+    {
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            DryRun = true
+        };
+
+        var result = await _service.CreateManyToManyAsync(request);
+
+        result.WasDryRun.Should().BeTrue();
+        _client.Verify(
+            c => c.ExecuteAsync(It.IsAny<SdkCreateManyToManyRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion

@@ -506,8 +506,16 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         reporter?.ReportPhase("Resolving publisher prefix");
         var prefix = await ResolvePublisherPrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
 
+        // Default the intersect entity schema name to the relationship schema name when not supplied.
+        // Matches the Power Apps Maker / SDK sample convention where both names are the same string
+        // (Microsoft Learn: CreateManyToManyRequest). Done before validation so prefix checks see the
+        // resolved value and dry-run catches mismatches.
+        var intersectSchemaName = string.IsNullOrWhiteSpace(request.IntersectEntitySchemaName)
+            ? request.SchemaName
+            : request.IntersectEntitySchemaName;
+
         reporter?.ReportPhase("Validating");
-        _validator.ValidateCreateManyToManyRequest(request, prefix);
+        _validator.ValidateCreateManyToManyRequest(request, prefix, intersectSchemaName);
 
         if (request.DryRun)
         {
@@ -526,8 +534,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             SchemaName = request.SchemaName,
             Entity1LogicalName = request.Entity1LogicalName,
-            Entity2LogicalName = request.Entity2LogicalName,
-            IntersectEntityName = request.IntersectEntitySchemaName
+            Entity2LogicalName = request.Entity2LogicalName
         };
 
         if (!string.IsNullOrEmpty(request.Entity1NavigationPropertyName))
@@ -538,7 +545,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var sdkRequest = new SdkCreateManyToManyRequest
         {
             ManyToManyRelationship = relationship,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = request.SolutionUniqueName,
+            IntersectEntitySchemaName = intersectSchemaName
         };
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);

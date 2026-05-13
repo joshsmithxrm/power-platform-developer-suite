@@ -162,3 +162,43 @@ public sealed class CliE2EWithCredentialsAttribute : FactAttribute
     }
 }
 
+/// <summary>
+/// Fact attribute for CLI E2E tests that mutate solution-scoped metadata. Requires client secret
+/// credentials, .NET 8.0, and a configured target solution and publisher prefix
+/// (PPDS_TEST_SOLUTION, PPDS_TEST_PREFIX). Use for tests that create custom tables, columns,
+/// relationships, etc., where the schema name must satisfy a publisher prefix.
+/// </summary>
+public sealed class CliE2EWithSolutionAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public CliE2EWithSolutionAttribute()
+    {
+        if (!IsNet8Runtime())
+        {
+            Skip = "CLI E2E tests only run on .NET 8.0 (CLI is spawned with --framework net8.0, making other TFMs redundant).";
+        }
+        else if (!Configuration.HasClientSecretCredentials)
+        {
+            Skip = "Client secret credentials not configured. Set DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, and PPDS_TEST_TENANT_ID.";
+        }
+        else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION"))
+                 || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")))
+        {
+            Skip = "Solution-scoped E2E test requires PPDS_TEST_SOLUTION (target unmanaged solution unique name) and PPDS_TEST_PREFIX (publisher customization prefix, e.g., 'new' or 'hsl').";
+        }
+    }
+
+    private static bool IsNet8Runtime()
+    {
+#if NET8_0
+        return true;
+#else
+        return false;
+#endif
+    }
+}
+
