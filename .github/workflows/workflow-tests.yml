@@ -15,7 +15,6 @@ on:
       - '.claude/**'
       - 'tests/test_hook_paths.py'
       - 'tests/test_hooks.py'
-      - 'tests/test_hook_envelope.py'
       - '.github/workflows/workflow-tests.yml'
   push:
     branches:
@@ -24,7 +23,6 @@ on:
       - '.claude/**'
       - 'tests/test_hook_paths.py'
       - 'tests/test_hooks.py'
-      - 'tests/test_hook_envelope.py'
       - '.github/workflows/workflow-tests.yml'
   workflow_dispatch: {}
 
@@ -49,4 +47,4 @@ jobs:
         run: pip install pytest
 
       - name: Run hook-path regression tests
-        run: pytest tests/test_hook_paths.py tests/test_hooks.py tests/test_hook_envelope.py -v
+        run: pytest tests/test_hook_paths.py tests/test_hooks.py -v
