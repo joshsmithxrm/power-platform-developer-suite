@@ -6,6 +6,7 @@ name: Pre-Merge Gate
 #
 # Rule 1 (size):       scripts/ci/check_pr_size.py
 # Rule 3 (major-bump): scripts/ci/check_major_bump_tested.py
+# (Rule 2 — workflow secret-ref drift — was retired; numbering preserved.)
 #
 # Both are ENFORCING from day one (no soft-warn) per retro recommendation.
 # Bypass markers are documented in docs/MERGE-POLICY.md.
