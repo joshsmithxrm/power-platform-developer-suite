@@ -1,5 +1,19 @@
 {
   "version": 1,
-  "updated": "2026-05-08T01:47:45Z",
-  "open_work": []
+  "updated": "2026-05-13T20:26:52Z",
+  "open_work": [
+    {
+      "session_id": "5a07ebdb",
+      "started": "2026-05-13T20:26:52Z",
+      "branch": "chore/drop-rule-2",
+      "worktree": ".worktrees/drop-rule-2",
+      "issues": [],
+      "areas": [
+        ".github/workflows/pre-merge-gate.yml",
+        "scripts/ci/check_workflow_secrets.py",
+        "docs/MERGE-POLICY.md"
+      ],
+      "intent": "drop Rule 2 (workflow secret-refs) from pre-merge gate per /investigate Option D"
+    }
+  ]
 }
