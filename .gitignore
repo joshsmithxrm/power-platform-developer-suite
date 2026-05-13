@@ -120,6 +120,11 @@ __pycache__/
 # Stop-hook watchdog counters (transient runtime state)
 .claude/state/hook-counts.json
 
+# Cross-session in-flight tracking — per-worktree runtime state, auto-bootstrapped
+# by scripts/inflight_common.py. Tracked-in-VCS caused constant working-tree dirt
+# on every pull/branch-switch because every register/deregister writes the file.
+.claude/state/in-flight-issues.json
+
 # Claude Code scheduled-tasks runtime lock (session state, not source)
 .claude/scheduled_tasks.lock
 
