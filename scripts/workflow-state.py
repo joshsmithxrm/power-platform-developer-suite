@@ -273,7 +273,11 @@ def main():
             sys.exit(1)
         key = sys.argv[2]
         if not KEY_PATTERN.match(key):
-            print(f"ERROR: invalid key {key}", file=sys.stderr)
+            print(
+                f"ERROR: invalid key {key} — keys must use dot-separated alphanumeric segments"
+                f" (e.g., routing_gates.backlog.fired_count)",
+                file=sys.stderr,
+            )
             sys.exit(3)
         state = read_state()
         try:
