@@ -453,6 +453,9 @@ export interface MetadataAuthoringResult {
     error?: string;
     errorCode?: string;
     validationMessages?: MetadataValidationMessageDto[];
+    // Issue #1009: signal that the change needs to be published before consumers see it.
+    requiresPublish?: boolean;
+    publishHint?: string;
 }
 
 export interface MetadataDeleteResult {
