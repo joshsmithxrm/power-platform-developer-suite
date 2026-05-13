@@ -1909,6 +1909,8 @@ public class RpcMethodHandler : IDisposable
                     Success = true,
                     LogicalName = entityLogicalName,
                     WasDryRun = dryRun,
+                    RequiresPublish = !dryRun,
+                    PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };
             }
             catch (Authoring.MetadataValidationException ex)
@@ -2091,6 +2093,8 @@ public class RpcMethodHandler : IDisposable
                     Success = true,
                     LogicalName = columnLogicalName,
                     WasDryRun = dryRun,
+                    RequiresPublish = !dryRun,
+                    PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };
             }
             catch (Authoring.MetadataValidationException ex)
@@ -8834,6 +8838,14 @@ public class MetadataAuthoringResponse
     [JsonPropertyName("validationMessages")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ValidationMessageDto>? ValidationMessages { get; set; }
+
+    // Issue #1009: signal that the change needs to be published before consumers see it.
+    [JsonPropertyName("requiresPublish")]
+    public bool RequiresPublish { get; set; }
+
+    [JsonPropertyName("publishHint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PublishHint { get; set; }
 }
 
 /// <summary>
