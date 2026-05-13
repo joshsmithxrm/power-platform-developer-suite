@@ -351,25 +351,30 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Updating column", request.ColumnLogicalName);
 
-        if (request.DisplayName != null)
-            existingAttr.DisplayName = new Label(request.DisplayName, 1033);
-        if (request.Description != null)
-            existingAttr.Description = new Label(request.Description, 1033);
-        if (request.RequiredLevel != null)
-            existingAttr.RequiredLevel = new AttributeRequiredLevelManagedProperty(ParseRequiredLevel(request.RequiredLevel));
-        if (request.IsAuditEnabled.HasValue)
-            existingAttr.IsAuditEnabled = new BooleanManagedProperty(request.IsAuditEnabled.Value);
-        if (request.IsSecured.HasValue)
-            existingAttr.IsSecured = request.IsSecured.Value;
-        if (request.IsValidForAdvancedFind.HasValue)
-            existingAttr.IsValidForAdvancedFind = new BooleanManagedProperty(request.IsValidForAdvancedFind.Value);
+        // #1009: re-sending the retrieved AttributeMetadata silently drops RequiredLevel
+        // changes on the wire. Build a fresh, minimal attribute of the same SDK type
+        // and copy only the fields the caller explicitly asked to change.
+        var updateAttr = CreateUpdateAttribute(existingAttr);
 
-        ApplyTypeSpecificUpdates(existingAttr, request);
+        if (request.DisplayName != null)
+            updateAttr.DisplayName = new Label(request.DisplayName, 1033);
+        if (request.Description != null)
+            updateAttr.Description = new Label(request.Description, 1033);
+        if (request.RequiredLevel != null)
+            updateAttr.RequiredLevel = new AttributeRequiredLevelManagedProperty(ParseRequiredLevel(request.RequiredLevel));
+        if (request.IsAuditEnabled.HasValue)
+            updateAttr.IsAuditEnabled = new BooleanManagedProperty(request.IsAuditEnabled.Value);
+        if (request.IsSecured.HasValue)
+            updateAttr.IsSecured = request.IsSecured.Value;
+        if (request.IsValidForAdvancedFind.HasValue)
+            updateAttr.IsValidForAdvancedFind = new BooleanManagedProperty(request.IsValidForAdvancedFind.Value);
+
+        ApplyTypeSpecificUpdates(updateAttr, request);
 
         var sdkRequest = new UpdateAttributeRequest
         {
             EntityName = request.EntityLogicalName,
-            Attribute = existingAttr,
+            Attribute = updateAttr,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -1299,6 +1304,35 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         return attr;
     }
 
+    private static AttributeMetadata CreateUpdateAttribute(AttributeMetadata existingAttr)
+    {
+        AttributeMetadata fresh = existingAttr switch
+        {
+            StringAttributeMetadata => new StringAttributeMetadata(),
+            MemoAttributeMetadata => new MemoAttributeMetadata(),
+            IntegerAttributeMetadata => new IntegerAttributeMetadata(),
+            BigIntAttributeMetadata => new BigIntAttributeMetadata(),
+            DecimalAttributeMetadata => new DecimalAttributeMetadata(),
+            DoubleAttributeMetadata => new DoubleAttributeMetadata(),
+            MoneyAttributeMetadata => new MoneyAttributeMetadata(),
+            BooleanAttributeMetadata => new BooleanAttributeMetadata(),
+            DateTimeAttributeMetadata => new DateTimeAttributeMetadata(),
+            MultiSelectPicklistAttributeMetadata => new MultiSelectPicklistAttributeMetadata(),
+            PicklistAttributeMetadata => new PicklistAttributeMetadata(),
+            ImageAttributeMetadata => new ImageAttributeMetadata(),
+            FileAttributeMetadata => new FileAttributeMetadata(),
+            LookupAttributeMetadata => new LookupAttributeMetadata(),
+            _ => throw new MetadataValidationException(
+                MetadataErrorCodes.InvalidConstraint,
+                $"Unsupported attribute type for update: {existingAttr.GetType().Name}",
+                "ColumnType")
+        };
+
+        fresh.LogicalName = existingAttr.LogicalName;
+        fresh.SchemaName = existingAttr.SchemaName;
+        return fresh;
+    }
+
     private static void ApplyTypeSpecificUpdates(AttributeMetadata attr, UpdateColumnRequest request)
     {
         switch (attr)
@@ -1330,6 +1364,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 if (request.MinValue.HasValue) moneyAttr.MinValue = request.MinValue.Value;
                 if (request.MaxValue.HasValue) moneyAttr.MaxValue = request.MaxValue.Value;
                 if (request.Precision.HasValue) moneyAttr.Precision = request.Precision.Value;
+                break;
+            case DateTimeAttributeMetadata dtAttr:
+                if (request.Format != null) dtAttr.Format = ParseDateTimeFormat(request.Format);
                 break;
         }
     }
