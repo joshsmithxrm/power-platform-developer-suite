@@ -118,8 +118,8 @@ def test_parse_banner_ansi():
 # AC-04: fallback cwd scan with fixture state.json files
 # ---------------------------------------------------------------------------
 
-def test_fallback_id_lookup(tmp_path, monkeypatch):
-    """AC-04: when banner absent, scan jobs dir and match on cwd+recency."""
+def test_fallback_id_lookup_mtime(tmp_path, monkeypatch):
+    """AC-04 mtime-fallback path: when state.json omits createdAt, mtime gates recency."""
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
 
@@ -175,6 +175,69 @@ def test_fallback_id_lookup(tmp_path, monkeypatch):
     short, data = identify_session(None, target_cwd, jobs_dir=jobs_dir)
     assert short == "goodgood"
     assert data["sessionId"] == "good-uuid-0000-0000-0000-000000000000"
+
+
+def test_fallback_id_lookup_created_at(tmp_path, monkeypatch):
+    """AC-04 createdAt-ISO path: state["createdAt"] within last 10s gates recency.
+
+    Exercises the branch in `_scan_for_cwd` that parses `state["createdAt"]`
+    (ISO-8601) — the spec's canonical recency signal. The mtime pre-filter
+    is bypassed by setting mtimes recent on all fixtures, so the createdAt
+    parser must do the work of rejecting the stale entry.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+
+    target_cwd = str(tmp_path / "worktree").replace("\\", "/")
+    now = time.time()
+    now_iso = datetime.fromtimestamp(now, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    stale_iso = datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # Stale entry: matching cwd, recent mtime, but createdAt is 30s old (>10s window)
+    stale_dir = jobs_dir / "stalests"
+    stale_dir.mkdir()
+    stale_state = stale_dir / "state.json"
+    stale_state.write_text(
+        json.dumps({
+            "sessionId": "stale-uuid",
+            "cwd": target_cwd,
+            "createdAt": stale_iso,
+        }),
+        encoding="utf-8",
+    )
+    os.utime(str(stale_state), (now, now))  # recent mtime bypasses mtime pre-filter
+
+    # Fresh entry: matching cwd, createdAt within window
+    fresh_dir = jobs_dir / "freshfre"
+    fresh_dir.mkdir()
+    fresh_state = fresh_dir / "state.json"
+    fresh_state.write_text(
+        json.dumps({
+            "sessionId": "fresh-uuid-0000-0000-0000-000000000000",
+            "cwd": target_cwd,
+            "createdAt": now_iso,
+        }),
+        encoding="utf-8",
+    )
+    os.utime(str(fresh_state), (now, now))
+
+    call_count = [0]
+
+    def patched_time():
+        call_count[0] += 1
+        if call_count[0] > 20:
+            return now + 6.0
+        return now
+
+    monkeypatch.setattr(time, "time", patched_time)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    short, data = identify_session(None, target_cwd, jobs_dir=jobs_dir)
+    assert short == "freshfre"
+    assert data["sessionId"] == "fresh-uuid-0000-0000-0000-000000000000"
 
 
 # ---------------------------------------------------------------------------

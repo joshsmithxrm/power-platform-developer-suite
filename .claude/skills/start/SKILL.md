@@ -79,19 +79,9 @@ python scripts/workflow-state.py set work_type <type>
 python scripts/workflow-state.py set launch_command "<confirmed-command>"
 ```
 
-#### Step 5c: Register as In-Flight
-
-```bash
-python scripts/inflight-register.py \
-  --branch feat/<name> --worktree .worktrees/<name> \
-  --issue <N> --area <area> --intent "<short description>"
-```
-
-Run from main repo root. Repeat `--issue`/`--area` as needed. Deregistration handled by `/cleanup`.
-
 ### Step 6: Spawn the Background Session
 
-Gather context (6a), build prompt (6b), spawn (6c).
+Gather context (6a), build prompt (6b), spawn (6c), register (6d). Registration happens **after** spawn so the daemon short ID is recorded on first write — no re-invocation.
 
 #### 6a: Gather context
 
@@ -103,22 +93,33 @@ Read REFERENCE.md §4 "Launch Prompt Structure" for the field set. Target 1–5K
 
 #### 6c: Spawn
 
-```bash
-PROMPT_FILE=$(mktemp -t start-prompt-XXXXXX.txt)
-cat > "$PROMPT_FILE" <<'PROMPT_EOF'
-<full prompt from 6b, verbatim>
-PROMPT_EOF
+Write the prompt to a temp file using the **Write tool** — never a shell heredoc. A heredoc terminator (`PROMPT_EOF`) appearing as a line inside the prompt would close the heredoc early; writing via the Write tool is byte-exact and immune to terminator collisions.
 
-SPAWN_JSON=$(python scripts/start-bg-spawn.py \
+1. Choose a temp path: `$env:TEMP/start-prompt-<8-hex>.txt` on Windows, `/tmp/start-prompt-<8-hex>.txt` elsewhere.
+2. Use the Write tool to write the prompt verbatim to that path.
+3. Invoke the helper:
+
+```bash
+python scripts/start-bg-spawn.py \
   --worktree-abs "<worktree-absolute-path>" \
   --branch "<branch>" \
-  --prompt-file "$PROMPT_FILE")
-rm -f "$PROMPT_FILE"
-
-DAEMON_SHORT=$(printf '%s' "$SPAWN_JSON" | python -c "import json,sys;print(json.load(sys.stdin)['short'])")
+  --prompt-file "<temp-path>"
 ```
 
-Exit: `0`=spawned (`{short,sessionId,cwd}`); `1`=caller error (version/PATH/arg/prompt); `2`=daemon error. Surface stderr verbatim and stop on non-zero. Re-invoke Step 5c's `inflight-register.py` with `--session $DAEMON_SHORT` if it was called earlier with a random hex.
+4. Parse the single-line stdout JSON to extract `short`, then delete the temp file.
+
+Exit: `0`=spawned (`{short,sessionId,cwd}`); `1`=caller error (version/PATH/arg/prompt); `2`=daemon error. Surface stderr verbatim and stop on non-zero.
+
+#### 6d: Register as In-Flight
+
+```bash
+python scripts/inflight-register.py \
+  --session <short-from-6c> \
+  --branch feat/<name> --worktree .worktrees/<name> \
+  --issue <N> --area <area> --intent "<short description>"
+```
+
+Run from main repo root. Repeat `--issue`/`--area` as needed. The register script is idempotent on `--branch` (it replaces any existing entry for the same branch), so re-running is safe but unnecessary here. Deregistration handled by `/cleanup`.
 
 ### Step 7: Return Control to User
 
