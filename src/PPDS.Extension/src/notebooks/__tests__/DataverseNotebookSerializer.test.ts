@@ -83,7 +83,7 @@ describe('DataverseNotebookSerializer', () => {
         });
 
         const notebook = await serializer.deserializeNotebook(encode(input), token);
-        const output = await serializer.serializeNotebook(notebook as never, token);
+        const output = await serializer.serializeNotebook(notebook, token);
         const parsed = JSON.parse(decode(output));
 
         expect(parsed.metadata.environmentId).toBe('env-123');
@@ -107,7 +107,7 @@ describe('DataverseNotebookSerializer', () => {
         expect(notebook.cells[0].languageId).toBe('fetchxml');
         expect(notebook.cells[0].kind).toBe(CellKindCode);
 
-        const output = await serializer.serializeNotebook(notebook as never, token);
+        const output = await serializer.serializeNotebook(notebook, token);
         const parsed = JSON.parse(decode(output));
 
         expect(parsed.cells).toHaveLength(1);
@@ -127,7 +127,7 @@ describe('DataverseNotebookSerializer', () => {
         expect(notebook.cells[0].kind).toBe(CellKindMarkup);
         expect(notebook.cells[0].languageId).toBe('markdown');
 
-        const output = await serializer.serializeNotebook(notebook as never, token);
+        const output = await serializer.serializeNotebook(notebook, token);
         const parsed = JSON.parse(decode(output));
 
         expect(parsed.cells).toHaveLength(1);
@@ -153,7 +153,7 @@ describe('DataverseNotebookSerializer', () => {
         expect(notebook.cells[2].kind).toBe(CellKindCode);
         expect(notebook.cells[3].kind).toBe(CellKindMarkup);
 
-        const output = await serializer.serializeNotebook(notebook as never, token);
+        const output = await serializer.serializeNotebook(notebook, token);
         const parsed = JSON.parse(decode(output));
 
         expect(parsed.cells).toHaveLength(4);
@@ -217,7 +217,7 @@ describe('DataverseNotebookSerializer', () => {
         expect(notebook.metadata?.environmentUrl).toBe('https://staging.crm.dynamics.com');
 
         // Serialize and verify metadata is preserved
-        const output = await serializer.serializeNotebook(notebook as never, token);
+        const output = await serializer.serializeNotebook(notebook, token);
         const parsed = JSON.parse(decode(output));
 
         expect(parsed.metadata.environmentId).toBe('env-789');

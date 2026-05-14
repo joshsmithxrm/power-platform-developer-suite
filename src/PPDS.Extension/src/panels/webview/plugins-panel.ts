@@ -13,7 +13,7 @@ import type {
 import { assertNever } from './shared/assert-never.js';
 
 const vscode = getVsCodeApi<PluginsPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as PluginsPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 
 // ── State ────────────────────────────────────────────────────────────────────
 let treeData: PluginTreeData | null = null;

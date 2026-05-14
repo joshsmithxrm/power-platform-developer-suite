@@ -71,7 +71,7 @@ describe('createWebResourceUri', () => {
 describe('parseWebResourceUri', () => {
     it('extracts all components from a simple URI', () => {
         const uri = createWebResourceUri('env-abc', 'wr-def', 'myscript.js');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.environmentId).toBe('env-abc');
         expect(parsed.webResourceId).toBe('wr-def');
         expect(parsed.filename).toBe('myscript.js');
@@ -80,31 +80,31 @@ describe('parseWebResourceUri', () => {
 
     it('handles nested filenames with slashes', () => {
         const uri = createWebResourceUri('env-1', 'wr-2', 'scripts/subfolder/app.js');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.filename).toBe('scripts/subfolder/app.js');
     });
 
     it('defaults to unpublished mode when no query', () => {
         const uri = createWebResourceUri('env-1', 'wr-2', 'file.ts');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.mode).toBe('unpublished');
     });
 
     it('extracts published mode from query', () => {
         const uri = createWebResourceUri('env-1', 'wr-2', 'file.ts', 'published');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.mode).toBe('published');
     });
 
     it('extracts server-current mode from query', () => {
         const uri = createWebResourceUri('env-1', 'wr-2', 'file.ts', 'server-current');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.mode).toBe('server-current');
     });
 
     it('extracts local-pending mode from query', () => {
         const uri = createWebResourceUri('env-1', 'wr-2', 'file.ts', 'local-pending');
-        const parsed = parseWebResourceUri(uri as any);
+        const parsed = parseWebResourceUri(uri);
         expect(parsed.mode).toBe('local-pending');
     });
 
