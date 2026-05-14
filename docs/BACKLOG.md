@@ -2,62 +2,16 @@
 
 Rules for issue tracking, labels, milestones, and triage.
 
-## Label Taxonomy (23 labels)
+## Labels
 
-### `type:` — What kind of work
+Canonical state lives in GitHub. To inspect:
 
-| Label | Color | Description |
-|-------|-------|-------------|
-| `type:bug` | #d73a4a | Something isn't working |
-| `type:enhancement` | #a2eeef | New feature or request |
-| `type:docs` | #0075ca | Documentation improvements or additions |
-| `type:performance` | #fbca04 | Performance improvement |
-| `type:refactor` | #c5def5 | Code restructuring without behavior change |
+    gh label list --json name,description,color
+    gh api repos/:owner/:repo/milestones
+    gh issue list --label epic:agents-dashboard
 
-### `area:` — Which subsystem
-
-| Label | Color | Description |
-|-------|-------|-------------|
-| `area:auth` | #0052CC | Authentication profiles |
-| `area:cli` | #0052CC | CLI commands and UX |
-| `area:data` | #0052CC | Data import/export/migration |
-| `area:extension` | #7057FF | VS Code extension |
-| `area:plugins` | #0052CC | Plugin registration, deployment |
-| `area:tui` | #0052CC | Terminal UI (interactive mode) |
-
-### `epic:` — Cross-cutting initiatives
-
-| Label | Color | Description |
-|-------|-------|-------------|
-| `epic:data-migration` | #7057ff | Enterprise Data Migration Platform epic |
-| `epic:plugin-registration` | #7B42BC | Full plugin registration CLI support epic |
-| `epic:testing` | #1D76DB | Integration and live testing infrastructure |
-
-Epics track initiatives that span areas. They close when the initiative is done. Areas persist indefinitely.
-
-### `priority:` — Urgency
-
-| Label | Color | Description |
-|-------|-------|-------------|
-| `priority:critical` | #b60205 | Fix immediately |
-| `priority:high` | #d93f0b | High priority |
-| `priority:medium` | #fbca04 | Medium priority |
-| `priority:low` | #0e8a16 | Low priority |
-
-### `status:` — Triage state (for unmilestoned issues)
-
-| Label | Color | Description |
-|-------|-------|-------------|
-| `status:backlog` | #d4c5f9 | Triaged, deliberately parked — pull forward when ready |
-| `status:needs-evaluation` | #d4c5f9 | Needs investigation or evaluation before work can begin |
-
-### Other
-
-| Label | Color | Description |
-|-------|-------|-------------|
-| `good first issue` | #7057ff | Good for newcomers |
-| `dependencies` | #0366d6 | Dependabot: dependency updates |
-| `javascript` | #168700 | Dependabot: JavaScript dependency updates |
+Labels are added/removed via the GitHub UI or `gh label create`. Do not duplicate
+them here — past audits found drift between this doc and the live state.
 
 ## Milestones
 

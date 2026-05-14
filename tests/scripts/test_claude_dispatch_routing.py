@@ -250,3 +250,59 @@ def test_no_github_action_or_token_references():
 
 
 # === end Phase 5A ===
+
+
+# === Phase 5B (AC-24) ===
+
+_AC24_FORBIDDEN_HEADINGS = (
+    "### `type:`",
+    "### `area:`",
+    "### `epic:`",
+    "### `priority:`",
+    "### `status:`",
+)
+
+
+def test_backlog_tables_removed():
+    """AC-24: docs/BACKLOG.md no longer contains the six label-reference tables."""
+    backlog_path = _REPO_ROOT / "docs" / "BACKLOG.md"
+    assert backlog_path.exists(), "docs/BACKLOG.md must exist"
+
+    text = backlog_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    # Forbidden literal headings: must not appear anywhere.
+    for heading in _AC24_FORBIDDEN_HEADINGS:
+        offenders = [i for i, line in enumerate(lines) if line.strip() == heading]
+        assert not offenders, (
+            f"AC-24: forbidden heading {heading!r} still present at line(s) "
+            f"{[i + 1 for i in offenders]}"
+        )
+
+    # `### Other` is only forbidden inside the Labels section (between
+    # `## Labels` heading and the next `## ` heading).
+    labels_start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Labels":
+            labels_start = i
+            break
+    if labels_start is not None:
+        labels_end = len(lines)
+        for j in range(labels_start + 1, len(lines)):
+            if lines[j].startswith("## ") and not lines[j].startswith("## Labels"):
+                labels_end = j
+                break
+        for k in range(labels_start, labels_end):
+            assert lines[k].strip() != "### Other", (
+                f"AC-24: `### Other` heading still present inside Labels "
+                f"section at line {k + 1}"
+            )
+
+    # The prose replacement must reference `gh label list`.
+    assert "gh label list" in text, (
+        "AC-24: docs/BACKLOG.md must reference `gh label list` as the canonical "
+        "label inspection command."
+    )
+
+
+# === end Phase 5B ===
