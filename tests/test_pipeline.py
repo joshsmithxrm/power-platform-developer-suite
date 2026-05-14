@@ -418,6 +418,7 @@ class TestImplementPipelineMode:
 # AC-67: Stream-json output format
 # ---------------------------------------------------------------------------
 class TestStreamJsonOutput:
+    @pytest.mark.real_dispatch_spawn
     def test_stream_json_output_format(self, tmp_path):
         """AC-67: run_claude passes --output-format stream-json to claude."""
         import pipeline

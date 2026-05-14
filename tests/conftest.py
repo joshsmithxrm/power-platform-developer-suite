@@ -55,7 +55,12 @@ def _dispatch_unit_test_defaults(request):
     # Tests in tests/scripts/test_claude_dispatch* explicitly test the real
     # dispatcher; they need the actual spawn function unmocked.
     test_file = str(request.node.path) if hasattr(request.node, "path") else ""
-    skip_spawn_mock = "test_claude_dispatch" in test_file or "test_bg_transcript" in test_file or "test_start_bg_spawn" in test_file
+    skip_spawn_mock = (
+        "test_claude_dispatch" in test_file
+        or "test_bg_transcript" in test_file
+        or "test_start_bg_spawn" in test_file
+        or any(m.name == "real_dispatch_spawn" for m in request.node.iter_markers())
+    )
 
     orig_version = claude_dispatch._VERSION_CHECKED
     orig_spawn = claude_dispatch.spawn
