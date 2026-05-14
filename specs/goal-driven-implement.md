@@ -1,9 +1,11 @@
 # Goal-Driven /implement
 
-**Status:** Draft
+**Status:** Implemented
 **Last Updated:** 2026-05-14
 **Code:** [scripts/goal_loop.py](../scripts/goal_loop.py) | [.claude/skills/implement/SKILL.md](../.claude/skills/implement/SKILL.md)
 **Surfaces:** N/A (workflow tooling)
+**Verification:** `python -m pytest tests/scripts/test_goal_loop.py -q`
+**Verification Max Iterations:** 10
 
 ---
 
@@ -170,22 +172,22 @@ The loop itself runs inside the existing `--bg` `/implement` session; no new dae
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `read_goal_from_spec` extracts `verification_command` from a `**Verification:** \`...\`` frontmatter line | `test_goal_loop.test_read_goal_from_spec_extracts_verification_command` | 🔲 |
-| AC-02 | `read_goal_from_spec` returns `Goal(verification_command=None, ...)` for a spec with no `**Verification:**` line (backward compatible) | `test_goal_loop.test_read_goal_from_spec_returns_none_when_missing` | 🔲 |
-| AC-03 | `read_goal_from_spec` extracts `verification_max_iterations` from frontmatter and defaults to `10` when absent | `test_goal_loop.test_read_goal_from_spec_max_iterations_default_and_override` | 🔲 |
-| AC-04 | `run_until_green` returns `GoalLoopResult(outcome=GREEN, iterations=1)` when verification_command exits 0 on first try | `test_goal_loop.test_run_until_green_returns_green_on_first_pass` | 🔲 |
-| AC-05 | `run_until_green` invokes `attempt_fix(last_result)` once per non-zero iteration up to `max_iterations - 1` times, then re-verifies | `test_goal_loop.test_run_until_green_invokes_fix_then_reverifies` | 🔲 |
-| AC-06 | `run_until_green` returns `outcome=ITERATION_CAP` when `max_iterations` is exhausted without GREEN | `test_goal_loop.test_run_until_green_returns_iteration_cap` | 🔲 |
-| AC-07 | `run_until_green` returns `outcome=STUCK_OUTPUT` when the SHA-256 hash of `(exit_code, stdout, stderr)` is identical for 3 consecutive non-zero iterations | `test_goal_loop.test_run_until_green_returns_stuck_output_on_three_identical_hashes` | 🔲 |
-| AC-08 | `STUCK_OUTPUT` does **not** trip when consecutive non-zero iterations have *different* output (progress is being made) | `test_goal_loop.test_stuck_output_does_not_trip_when_output_changes` | 🔲 |
-| AC-09 | `run_until_green` returns `outcome=BLOCKED_HARD` and propagates `needs` when `attempt_fix` raises `BlockedSessionError` with non-empty `needs` | `test_goal_loop.test_run_until_green_blocked_hard_with_needs` | 🔲 |
-| AC-10 | `run_until_green` swallows `BlockedSessionError` with empty `needs` and continues to the next iteration (mirrors PR #1051 commit `d1bfe877`) | `test_goal_loop.test_run_until_green_tolerates_empty_needs_blocked` | 🔲 |
-| AC-11 | `run_until_green` returns `outcome=FIX_ERROR` and propagates the exception when `attempt_fix` raises any non-`BlockedSessionError` exception | `test_goal_loop.test_run_until_green_returns_fix_error` | 🔲 |
-| AC-12 | `Goal` is a frozen dataclass — attempting to mutate `verification_command` after construction raises `FrozenInstanceError` | `test_goal_loop.test_goal_dataclass_is_frozen` | 🔲 |
-| AC-13 | `run_until_green` emits one stderr progress line per iteration in the format `goal-loop iter={n}/{cap} exit={code} hash={short8}` | `test_goal_loop.test_run_until_green_emits_stderr_progress_lines` | 🔲 |
-| AC-14 | `read_goal_from_spec` raises `ValueError` for `**Verification Max Iterations:** 0` or a negative integer | `test_goal_loop.test_read_goal_from_spec_rejects_nonpositive_max_iterations` | 🔲 |
-| AC-15 | `run_until_green` rejects `max_iterations < 1` with `ValueError` at call time | `test_goal_loop.test_run_until_green_rejects_invalid_max_iterations` | 🔲 |
-| AC-16 | `.claude/skills/implement/SKILL.md` documents Step 5.G (per-phase) and Step 5.5 (pre-tail) and references `scripts/goal_loop.py` by path | `test_goal_loop.test_implement_skill_documents_goal_loop_steps` | 🔲 |
+| AC-01 | `read_goal_from_spec` extracts `verification_command` from a `**Verification:** \`...\`` frontmatter line | `test_goal_loop.test_read_goal_from_spec_extracts_verification_command` | ✅ |
+| AC-02 | `read_goal_from_spec` returns `Goal(verification_command=None, ...)` for a spec with no `**Verification:**` line (backward compatible) | `test_goal_loop.test_read_goal_from_spec_returns_none_when_missing` | ✅ |
+| AC-03 | `read_goal_from_spec` extracts `verification_max_iterations` from frontmatter and defaults to `10` when absent | `test_goal_loop.test_read_goal_from_spec_max_iterations_default_and_override` | ✅ |
+| AC-04 | `run_until_green` returns `GoalLoopResult(outcome=GREEN, iterations=1)` when verification_command exits 0 on first try | `test_goal_loop.test_run_until_green_returns_green_on_first_pass` | ✅ |
+| AC-05 | `run_until_green` invokes `attempt_fix(last_result)` once per non-zero iteration up to `max_iterations - 1` times, then re-verifies | `test_goal_loop.test_run_until_green_invokes_fix_then_reverifies` | ✅ |
+| AC-06 | `run_until_green` returns `outcome=ITERATION_CAP` when `max_iterations` is exhausted without GREEN | `test_goal_loop.test_run_until_green_returns_iteration_cap` | ✅ |
+| AC-07 | `run_until_green` returns `outcome=STUCK_OUTPUT` when the SHA-256 hash of `(exit_code, stdout, stderr)` is identical for 3 consecutive non-zero iterations | `test_goal_loop.test_run_until_green_returns_stuck_output_on_three_identical_hashes` | ✅ |
+| AC-08 | `STUCK_OUTPUT` does **not** trip when consecutive non-zero iterations have *different* output (progress is being made) | `test_goal_loop.test_stuck_output_does_not_trip_when_output_changes` | ✅ |
+| AC-09 | `run_until_green` returns `outcome=BLOCKED_HARD` and propagates `needs` when `attempt_fix` raises `BlockedSessionError` with non-empty `needs` | `test_goal_loop.test_run_until_green_blocked_hard_with_needs` | ✅ |
+| AC-10 | `run_until_green` swallows `BlockedSessionError` with empty `needs` and continues to the next iteration (mirrors PR #1051 commit `d1bfe877`) | `test_goal_loop.test_run_until_green_tolerates_empty_needs_blocked` | ✅ |
+| AC-11 | `run_until_green` returns `outcome=FIX_ERROR` and propagates the exception when `attempt_fix` raises any non-`BlockedSessionError` exception | `test_goal_loop.test_run_until_green_returns_fix_error` | ✅ |
+| AC-12 | `Goal` is a frozen dataclass — attempting to mutate `verification_command` after construction raises `FrozenInstanceError` | `test_goal_loop.test_goal_dataclass_is_frozen` | ✅ |
+| AC-13 | `run_until_green` emits one stderr progress line per iteration in the format `goal-loop iter={n}/{cap} exit={code} hash={short8}` | `test_goal_loop.test_run_until_green_emits_stderr_progress_lines` | ✅ |
+| AC-14 | `read_goal_from_spec` raises `ValueError` for `**Verification Max Iterations:** 0` or a negative integer | `test_goal_loop.test_read_goal_from_spec_rejects_nonpositive_max_iterations` | ✅ |
+| AC-15 | `run_until_green` rejects `max_iterations < 1` with `ValueError` at call time | `test_goal_loop.test_run_until_green_rejects_invalid_max_iterations` | ✅ |
+| AC-16 | `.claude/skills/implement/SKILL.md` documents Step 5.G (per-phase) and Step 5.5 (pre-tail) and references `scripts/goal_loop.py` by path | `test_goal_loop.test_implement_skill_documents_goal_loop_steps` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 
