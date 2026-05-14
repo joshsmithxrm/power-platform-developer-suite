@@ -167,7 +167,7 @@ export class DataTable<T> {
 
         this.scrollContainer = wrapper;
         this.spacer = spacer;
-        this.tbody = tbody as unknown as HTMLElement;
+        this.tbody = tbody;
 
         // Initial render of visible rows
         this.visibleStart = 0;

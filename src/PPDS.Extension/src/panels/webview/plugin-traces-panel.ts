@@ -18,7 +18,7 @@ import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable, formatStatusCount } from './shared/data-table.js';
 
 const vscode = getVsCodeApi<PluginTracesPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as PluginTracesPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 
 // ── DOM element references ──────────────────────────────────────────────
 const tablePane = document.getElementById('table-pane') as HTMLElement;

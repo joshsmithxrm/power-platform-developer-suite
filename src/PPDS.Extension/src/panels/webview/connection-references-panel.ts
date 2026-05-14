@@ -21,7 +21,7 @@ import { FilterBar } from './shared/filter-bar.js';
 const DEFAULT_SOLUTION_ID = 'fd140aaf-4df4-11dd-bd17-0019b9312238';
 
 const vscode = getVsCodeApi<ConnectionReferencesPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as ConnectionReferencesPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;

@@ -17,7 +17,7 @@ import { DataTable } from './shared/data-table.js';
 import { SolutionFilter } from './shared/solution-filter.js';
 
 const vscode = getVsCodeApi<EnvironmentVariablesPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as EnvironmentVariablesPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
