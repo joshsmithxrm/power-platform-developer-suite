@@ -576,6 +576,17 @@ def run_triage(worktree, pr_number, comments, logger, mode=None):
 
     logger.log("triage", "DONE", exit=exit_code)
 
+    # In interactive --bg mode, the daemon writes its transcript to
+    # handle.transcript_path (~/.claude/projects/<slug>/<sid>.jsonl), not
+    # stage_jsonl_path. Mirror it so the existing parse_triage_jsonl reader
+    # finds the JSONL events.
+    try:
+        import shutil as _shutil
+        if str(handle.transcript_path) != stage_jsonl_path:
+            _shutil.copyfile(handle.transcript_path, stage_jsonl_path)
+    except OSError as e:
+        logger.log("triage", "TRANSCRIPT_COPY_FAILED", error=str(e))
+
     if exit_code != 0:
         raise claude_dispatch.DispatchFallbackError(
             f"triage exited {exit_code}"
@@ -1002,6 +1013,15 @@ def run_retro(worktree, logger, mode=None):
         handle.terminate()
         logger.log("retro", "TIMEOUT")
         return "timeout"
+
+    # Mirror daemon transcript to stage_jsonl_path for consistency with
+    # pre-refactor readers (downstream may inspect the stage log).
+    try:
+        import shutil as _shutil
+        if str(handle.transcript_path) != stage_jsonl_path:
+            _shutil.copyfile(handle.transcript_path, stage_jsonl_path)
+    except OSError:
+        pass
 
     status = "done" if exit_code == 0 else "error"
     logger.log("retro", "DONE", exit=exit_code, status=status)
