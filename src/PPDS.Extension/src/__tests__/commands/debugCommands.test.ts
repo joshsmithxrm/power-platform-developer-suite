@@ -153,7 +153,7 @@ describe('debugCommands', () => {
             };
 
             registerDebugCommands(
-                mockContext as any,
+                mockContext,
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'ready', profileCount: 1 },
@@ -187,7 +187,7 @@ describe('debugCommands', () => {
             mockRegisterCommand.mockReturnValue({ dispose: vi.fn() });
 
             registerDebugCommands(
-                mockContext as any,
+                mockContext,
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'starting', profileCount: 0 },
@@ -211,7 +211,7 @@ describe('debugCommands', () => {
             };
 
             registerDebugCommands(
-                mockContext as any,
+                mockContext,
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'ready', profileCount: 2 },
@@ -244,7 +244,7 @@ describe('debugCommands', () => {
             let sCount = 0;
 
             registerDebugCommands(
-                mockContext as any,
+                mockContext,
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'error', profileCount: 0 },

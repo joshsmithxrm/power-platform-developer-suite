@@ -16,7 +16,7 @@ import type { CellCoord, SelectionRect } from './shared/selection-utils.js';
 declare const monaco: typeof import('monaco-editor');
 
 const vscode = getVsCodeApi<QueryPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as QueryPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 
 // ── Monaco Editor initialization ──
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null;
@@ -340,7 +340,7 @@ if (editor) editor.onDidChangeModelContent(() => {
                 requestId: validationRequestId,
                 sql,
                 language,
-            } as QueryPanelWebviewToHost);
+            });
         }, 300);
     }
 });
