@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse, json, os, re, subprocess, sys, time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 MIN_VERSION = (2, 1, 139)
@@ -107,7 +107,7 @@ def _scan_for_cwd(target_cwd: str, since: float, jobs_dir: Path | None = None) -
                     continue
             except (ValueError, OSError):
                 pass  # mtime pre-filter already applied
-        if _norm(data.get("cwd", "")) == _norm(target_cwd):
+        if _norm(data.get("cwd") or "") == _norm(target_cwd):
             return child.name, data
     return None
 
@@ -155,30 +155,24 @@ def spawn(
         raise SpawnError(f"claude --bg failed: {proc.stderr}", 2)
     short_hint = parse_banner(proc.stdout)
     short, state = identify_session(short_hint, worktree_abs, jobs_dir)
-    if _norm(state["cwd"]) != _norm(worktree_abs):
+    if _norm(state.get("cwd") or "") != _norm(worktree_abs):
         subprocess.run(["claude", "stop", short], capture_output=True, text=True)
         raise SpawnError(
             f"daemon cwd mismatch: expected {_norm(worktree_abs)}, "
-            f"got {_norm(state['cwd'])}",
+            f"got {_norm(state.get('cwd') or '')}",
             2,
         )
     return SpawnResult(short=short, sessionId=state["sessionId"], cwd=_norm(state["cwd"]))
 
 
-def _validate(args) -> None:
+def _validate(args: argparse.Namespace, prompt: str) -> None:
     if not os.path.isabs(args.worktree_abs) or not os.path.isdir(args.worktree_abs):
         raise SpawnError(f"worktree path does not exist: {args.worktree_abs}", 1)
     if not args.branch or not re.match(r"^[A-Za-z0-9/_.\-]+$", args.branch):
         raise SpawnError(
             "--branch must be non-empty and contain only [A-Za-z0-9/_.-]", 1
         )
-    if not os.path.exists(args.prompt_file):
-        raise SpawnError("prompt file is empty or missing", 1)
-    try:
-        text = Path(args.prompt_file).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise SpawnError(f"could not read prompt file: {exc}", 1)
-    if not text.strip():
+    if not prompt.strip():
         raise SpawnError("prompt file is empty or missing", 1)
 
 
@@ -189,11 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--prompt-file", required=True)
     args = p.parse_args(argv)
     try:
-        _validate(args)
         try:
             prompt = Path(args.prompt_file).read_text(encoding="utf-8")
         except OSError as exc:
             raise SpawnError(f"could not read prompt file: {exc}", 1)
+        _validate(args, prompt)
         result = spawn(args.worktree_abs, args.branch, prompt)
         json.dump(
             {"short": result.short, "sessionId": result.sessionId, "cwd": result.cwd},
