@@ -99,10 +99,20 @@ def _norm(p: str) -> str:
 _SLUG_CHAR_RE = re.compile(r"[^A-Za-z0-9-]")
 
 
+def derive_slug(cwd: str) -> str:
+    """Return Claude Code's per-project slug for ``cwd``.
+
+    Replaces every non-[A-Za-z0-9-] character with `-`. This is the same
+    encoding Claude Code uses for ``~/.claude/projects/<slug>/``. Other
+    PPDS scripts (e.g. retro transcript discovery) must call this helper
+    rather than re-deriving the rule.
+    """
+    return _SLUG_CHAR_RE.sub("-", cwd)
+
+
 def _derive_transcript_path(cwd: str, session_id: str) -> Path:
     """Return ~/.claude/projects/<slug>/<sessionId>.jsonl for the given cwd."""
-    slug = _SLUG_CHAR_RE.sub("-", cwd)
-    return Path(os.path.expanduser("~/.claude/projects")) / slug / f"{session_id}.jsonl"
+    return Path(os.path.expanduser("~/.claude/projects")) / derive_slug(cwd) / f"{session_id}.jsonl"
 
 
 def _parse_version(out: str) -> tuple[int, int, int]:

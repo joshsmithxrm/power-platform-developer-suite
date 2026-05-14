@@ -122,3 +122,143 @@ class TestDiscoverTranscripts:
             transcripts = retro_helpers.discover_transcripts(worktree)
             assert any("mine.jsonl" in t for t in transcripts)
             assert not any("theirs.jsonl" in t for t in transcripts)
+
+    def test_encode_project_dir_uses_dispatch_slug_rule(self):
+        """_encode_project_dir matches claude_dispatch.derive_slug — every
+        non-[A-Za-z0-9-] character (including underscores and dots) becomes -."""
+        import retro_helpers
+        from claude_dispatch import derive_slug
+
+        # Real Windows-shaped path with an underscore in the username and a
+        # dot in `.worktrees` — both are dropped by the old regex but caught
+        # by the dispatcher's rule.
+        path = r"C:\Users\josh_\source\repos\ppdsw\ppds\.worktrees\workflow-gates"
+        encoded = retro_helpers._encode_project_dir(path)
+        # Underscore replaced
+        assert "_" not in encoded
+        # Matches the dispatcher's derivation (after abspath normalization)
+        assert encoded == derive_slug(os.path.abspath(path))
+
+    def test_discover_transcripts_since_filter(self, monkeypatch):
+        """discover_transcripts skips transcripts older than ``since`` mtime."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_projects = os.path.join(fake_home, ".claude", "projects")
+            worktree = os.path.join(fake_home, "my", "project")
+            os.makedirs(worktree)
+            encoded = retro_helpers._encode_project_dir(worktree)
+            project_dir = os.path.join(claude_projects, encoded)
+            os.makedirs(project_dir)
+
+            old = os.path.join(project_dir, "old.jsonl")
+            new = os.path.join(project_dir, "new.jsonl")
+            with open(old, "w") as f:
+                f.write("{}\n")
+            with open(new, "w") as f:
+                f.write("{}\n")
+            os.utime(old, (1_000_000, 1_000_000))
+            os.utime(new, (2_000_000, 2_000_000))
+
+            monkeypatch.setattr(
+                os.path, "expanduser",
+                lambda p: p.replace("~", fake_home),
+            )
+            transcripts = retro_helpers.discover_transcripts(worktree, since=1_500_000)
+            assert any("new.jsonl" in t for t in transcripts)
+            assert not any("old.jsonl" in t for t in transcripts)
+
+
+class TestAllowlistDriftDetector:
+    def _init_repo(self, tmpdir):
+        import subprocess
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+        for cmd in (
+            ["git", "init", "-q", "-b", "main"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "init"],
+        ):
+            subprocess.run(cmd, cwd=tmpdir, check=True, env=env)
+        return env
+
+    def _commit(self, tmpdir, env, subject, files):
+        import subprocess
+        for rel, content in files.items():
+            full = os.path.join(tmpdir, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write(content)
+            subprocess.run(["git", "add", rel], cwd=tmpdir, check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", subject], cwd=tmpdir, check=True, env=env)
+
+    def test_flags_post_verify_fix_on_subprocess_file(self):
+        """A fix-after-/verify commit touching a subprocess-spawning file
+        outside the allowlist produces a concrete proposal."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._init_repo(tmpdir)
+            # Pre-verify work (ignored)
+            self._commit(tmpdir, env, "feat: introduce foo",
+                         {"scripts/foo.py": "import subprocess\n"})
+            # The /verify marker
+            self._commit(tmpdir, env, "verify: workflow ok",
+                         {"docs/notes.md": "x\n"})
+            # Two post-verify fixes touching scripts/foo.py — must be flagged
+            self._commit(tmpdir, env, "fix: foo crash on Windows",
+                         {"scripts/foo.py": "import subprocess  # patched\n"})
+            self._commit(tmpdir, env, "fix(foo): error path",
+                         {"scripts/foo.py": "import subprocess  # patched2\n"})
+            # Post-verify fix touching an allowlisted file — must NOT be flagged
+            self._commit(tmpdir, env, "fix(dispatch): edge case",
+                         {"scripts/claude_dispatch.py": "import subprocess\n"})
+            # Post-verify fix touching a non-subprocess file — must NOT be flagged
+            self._commit(tmpdir, env, "fix: doc typo",
+                         {"docs/notes.md": "y\n"})
+
+            proposals = retro_helpers.detect_allowlist_drift(cwd=tmpdir)
+            flagged = [p["file"] for p in proposals]
+            assert "scripts/foo.py" in flagged
+            assert "scripts/claude_dispatch.py" not in flagged
+            assert "docs/notes.md" not in flagged
+            foo = next(p for p in proposals if p["file"] == "scripts/foo.py")
+            assert foo["fix_count"] == 2
+            assert "shakedown allowlist" in foo["proposal"]
+
+    def test_no_verify_marker_returns_empty(self):
+        """Detector is a no-op when no /verify commit appears in history."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._init_repo(tmpdir)
+            self._commit(tmpdir, env, "fix: thing",
+                         {"scripts/foo.py": "import subprocess\n"})
+            assert retro_helpers.detect_allowlist_drift(cwd=tmpdir) == []
+
+    def test_write_drift_proposals_merges_existing_findings(self):
+        """write_drift_proposals preserves prior keys in retro-findings.json."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            findings = os.path.join(tmpdir, ".workflow", "retro-findings.json")
+            os.makedirs(os.path.dirname(findings))
+            with open(findings, "w", encoding="utf-8") as f:
+                json.dump({"prior": [1, 2, 3]}, f)
+            proposals = [
+                {"file": "scripts/bar.py", "fix_count": 1, "commits": ["abc"],
+                 "proposal": "Add scripts/bar.py to shakedown allowlist (1 post-/verify fix this PR)"},
+            ]
+            retro_helpers.write_drift_proposals(findings, proposals)
+            with open(findings, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            assert data["prior"] == [1, 2, 3]
+            assert data["allowlist_drift"] == proposals
+
+    def test_write_drift_proposals_skips_empty(self):
+        """No file write when proposals list is empty."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            findings = os.path.join(tmpdir, ".workflow", "retro-findings.json")
+            retro_helpers.write_drift_proposals(findings, [])
+            assert not os.path.exists(findings)

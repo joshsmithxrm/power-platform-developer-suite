@@ -5,271 +5,138 @@ description: AI self-verification of implemented work across surfaces (extension
 
 # Verify
 
-AI self-verification of implemented work using MCP tools. Goes beyond unit tests to verify that code actually works in its runtime environment.
+AI self-verification of implemented work. Goes beyond unit tests to verify
+code actually works in its runtime environment.
 
 ## Usage
 
-`/verify` - Auto-detect component from recent changes
-`/verify cli` - Verify CLI command behavior
-`/verify tui` - Verify TUI rendering and interaction
-`/verify extension` - Verify VS Code extension behavior
-`/verify mcp` - Verify MCP server tools
+- `/verify` - auto-detect from recent changes
+- `/verify cli|tui|extension|mcp|workflow` - explicit mode
 
 ## Prerequisites
 
-Each mode requires specific MCP servers. If a prerequisite is missing, tell the user what to install and stop.
+| Mode | Required |
+|------|----------|
+| cli | Bash tool only |
+| tui | `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` (`@microsoft/tui-test`, `node-pty`) |
+| extension | `src/PPDS.Extension/tools/webview-cdp.mjs` (`@playwright/test`, `@vscode/test-electron`) |
+| mcp | `npx @modelcontextprotocol/inspector` |
 
-| Mode | Required MCPs / Tools |
-|------|----------------------|
-| cli | None (uses Bash tool directly) |
-| tui | `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` (uses `@microsoft/tui-test` + `node-pty`, both dev deps) |
-| extension | `src/PPDS.Extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
-| mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
+If a prerequisite is missing, tell the user what to install and stop.
 
 ## Process
 
-### 1. Detect Component
+### 1. Detect component
 
-Based on $ARGUMENTS or recent changes:
-- `src/PPDS.Cli/Commands/` → CLI mode
-- `src/PPDS.Cli/Tui/` → TUI mode
-- `src/PPDS.Extension/` → Extension mode
-- `src/PPDS.Mcp/` → MCP mode
-- `.claude/` or `scripts/` → Workflow mode
-- No clear match → Ask user
+From `$ARGUMENTS` or recent changes:
+`src/PPDS.Cli/Commands/`->cli, `src/PPDS.Cli/Tui/`->tui,
+`src/PPDS.Extension/`->extension, `src/PPDS.Mcp/`->mcp,
+`.claude/`+`scripts/`->workflow. No match: ask.
 
-### 2. Run Unit Tests First
-
-Always run the relevant unit tests before interactive verification. If tests fail, fix them first — don't waste MCP verification cycles on broken code.
+### 2. Unit tests first
 
 - CLI/TUI: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
 - Extension: `npm run test --prefix src/PPDS.Extension`
 - MCP: `dotnet test --filter "FullyQualifiedName~Mcp" -v q`
 
-### 3. CLI Mode
+Don't waste interactive cycles on broken code.
 
-Run the CLI command and verify output:
+### 3. CLI mode
 
 ```bash
 dotnet build src/PPDS.Cli/PPDS.Cli.csproj -f net10.0
 .\src\PPDS.Cli\bin\Debug\net10.0\ppds.exe <command> <args>
 ```
+Verify exit 0, format correct, edge cases (empty/invalid/no-auth).
 
-Verify:
-- Command executes without error
-- Output format is correct (JSON where expected, table where expected)
-- Exit code is 0
-- Edge cases: empty input, invalid args, missing auth
+### 4. TUI mode
 
-### 4. TUI Mode
+See `REFERENCE.md` "TUI Mode - worked example" for the Phase A/B/C
+commands. Phase B is mandatory when changed files touch
+`src/PPDS.Cli/Tui/`. <!-- enforcement: T3 -->
 
-**Phase A: Build and Launch**
+### 5. Extension mode
 
-```bash
-# Build and launch TUI in PTY
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
+See `REFERENCE.md` "Extension Mode - worked example" for Phase A/B/C
+commands. Phase B is mandatory when query/data/panel files change.
+<!-- enforcement: T3 -->
 
-# Wait for TUI to render
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
-
-# Read the title bar to confirm it loaded
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 0
-```
-
-**Phase B: Interactive Verification (MANDATORY for TUI rendering/interaction changes)** <!-- enforcement: T3 -->
-
-If changed files touch `src/PPDS.Cli/Tui/`, Phase B is NOT optional.
-
-```bash
-# Navigate to the relevant screen
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "tab"
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
-
-# Verify status bar content
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28
-
-# Wait for expected screen title
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
-
-# Dump terminal state for debugging if needed
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/tui-verify.json
-```
-
-**Phase C: Cleanup**
-
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
-```
-
-See @tui-verify skill for full command reference and Terminal.Gui keyboard patterns.
-
-### 5. Extension Mode
-
-**Phase A: Functional Verification (ext-verify)**
-
-Launch VS Code with the extension and verify panels load:
-
-```bash
-# Build and launch (compiles extension + daemon)
-node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
-
-# Open Data Explorer and wait for webview
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-
-# Screenshot to verify panel rendered correctly
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
-# LOOK at the screenshot — verify layout, no blank areas, controls visible
-
-# Check for runtime errors
-node src/PPDS.Extension/tools/webview-cdp.mjs logs
-node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
-```
-
-**Phase B: Interaction Verification (MANDATORY for query/data-display/panel-interaction changes)** <!-- enforcement: T3 -->
-
-If changed files touch query execution (`SqlQueryService`, `RpcMethodHandler`, `QueryPanel`, `query-panel.ts`), data rendering, or panel interactions, Phase B is NOT optional — you must execute at least one query and verify the results.
-
-```bash
-# Test query execution
-node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
-node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
-
-# Test Solutions Panel
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Solutions"
-node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
-```
-
-**Phase C: Cleanup**
-
-```bash
-node src/PPDS.Extension/tools/webview-cdp.mjs close
-```
-
-See @ext-verify skill for full command reference and common patterns.
-
-### 6. MCP Mode
-
-Use MCP Inspector CLI to test tools:
+### 6. MCP mode
 
 ```bash
 npx @modelcontextprotocol/inspector --cli --server "ppds-mcp-server"
 ```
+Per tool: valid->success shape; edge case->error handling; matches schema.
 
-For each tool:
-1. Call with valid input -> verify success response shape
-2. Call with edge case input -> verify error handling
-3. Verify response matches expected schema
+### 7. Workflow mode
 
-
-### 7. Workflow Mode
-
-Structural validation of process code (`.claude/` and `scripts/`).
-
-**Check 1: Python tests**
+**Check 1 - Python tests:**
 ```bash
 pytest tests/test_pipeline.py tests/test_workflow_state.py tests/test_protect_main_branch.py tests/test_session_stop_workflow.py -v
 ```
 
-**Check 2: Hook script tests**
-For each `.py` file in `.claude/hooks/` (excluding `_pathfix.py`):
+**Check 2 - Hook scripts:** for each `.py` in `.claude/hooks/` (except
+`_pathfix.py`): `echo '{}' | python .claude/hooks/{hook}.py`. Exit 0 or 2,
+never 1.
+
+**Check 3 - settings.json:** parses; every hook `command` exists on disk.
+
+**Check 4 - Skill frontmatter:** every `.claude/skills/*/SKILL.md` parses;
+`name` and `description` non-empty.
+
+**Check 5 - Agent frontmatter:** every `.claude/agents/*.md` parses;
+`tools` present; names in known set (`Read`, `Edit`, `Write`, `Glob`,
+`Grep`, `Bash`, `Agent`, `WebSearch`, `WebFetch`, `NotebookEdit`, and
+`Bash(pattern:*)`).
+
+**Check 6 - Skill file refs:** every referenced path exists.
+
+**Check 7 - Retro store schema:** see `REFERENCE.md` "Retro store schema".
+
+**Check 8 - Behavioral scenarios:** `python scripts/verify-workflow.py`;
+any failed scenario fails the check.
+
+**Check 9 - Empirical shakedown gate** <!-- enforcement: T2 hook:shakedown-gate -->
 ```bash
-echo '{}' | python .claude/hooks/{hook}.py
-# Expect exit 0 (allow) or exit 2 (block) — not a crash (exit 1)
+python scripts/verify_shakedown.py
 ```
+Allowlist source of truth: `scripts/_shakedown_allowlist.py`. When the
+diff touches any allowlisted file, spawn one real `claude --bg` against
+a throwaway prompt and assert exit 0; otherwise log a skip and exit 0.
+Subscription pool only (`claude --bg`), never `-p`. Rationale + how to
+add a wrapper: `REFERENCE.md` "Empirical shakedown gate". Exit codes:
+0=skipped/passed, 1=ran-and-failed, 2=setup error.
 
-**Check 3: settings.json validation**
-Parse `.claude/settings.json` as JSON. For each hook entry, verify the `command` path exists on disk.
-
-**Check 4: Skill frontmatter validation**
-For each `.claude/skills/*/SKILL.md`:
-- Parse YAML frontmatter (between `---` delimiters)
-- Verify `name` field present and non-empty
-- Verify `description` field present and non-empty
-
-**Check 5: Agent frontmatter validation**
-For each `.claude/agents/*.md`:
-- Parse YAML frontmatter
-- Verify `tools` list present
-- Verify each tool name is in the known valid set: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`, `Agent`, `WebSearch`, `WebFetch`, `NotebookEdit` (and Bash with patterns like `Bash(git diff:*)`)
-
-**Check 6: Skill file references**
-Scan each skill markdown for file path patterns (relative paths starting with `./`, `../`, or absolute paths). Verify each referenced file exists.
-
-**Check 7: Retro store schema**
-If `.retros/summary.json` exists:
-- Parse as JSON
-- Verify required keys: `schema_version`, `last_updated`, `total_retros`, `findings_by_category`, `metrics`
-- Verify `schema_version == 1`
-If the file does not exist, this check passes (the store is optional until first retro).
-
-**Check 8: Behavioral scenario tests**
-```bash
-python scripts/verify-workflow.py
-```
-Runs behavioral scenarios against workflow hooks and state management. Parses JSON output from stdout; any failed scenario is a check failure.
-
-**Check 9: Workflow state write**
-On all checks passing:
-```bash
-python scripts/workflow-state.py set verify.workflow now
-python scripts/workflow-state.py set verify.workflow_commit_ref "$(git rev-parse HEAD)"
-```
+**Check 10 - State write:** on all checks passing,
+`python scripts/workflow-state.py set verify.workflow now` and
+`python scripts/workflow-state.py set verify.workflow_commit_ref "$(git rev-parse HEAD)"`.
 
 ### 8. Report
 
-Present structured results:
+See `REFERENCE.md` "Report template". Include actual values.
 
-```
-## Verification Results -- [component]
+## Workflow state
 
-| Check | Status | Details |
-|-------|--------|---------|
-| Unit tests | PASS | 12/12 passing |
-| Daemon connection | PASS | PID 12345, uptime 30s |
-| Tree view state | PASS | 2 profiles, 3 environments |
-| Data Explorer open | PASS | Panel created |
-| SQL query execution | PASS | 5 rows returned |
-| Webview rendering | PASS | Query panel layout correct |
-
-### Verdict: PASS -- all checks green
-```
-
-## Workflow State
-
-After verification passes for a surface (verdict is PASS), run:
-
+After PASS for a surface (`ext`/`tui`/`mcp`/`cli`/`workflow`):
 ```bash
 python scripts/workflow-state.py set verify.{surface} now
 python scripts/workflow-state.py set verify.{surface}_commit_ref "$(git rev-parse HEAD)"
 ```
 
-Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
-Surface key `workflow`: `/verify workflow` → writes `verify.workflow` (structural validation for process code).
+## Workflow continuation - MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
 
-## Workflow Continuation — MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
+Verify is one step in the shipping pipeline, not the last one. Check
+`python scripts/workflow-state.py get phase`:
+- `implementing` -> return results to `/implement`.
+- otherwise -> proceed to `/pr` immediately. Pipeline is `/gates` ->
+  `/verify` -> `/pr`. Do not stop.
 
-Verify is ONE step in the shipping pipeline — not the last one.
-
-After verify passes, check whether `/implement` is driving the pipeline:
-
-```bash
-python scripts/workflow-state.py get phase
-```
-
-- **If phase is `implementing`:** return verify results to the `/implement` orchestrator. It manages the remaining pipeline steps.
-- **Otherwise (standalone invocation):** proceed to `/pr` immediately. Do NOT stop after reporting verification results. Do NOT wait for the user to tell you what to do next.
-
-  The shipping pipeline is `/gates` → `/verify` → `/pr`. You are at step 2. Proceed to step 3.
-
-Exception: if verify FAILS, stop and fix the failures first. Re-run `/verify` after fixing, then proceed to `/pr`.
+Exception: on FAIL, fix first, rerun `/verify`, then `/pr`.
 
 ## Rules
 
-1. **Unit tests first** -- always. Don't waste interactive cycles on broken code.
-2. **Screenshots for visual changes** -- if your change affects what users see, take a screenshot and look at it. See @ext-verify for what requires screenshots vs compile+test.
-3. **Report exact state** -- include actual values, not just pass/fail.
-4. **Prerequisites are hard gates** -- if MCP not configured, stop and say so.
-5. **Don't fix during verify** -- report problems, don't fix them. That's for /debug or /converge.
+1. Unit tests first.
+2. Screenshots for visual changes - look at them, don't just take them.
+3. Report actual values, not just pass/fail.
+4. Prerequisites are hard gates.
+5. Don't fix during verify - report problems for `/debug` or `/converge`.
