@@ -24,7 +24,7 @@ import os
 import re
 import shlex
 import sys
-import time
+from datetime import datetime, timezone
 
 _ENV_PREFIX_RE = re.compile(r"^[A-Z_][A-Z0-9_]*=.*$")
 _EXE_SUFFIX_RE = re.compile(r"\.exe$", re.IGNORECASE)
@@ -129,7 +129,7 @@ def main() -> None:
     try:
         _append_jsonl(
             {
-                "ts": time.time(),
+                "ts": datetime.now(timezone.utc).isoformat(),
                 "caller": caller,
                 "model": model,
                 "agent": agent,

@@ -500,24 +500,24 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
         cleanup_path = tmp_path
 
     try:
-        handle = claude_dispatch.spawn(
-            mode=resolved_mode,
-            prompt=prompt,
-            caller=caller,
-            name=profile_name,
-            agent=profile_name,
-            model=model,
-            cwd=worktree,
-            stage_log=stage_log,
-        )
-    except claude_dispatch.DispatchError as e:
-        return {"stdout": "", "stderr": str(e), "exit_code": getattr(e, "exit_code", 1)}
-    except FileNotFoundError:
-        return {"stdout": "", "stderr": "claude command not found", "exit_code": -1}
-    except OSError as e:
-        return {"stdout": "", "stderr": str(e), "exit_code": -1}
+        try:
+            handle = claude_dispatch.spawn(
+                mode=resolved_mode,
+                prompt=prompt,
+                caller=caller,
+                name=profile_name,
+                agent=profile_name,
+                model=model,
+                cwd=worktree,
+                stage_log=stage_log,
+            )
+        except claude_dispatch.DispatchError as e:
+            return {"stdout": "", "stderr": str(e), "exit_code": getattr(e, "exit_code", 1)}
+        except FileNotFoundError:
+            return {"stdout": "", "stderr": "claude command not found", "exit_code": -1}
+        except OSError as e:
+            return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
-    try:
         try:
             exit_code = handle.wait(timeout=timeout)
         except claude_dispatch.BlockedSessionError as e:
