@@ -408,6 +408,24 @@ public class JsonDataWriterTests
     }
 
     [Fact]
+    public async Task WriteAsync_AliasedValue_UnwrapsToInnerValue()
+    {
+        // Linked-entity attributes from FetchXML joins arrive as AliasedValue wrappers.
+        var entity = new Entity("account", Guid.NewGuid());
+        entity["contact.fullname"] = new AliasedValue("contact", "fullname", "Jane Doe");
+
+        var data = BuildSingleEntityData(entity, "account");
+
+        using var doc = await WriteAndParseAsync(data);
+        var field = doc.RootElement.GetProperty("entities")[0]
+            .GetProperty("records")[0]
+            .GetProperty("fields")
+            .GetProperty("contact.fullname");
+
+        field.GetProperty("value").GetString().Should().Be("Jane Doe");
+    }
+
+    [Fact]
     public async Task WriteAsync_EntityWithNoM2M_EmitsEmptyArray()
     {
         var entity = new Entity("account", Guid.NewGuid());

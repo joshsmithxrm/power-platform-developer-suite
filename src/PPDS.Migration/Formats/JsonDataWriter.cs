@@ -272,6 +272,14 @@ namespace PPDS.Migration.Formats
                 return;
             }
 
+            // Linked-entity attributes from FetchXML joins arrive wrapped in AliasedValue.
+            // Unwrap so the serialized JSON shows the underlying field value, not the wrapper.
+            if (value is AliasedValue aliased)
+            {
+                if (aliased.Value == null) return;
+                value = aliased.Value;
+            }
+
             writer.WritePropertyName(name);
             writer.WriteStartObject();
 
