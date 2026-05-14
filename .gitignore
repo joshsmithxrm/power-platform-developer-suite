@@ -135,3 +135,4 @@ __pycache__/
 # Public keys (*.PublicKey) ARE safe to commit and are not ignored here.
 # CI decodes the real private key from the PLUGINS_SNK_BASE64 secret at publish time.
 *.snk
+.claude/state/
