@@ -22,7 +22,10 @@ SHAKEDOWN_ALLOWLIST: tuple[str, ...] = (
 
 
 def _norm(p: str) -> str:
-    return p.replace("\\", "/").lstrip("./")
+    s = p.replace("\\", "/")
+    while s.startswith("./"):
+        s = s[2:]
+    return s
 
 
 def is_allowlisted(path: str) -> bool:
