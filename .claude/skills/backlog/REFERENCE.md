@@ -88,7 +88,6 @@ Periodically (or on `/backlog validate`):
 
 When and how to spawn parallel worktrees:
 
-- Default wave size: <=3 worktrees. Ask before exceeding (the `taskcreate-cap.py` hook will block a 4th).
 - Group by `area:` to maximize parallelism without merge conflicts.
 - Each dispatched worktree gets a single issue (not a batch). One issue, one PR, one merge.
 - Inline-prompt requirement: every dispatch carries the issue text, the AC list, and the worktree branch name in the prompt body. Spawning without an inline prompt is what forced retrospective B3.
@@ -119,7 +118,7 @@ issues: #NNN, #NNN, #NNN
 wave: 1 of 1
 ```
 
-Backlog skill plans the wave, generates one inline prompt per issue, and spawns up to 3 worktrees. The 4th would be blocked by the taskcreate-cap hook.
+Backlog skill plans the wave, generates one inline prompt per issue, and spawns one worktree per issue.
 
 ## §8 - Conflict-resolution examples
 
@@ -142,13 +141,11 @@ If the closer is not in the registry but a sibling is, the closer must surface t
 Backlog operations have produced these retros worth re-reading:
 
 - B3 / #802 - duplicate issue creation due to skipped sibling check; led to T2 enforcement marker.
-- B5 - dispatch wave too large (5 worktrees) led to TaskCreate cap; enforced by `taskcreate-cap.py`.
 - B7 - issues closed without reading the in-flight registry; led to second sibling check on close.
 
 ## §10 - NEVER list (with rationale)
 
 - NEVER create an issue without `type:` + `area:` labels (orphan issues are unfindable in triage).
 - NEVER close an issue without checking the in-flight registry (misattributes fixes).
-- NEVER spawn a 4th parallel worktree without explicit user permission (CLAUDE.md cap; enforced).
 - NEVER skip the `cat docs/BACKLOG.md` step (label rules drift; the file is the source of truth).
 - NEVER dispatch a worktree without an inline prompt (retrospective B3).

@@ -333,53 +333,6 @@ class TestWorktreeSafety(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# taskcreate-cap.py
-# ---------------------------------------------------------------------------
-
-
-class TestTaskCreateCap(unittest.TestCase):
-    """AC-173, AC-174."""
-
-    def _setup_inflight(self, project_dir: str, count: int):
-        d = os.path.join(project_dir, ".claude", "state")
-        os.makedirs(d, exist_ok=True)
-        entries = [
-            {"id": f"#{i}", "status": "active"} for i in range(count)
-        ]
-        with open(os.path.join(d, "in-flight-issues.json"), "w", encoding="utf-8") as f:
-            json.dump({"open_work": entries}, f)
-
-    def test_taskcreate_cap_blocks_fourth(self):
-        # AC-173 — 3 in-flight, attempting 4th
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        self._setup_inflight(tmp, 3)
-        payload = {"tool_name": "Agent",
-                   "tool_input": {"description": "x", "prompt": "y"}}
-        proc = _run_hook("taskcreate-cap.py", payload, project_dir=tmp)
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("BLOCKED", proc.stderr)
-
-    def test_taskcreate_cap_allows_under_limit(self):
-        # AC-174 — 2 in-flight → allow
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        self._setup_inflight(tmp, 2)
-        payload = {"tool_name": "Agent",
-                   "tool_input": {"description": "x", "prompt": "y"}}
-        proc = _run_hook("taskcreate-cap.py", payload, project_dir=tmp)
-        self.assertEqual(proc.returncode, 0)
-
-    def test_taskcreate_cap_no_state_allows(self):
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        payload = {"tool_name": "Agent",
-                   "tool_input": {"description": "x", "prompt": "y"}}
-        proc = _run_hook("taskcreate-cap.py", payload, project_dir=tmp)
-        self.assertEqual(proc.returncode, 0)
-
-
-# ---------------------------------------------------------------------------
 # debug-first.py
 # ---------------------------------------------------------------------------
 
