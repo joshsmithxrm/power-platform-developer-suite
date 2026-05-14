@@ -377,3 +377,16 @@ def test_claude_not_on_path(monkeypatch):
     msg = str(err)
     assert "Claude Code" in msg
     assert "npm i -g @anthropic-ai/claude-code" in msg
+
+
+# ---------------------------------------------------------------------------
+# Spec InvalidArg: argparse missing-required-arg → exit 1 (not argparse default 2)
+# ---------------------------------------------------------------------------
+
+def test_argparse_missing_args_exits_1(capsys):
+    """Spec Error Types: InvalidArg → exit 1. argparse defaults to 2; helper overrides."""
+    with pytest.raises(SystemExit) as exc_info:
+        main([])  # no args at all → all three required flags missing
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "--worktree-abs" in err or "required" in err.lower()

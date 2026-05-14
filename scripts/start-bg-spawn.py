@@ -176,8 +176,17 @@ def _validate(args: argparse.Namespace, prompt: str) -> None:
         raise SpawnError("prompt file is empty or missing", 1)
 
 
+class _ArgParser(argparse.ArgumentParser):
+    """argparse default exits 2 on errors; spec InvalidArg is exit 1."""
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Spawn a claude --bg session for /start.")
+    p = _ArgParser(description="Spawn a claude --bg session for /start.")
     p.add_argument("--worktree-abs", required=True)
     p.add_argument("--branch", required=True)
     p.add_argument("--prompt-file", required=True)
