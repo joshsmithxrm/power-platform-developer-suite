@@ -76,7 +76,7 @@ public class JsonDataWriterTests
 
         root.GetProperty("$schema").GetString().Should().Be(JsonDataWriter.SchemaUri);
         root.GetProperty("formatVersion").GetString().Should().Be(JsonDataWriter.FormatVersion);
-        root.GetProperty("exportedAt").GetString().Should().Be("2026-05-14T12:00:00.0000000Z");
+        root.GetProperty("exportedAt").GetString().Should().Be("2026-05-14T12:00:00Z");
     }
 
     [Fact]
@@ -297,7 +297,7 @@ public class JsonDataWriterTests
             .GetProperty("createdon")
             .GetProperty("value").GetString();
 
-        value.Should().Be("2026-01-15T10:30:00.0000000Z");
+        value.Should().Be("2026-01-15T10:30:00Z");
     }
 
     [Fact]

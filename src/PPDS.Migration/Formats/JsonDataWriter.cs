@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -98,7 +97,7 @@ namespace PPDS.Migration.Formats
             writer.WriteStartObject();
             writer.WriteString("$schema", SchemaUri);
             writer.WriteString("formatVersion", FormatVersion);
-            writer.WriteString("exportedAt", data.ExportedAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture));
+            writer.WriteString("exportedAt", data.ExportedAt.ToUniversalTime());
             if (!string.IsNullOrEmpty(data.SourceEnvironment))
             {
                 writer.WriteString("sourceEnvironment", data.SourceEnvironment);
@@ -127,7 +126,10 @@ namespace PPDS.Migration.Formats
                 writer.WriteString("displayName", entity.DisplayName);
                 writer.WriteString("primaryIdField", entity.PrimaryIdField);
                 writer.WriteString("primaryNameField", entity.PrimaryNameField);
-                writer.WriteNumber("objectTypeCode", entity.ObjectTypeCode ?? 0);
+                if (entity.ObjectTypeCode.HasValue)
+                {
+                    writer.WriteNumber("objectTypeCode", entity.ObjectTypeCode.Value);
+                }
                 writer.WriteBoolean("disablePlugins", entity.DisablePlugins);
 
                 writer.WritePropertyName("fields");
@@ -252,7 +254,7 @@ namespace PPDS.Migration.Formats
         private static void WriteRecord(Utf8JsonWriter writer, Entity record)
         {
             writer.WriteStartObject();
-            writer.WriteString("id", record.Id.ToString());
+            writer.WriteString("id", record.Id);
 
             writer.WritePropertyName("fields");
             writer.WriteStartObject();
@@ -286,7 +288,7 @@ namespace PPDS.Migration.Formats
             switch (value)
             {
                 case EntityReference er:
-                    writer.WriteString("value", er.Id.ToString());
+                    writer.WriteString("value", er.Id);
                     writer.WriteString("lookupEntity", er.LogicalName);
                     if (!string.IsNullOrEmpty(er.Name))
                     {
@@ -303,9 +305,7 @@ namespace PPDS.Migration.Formats
                     break;
 
                 case DateTime dt:
-                    writer.WriteString(
-                        "value",
-                        dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture));
+                    writer.WriteString("value", dt.ToUniversalTime());
                     break;
 
                 case bool b:
@@ -313,7 +313,7 @@ namespace PPDS.Migration.Formats
                     break;
 
                 case Guid g:
-                    writer.WriteString("value", g.ToString());
+                    writer.WriteString("value", g);
                     break;
 
                 case int i:
@@ -358,7 +358,7 @@ namespace PPDS.Migration.Formats
         {
             writer.WriteStartObject();
             writer.WriteString("relationshipName", m2m.RelationshipName);
-            writer.WriteString("sourceId", m2m.SourceId.ToString());
+            writer.WriteString("sourceId", m2m.SourceId);
             writer.WriteString("targetEntityName", m2m.TargetEntityName);
             writer.WriteString("targetEntityPrimaryKey", m2m.TargetEntityPrimaryKey);
 
@@ -366,7 +366,7 @@ namespace PPDS.Migration.Formats
             writer.WriteStartArray();
             foreach (var targetId in m2m.TargetIds)
             {
-                writer.WriteStringValue(targetId.ToString());
+                writer.WriteStringValue(targetId);
             }
             writer.WriteEndArray();
 
