@@ -522,48 +522,9 @@ def get_git_activity(worktree_path):
     return changes, commits
 
 
-def extract_text_from_jsonl(jsonl_path):
-    """Extract assistant text from stream-json JSONL file.
-
-    Prefers 'result' events (clean exit) but falls back to assembling text
-    from 'assistant' message events (timeout/crash). Claude Code's stream-json
-    format emits whole-message events — 'assistant' events contain complete
-    content arrays with 'text' blocks on every turn.
-    """
-    result_text_parts = []
-    assistant_text_parts = []
-    try:
-        with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # Skip malformed lines (partial writes, stderr)
-
-                event_type = event.get("type")
-
-                if event_type == "result":
-                    result_text = event.get("result", "")
-                    if result_text:
-                        result_text_parts.append(result_text)
-                elif event_type == "assistant":
-                    # assistant events have message.content array
-                    content = event.get("message", {}).get("content", [])
-                    for block in content:
-                        if block.get("type") == "text":
-                            text = block.get("text", "")
-                            if text:
-                                assistant_text_parts.append(text)
-    except OSError:
-        pass
-
-    # Prefer result (clean exit) over assembled assistant text (timeout)
-    if result_text_parts:
-        return "\n".join(result_text_parts)
-    return "\n\n".join(assistant_text_parts)
+# Transcript reader lives in scripts/bg_transcript.py — re-export so existing
+# callers keep working. See specs/dispatch-routing.md Core Requirement #6.
+from bg_transcript import extract_text_from_jsonl, parse_outcome  # noqa: E402,F401
 
 
 def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
