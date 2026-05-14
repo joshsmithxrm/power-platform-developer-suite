@@ -183,10 +183,13 @@ def _emit_headless_warning(
     """Stderr warning + JSONL audit row. Implements Req #7 layer (a), ACs 03-04."""
     model_str = model if model else "none"
     agent_str = agent if agent else "none"
-    sys.stderr.write(
-        WARNING_TEMPLATE.format(caller=caller, model=model_str, agent=agent_str) + "\n"
-    )
-    sys.stderr.flush()
+    msg = WARNING_TEMPLATE.format(caller=caller, model=model_str, agent=agent_str) + "\n"
+    try:
+        sys.stderr.buffer.write(msg.encode("utf-8"))
+        sys.stderr.buffer.flush()
+    except (AttributeError, OSError):
+        sys.stderr.write(msg)
+        sys.stderr.flush()
     target = spend_log_path if spend_log_path is not None else SPEND_LOG
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -290,6 +293,18 @@ class BgHandle(DispatchHandle):
                 continue
             if state == "blocked":
                 needs = self.needs()
+                # A real "stage asked a question" block populates `needs`.
+                # An empty `needs` means the daemon transiently flipped to
+                # blocked during startup or between phases; treat as still
+                # working so the existing timeout budget gates progress.
+                if not needs.strip():
+                    if deadline is not None and time.time() >= deadline:
+                        raise DispatchError(
+                            f"BgHandle.wait timed out after {timeout}s for "
+                            f"{self.short} (last state=blocked, no needs text)"
+                        )
+                    time.sleep(0.5)
+                    continue
                 self.terminate()
                 raise BlockedSessionError(self.short, needs)
             if state == "done":
@@ -312,6 +327,7 @@ class HeadlessHandle(DispatchHandle):
         rc = self.proc.poll()
         if rc is None:
             return "working"
+        self._close_stdout()
         if rc == 0:
             return "done"
         return "error"
@@ -429,6 +445,7 @@ def spawn(
             caller=caller,
             model=model,
             agent=agent,
+            est_input_tokens=len(prompt) // 4,
             spend_log_path=spend_log_path,
         )
         argv = ["claude", "-p", prompt, "--verbose", "--output-format", "stream-json"]

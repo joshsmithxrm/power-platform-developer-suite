@@ -661,3 +661,71 @@ def test_derive_transcript_path_slug_format():
     s = str(p)
     assert "C--Users-josh--source-repos-ppdsw-ppds--worktrees-dual-mode-dispatch" in s
     assert s.endswith("abc12345-1111-2222-3333-444444444444.jsonl")
+
+
+
+def test_bg_handle_wait_tolerates_empty_needs_blocked_transition(monkeypatch, tmp_path):
+    """state=blocked with empty needs is treated as a startup transient.
+    The wait() loop keeps polling until state moves to done/error or the
+    timeout budget elapses. Real "stage asked a question" blocks (needs
+    populated) still hard-fail immediately."""
+    state_path = tmp_path / "state.json"
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+
+    seq = iter(["blocked", "blocked", "done"])
+    def fake_read_state(self_arg):
+        return {"sessionId": "s1", "cwd": "/x",
+                "state": next(seq, "done"),
+                "needs": "",
+                "linkScanPath": str(tmp_path / "tr.jsonl")}
+    monkeypatch.setattr(BgHandle, "_read_state", fake_read_state)
+
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    assert h.wait(timeout=10) == 0
+
+
+def test_bg_handle_wait_still_hard_fails_when_needs_populated(monkeypatch, tmp_path):
+    """A blocked state with populated needs is the real failure case
+    (AC-09a) and must still raise BlockedSessionError immediately."""
+    import json as _json
+    state_path = tmp_path / "state.json"
+    state_path.write_text(_json.dumps({
+        "sessionId": "s1", "cwd": "/x",
+        "state": "blocked",
+        "needs": "what env should I deploy to?",
+        "linkScanPath": str(tmp_path / "tr.jsonl"),
+    }), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: CompletedProcess([], 0, "", ""))
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    with pytest.raises(BlockedSessionError) as exc:
+        h.wait(timeout=5)
+    assert exc.value.needs == "what env should I deploy to?"
+
+
+def test_bg_handle_wait_empty_needs_blocked_eventually_times_out(monkeypatch, tmp_path):
+    """If state stays blocked-with-empty-needs forever, the timeout budget
+    eventually triggers DispatchError (not BlockedSessionError)."""
+    import json as _json
+    state_path = tmp_path / "state.json"
+    state_path.write_text(_json.dumps({
+        "sessionId": "s1", "cwd": "/x",
+        "state": "blocked",
+        "needs": "",
+        "linkScanPath": str(tmp_path / "tr.jsonl"),
+    }), encoding="utf-8")
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    # Make time advance so the budget elapses on first iteration.
+    times = iter([1000.0, 1000.0, 9999.0, 9999.0, 9999.0])
+    monkeypatch.setattr(time, "time", lambda: next(times, 9999.0))
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    with pytest.raises(DispatchError) as exc:
+        h.wait(timeout=1)
+    msg = str(exc.value)
+    assert "timed out" in msg
+    assert "no needs text" in msg
