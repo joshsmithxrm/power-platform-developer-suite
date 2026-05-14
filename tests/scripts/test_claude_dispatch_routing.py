@@ -306,3 +306,29 @@ def test_backlog_tables_removed():
 
 
 # === end Phase 5B ===
+
+
+# === Phase 5C (AC-25) ===
+
+_AC25_REQUIRED_HEADINGS = (
+    "### When interactive",
+    "### When headless",
+    "### Overrides",
+    "### Spend journal",
+)
+
+
+def test_workflow_md_has_dispatch_section_headings():
+    """AC-25: .claude/WORKFLOW.md has the four dispatch-routing subsection headings."""
+    workflow_path = _REPO_ROOT / ".claude" / "WORKFLOW.md"
+    assert workflow_path.exists(), ".claude/WORKFLOW.md must exist"
+
+    lines = workflow_path.read_text(encoding="utf-8").splitlines()
+    missing = [h for h in _AC25_REQUIRED_HEADINGS if h not in lines]
+    assert not missing, (
+        "AC-25: required Dispatch routing subsection heading(s) missing from "
+        f".claude/WORKFLOW.md: {missing}"
+    )
+
+
+# === end Phase 5C ===

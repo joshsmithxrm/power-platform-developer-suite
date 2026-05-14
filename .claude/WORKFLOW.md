@@ -70,6 +70,29 @@ Portable path resolution across Windows cmd, Git Bash, and POSIX shells. In work
 4. In the hook or skill that consumes it, guard with `os.environ.get(...)` (not `os.environ[...]` — unset is always a valid state).
 5. If removal of a variable is contemplated, file a retro observation first; env vars are an implicit contract between skills and hooks.
 
+## Dispatch routing
+
+### When interactive
+PPDS scripts default to `--mode interactive` (`claude --bg`). This runs on the
+subscription pool. Pipeline stages, pr_monitor triage/retro, and triage_common
+subagent dispatches all default here. Sessions appear in `claude` Agent View.
+
+### When headless
+`--mode headless` (`claude -p`) is opt-in. After 2026-06-15 it draws from the
+metered Agent SDK credit. Use only when the call site cannot host an interactive
+session, or for explicit one-off debugging. Both layers (dispatcher +
+sdk-spend-warn hook) emit a loud stderr warning when this happens.
+
+### Overrides
+`--mode {interactive,headless}` flag on `pipeline.py` / `pr_monitor.py` / scripts
+calling `triage_common.dispatch_subagent`. `PPDS_DISPATCH_MODE` env var as a
+process-wide override (flag wins when both set).
+
+### Spend journal
+Every headless invocation appends a JSONL row to `.claude/state/sdk-spend.jsonl`
+(gitignored). Tail it for live visibility:
+`tail -f .claude/state/sdk-spend.jsonl`.
+
 ## Related Docs
 
 - `CLAUDE.md` — repo-level rules
