@@ -13,9 +13,9 @@ import type {
     PluginTraceViewDto,
     PluginTraceDetailViewDto,
     TimelineNodeViewDto,
-    AdvancedQueryViewDto,
 } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
+import { convertAdvancedQuery } from './pluginTracesQuery.js';
 
 export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebviewToHost, PluginTracesPanelHostToWebview> {
     private static instances: PluginTracesPanel[] = [];
@@ -127,7 +127,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
                 await this.exportTraces(message.format);
                 break;
             case 'applyAdvancedFilter':
-                this.currentFilter = this.convertAdvancedQuery(message.query);
+                this.currentFilter = convertAdvancedQuery(message.query);
                 await this.loadTraces();
                 break;
             case 'persistState':
@@ -409,46 +409,6 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             vscode.window.showInformationMessage(`Exported ${traces.length} trace(s) to ${uri.fsPath}`);
             return;
         }
-    }
-
-    /** Convert advanced query builder state to a TraceFilterDto for the daemon. */
-    private convertAdvancedQuery(query: AdvancedQueryViewDto): TraceFilterDto {
-        const filter: TraceFilterDto = {};
-
-        // Apply quick filters
-        for (const qfId of query.quickFilterIds) {
-            switch (qfId) {
-                case 'exceptions': filter.hasException = true; break;
-                case 'success': filter.hasException = false; break;
-                case 'last-hour': filter.startDate = new Date(Date.now() - 3600000).toISOString(); break;
-                case 'last-24h': filter.startDate = new Date(Date.now() - 86400000).toISOString(); break;
-                case 'today': {
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    filter.startDate = today.toISOString();
-                    break;
-                }
-                case 'async': filter.mode = 'Async'; break;
-                case 'sync': filter.mode = 'Sync'; break;
-                case 'recursive': filter.minDurationMs = undefined; break; // handled by depth filter in conditions
-            }
-        }
-
-        // Apply enabled advanced conditions (simplified — the daemon supports basic filter fields)
-        for (const cond of query.conditions) {
-            if (!cond.enabled) continue;
-            const val = cond.value;
-            switch (cond.field) {
-                case 'Plugin Name': filter.typeName = val; break;
-                case 'Entity': filter.primaryEntity = val; break;
-                case 'Message': filter.messageName = val; break;
-                case 'Duration': if (val) filter.minDurationMs = parseInt(val, 10) || undefined; break;
-                case 'Created On': if (val) filter.startDate = new Date(val).toISOString(); break;
-                case 'Mode': filter.mode = val; break;
-            }
-        }
-
-        return filter;
     }
 
     /** Select a trace by ID and load its detail — used for timeline click navigation. */
