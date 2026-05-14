@@ -359,9 +359,23 @@ def _identify_bg_session(
     short_hint: Optional[str],
     cwd_abs: str,
     jobs_dir: Path,
+    spawn_started_at: Optional[float] = None,
     poll_budget: float = STATE_POLL_BUDGET_SEC,
 ) -> tuple[str, dict]:
+    """Resolve the short+state.json for the just-spawned --bg session.
+
+    short_hint is the value parsed from the `backgrounded · <short>` banner.
+    spawn_started_at is the time the subprocess.run was issued; the fallback
+    cwd-scan only considers sessions whose state.json *createdAt* field is
+    >= spawn_started_at - 1s (small clock skew tolerance). Without that
+    filter, an old session whose state.json is being actively rewritten
+    (e.g. the live Claude Code conversation) trivially passes an mtime
+    filter and would be mistaken for the newly spawned session.
+    """
     deadline = time.time() + poll_budget
+    if spawn_started_at is None:
+        spawn_started_at = time.time() - 1
+    floor = spawn_started_at - 1.0  # 1s clock-skew tolerance
     while time.time() < deadline:
         if short_hint:
             p = jobs_dir / short_hint / "state.json"
@@ -374,26 +388,39 @@ def _identify_bg_session(
                     return short_hint, data
         else:
             if jobs_dir.exists():
-                since = time.time() - 10
                 for child in jobs_dir.iterdir():
                     sp = child / "state.json"
                     if not sp.exists():
                         continue
                     try:
-                        if sp.stat().st_mtime < since:
+                        if sp.stat().st_mtime < floor:
                             continue
                         data = json.loads(sp.read_text(encoding="utf-8"))
                     except (json.JSONDecodeError, OSError):
                         continue
                     if not data.get("sessionId"):
                         continue
-                    if _norm(data.get("cwd") or "") == _norm(cwd_abs):
-                        return child.name, data
+                    if _norm(data.get("cwd") or "") != _norm(cwd_abs):
+                        continue
+                    # Per-session createdAt filter — mirrors start-bg-spawn
+                    # (mtime alone is not enough; active sessions get touched
+                    # constantly even when they were created hours ago).
+                    created_at = data.get("createdAt")
+                    if created_at:
+                        try:
+                            created_ts = datetime.fromisoformat(
+                                str(created_at).replace("Z", "+00:00")
+                            ).timestamp()
+                        except (ValueError, OSError):
+                            created_ts = sp.stat().st_mtime
+                        if created_ts < floor:
+                            continue
+                    return child.name, data
         time.sleep(STATE_POLL_INTERVAL_SEC)
     raise DispatchError(
-        f"daemon state file did not appear within {poll_budget}s"
+        f"daemon state file did not appear within {poll_budget}s "
+        f"({'short=' + short_hint if short_hint else 'cwd=' + cwd_abs})"
     )
-
 
 def spawn(
     *,
@@ -476,6 +503,7 @@ def spawn(
     if dangerous:
         argv.append("--dangerously-skip-permissions")
     argv.extend(["--", prompt])
+    spawn_started_at = time.time()
     proc = subprocess.run(
         argv,
         cwd=cwd_str,
@@ -488,8 +516,18 @@ def spawn(
     if proc.returncode != 0:
         raise DispatchError(f"claude --bg failed: {proc.stderr}")
     short_hint = _parse_banner(proc.stdout)
+    if not short_hint:
+        # Banner parse failure is suspicious — log the stdout snippet so the
+        # operator can see what claude actually emitted. We still try the
+        # cwd-scan fallback, but it is bounded by the spawn_started_at floor.
+        sys.stderr.write(
+            f"WARN claude --bg banner parse failed; stdout head: "
+            f"{(proc.stdout or '')[:200]!r}\n"
+        )
     jd = jobs_dir if jobs_dir is not None else JOBS_DIR
-    short, state = _identify_bg_session(short_hint, cwd_str, jd)
+    short, state = _identify_bg_session(
+        short_hint, cwd_str, jd, spawn_started_at=spawn_started_at
+    )
     # Transcript path resolution, in priority order:
     #   1. state.json["linkScanPath"] — populated by template="start"
     #      sessions (e.g. /start helper). When present, it is authoritative.
