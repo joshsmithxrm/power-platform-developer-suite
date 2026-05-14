@@ -52,6 +52,9 @@ updates:
       github-actions:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # VS Code Extension (npm)
   - package-ecosystem: "npm"
