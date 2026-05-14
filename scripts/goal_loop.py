@@ -85,7 +85,7 @@ class GoalLoopResult:
     last_stderr: str
     stuck_hash: Optional[str] = None
     blocked_needs: Optional[str] = None
-    error: Optional[BaseException] = None
+    error: Optional[Exception] = None
 
 
 def _extract_frontmatter(text: str) -> str:
@@ -228,7 +228,7 @@ def run_until_green(
                 last_stderr=proc.stderr,
                 blocked_needs=exc.needs,
             )
-        except BaseException as exc:  # noqa: BLE001 — surfacing arbitrary fix errors is the contract
+        except Exception as exc:  # noqa: BLE001 — surfacing arbitrary fix errors is the contract
             return GoalLoopResult(
                 outcome=GoalLoopOutcome.FIX_ERROR,
                 iterations=iteration,
