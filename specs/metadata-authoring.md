@@ -175,7 +175,7 @@ Task DeleteRelationshipAsync(DeleteRelationshipRequest request, IProgressReporte
 - `SolutionUniqueName` (required)
 - `Entity1LogicalName`, `Entity2LogicalName` (required)
 - `SchemaName` (required)
-- `IntersectEntitySchemaName`
+- `IntersectEntitySchemaName` — schema name of the auto-generated intersect (link) table that holds the M:N associations. Required by the Dataverse SDK message but optional on this DTO: when null/empty, the service defaults it to `SchemaName` (matches Power Apps Maker convention and the Microsoft Learn `CreateManyToManyRequest` sample). Override only when the relationship name and intersect-entity name must differ. Validated for publisher prefix alongside `SchemaName`, so dry-run catches mismatches.
 - `Entity1NavigationPropertyName`, `Entity2NavigationPropertyName`
 - `DryRun` (bool)
 
@@ -424,7 +424,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-03 | `CreateTableAsync` with `DryRun=true` validates without executing SDK call | `MetadataAuthoringServiceTests.CreateTableAsync_DryRun_DoesNotCallSdk` | ✅ |
 | AC-04 | `CreateColumnAsync` creates columns of all supported types with type-specific properties (parameterized: String, Memo, Integer, BigInt, Decimal, Double, Money, Boolean, DateTime, Choice, Choices, Image, File) | `CreateColumnTypeTests.CreateColumn_{Type}_SetsTypeSpecificProperties` | ✅ |
 | AC-05 | `CreateOneToManyAsync` creates a 1:N relationship with lookup column and cascade configuration | `SchemaValidatorTests.ValidateCreateOneToManyRequest_ValidRequest_DoesNotThrow` | ✅ |
-| AC-06 | `CreateManyToManyAsync` creates an N:N relationship with intersect entity | `SchemaValidatorTests.ValidateCreateManyToManyRequest_ValidRequest_DoesNotThrow` | ✅ |
+| AC-06 | `CreateManyToManyAsync` creates an N:N relationship with intersect entity. `IntersectEntitySchemaName` is set on the SDK `CreateManyToManyRequest` (not the metadata) and defaults to `SchemaName` when caller omits it. Issue #1008. | `MetadataAuthoringServiceTests.CreateManyToManyAsync_OmittedIntersect_DefaultsToSchemaNameOnSdkRequest`, `MetadataAuthoringServiceTests.CreateManyToManyAsync_ExplicitIntersect_PassesThroughOnSdkRequest`, `SchemaValidatorTests.ValidateCreateManyToManyRequest_ResolvedIntersectMissing_ThrowsMissingRequiredField`, `MetadataRelationshipCreateE2ETests.CreateManyToMany_OmittedIntersect_DefaultsFromName_Succeeds` | ✅ |
 | AC-07 | `CreateGlobalChoiceAsync` creates a global option set with initial values | `CacheInvalidationTests.CreateGlobalChoice_InvalidatesGlobalOptionSets` | ✅ |
 | AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set | — | ❌ |
 | AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |

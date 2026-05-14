@@ -308,15 +308,27 @@ public static class ChoiceCommandGroup
 
             await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
 
+            // Global choices aren't entity-bound; suggest publish --all.
+            const string publishHint = "ppds publish --all";
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { name, updated = true, dryRun });
+                writer.WriteSuccess(new
+                {
+                    name,
+                    updated = true,
+                    dryRun,
+                    requiresPublish = !dryRun,
+                    publishHint = dryRun ? null : publishHint
+                });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine(dryRun
-                    ? "[Dry-Run] Validation passed. No changes persisted."
-                    : $"Global choice '{name}' updated successfully.");
+                Console.Error.WriteLine($"Global choice '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

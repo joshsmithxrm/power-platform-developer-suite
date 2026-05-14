@@ -70,7 +70,7 @@ def _resolve_main_repo_root() -> str:
     main worktree.  When ``worktree-create.py`` is invoked from inside a
     secondary worktree without ``--repo-root``, falling back to ``cwd``
     would nest the new worktree inside the current one — the path that
-    ``launch-claude-session.py`` targets wouldn't exist.
+    ``start-bg-spawn.py`` targets wouldn't exist.
     """
     try:
         result = subprocess.run(
