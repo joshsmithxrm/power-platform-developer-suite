@@ -88,6 +88,11 @@ def run_shakedown(timeout: float = DEFAULT_TIMEOUT_SEC) -> int:
     # Import lazily so --help / no-change-set paths don't require dispatcher.
     import claude_dispatch  # noqa: E402
 
+    # dangerous=True (--dangerously-skip-permissions): the shakedown is run
+    # unattended from /verify with no operator at the keyboard. Even though
+    # THROWAWAY_PROMPT does not ask the model to use tools, any unexpected
+    # tool attempt would otherwise stall on a permission prompt and the
+    # gate would hang until --timeout, defeating its purpose.
     handle = claude_dispatch.spawn(
         mode="interactive",
         prompt=THROWAWAY_PROMPT,

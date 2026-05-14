@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -220,23 +221,31 @@ def _git_log(args, cwd=None):
     return out.stdout
 
 
+# Match ``/verify``, ``verify:``, ``verify(...)``, ``verify passed``,
+# ``verify ok`` only when they appear at the START of the commit subject.
+# Substring matching would false-positive on subjects like
+# ``feat(verify): tighten marker`` (which references /verify but is not one).
+_VERIFY_SUBJECT_RE = re.compile(
+    r"^\s*(?:/verify\b|verify[:(]|verify\s+(?:passed|ok)\b)",
+    re.IGNORECASE,
+)
+
+
 def _commits_since_verify(cwd=None):
     """Return commit SHAs (oldest -> newest) authored after the latest
     ``/verify`` marker.
 
-    Heuristic: the marker is a commit whose subject matches ``/verify`` or
-    ``verify:``/``verify(``/``verify passed``. If no such commit is found,
-    return ``[]`` (the detector then has nothing to flag).
+    The marker is a commit whose subject *starts* with ``/verify`` or
+    ``verify:``/``verify(``/``verify passed``/``verify ok``. If no such
+    commit is found, return ``[]`` (the detector then has nothing to flag).
     """
-    log = _git_log(["--reverse", "--format=%H%x09%s", "-n", "200"], cwd=cwd)
+    log = _git_log(["--reverse", "--format=%H%x09%s", "-n", "1000"], cwd=cwd)
     if not log:
         return []
     rows = [line.split("\t", 1) for line in log.splitlines() if "\t" in line]
     verify_idx = None
-    markers = ("/verify", "verify:", "verify(", "verify passed", "verify ok")
     for i, (_sha, subject) in enumerate(rows):
-        s = subject.lower()
-        if any(m in s for m in markers):
+        if _VERIFY_SUBJECT_RE.match(subject):
             verify_idx = i
     if verify_idx is None:
         return []
