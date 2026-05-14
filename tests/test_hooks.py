@@ -147,6 +147,29 @@ class TestWriteNonExistentFile:
         assert code == 2
 
 
+class TestWriteClaudeProjectDirForm:
+    """Hook must accept the $CLAUDE_PROJECT_DIR / ${CLAUDE_PROJECT_DIR} absolute form."""
+
+    def test_allows_claude_project_dir_form(self):
+        command = f'python "$CLAUDE_PROJECT_DIR/{_REAL_HOOK}"'
+        payload = _write_payload(".claude/settings.json", _settings_with_command(command))
+        code, _ = _run(payload)
+        assert code == 0
+
+    def test_allows_claude_project_dir_brace_form(self):
+        command = f'python "${{CLAUDE_PROJECT_DIR}}/{_REAL_HOOK}"'
+        payload = _write_payload(".claude/settings.json", _settings_with_command(command))
+        code, _ = _run(payload)
+        assert code == 0
+
+    def test_blocks_missing_file_with_claude_project_dir_prefix(self):
+        command = 'python "$CLAUDE_PROJECT_DIR/.claude/hooks/does-not-exist-xyz.py"'
+        payload = _write_payload(".claude/settings.json", _settings_with_command(command))
+        code, stderr = _run(payload)
+        assert code == 2
+        assert "does not exist" in stderr.lower()
+
+
 # ---------------------------------------------------------------------------
 # Edit tool — fragment validation (doubled pattern only)
 # ---------------------------------------------------------------------------
