@@ -266,7 +266,7 @@ def _spawns_subprocess(path, cwd=None):
     try:
         full = os.path.join(cwd or ".", path)
         with open(full, "r", encoding="utf-8", errors="replace") as f:
-            head = f.read(8192)
+            head = f.read(8192).lower()
     except OSError:
         return False
     return any(h in head for h in _SUBPROCESS_HINTS)
