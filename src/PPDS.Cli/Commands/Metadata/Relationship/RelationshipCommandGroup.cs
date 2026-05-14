@@ -71,6 +71,11 @@ public static class RelationshipCommandGroup
             Description = "Display name of the lookup column (one-to-many only)"
         };
 
+        var intersectEntityOption = new Option<string?>("--intersect-entity")
+        {
+            Description = "Schema name of the intersect entity (many-to-many only). Defaults to --name."
+        };
+
         var cascadeDeleteOption = new Option<CascadeBehavior?>("--cascade-delete")
         {
             Description = "Cascade behavior for delete: Cascade, Active, NoCascade, RemoveLink, Restrict"
@@ -96,6 +101,7 @@ public static class RelationshipCommandGroup
             nameOption,
             lookupNameOption,
             lookupDisplayNameOption,
+            intersectEntityOption,
             cascadeDeleteOption,
             cascadeAssignOption,
             dryRunOption,
@@ -114,6 +120,7 @@ public static class RelationshipCommandGroup
             var name = parseResult.GetValue(nameOption)!;
             var lookupName = parseResult.GetValue(lookupNameOption);
             var lookupDisplayName = parseResult.GetValue(lookupDisplayNameOption);
+            var intersectEntity = parseResult.GetValue(intersectEntityOption);
             var cascadeDelete = parseResult.GetValue(cascadeDeleteOption);
             var cascadeAssign = parseResult.GetValue(cascadeAssignOption);
             var dryRun = parseResult.GetValue(dryRunOption);
@@ -123,7 +130,7 @@ public static class RelationshipCommandGroup
 
             return await ExecuteCreateAsync(
                 solution, from, to, type, name,
-                lookupName, lookupDisplayName,
+                lookupName, lookupDisplayName, intersectEntity,
                 cascadeDelete, cascadeAssign, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
@@ -139,6 +146,7 @@ public static class RelationshipCommandGroup
         string name,
         string? lookupName,
         string? lookupDisplayName,
+        string? intersectEntity,
         CascadeBehavior? cascadeDelete,
         CascadeBehavior? cascadeAssign,
         bool dryRun,
@@ -183,12 +191,20 @@ public static class RelationshipCommandGroup
 
             if (type == "many-to-many")
             {
+                if (!globalOptions.IsJsonMode &&
+                    (lookupName is not null || lookupDisplayName is not null ||
+                     cascadeDelete.HasValue || cascadeAssign.HasValue))
+                {
+                    Console.Error.WriteLine("Warning: --lookup-name, --lookup-display-name, --cascade-delete, and --cascade-assign apply to one-to-many only and are ignored for many-to-many.");
+                }
+
                 var request = new CreateManyToManyRequest
                 {
                     SolutionUniqueName = solution,
                     Entity1LogicalName = from,
                     Entity2LogicalName = to,
                     SchemaName = name,
+                    IntersectEntitySchemaName = intersectEntity,
                     DryRun = dryRun
                 };
 
@@ -196,6 +212,11 @@ public static class RelationshipCommandGroup
             }
             else
             {
+                if (!globalOptions.IsJsonMode && intersectEntity is not null)
+                {
+                    Console.Error.WriteLine("Warning: --intersect-entity applies to many-to-many only and is ignored for one-to-many.");
+                }
+
                 var request = new CreateOneToManyRequest
                 {
                     SolutionUniqueName = solution,
@@ -400,15 +421,27 @@ public static class RelationshipCommandGroup
 
             await authoringService.UpdateRelationshipAsync(request, ct: cancellationToken);
 
+            // Relationships span two entities; the request DTO doesn't carry them, so suggest publish --all.
+            const string publishHint = "ppds publish --all";
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { name, updated = true, dryRun });
+                writer.WriteSuccess(new
+                {
+                    name,
+                    updated = true,
+                    dryRun,
+                    requiresPublish = !dryRun,
+                    publishHint = dryRun ? null : publishHint
+                });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine(dryRun
-                    ? "[Dry-Run] Validation passed. No changes persisted."
-                    : $"Relationship '{name}' updated successfully.");
+                Console.Error.WriteLine($"Relationship '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

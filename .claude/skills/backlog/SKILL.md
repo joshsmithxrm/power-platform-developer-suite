@@ -25,6 +25,38 @@ Read REFERENCE.md §1 "Label taxonomy" before classifying any issue.
 
 ## Process
 
+### Step 0: Readiness Gate
+
+<!-- enforcement: T3 advisory — see specs/skill-routing-gates.md and issue #1023 -->
+
+Applies only to `/backlog create <description>`. Skip for `triage`, `review`, `validate`, `dispatch`, and no-arg invocations — does not apply to any other sub-verb.
+
+**Detect (case-insensitive keyword match OR judgment fallback):** fire if description contains any of `broad concept`, `think out loud`, `need to figure out`, `let's explore`, `strategic`, `not sure what`, `should we` — or lacks a concrete deliverable.
+
+**On fire** — before presenting options, emit:
+
+```bash
+python scripts/workflow-state.py bump routing_gates.backlog.fired_count
+```
+
+Then offer to run /investigate (numbered options, redirect first):
+
+> This sounds like it needs exploration first.
+> 1. Run `/investigate` with this description as input (recommended)
+> 2. Continue with `/backlog create` as-is
+
+On (1) — emit bump FIRST (Skill tool transfers execution), then invoke `/investigate` via Skill tool with original description as args:
+
+```bash
+python scripts/workflow-state.py bump routing_gates.backlog.honored_count
+```
+
+On (2) — emit bump FIRST, then proceed to Step 1:
+
+```bash
+python scripts/workflow-state.py bump routing_gates.backlog.overridden_count
+```
+
 ### 1. Parse Arguments
 
 - `/backlog create <description>` - create a new issue

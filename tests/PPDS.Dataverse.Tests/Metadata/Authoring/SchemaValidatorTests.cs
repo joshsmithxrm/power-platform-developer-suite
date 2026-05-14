@@ -424,9 +424,46 @@ public class SchemaValidatorTests
             SchemaName = "new_account_contact_mm"
         };
 
-        var act = () => _validator.ValidateCreateManyToManyRequest(request, "new");
+        var act = () => _validator.ValidateCreateManyToManyRequest(request, "new", request.SchemaName);
 
         act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void ValidateCreateManyToManyRequest_ResolvedIntersectMissing_ThrowsMissingRequiredField()
+    {
+        // Reproduces issue #1008: SDK rejects CreateManyToMany with missing IntersectEntitySchemaName.
+        // Validator must catch this at dry-run time, not let it leak through to the SDK.
+        var request = new CreateManyToManyRequest
+        {
+            SolutionUniqueName = "MySolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm"
+        };
+
+        var act = () => _validator.ValidateCreateManyToManyRequest(request, "new", resolvedIntersectSchemaName: "");
+
+        act.Should().Throw<MetadataValidationException>()
+            .Which.ValidationMessages.Should().Contain(m => m.Field == "IntersectEntitySchemaName");
+    }
+
+    [Fact]
+    public void ValidateCreateManyToManyRequest_IntersectPrefixMismatch_Throws()
+    {
+        var request = new CreateManyToManyRequest
+        {
+            SolutionUniqueName = "MySolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            IntersectEntitySchemaName = "other_account_contact_mm"
+        };
+
+        var act = () => _validator.ValidateCreateManyToManyRequest(request, "new", request.IntersectEntitySchemaName);
+
+        act.Should().Throw<MetadataValidationException>()
+            .Which.ValidationMessages.Should().Contain(m => m.Rule == MetadataErrorCodes.InvalidPrefix);
     }
 
     #endregion

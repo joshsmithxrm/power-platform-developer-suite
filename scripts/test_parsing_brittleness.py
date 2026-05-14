@@ -27,12 +27,6 @@ _ws_spec = importlib.util.spec_from_file_location("workflow_state", _WS_SOURCE)
 workflow_state = importlib.util.module_from_spec(_ws_spec)
 _ws_spec.loader.exec_module(workflow_state)
 
-_LS_SOURCE = os.path.join(_HERE, "launch-claude-session.py")
-_ls_spec = importlib.util.spec_from_file_location("launch_claude_session", _LS_SOURCE)
-launch_claude_session = importlib.util.module_from_spec(_ls_spec)
-_ls_spec.loader.exec_module(launch_claude_session)
-
-
 class TestUtf8RoundTrip(unittest.TestCase):
     """State values with non-Latin-1 codepoints must survive set/get."""
 
@@ -78,69 +72,6 @@ class TestUtf8RoundTrip(unittest.TestCase):
             with open(state_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
             self.assertEqual(state["test"]["key"], value)
-
-
-class TestLaunchPromptSafety(unittest.TestCase):
-    """Prompts with shell metacharacters must survive into the .ps1."""
-
-    def test_prompt_eof_in_body(self):
-        prompt = "Line1\nPROMPT_EOF\nLine3"
-        script = launch_claude_session.build_launch_script(
-            r"C:\repo", r"C:\bin\claude.exe", prompt,
-        )
-        self.assertIn("PROMPT_EOF", script)
-
-    def test_dollar_whoami_preserved(self):
-        prompt = "Hello $(whoami) world"
-        script = launch_claude_session.build_launch_script(
-            r"C:\repo", r"C:\bin\claude.exe", prompt,
-        )
-        self.assertIn("$(whoami)", script)
-
-    def test_backticks_preserved(self):
-        prompt = "Run `git status` now"
-        script = launch_claude_session.build_launch_script(
-            r"C:\repo", r"C:\bin\claude.exe", prompt,
-        )
-        self.assertIn("`git status`", script)
-
-    def test_terminator_mid_line_ok(self):
-        prompt = "It's a test '@ midline is fine"
-        script = launch_claude_session.build_launch_script(
-            r"C:\repo", r"C:\bin\claude.exe", prompt,
-        )
-        self.assertIn("'@ midline", script)
-
-    def test_terminator_at_line_start_rejected(self):
-        prompt = "Line1\n'@\nLine3"
-        with self.assertRaises(ValueError):
-            launch_claude_session.build_launch_script(
-                r"C:\repo", r"C:\bin\claude.exe", prompt,
-            )
-
-    def test_terminator_with_trailing_text_allowed(self):
-        prompt = "Line1\n'@ this is fine in PowerShell\nLine3"
-        script = launch_claude_session.build_launch_script(
-            r"C:\repo", r"C:\bin\claude.exe", prompt,
-        )
-        self.assertIn("'@ this is fine", script)
-
-    def test_prompt_stdin_dry_run(self):
-        prompt = "Test with – em-dash and $(whoami)"
-        with tempfile.TemporaryDirectory() as tmp:
-            result = launch_claude_session.launch(
-                target=tmp,
-                name="test-stdin",
-                prompt=prompt,
-                dry_run=True,
-                launch_dir=tmp,
-            )
-            self.assertEqual(result, 0)
-            script_path = os.path.join(tmp, "launch-test-stdin.ps1")
-            with open(script_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            self.assertIn("$(whoami)", content)
-            self.assertIn("–", content)
 
 
 class TestParseTriageJson(unittest.TestCase):

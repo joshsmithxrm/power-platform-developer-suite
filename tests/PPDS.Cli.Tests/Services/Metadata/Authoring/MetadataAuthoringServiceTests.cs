@@ -19,6 +19,8 @@ using PPDS.Dataverse.Pooling;
 using Xunit;
 using AuthoringUpdateRelationshipRequest = PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest;
 using AuthoringUpdateStateValueRequest = PPDS.Dataverse.Metadata.Authoring.UpdateStateValueRequest;
+using AuthoringCreateManyToManyRequest = PPDS.Dataverse.Metadata.Authoring.CreateManyToManyRequest;
+using SdkCreateManyToManyRequest = Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -277,6 +279,225 @@ public class MetadataAuthoringServiceTests
         capturedRequest!.Attribute.RequiredLevel!.Value.Should().Be(AttributeRequiredLevel.ApplicationRequired);
     }
 
+    // Regression for #1009: the retrieve-then-mutate pattern silently dropped the
+    // RequiredLevel change on the wire (the CLI reported success but Dataverse never
+    // applied the new value). The fix is to send a fresh, minimal AttributeMetadata
+    // of the same SDK type rather than the populated object returned by Retrieve.
+    [Fact]
+    public async Task UpdateColumnAsync_SendsFreshAttributeWithOnlyRequestedFields()
+    {
+        var existingAttr = new StringAttributeMetadata
+        {
+            LogicalName = "new_myfield",
+            SchemaName = "new_myfield",
+            MaxLength = 100,
+            DisplayName = new Label("Original Display", 1033),
+            Description = new Label("Original Description", 1033),
+            RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.None)
+        };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        UpdateAttributeRequest? capturedRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                if (req is UpdateAttributeRequest ua)
+                    capturedRequest = ua;
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_myfield",
+            RequiredLevel = "Required"
+        };
+
+        await _service.UpdateColumnAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Attribute.Should().NotBeSameAs(existingAttr,
+            "retrieve-then-mutate doesn't reliably persist RequiredLevel — #1009");
+        capturedRequest.Attribute.Should().BeOfType<StringAttributeMetadata>();
+        capturedRequest.Attribute.LogicalName.Should().Be("new_myfield");
+        capturedRequest.Attribute.RequiredLevel!.Value.Should().Be(AttributeRequiredLevel.ApplicationRequired);
+        capturedRequest.Attribute.DisplayName.Should().BeNull(
+            "the caller did not request a DisplayName change, so it must not appear on the update payload");
+        capturedRequest.Attribute.Description.Should().BeNull(
+            "the caller did not request a Description change, so it must not appear on the update payload");
+    }
+
+    // Same silent-no-op class as #1009: --format on a DateTime column was being dropped
+    // because ApplyTypeSpecificUpdates had no DateTimeAttributeMetadata case.
+    [Fact]
+    public async Task UpdateColumnAsync_AppliesDateTimeFormatChange()
+    {
+        var existingAttr = new DateTimeAttributeMetadata
+        {
+            LogicalName = "new_eventdate",
+            SchemaName = "new_eventdate",
+            Format = DateTimeFormat.DateAndTime
+        };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        UpdateAttributeRequest? capturedRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                if (req is UpdateAttributeRequest ua)
+                    capturedRequest = ua;
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_eventdate",
+            Format = "dateonly"
+        };
+
+        await _service.UpdateColumnAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        var dtAttr = capturedRequest!.Attribute as DateTimeAttributeMetadata;
+        dtAttr.Should().NotBeNull();
+        dtAttr!.Format.Should().Be(DateTimeFormat.DateOnly);
+    }
+
+    // Issue #1009: UpdateColumnAsync executes UpdateAttributeRequest but never publishes,
+    // so the change is invisible to consumers until something else publishes. Spec
+    // (metadata-authoring.md "Why no auto-publish?") forbids auto-publish, so the service
+    // success message must signal the publish requirement. The service stays UI-agnostic;
+    // surface-specific guidance (CLI command string) is added by each surface.
+    [Fact]
+    public async Task UpdateColumnAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingAttr = new StringAttributeMetadata { LogicalName = "new_myfield", MaxLength = 100 };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateColumnAsync(new UpdateColumnRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                EntityLogicalName = "account",
+                ColumnLogicalName = "new_myfield",
+                RequiredLevel = "Required"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "users must know publish is required for the change to take effect (#1009)");
+        message.Should().NotContain("ppds ",
+            because: "the service is UI-agnostic and must not embed a CLI command string (F-4)");
+    }
+
+    [Fact]
+    public async Task UpdateTableAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateTableAsync(new UpdateTableRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                EntityLogicalName = "account",
+                DisplayName = "Account"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "table updates carry the same silent-failure shape as #1009");
+        message.Should().NotContain("ppds ");
+    }
+
+    [Fact]
+    public async Task UpdateRelationshipAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingRel = new OneToManyRelationshipMetadata
+        {
+            SchemaName = "new_account_contact",
+            CascadeConfiguration = new CascadeConfiguration()
+        };
+        var retrieveResponse = new RetrieveRelationshipResponse();
+        retrieveResponse.Results["RelationshipMetadata"] = existingRel;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveRelationshipRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateRelationshipAsync(new AuthoringUpdateRelationshipRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                SchemaName = "new_account_contact",
+                CascadeConfiguration = new CascadeConfigurationDto { Delete = CascadeBehavior.Restrict }
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "relationship cascade changes aren't visible until publish");
+        message.Should().NotContain("ppds ");
+    }
+
+    [Fact]
+    public async Task UpdateGlobalChoiceAsync_SuccessMessage_TellsUserToPublish()
+    {
+        var existingOs = new OptionSetMetadata { Name = "new_priority" };
+        var retrieveResponse = new RetrieveOptionSetResponse();
+        retrieveResponse.Results["OptionSetMetadata"] = existingOs;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveOptionSetRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var message = await CaptureSingleInfoMessageAsync(reporter =>
+            _service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
+            {
+                SolutionUniqueName = "TestSolution",
+                Name = "new_priority",
+                DisplayName = "Priority"
+            }, reporter));
+
+        message.Should().Contain("publish",
+            because: "choice label changes aren't visible until publish");
+        message.Should().NotContain("ppds ");
+    }
+
+    private static async Task<string> CaptureSingleInfoMessageAsync(Func<IMetadataAuthoringProgressReporter, Task> act)
+    {
+        var infoMessages = new System.Collections.Generic.List<string>();
+        var reporter = new Mock<IMetadataAuthoringProgressReporter>();
+        reporter.Setup(r => r.ReportInfo(It.IsAny<string>()))
+            .Callback<string>(infoMessages.Add);
+
+        await act(reporter.Object);
+
+        infoMessages.Should().ContainSingle();
+        return infoMessages[0];
+    }
+
     #endregion
 
     #region UpdateRelationshipAsync
@@ -324,6 +545,94 @@ public class MetadataAuthoringServiceTests
         updatedRel!.CascadeConfiguration.Should().NotBeNull();
         updatedRel.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
         updatedRel.CascadeConfiguration.Assign.Should().Be(CascadeType.Cascade);
+    }
+
+    #endregion
+
+    #region CreateManyToManyAsync
+
+    [Fact]
+    public async Task CreateManyToManyAsync_OmittedIntersect_DefaultsToSchemaNameOnSdkRequest()
+    {
+        // Regression guard for issue #1008: previously the CLI never populated IntersectEntitySchemaName,
+        // and the service set it on the wrong field (ManyToManyRelationshipMetadata.IntersectEntityName)
+        // instead of the SDK request's IntersectEntitySchemaName, so every M:N create failed at execute time.
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        SdkCreateManyToManyRequest? capturedRequest = null;
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
+            })
+            .ReturnsAsync(response);
+
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm"
+            // IntersectEntitySchemaName intentionally omitted
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.IntersectEntitySchemaName.Should().Be("new_account_contact_mm",
+            "the service must default IntersectEntitySchemaName to SchemaName when omitted (Power Apps Maker convention; required by the SDK)");
+    }
+
+    [Fact]
+    public async Task CreateManyToManyAsync_ExplicitIntersect_PassesThroughOnSdkRequest()
+    {
+        var response = new CreateManyToManyResponse();
+        response.Results["ManyToManyRelationshipId"] = Guid.NewGuid();
+
+        SdkCreateManyToManyRequest? capturedRequest = null;
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
+            })
+            .ReturnsAsync(response);
+
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            IntersectEntitySchemaName = "new_AccountContactLink"
+        };
+
+        await _service.CreateManyToManyAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.IntersectEntitySchemaName.Should().Be("new_AccountContactLink");
+        capturedRequest.ManyToManyRelationship.SchemaName.Should().Be("new_account_contact_mm",
+            "the relationship schema name and intersect entity schema name remain independently set when overridden");
+    }
+
+    [Fact]
+    public async Task CreateManyToManyAsync_DryRun_DoesNotCallSdk()
+    {
+        var request = new AuthoringCreateManyToManyRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            Entity1LogicalName = "account",
+            Entity2LogicalName = "contact",
+            SchemaName = "new_account_contact_mm",
+            DryRun = true
+        };
+
+        var result = await _service.CreateManyToManyAsync(request);
+
+        result.WasDryRun.Should().BeTrue();
+        _client.Verify(
+            c => c.ExecuteAsync(It.IsAny<SdkCreateManyToManyRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion

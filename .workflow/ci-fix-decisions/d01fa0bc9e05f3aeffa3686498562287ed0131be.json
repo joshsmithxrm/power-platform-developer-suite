@@ -1,0 +1,12 @@
+{
+  "round": 3,
+  "timestamp": "2026-05-14T00:48:18Z",
+  "pr": 1037,
+  "failure_summary": "(log fetch failed: run 25834767022 is still in progress; logs will be available when it is complete\n)",
+  "files_touched": [],
+  "lines_added": 0,
+  "lines_removed": 0,
+  "action": "fix",
+  "escalation_reason": null,
+  "scope_violation": false
+}

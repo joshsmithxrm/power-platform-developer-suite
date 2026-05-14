@@ -440,6 +440,35 @@ public class MetadataAuthoringRpcTests
         json.Should().NotContain("\"error\"");
         json.Should().NotContain("\"errorCode\"");
         json.Should().NotContain("\"validationMessages\"");
+        json.Should().NotContain("\"publishHint\"",
+            because: "publishHint is nullable and should be omitted when not set");
+        json.Should().Contain("\"requiresPublish\":false",
+            because: "requiresPublish is a non-nullable bool and serializes its default");
+    }
+
+    // Issue #1009: RPC consumers (Extension) need to know when a change requires
+    // publishing. The fields are additive so existing consumers are unaffected.
+    [Fact]
+    public void MetadataAuthoringResponse_WithPublishHint_SerializesCorrectly()
+    {
+        var response = new MetadataAuthoringResponse
+        {
+            Success = true,
+            LogicalName = "new_field",
+            WasDryRun = false,
+            RequiresPublish = true,
+            PublishHint = "ppds metadata publish account",
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+        var deserialized = JsonSerializer.Deserialize<MetadataAuthoringResponse>(json, JsonOptions);
+
+        deserialized.Should().NotBeNull();
+        deserialized!.RequiresPublish.Should().BeTrue();
+        deserialized.PublishHint.Should().Be("ppds metadata publish account");
+
+        json.Should().Contain("\"requiresPublish\":true");
+        json.Should().Contain("\"publishHint\":\"ppds metadata publish account\"");
     }
 
     #endregion

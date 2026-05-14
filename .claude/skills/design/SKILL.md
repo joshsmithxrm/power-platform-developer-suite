@@ -9,11 +9,9 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## When to Use
 
-- "I have an idea for..."
-- "Let's design..."
-- "We need to figure out how to..."
-- "Let's brainstorm..."
 - Starting any new feature or non-trivial change
+- "I have an idea for..." / "Let's design..." / "We need to figure out how to..."
+- Read REFERENCE.md §1 for full guidance and anti-patterns.
 
 ## Process
 
@@ -28,93 +26,91 @@ python scripts/workflow-state.py set phase design
 **Gate:** Check current branch. If on `main` or `master`, error immediately:
 > You're on main. Run `/start` first to create a worktree.
 
-Before asking any questions, read:
-- `specs/CONSTITUTION.md` — non-negotiable principles that constrain the design
-- `specs/SPEC-TEMPLATE.md` — the format the output must follow
+Before asking any questions, read `specs/CONSTITUTION.md` and `specs/SPEC-TEMPLATE.md`.
 
-**Search for existing specs:** Grep all `specs/*.md` for overlapping scope — check file names, overview sections, and Code frontmatter for the domain being designed. If an existing spec covers this domain:
-- Present the finding: "Found existing spec `specs/<name>.md` covering this domain."
-- Propose update mode: "Should I update this spec, or is this a new spec?"
-- If updating, read the existing spec fully before proceeding.
+**Search for existing specs:** Grep all `specs/*.md` for overlapping scope — check file names, overviews, and Code frontmatter. If found, present it and ask: update or new spec?
 
-**Check for design context:** After searching for existing specs, check for
-`.plans/context.md` in the current working directory.
+**Check for design context:** Check for `.plans/context.md` in the current working directory.
 
-If found:
-1. Read the file
-2. Present a summary: "Design context loaded from investigation: {topic}. Covers: {scope summary}."
-3. Ask: "Proceed to spec writing, or brainstorm further?"
-4. If "proceed": skip Step 2 (Brainstorm), go directly to Step 3 (Write Spec)
-5. If "brainstorm": continue with Step 2, using the design context as starting input
+If found: read it, summarize it, ask "Proceed to spec writing, or brainstorm further?" Proceed → skip Step 2. Brainstorm → use context as starting input. Apply constraint checking (Read REFERENCE.md §3).
 
-**Constraint checking:** Before presenting the architecture (Step 2 or Step 3),
-verify the proposal against each Constraint and each Known Concern in
-`context.md`. Flag conflicts — e.g., "Constraint #3 says X, but the
-proposed architecture does Y."
-
-If not found: continue with normal Step 2 brainstorm flow.
+If not found: continue with Step 2.
 
 ### Step 2: Brainstorm
 
-**Understand the idea** — ask clarifying questions **one at a time**:
-- Prefer multiple choice when possible
-- Focus on: purpose, constraints, success criteria
-- Assess scope: if the request describes multiple independent subsystems, flag this immediately and help decompose
+**Understand the idea** — ask clarifying questions **one at a time**: prefer multiple choice; focus on purpose, constraints, success criteria.
 
-**Explore approaches:**
-- Propose 2-3 different approaches with trade-offs
-- Lead with your recommended option and explain why
-- Be honest about consequences — don't oversell
+**Multi-Concern Checkpoint**
 
-**Present design** — present in sections, scaled to complexity:
-- Ask after each section: "Does this look right?"
-- Cover: architecture, components, data flow, error handling, testing
-- Check against constitution principles — flag any tensions
+<!-- enforcement: T3 advisory — see specs/skill-routing-gates.md and issue #1023 -->
+
+After the clarifying questions, evaluate the clarified scope. The heuristic trips if **either** is true:
+
+- The scope contains **more than 3 sub-features**, OR
+- **Two or more sub-features could ship independently** (one does not require the other to be valuable)
+
+When the heuristic trips, emit:
+
+```bash
+python scripts/workflow-state.py bump routing_gates.design.fired_count
+```
+
+Ask the human:
+
+> You raised N concerns: {bulleted list}. Are these:
+> 1. One cohesive feature with a shared trigger event (continue the design), or
+> 2. N separate features that share a trigger event but ship independently?
+
+On (1) — cohesive (false positive): continue with "Explore approaches".
+
+```bash
+python scripts/workflow-state.py bump routing_gates.design.cohesion_confirmed_count
+```
+
+On (2) — separate features: recommend filing N issues. Ask:
+
+> (a) File issues via `/backlog` (recommended)
+> (b) Continue with this design anyway
+
+On (2)(a) — split: emit the bump FIRST (the Skill tool transfers execution, so anything after it never runs):
+
+```bash
+python scripts/workflow-state.py bump routing_gates.design.split_count
+```
+
+Then invoke `/backlog` via Skill tool; exit `/design`; instruct user to `/start` a new worktree per issue.
+
+On (2)(b) — proceed anyway: continue, flag as deliberate multi-concern design (cross-reference issue #989).
+
+```bash
+python scripts/workflow-state.py bump routing_gates.design.proceed_anyway_count
+```
+
+**Explore approaches:** propose 2-3 different approaches with trade-offs; lead with your recommended option.
+
+**Present design** — in sections, scaled to complexity; ask after each "Does this look right?". Read REFERENCE.md §4 for section coverage checklist.
 
 ### Step 3: Write Spec and Review
 
 When the design is approved:
 
-**A. Write the spec:**
-1. Write the spec to `specs/<name>.md` using the spec template
-2. Include numbered acceptance criteria (Constitution I3)
-3. If updating an existing spec, preserve unchanged sections
+**A. Write the spec** to `specs/<name>.md` using the spec template. Include numbered ACs (Constitution I3). Preserve unchanged sections if updating.
 
-**B. Review the spec:**
-1. Invoke `/review` — dispatch an impartial reviewer that gets ONLY the spec content, constitution, and spec template. No design conversation context.
-2. Fix critical and important findings
-3. Note which findings were fixed and which were dismissed with rationale
-4. Restore phase: `python scripts/workflow-state.py set phase design`
+**B. Review the spec:** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
 
-**C. Present to user:**
-1. Present the spec to the user
-2. Show review findings: "The reviewer found N issues. Fixed M, dismissed K. Here's what was caught and fixed: [list]. Here's what I disagreed with: [list with rationale]."
-3. Wait for user approval before proceeding
+**C. Present to user:** present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
 ### Step 4: Write Plan and Review
 
-After user approves the spec:
+**A. Write the plan** to `.plans/<date>-<name>.md`: phased, each phase maps to spec ACs, sequential vs parallel identified, file paths and commands included.
 
-**A. Write the implementation plan:**
-1. Generate a phased implementation plan in `.plans/<date>-<name>.md`
-2. Each phase should map to specific ACs from the spec
-3. Identify sequential vs parallel phases
-4. Include file paths, commands, and verification steps
+**B. Review the plan:** invoke `/review` — reviewer checks plan against spec ACs for gaps. Fix findings. Restore phase: `python scripts/workflow-state.py set phase design`
 
-**B. Review the plan:**
-1. Invoke `/review` — reviewer checks plan against spec ACs for coverage gaps
-2. Fix findings (missing ACs, incorrect phase ordering, missing verification)
-3. Note fixes and dismissals
-4. Restore phase: `python scripts/workflow-state.py set phase design`
-
-**C. Present to user:**
-1. Present the plan with a summary table (phases, files, ACs covered)
-2. Show review findings and fixes
-3. Wait for user approval
+**C. Present to user:** present plan with summary table, show review findings. Wait for approval.
 
 ### Step 5: Commit
 
-On user approval of the plan:
+On user approval:
 
 ```bash
 git add specs/<name>.md
@@ -123,9 +119,7 @@ git commit -m "spec: <name>
 Co-Authored-By: {use the format from the system prompt}"
 ```
 
-Note: `.plans/` is gitignored — the plan lives in the worktree filesystem only.
-
-Write the spec path to workflow state so `/implement` can find it:
+Note: `.plans/` is gitignored — the plan lives in the worktree only.
 
 ```bash
 python scripts/workflow-state.py set spec specs/<name>.md
@@ -133,24 +127,7 @@ python scripts/workflow-state.py set spec specs/<name>.md
 
 ### Step 6: Handoff
 
-**Do NOT flip `phase` here.** Leave it as `design`. The downstream skill
-owns its own phase transition:
-
-- `/implement` Step 3.5 sets `phase=implementing` when the user actually
-  starts building.
-- `scripts/pipeline.py` sets `phase=pipeline` when the headless pipeline
-  starts (and also sets `PPDS_PIPELINE=1`, which bypasses the stop hook
-  entirely).
-- If the user chooses **Defer**, phase stays `design` — which the
-  session-stop hook treats as a bypass phase, so the user can close the
-  session cleanly without triggering a premature gates-enforcement loop
-  on a spec-only commit.
-
-Historical note: this used to unconditionally run
-`workflow-state.py set phase implementing` here, which caused issue
-#800 — pausing between `/design` and `/implement` triggered the
-session-stop hook to block with a spurious "gates/verify/QA missing"
-message on a spec-only commit.
+**Do NOT flip `phase` here.** The downstream skill owns its own phase transition (`/implement` sets `phase=implementing`; pipeline sets `phase=pipeline`; Defer leaves `phase=design`). Read REFERENCE.md §5 for the historical rationale.
 
 Present three options:
 
@@ -167,34 +144,6 @@ Spec committed. Choose next step:
      → Spec is committed on branch feat/<name>. Resume anytime.
 ```
 
-If the user chooses option 1, run the pipeline command in the background
-(pipeline sets its own phase).
-If option 2, invoke `/implement` immediately (it sets `phase=implementing`
-at Step 3.5).
-If option 3, note the spec path and stop — phase stays `design`, stop
-hook allows clean exit.
-
-## Key Principles
-
-- **One question at a time** — don't overwhelm
-- **Multiple choice preferred** — easier to answer than open-ended
-- **YAGNI ruthlessly** — remove unnecessary features
-- **Explore alternatives** — always propose 2-3 approaches before settling
-- **Incremental validation** — present design, get approval, then proceed
-- **Constitution compliance** — every design must comply with the constitution
-- **Review before presenting** — specs and plans go through /review before the user sees them
-- **Do NOT use plan mode** — /design has its own approval gates (one question at a time, incremental validation). Plan mode blocks spec writing. Exit plan mode before running /design.
-
-## Anti-Patterns
-
-| Pattern | Fix |
-|---------|-----|
-| "This is too simple for a design" | Every new feature goes through this. Bug fixes skip design entirely (code + test + `/gates` + `/verify` + `/pr`). Enhancements with existing specs use `/implement` directly. Short designs are fine. |
-| Jumping to implementation | Design MUST be approved before any code | <!-- enforcement: T3 -->
-| Asking 5 questions at once | One question per message |
-| Proposing only one approach | Always propose 2-3 with trade-offs |
-| Skipping the spec | The spec IS the deliverable of this skill |
-| Skipping the plan | The plan is the second deliverable — spec alone isn't enough |
-| Using plan mode with /design | /design has its own approval gates. Exit plan mode first. |
-| Running on main | /design requires a worktree. Run /start first. |
-| Skipping spec search | Always search existing specs before creating new ones. |
+If option 1: run pipeline command in background (pipeline sets its own phase).
+If option 2: invoke `/implement` immediately (it sets `phase=implementing` at Step 3.5).
+If option 3: note spec path and stop — phase stays `design`.

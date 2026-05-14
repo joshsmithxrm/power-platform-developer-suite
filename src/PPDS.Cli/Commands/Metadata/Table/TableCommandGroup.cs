@@ -304,15 +304,26 @@ public static class TableCommandGroup
 
             await authoringService.UpdateTableAsync(request, ct: cancellationToken);
 
+            var publishHint = $"ppds metadata publish {entity}";
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { entity, updated = true, dryRun });
+                writer.WriteSuccess(new
+                {
+                    entity,
+                    updated = true,
+                    dryRun,
+                    requiresPublish = !dryRun,
+                    publishHint = dryRun ? null : publishHint
+                });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine(dryRun
-                    ? "[Dry-Run] Validation passed. No changes persisted."
-                    : $"Table '{entity}' updated successfully.");
+                Console.Error.WriteLine($"Table '{entity}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

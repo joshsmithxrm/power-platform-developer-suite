@@ -215,7 +215,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
-        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated successfully.");
+        // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
+        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
     }
 
@@ -351,25 +352,30 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Updating column", request.ColumnLogicalName);
 
-        if (request.DisplayName != null)
-            existingAttr.DisplayName = new Label(request.DisplayName, 1033);
-        if (request.Description != null)
-            existingAttr.Description = new Label(request.Description, 1033);
-        if (request.RequiredLevel != null)
-            existingAttr.RequiredLevel = new AttributeRequiredLevelManagedProperty(ParseRequiredLevel(request.RequiredLevel));
-        if (request.IsAuditEnabled.HasValue)
-            existingAttr.IsAuditEnabled = new BooleanManagedProperty(request.IsAuditEnabled.Value);
-        if (request.IsSecured.HasValue)
-            existingAttr.IsSecured = request.IsSecured.Value;
-        if (request.IsValidForAdvancedFind.HasValue)
-            existingAttr.IsValidForAdvancedFind = new BooleanManagedProperty(request.IsValidForAdvancedFind.Value);
+        // #1009: re-sending the retrieved AttributeMetadata silently drops RequiredLevel
+        // changes on the wire. Build a fresh, minimal attribute of the same SDK type
+        // and copy only the fields the caller explicitly asked to change.
+        var updateAttr = CreateUpdateAttribute(existingAttr);
 
-        ApplyTypeSpecificUpdates(existingAttr, request);
+        if (request.DisplayName != null)
+            updateAttr.DisplayName = new Label(request.DisplayName, 1033);
+        if (request.Description != null)
+            updateAttr.Description = new Label(request.Description, 1033);
+        if (request.RequiredLevel != null)
+            updateAttr.RequiredLevel = new AttributeRequiredLevelManagedProperty(ParseRequiredLevel(request.RequiredLevel));
+        if (request.IsAuditEnabled.HasValue)
+            updateAttr.IsAuditEnabled = new BooleanManagedProperty(request.IsAuditEnabled.Value);
+        if (request.IsSecured.HasValue)
+            updateAttr.IsSecured = request.IsSecured.Value;
+        if (request.IsValidForAdvancedFind.HasValue)
+            updateAttr.IsValidForAdvancedFind = new BooleanManagedProperty(request.IsValidForAdvancedFind.Value);
+
+        ApplyTypeSpecificUpdates(updateAttr, request);
 
         var sdkRequest = new UpdateAttributeRequest
         {
             EntityName = request.EntityLogicalName,
-            Attribute = existingAttr,
+            Attribute = updateAttr,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -377,7 +383,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
-        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'.");
+        // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
+        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
     }
 
@@ -506,8 +513,16 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         reporter?.ReportPhase("Resolving publisher prefix");
         var prefix = await ResolvePublisherPrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
 
+        // Default the intersect entity schema name to the relationship schema name when not supplied.
+        // Matches the Power Apps Maker / SDK sample convention where both names are the same string
+        // (Microsoft Learn: CreateManyToManyRequest). Done before validation so prefix checks see the
+        // resolved value and dry-run catches mismatches.
+        var intersectSchemaName = string.IsNullOrWhiteSpace(request.IntersectEntitySchemaName)
+            ? request.SchemaName
+            : request.IntersectEntitySchemaName;
+
         reporter?.ReportPhase("Validating");
-        _validator.ValidateCreateManyToManyRequest(request, prefix);
+        _validator.ValidateCreateManyToManyRequest(request, prefix, intersectSchemaName);
 
         if (request.DryRun)
         {
@@ -526,8 +541,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             SchemaName = request.SchemaName,
             Entity1LogicalName = request.Entity1LogicalName,
-            Entity2LogicalName = request.Entity2LogicalName,
-            IntersectEntityName = request.IntersectEntitySchemaName
+            Entity2LogicalName = request.Entity2LogicalName
         };
 
         if (!string.IsNullOrEmpty(request.Entity1NavigationPropertyName))
@@ -538,7 +552,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var sdkRequest = new SdkCreateManyToManyRequest
         {
             ManyToManyRelationship = relationship,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = request.SolutionUniqueName,
+            IntersectEntitySchemaName = intersectSchemaName
         };
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -614,7 +629,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         // invalidate all entity caches to ensure stale relationship data is cleared.
         _cacheProvider?.InvalidateAll();
 
-        reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated.");
+        reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated relationship {SchemaName}", request.SchemaName);
     }
 
@@ -773,7 +788,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateGlobalOptionSets();
 
-        reporter?.ReportInfo($"Global choice '{request.Name}' updated.");
+        reporter?.ReportInfo($"Global choice '{request.Name}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated global choice {Name}", request.Name);
     }
 
@@ -1291,6 +1306,35 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         return attr;
     }
 
+    private static AttributeMetadata CreateUpdateAttribute(AttributeMetadata existingAttr)
+    {
+        AttributeMetadata fresh = existingAttr switch
+        {
+            StringAttributeMetadata => new StringAttributeMetadata(),
+            MemoAttributeMetadata => new MemoAttributeMetadata(),
+            IntegerAttributeMetadata => new IntegerAttributeMetadata(),
+            BigIntAttributeMetadata => new BigIntAttributeMetadata(),
+            DecimalAttributeMetadata => new DecimalAttributeMetadata(),
+            DoubleAttributeMetadata => new DoubleAttributeMetadata(),
+            MoneyAttributeMetadata => new MoneyAttributeMetadata(),
+            BooleanAttributeMetadata => new BooleanAttributeMetadata(),
+            DateTimeAttributeMetadata => new DateTimeAttributeMetadata(),
+            MultiSelectPicklistAttributeMetadata => new MultiSelectPicklistAttributeMetadata(),
+            PicklistAttributeMetadata => new PicklistAttributeMetadata(),
+            ImageAttributeMetadata => new ImageAttributeMetadata(),
+            FileAttributeMetadata => new FileAttributeMetadata(),
+            LookupAttributeMetadata => new LookupAttributeMetadata(),
+            _ => throw new MetadataValidationException(
+                MetadataErrorCodes.InvalidConstraint,
+                $"Unsupported attribute type for update: {existingAttr.GetType().Name}",
+                "ColumnType")
+        };
+
+        fresh.LogicalName = existingAttr.LogicalName;
+        fresh.SchemaName = existingAttr.SchemaName;
+        return fresh;
+    }
+
     private static void ApplyTypeSpecificUpdates(AttributeMetadata attr, UpdateColumnRequest request)
     {
         switch (attr)
@@ -1322,6 +1366,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 if (request.MinValue.HasValue) moneyAttr.MinValue = request.MinValue.Value;
                 if (request.MaxValue.HasValue) moneyAttr.MaxValue = request.MaxValue.Value;
                 if (request.Precision.HasValue) moneyAttr.Precision = request.Precision.Value;
+                break;
+            case DateTimeAttributeMetadata dtAttr:
+                if (request.Format != null) dtAttr.Format = ParseDateTimeFormat(request.Format);
                 break;
         }
     }
