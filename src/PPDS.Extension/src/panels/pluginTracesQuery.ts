@@ -35,7 +35,15 @@ export function convertAdvancedQuery(query: AdvancedQueryViewDto): TraceFilterDt
             case 'Entity': filter.primaryEntity = val; break;
             case 'Message': filter.messageName = val; break;
             case 'Duration': if (val) filter.minDurationMs = parseInt(val, 10) || undefined; break;
-            case 'Created On': if (val) filter.startDate = new Date(val).toISOString(); break;
+            case 'Created On': {
+                if (val) {
+                    const date = new Date(val);
+                    if (!isNaN(date.getTime())) {
+                        filter.startDate = date.toISOString();
+                    }
+                }
+                break;
+            }
             case 'Mode': filter.mode = val; break;
             case 'Status': {
                 if (val !== 'Exception' && val !== 'Success') break;
