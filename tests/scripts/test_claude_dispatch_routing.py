@@ -332,3 +332,40 @@ def test_workflow_md_has_dispatch_section_headings():
 
 
 # === end Phase 5C ===
+
+
+# === Phase 5D (AC-26a, AC-26b) ===
+
+_AC26_NEEDLE_REFERENCE = "claude_dispatch.py:spawn()"
+_AC26_NEEDLE_MARKER = "<!-- enforcement: T2 hook:sdk-spend-warn -->"
+_AC26_LINE_CAP = 100
+
+
+def test_claudemd_never_line_present():
+    """AC-26a: CLAUDE.md contains the dispatcher NEVER line with the T2 marker."""
+    claudemd_path = _REPO_ROOT / "CLAUDE.md"
+    assert claudemd_path.exists(), "CLAUDE.md must exist at repo root"
+
+    lines = claudemd_path.read_text(encoding="utf-8").splitlines()
+    matches = [
+        line
+        for line in lines
+        if _AC26_NEEDLE_REFERENCE in line and _AC26_NEEDLE_MARKER in line
+    ]
+    assert matches, (
+        "AC-26a: CLAUDE.md must contain one line referencing "
+        f"{_AC26_NEEDLE_REFERENCE!r} together with {_AC26_NEEDLE_MARKER!r}; "
+        "none found."
+    )
+
+
+def test_claudemd_line_cap():
+    """AC-26b: CLAUDE.md remains at or under the 100-line cap."""
+    claudemd_path = _REPO_ROOT / "CLAUDE.md"
+    line_count = len(claudemd_path.read_text(encoding="utf-8").splitlines())
+    assert line_count <= _AC26_LINE_CAP, (
+        f"AC-26b: CLAUDE.md at {line_count} lines exceeds cap of {_AC26_LINE_CAP}."
+    )
+
+
+# === end Phase 5D ===
