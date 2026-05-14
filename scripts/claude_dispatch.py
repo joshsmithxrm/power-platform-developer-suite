@@ -89,6 +89,22 @@ def _norm(p: str) -> str:
     return p.replace("\\", "/").rstrip("/")
 
 
+# Slug derivation: ~/.claude/projects/<slug>/<sessionId>.jsonl where slug
+# replaces every non-[A-Za-z0-9-] character in the cwd with `-`. Used as a
+# fallback when state.json has no linkScanPath field — true for sessions of
+# template="bg" (pr_monitor, pipeline, triage_common dispatches). For
+# template="start" sessions claude writes linkScanPath explicitly and we
+# prefer that path. Pattern verified empirically against live sessions on
+# Windows 2026-05-14.
+_SLUG_CHAR_RE = re.compile(r"[^A-Za-z0-9-]")
+
+
+def _derive_transcript_path(cwd: str, session_id: str) -> Path:
+    """Return ~/.claude/projects/<slug>/<sessionId>.jsonl for the given cwd."""
+    slug = _SLUG_CHAR_RE.sub("-", cwd)
+    return Path(os.path.expanduser("~/.claude/projects")) / slug / f"{session_id}.jsonl"
+
+
 def _parse_version(out: str) -> tuple[int, int, int]:
     m = re.match(r"\s*(\d+)\.(\d+)\.(\d+)", out)
     if not m:
@@ -457,13 +473,17 @@ def spawn(
     short_hint = _parse_banner(proc.stdout)
     jd = jobs_dir if jobs_dir is not None else JOBS_DIR
     short, state = _identify_bg_session(short_hint, cwd_str, jd)
-    # claude --bg writes state.json in stages: sessionId+cwd land first,
-    # linkScanPath populates a moment later. Re-poll the same state.json
-    # within the remaining budget rather than failing on the first read.
+    # Transcript path resolution, in priority order:
+    #   1. state.json["linkScanPath"] — populated by template="start"
+    #      sessions (e.g. /start helper). When present, it is authoritative.
+    #   2. Brief re-poll of state.json — covers a rare staged-write race.
+    #   3. Slug-derived path ~/.claude/projects/<slug>/<sessionId>.jsonl —
+    #      template="bg" sessions never populate linkScanPath, so derivation
+    #      is the only option. Verified against live ci-fix sessions.
     link_scan_path = state.get("linkScanPath")
     if not link_scan_path:
         state_path = jd / short / "state.json"
-        lsp_deadline = time.time() + STATE_POLL_BUDGET_SEC
+        lsp_deadline = time.time() + 1.0  # brief re-poll, not full budget
         while time.time() < lsp_deadline:
             try:
                 data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -474,11 +494,10 @@ def spawn(
                 link_scan_path = data["linkScanPath"]
                 break
             time.sleep(STATE_POLL_INTERVAL_SEC)
-        if not link_scan_path:
-            raise DispatchError(
-                f"linkScanPath missing/empty in state.json for {short} "
-                f"after waiting {STATE_POLL_BUDGET_SEC}s"
-            )
+    if not link_scan_path:
+        link_scan_path = str(_derive_transcript_path(
+            state.get("cwd") or cwd_str, state["sessionId"]
+        ))
     return BgHandle(
         short=short,
         session_id=state["sessionId"],

@@ -609,8 +609,9 @@ def test_spawn_polls_for_linkscanpath_after_sessionid(monkeypatch, tmp_path):
     assert handle.transcript_path == Path(final_lsp)
 
 
-def test_spawn_fails_if_linkscanpath_never_populates(monkeypatch, tmp_path):
-    """Negative case: if linkScanPath never arrives within the budget, raise."""
+def test_spawn_falls_back_to_slug_derived_path_when_linkscanpath_absent(monkeypatch, tmp_path):
+    """template=bg sessions never write linkScanPath. spawn() must fall back
+    to ~/.claude/projects/<slug>/<sessionId>.jsonl rather than raise."""
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
     short = "abc12345"
@@ -619,14 +620,13 @@ def test_spawn_fails_if_linkscanpath_never_populates(monkeypatch, tmp_path):
     state_path = state_dir / "state.json"
     import json as _json
     state_path.write_text(_json.dumps({
-        "sessionId": "s1", "cwd": str(tmp_path).replace("\\", "/"),
-        "state": "working", "linkScanPath": "",
+        "sessionId": "abc12345-0000-0000-0000-000000000000",
+        "cwd": str(tmp_path).replace("\\\\", "/"),
+        "state": "working",
+        # linkScanPath intentionally absent (template=bg behavior)
     }), encoding="utf-8")
 
     monkeypatch.setattr(time, "sleep", lambda _s: None)
-
-    # Force the poll budget to elapse fast.
-    monkeypatch.setattr(claude_dispatch, "STATE_POLL_BUDGET_SEC", 0.05)
 
     def fake_run(argv, **kw):
         if argv[:2] == ["claude", "--version"]:
@@ -636,13 +636,28 @@ def test_spawn_fails_if_linkscanpath_never_populates(monkeypatch, tmp_path):
         return CompletedProcess(argv, 0, "", "")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    with pytest.raises(DispatchError) as exc_info:
-        spawn(
-            mode="interactive",
-            prompt="hi",
-            caller="regression-test",
-            name="stage",
-            cwd=str(tmp_path),
-            jobs_dir=jobs_dir,
-        )
-    assert "linkScanPath" in str(exc_info.value)
+    handle = spawn(
+        mode="interactive",
+        prompt="hi",
+        caller="slug-fallback-test",
+        name="stage",
+        cwd=str(tmp_path),
+        jobs_dir=jobs_dir,
+    )
+    assert isinstance(handle, BgHandle)
+    # Slug-derived path lives under ~/.claude/projects/<slug>/<sid>.jsonl.
+    p = str(handle.transcript_path)
+    assert p.endswith("abc12345-0000-0000-0000-000000000000.jsonl"), p
+    assert ".claude" in p and "projects" in p, p
+
+
+def test_derive_transcript_path_slug_format():
+    """Slug replaces every non-[A-Za-z0-9-] char with -."""
+    import claude_dispatch as _m
+    p = _m._derive_transcript_path(
+        r"C:\Users\josh_\source\repos\ppdsw\ppds\.worktrees\dual-mode-dispatch",
+        "abc12345-1111-2222-3333-444444444444",
+    )
+    s = str(p)
+    assert "C--Users-josh--source-repos-ppdsw-ppds--worktrees-dual-mode-dispatch" in s
+    assert s.endswith("abc12345-1111-2222-3333-444444444444.jsonl")
