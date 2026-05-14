@@ -1737,7 +1737,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
 
                 triage_results = _step_triage(
                     worktree, pr_number, comments, logger, result,
-                    step_key, triage_rounds_used,
+                    step_key, triage_rounds_used, mode=mode,
                 )
 
                 if triage_results:
@@ -1918,7 +1918,7 @@ def _step_gemini(worktree, pr_number, logger, result, step_suffix=""):
 
 
 def _step_triage(worktree, pr_number, comments, logger, result,
-                 step_key, iteration):
+                 step_key, iteration, mode=None):
     """Triage step. Returns triage results list or None."""
     try:
         triage_results = run_triage(worktree, pr_number, comments, logger, mode=mode)
