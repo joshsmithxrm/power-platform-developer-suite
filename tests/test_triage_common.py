@@ -480,3 +480,101 @@ class TestUnifiedTriagePass:
                 result = get_unreplied_comments(str(tmp_path), 42)
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# dispatch_subagent — AC-15 (dual-mode)
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock
+import pytest
+
+
+class _FakeHandle:
+    def __init__(self, *, exit_code=0, output="result-text", transcript=None):
+        self._exit_code = exit_code
+        self._output = output
+        self.transcript_path = transcript
+
+    def wait(self, timeout=None):
+        return self._exit_code
+
+    def output(self):
+        return self._output
+
+    def terminate(self):
+        pass
+
+
+@pytest.mark.parametrize("mode", ["interactive", "headless"])
+def test_dispatch_subagent_both_modes(mode, tmp_path):
+    """AC-15: dispatch_subagent forwards mode and shape to claude_dispatch.spawn,
+    returning {stdout, stderr, exit_code}."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+
+    captured = {}
+
+    def fake_spawn(**kw):
+        captured.update(kw)
+        return _FakeHandle(exit_code=0, output="ok", transcript=tmp_path / "t.jsonl")
+
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        result = dispatch_subagent(
+            profile_name="reviewer",
+            payload={"key": "value"},
+            mode=mode,
+            worktree=str(tmp_path),
+            caller="test.dispatch_subagent",
+        )
+    assert result == {"stdout": "ok", "stderr": "", "exit_code": 0}
+    assert captured["mode"] == mode
+    assert captured["caller"] == "test.dispatch_subagent"
+    assert captured["agent"] == "reviewer"
+    assert captured["name"] == "reviewer"
+    # JSON-serialized payload reaches the dispatcher unchanged.
+    assert json.loads(captured["prompt"]) == {"key": "value"}
+
+
+def test_dispatch_subagent_caller_default(tmp_path):
+    """When caller is None, default to 'triage_common.dispatch_subagent'."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+    captured = {}
+    def fake_spawn(**kw):
+        captured.update(kw)
+        return _FakeHandle()
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        dispatch_subagent(profile_name="p", payload={}, worktree=str(tmp_path),
+                          mode="interactive")
+    assert captured["caller"] == "triage_common.dispatch_subagent"
+
+
+def test_dispatch_subagent_dispatch_error_returns_error_shape(tmp_path):
+    """DispatchError from spawn propagates as exit_code != 0, stderr captured."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+    def fake_spawn(**kw):
+        raise claude_dispatch.DispatchError("nope", exit_code=2)
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        result = dispatch_subagent(profile_name="p", payload={},
+                                   worktree=str(tmp_path), mode="interactive")
+    assert result["exit_code"] == 2
+    assert "nope" in result["stderr"]
+
+
+def test_dispatch_subagent_blocked_returns_loud_shape(tmp_path):
+    """BlockedSessionError surfaces as exit_code=1, stderr includes needs text."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+
+    class _BlockedHandle(_FakeHandle):
+        def wait(self, timeout=None):
+            raise claude_dispatch.BlockedSessionError("abc12345", "what env?")
+
+    with patch.object(claude_dispatch, "spawn", lambda **kw: _BlockedHandle()):
+        result = dispatch_subagent(profile_name="p", payload={},
+                                   worktree=str(tmp_path), mode="interactive")
+    assert result["exit_code"] == 1
+    assert "blocked" in result["stderr"]
+    assert "what env?" in result["stderr"]

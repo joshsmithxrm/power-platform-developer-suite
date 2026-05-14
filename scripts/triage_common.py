@@ -455,49 +455,79 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
             log_fn("FAILED", comment_id=comment_id)
 
 
-def dispatch_subagent(profile_name, payload, model="sonnet", worktree=".", timeout=1800):
-    """Invoke ``claude -p`` with an agent profile, passing payload as the -p prompt argument.
+def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
+                      timeout=1800, mode=None, caller=None,
+                      stage_log=None):
+    """Invoke an agent profile via the dispatch router.
 
-    Centralises the Windows-quoting / UTF-8 / shell=False (Constitution S2)
-    invocation pattern so CI-fix and Gemini-triage dispatchers share one code path.
+    Wraps ``claude_dispatch.spawn`` so both interactive (``--bg``) and headless
+    (``-p``) modes share one entry point. Mode defaults to the value of
+    ``PPDS_DISPATCH_MODE`` (or ``"interactive"`` when unset). ``caller``
+    defaults to ``"triage_common.dispatch_subagent"`` for the spend-journal
+    audit row. Constitution A2: single code path.
 
     Args:
-        profile_name: agent profile name (matches .claude/agents/<name>.md)
-        payload: dict serialized as JSON and passed as the -p prompt argument
-        model: model slug (floating name, no version pin)
-        worktree: working directory for the subprocess
-        timeout: seconds before the process is killed (default 30 min)
+        profile_name: agent profile name (matches .claude/agents/<name>.md).
+        payload: dict serialized as JSON and passed as the prompt.
+        model: model slug (floating name, no version pin).
+        worktree: working directory for the subprocess.
+        timeout: seconds before the process is killed (default 30 min).
+        mode: ``"interactive"`` / ``"headless"`` / ``None``. ``None`` defers
+            to ``claude_dispatch._resolve_mode``.
+        caller: identification string written to the spend journal. Defaults
+            to ``"triage_common.dispatch_subagent"``.
+        stage_log: optional headless-mode stream-json path. When mode resolves
+            to headless and this is unset, a temp file is used.
 
     Returns:
-        dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int)
+        dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int).
     """
+    import claude_dispatch  # local import keeps module-load cycle clean
+    if caller is None:
+        caller = "triage_common.dispatch_subagent"
+    resolved_mode = claude_dispatch._resolve_mode(mode)
     prompt = json.dumps(payload)
-    cmd = [
-        "claude", "-p", prompt,
-        "--verbose", "--output-format", "stream-json",
-        "--model", model,
-        "--agent", profile_name,
-    ]
+
+    # Headless needs a stage_log path; auto-create a per-call temp file when caller
+    # didn't provide one. The temp file is deleted after output() reads it.
+    cleanup_path = None
+    if resolved_mode == "headless" and stage_log is None:
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(prefix="dispatch_subagent_",
+                                        suffix=".jsonl", dir=worktree if worktree else ".")
+        os.close(fd)
+        stage_log = tmp_path
+        cleanup_path = tmp_path
 
     try:
-        proc = subprocess.Popen(
-            cmd,
+        handle = claude_dispatch.spawn(
+            mode=resolved_mode,
+            prompt=prompt,
+            caller=caller,
+            name=profile_name,
+            agent=profile_name,
+            model=model,
             cwd=worktree,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stage_log=stage_log,
         )
-        try:
-            stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return {"stdout": "", "stderr": "timeout", "exit_code": -1}
-        return {
-            "stdout": stdout_bytes.decode("utf-8", errors="replace"),
-            "stderr": stderr_bytes.decode("utf-8", errors="replace"),
-            "exit_code": proc.returncode,
-        }
+    except claude_dispatch.DispatchError as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": getattr(e, "exit_code", 1)}
     except FileNotFoundError:
         return {"stdout": "", "stderr": "claude command not found", "exit_code": -1}
     except OSError as e:
         return {"stdout": "", "stderr": str(e), "exit_code": -1}
+
+    try:
+        try:
+            exit_code = handle.wait(timeout=timeout)
+        except claude_dispatch.BlockedSessionError as e:
+            handle.terminate()
+            return {"stdout": "", "stderr": f"blocked: {e.needs}", "exit_code": 1}
+        output = handle.output()
+        return {"stdout": output, "stderr": "", "exit_code": exit_code}
+    finally:
+        if cleanup_path:
+            try:
+                os.remove(cleanup_path)
+            except OSError:
+                pass
