@@ -199,7 +199,17 @@ public sealed class SchemaValidator
     /// <summary>
     /// Validates a <see cref="CreateManyToManyRequest"/>.
     /// </summary>
-    public void ValidateCreateManyToManyRequest(CreateManyToManyRequest request, string publisherPrefix)
+    /// <param name="request">The request to validate.</param>
+    /// <param name="publisherPrefix">The publisher prefix resolved from the target solution.</param>
+    /// <param name="resolvedIntersectSchemaName">
+    /// The intersect-entity schema name after caller-supplied defaulting (typically
+    /// <see cref="CreateManyToManyRequest.IntersectEntitySchemaName"/> falling back to
+    /// <see cref="CreateManyToManyRequest.SchemaName"/>). Required by the Dataverse SDK.
+    /// </param>
+    public void ValidateCreateManyToManyRequest(
+        CreateManyToManyRequest request,
+        string publisherPrefix,
+        string? resolvedIntersectSchemaName)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -210,6 +220,16 @@ public sealed class SchemaValidator
         CollectIfInvalid(messages, () => ValidateRequiredString(request.Entity2LogicalName, "Entity2LogicalName"));
         CollectIfInvalid(messages, () => ValidateSchemaName(request.SchemaName));
         CollectIfInvalid(messages, () => ValidatePrefix(request.SchemaName, publisherPrefix));
+
+        // The Dataverse CreateManyToManyRequest message requires IntersectEntitySchemaName.
+        // The caller defaults it to SchemaName before validation; we re-validate the resolved value so
+        // dry-run rejects a missing or malformed intersect name (which would otherwise only fail at execute time).
+        CollectIfInvalid(messages, () => ValidateRequiredString(resolvedIntersectSchemaName, "IntersectEntitySchemaName"));
+        if (!string.IsNullOrWhiteSpace(resolvedIntersectSchemaName))
+        {
+            CollectIfInvalid(messages, () => ValidateSchemaName(resolvedIntersectSchemaName));
+            CollectIfInvalid(messages, () => ValidatePrefix(resolvedIntersectSchemaName, publisherPrefix));
+        }
 
         ThrowIfErrors(messages);
     }

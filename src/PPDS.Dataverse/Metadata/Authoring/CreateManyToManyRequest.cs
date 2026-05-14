@@ -17,7 +17,11 @@ public sealed class CreateManyToManyRequest
     /// <summary>Gets or sets the schema name for the relationship.</summary>
     public string SchemaName { get; set; } = "";
 
-    /// <summary>Gets or sets the schema name of the intersect entity.</summary>
+    /// <summary>
+    /// Gets or sets the schema name for the intersect entity that Dataverse will auto-create
+    /// to store many-to-many associations. If null or empty, defaults to <see cref="SchemaName"/>
+    /// (matches Power Apps Maker convention; see Microsoft Learn CreateManyToManyRequest sample).
+    /// </summary>
     public string? IntersectEntitySchemaName { get; set; }
 
     /// <summary>Gets or sets the navigation property name on Entity1.</summary>

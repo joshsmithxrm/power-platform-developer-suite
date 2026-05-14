@@ -72,7 +72,9 @@ public sealed class MetadataUpdateColumnTool : McpToolBase
             return new MetadataUpdateColumnResult
             {
                 Success = true,
-                WasDryRun = dryRun
+                WasDryRun = dryRun,
+                RequiresPublish = !dryRun,
+                PublishHint = dryRun ? null : $"ppds metadata publish {entityName}"
             };
         }
         catch (PpdsException ex)
@@ -100,4 +102,13 @@ public sealed class MetadataUpdateColumnResult
     /// <summary>Whether the operation was a dry run.</summary>
     [JsonPropertyName("wasDryRun")]
     public bool WasDryRun { get; set; }
+
+    // Issue #1009: schema changes are not visible to consumers until publish runs.
+    /// <summary>True when the change must be published before it takes effect.</summary>
+    [JsonPropertyName("requiresPublish")]
+    public bool RequiresPublish { get; set; }
+
+    /// <summary>CLI command the caller should run to publish the change, if any.</summary>
+    [JsonPropertyName("publishHint")]
+    public string? PublishHint { get; set; }
 }
