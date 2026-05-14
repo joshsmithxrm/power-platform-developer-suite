@@ -5,10 +5,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-MIN_VERSION = (2, 1, 139)
+# Allow direct script execution: ensure sibling modules (claude_dispatch) are importable
+# when this file is loaded by absolute path (tests, /start helper).
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from claude_dispatch import MIN_VERSION, BANNER_RE, _norm, _parse_version  # noqa: E402,F401
+
 JOBS_DIR = Path(os.path.expanduser("~/.claude/jobs"))
 ANSI_RE = re.compile(r"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[^[])")
-BANNER_RE = re.compile(r"backgrounded\s+·\s+([0-9a-f]{8})\b")
 POLL_BUDGET_SEC = 5.0
 POLL_INTERVAL_SEC = 0.1
 FALLBACK_AGE_SEC = 10
@@ -27,18 +33,13 @@ class SpawnError(Exception):
         self.code = code
 
 
-def _norm(p: str) -> str:
-    return p.replace("\\", "/").rstrip("/")
-
-
-def _parse_version(out: str) -> tuple[int, int, int]:
-    m = re.match(r"\s*(\d+)\.(\d+)\.(\d+)", out)
-    if not m:
-        raise SpawnError(f"could not parse `claude --version` output: {out!r}", 1)
-    return tuple(int(g) for g in m.groups())
-
-
 def require_min_version(min_ver: tuple[int, int, int] = MIN_VERSION) -> None:
+    """SpawnError-raising wrapper around the shared version check.
+
+    claude_dispatch.require_min_version raises DispatchError; /start callers
+    here have a SpawnError(msg, code) contract baked into main() and tests.
+    Keep the wrapper local; share _parse_version via the import above.
+    """
     try:
         result = subprocess.run(
             ["claude", "--version"], capture_output=True, text=True, timeout=10
@@ -51,7 +52,10 @@ def require_min_version(min_ver: tuple[int, int, int] = MIN_VERSION) -> None:
         )
     if result.returncode != 0:
         raise SpawnError(f"`claude --version` failed: {result.stderr}", 1)
-    found = _parse_version(result.stdout)
+    try:
+        found = _parse_version(result.stdout)
+    except Exception as e:
+        raise SpawnError(str(e), 1) from e
     if found < min_ver:
         raise SpawnError(
             f"/start requires Claude Code >={'.'.join(map(str, min_ver))} "
