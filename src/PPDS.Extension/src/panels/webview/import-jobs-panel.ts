@@ -10,7 +10,7 @@ import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable, formatStatusCount } from './shared/data-table.js';
 
 const vscode = getVsCodeApi<ImportJobsPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as ImportJobsPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;

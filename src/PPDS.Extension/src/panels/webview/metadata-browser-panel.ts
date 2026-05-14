@@ -20,7 +20,7 @@ import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable } from './shared/data-table.js';
 
 const vscode = getVsCodeApi<MetadataBrowserPanelWebviewToHost>();
-installErrorHandler((msg) => vscode.postMessage(msg as MetadataBrowserPanelWebviewToHost));
+installErrorHandler((msg) => vscode.postMessage(msg));
 
 // ── DOM elements ──
 const entityListEl = document.getElementById('entity-list') as HTMLElement;

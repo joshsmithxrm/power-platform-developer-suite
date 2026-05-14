@@ -634,23 +634,23 @@
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
-    "monaco-editor": "0.53.0",
+    "monaco-editor": "0.55.1",
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
-    "@types/node": "^25.6.0",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.7.0",
     "@types/vscode": "^1.116.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
-    "eslint": "^10.2.1",
+    "eslint": "^10.3.0",
     "eslint-plugin-import-x": "^4.16.2",
     "knip": "^6.13.1",
     "stylelint": "^17.11.0",
     "stylelint-config-standard": "^40.0.0",
     "typescript": ">=6.0.2 <6.1.0",
-    "typescript-eslint": "^8.58.0",
+    "typescript-eslint": "^8.59.3",
     "vitest": "^4.1.6"
   },
   "repository": {
