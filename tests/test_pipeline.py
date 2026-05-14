@@ -41,6 +41,34 @@ def _mock_pipeline_v8_helpers(monkeypatch):
 # ---------------------------------------------------------------------------
 # AC-51: All hook commands use relative paths
 # ---------------------------------------------------------------------------
+
+
+class _DispatchHandleStub:
+    """Stub returned from mocked claude_dispatch.spawn for run_claude tests."""
+    def __init__(self, *, transcript_path=None, poll_sequence=None,
+                 exit_code=0, output=""):
+        from pathlib import Path as _P
+        self.transcript_path = _P(transcript_path) if transcript_path else _P("none.jsonl")
+        self._poll_seq = list(poll_sequence or ["done"])
+        self._exit_code = exit_code
+        self._output = output
+        self.terminate = unittest.mock.MagicMock()
+        self.proc = unittest.mock.MagicMock(pid=12345)
+        self.short = "abc12345"
+
+    def poll(self):
+        return self._poll_seq.pop(0) if self._poll_seq else "done"
+
+    def wait(self, timeout=None):
+        return self._exit_code
+
+    def output(self):
+        return self._output
+
+    def needs(self):
+        return ""
+
+
 class TestHookPaths:
     def test_all_commands_use_absolute_paths(self):
         """AC-51 (updated #906): All hook commands use $CLAUDE_PROJECT_DIR."""
@@ -127,14 +155,12 @@ class TestPipelineEnv:
         wf_dir.mkdir(parents=True)
         logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
 
-        mock_proc = unittest.mock.MagicMock()
-        mock_proc.poll.return_value = 0  # Immediate exit
-        mock_proc.returncode = 0
-
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+        import claude_dispatch
+        stub = _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl", poll_sequence=["done"])
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub) as mock_spawn:
             pipeline.run_claude(str(tmp_path), "test", logger, "test-stage")
 
-        env_passed = mock_popen.call_args.kwargs.get("env", {})
+        env_passed = mock_spawn.call_args.kwargs.get("env", {})
         assert env_passed.get("PPDS_PIPELINE") == "1"
         logger.close()
 
@@ -151,14 +177,12 @@ class TestPipelineEnv:
         wf_dir.mkdir(parents=True)
         logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
 
-        mock_proc = unittest.mock.MagicMock()
-        mock_proc.poll.return_value = 0
-        mock_proc.returncode = 0
-
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+        import claude_dispatch
+        stub = _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl", poll_sequence=["done"])
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub) as mock_spawn:
             pipeline.run_claude(str(tmp_path), "test", logger, "test-stage")
 
-        env_passed = mock_popen.call_args.kwargs.get("env", {})
+        env_passed = mock_spawn.call_args.kwargs.get("env", {})
         assert "MSYS_NO_PATHCONV" not in env_passed, \
             "MSYS_NO_PATHCONV in claude env breaks hook path resolution (#910)"
         logger.close()
@@ -402,14 +426,19 @@ class TestStreamJsonOutput:
         wf_dir.mkdir(parents=True)
         logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
 
-        mock_proc = unittest.mock.MagicMock()
-        mock_proc.poll.return_value = 0
-        mock_proc.returncode = 0
+        captured = []
+        def fake_popen(argv, **kw):
+            captured.append(list(argv))
+            m = unittest.mock.MagicMock()
+            m.poll.return_value = 0
+            m.returncode = 0
+            return m
+        with unittest.mock.patch("subprocess.Popen", side_effect=fake_popen):
+            pipeline.run_claude(str(tmp_path), "test", logger, "test-stage", mode="headless")
 
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
-            pipeline.run_claude(str(tmp_path), "test", logger, "test-stage")
-
-        cmd = mock_popen.call_args.args[0] if mock_popen.call_args.args else mock_popen.call_args[0][0]
+        assert captured, "no Popen call captured"
+        cmd = captured[0]
+        assert cmd[:2] == ["claude", "-p"]
         assert "--output-format" in cmd
         assert "stream-json" in cmd
         logger.close()
@@ -1441,76 +1470,62 @@ class TestStallTimeout:
 # ---------------------------------------------------------------------------
 class TestHardTimeout:
     def test_hard_timeout_kills_at_ceiling(self, tmp_path):
-        """AC-13: run_claude terminates subprocess when hard ceiling exceeded."""
+        """AC-13: run_claude calls handle.terminate when hard ceiling exceeded."""
         import pipeline
+        import claude_dispatch
 
         wf_dir = tmp_path / ".workflow" / "stages"
         wf_dir.mkdir(parents=True)
         logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
 
-        mock_proc = unittest.mock.MagicMock()
-        mock_proc.poll.return_value = None  # Never exits naturally
-        mock_proc.wait.return_value = -1
-        mock_proc.returncode = -1
-
-        # Simulate time: first call = start, second call immediately past ceiling
-        call_count = [0]
         ceiling = pipeline.HARD_CEILING
+        stub = _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                   poll_sequence=["working"] * 10000)
 
+        call_count = [0]
         def fake_time():
             call_count[0] += 1
             if call_count[0] <= 1:
-                return 1000.0  # start = time.time()
-            return 1000.0 + ceiling + 1  # All subsequent calls exceed ceiling
+                return 1000.0
+            return 1000.0 + ceiling + 1
 
-        # Also mock subprocess.run (called by get_git_activity during heartbeat)
-        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0\n", stderr="")
-
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc):
+        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0", stderr="")
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub):
             with unittest.mock.patch("subprocess.run", return_value=mock_run_result):
                 with unittest.mock.patch("time.time", side_effect=fake_time):
                     with unittest.mock.patch("time.sleep"):
                         exit_code, _ = pipeline.run_claude(
                             str(tmp_path), "test", logger, "test-stage")
 
-        mock_proc.terminate.assert_called_once()
+        stub.terminate.assert_called_once()
         assert exit_code == -1
         logger.close()
 
-
-# ---------------------------------------------------------------------------
-# AC-27: --max-stage-seconds overrides HARD_CEILING for the run
-# AC-28: Effective ceiling is recorded on stage START
-# ---------------------------------------------------------------------------
 class TestMaxStageSecondsOverride:
     def _run_claude_with_ceiling(self, tmp_path, stage_name, ceiling,
                                   elapsed_offset):
-        """Helper: run run_claude with a mocked subprocess that never exits,
-        fake time jumping past ``elapsed_offset`` after start. Returns the
-        mock_proc and log content for assertions."""
+        """Helper: run run_claude with claude_dispatch.spawn mocked to a stub
+        that polls 'working' forever, fake time jumping past elapsed_offset.
+        Returns the (stub, log_content, exit_code) triple."""
         import pipeline
+        import claude_dispatch
 
         wf_dir = tmp_path / ".workflow" / "stages"
         wf_dir.mkdir(parents=True)
         log_path = tmp_path / ".workflow" / "pipeline.log"
         logger = pipeline.open_logger(str(log_path))
 
-        mock_proc = unittest.mock.MagicMock()
-        mock_proc.poll.return_value = None  # Never exits naturally
-        mock_proc.wait.return_value = -1
-        mock_proc.returncode = -1
-
+        stub = _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                   poll_sequence=["working"] * 10000)
         call_count = [0]
-
         def fake_time():
             call_count[0] += 1
             if call_count[0] <= 1:
                 return 1000.0
             return 1000.0 + elapsed_offset
 
-        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0\n", stderr="")
-
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc):
+        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0", stderr="")
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub):
             with unittest.mock.patch("subprocess.run", return_value=mock_run_result):
                 with unittest.mock.patch("time.time", side_effect=fake_time):
                     with unittest.mock.patch("time.sleep"):
@@ -1521,7 +1536,7 @@ class TestMaxStageSecondsOverride:
         logger.close()
         with open(log_path) as f:
             content = f.read()
-        return mock_proc, content, exit_code
+        return stub, content, exit_code
 
     def test_max_stage_seconds_flag_overrides_ceiling(self, tmp_path):
         """AC-27: ceiling=N shortens the effective kill threshold below the
@@ -1539,45 +1554,31 @@ class TestMaxStageSecondsOverride:
         )
 
     def test_ceiling_override_extends_beyond_default(self, tmp_path):
-        """AC-27: ceiling=N can also extend the ceiling past HARD_CEILING.
-        Elapsed of HARD_CEILING+1 would normally trip the kill with the
-        default, but with ceiling=HARD_CEILING+1000 the stage keeps running
-        (proc.terminate is not called for the ceiling reason)."""
+        """AC-27: override > default lets a run continue beyond the default ceiling.
+        Stage exits cleanly via poll returning 'done' before override is reached."""
         import pipeline
+        import claude_dispatch
 
-        override = pipeline.HARD_CEILING + 1000  # 8200 (> default 7200)
-        # elapsed falls between default and override → default would kill, override keeps running.
-        elapsed = pipeline.HARD_CEILING + 500  # 7700
+        override = pipeline.HARD_CEILING + 1000  # 8200
+        elapsed = pipeline.HARD_CEILING + 500    # 7700
 
         wf_dir = tmp_path / ".workflow" / "stages"
         wf_dir.mkdir(parents=True)
         logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
 
-        mock_proc = unittest.mock.MagicMock()
-        # Exit "naturally" on second poll so the loop terminates without
-        # hitting the ceiling branch.
-        poll_calls = [0]
-
-        def fake_poll():
-            poll_calls[0] += 1
-            if poll_calls[0] >= 2:
-                return 0  # clean exit
-            return None
-
-        mock_proc.poll.side_effect = fake_poll
-        mock_proc.returncode = 0
+        # Poll returns "working" once then "done" — exits cleanly before override.
+        stub = _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                   poll_sequence=["working", "done"])
 
         call_count = [0]
-
         def fake_time():
             call_count[0] += 1
             if call_count[0] <= 1:
                 return 1000.0
             return 1000.0 + elapsed
 
-        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0\n", stderr="")
-
-        with unittest.mock.patch("subprocess.Popen", return_value=mock_proc):
+        mock_run_result = unittest.mock.MagicMock(returncode=0, stdout="0", stderr="")
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub):
             with unittest.mock.patch("subprocess.run", return_value=mock_run_result):
                 with unittest.mock.patch("time.time", side_effect=fake_time):
                     with unittest.mock.patch("time.sleep"):
@@ -1586,9 +1587,7 @@ class TestMaxStageSecondsOverride:
                             ceiling=override,
                         )
 
-        # With the override, the ceiling branch should NOT fire at elapsed=7700
-        # because 7700 < 8200. The stage exits cleanly via poll returning 0.
-        mock_proc.terminate.assert_not_called()
+        stub.terminate.assert_not_called()
         assert exit_code == 0
         logger.close()
 
@@ -1743,8 +1742,9 @@ class TestMaxStageSecondsOverride:
         captured_run_claude = {}
 
         def fake_run_claude(worktree_path, prompt, logger_, stage, dry_run=False,
-                            agent=None, ceiling=None):
+                            agent=None, ceiling=None, mode=None):
             captured_run_claude["ceiling"] = ceiling
+            captured_run_claude["mode"] = mode
             captured_run_claude["stage"] = stage
             # Write a minimal summary log so the caller's file read succeeds
             summary_log = os.path.join(
@@ -3271,3 +3271,123 @@ class TestConvergePreservesVerifyQa:
                     qa_missing.append(f"qa not ancestor for {surface}")
 
             assert qa_missing == [], f"QA should pass after converge: {qa_missing}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2C: AC-13 (mode flag + env) and AC-18 (loud-fail on blocked)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineModeFlag:
+    def test_pipeline_mode_flag_default_interactive(self, tmp_path):
+        """AC-13: --mode flag absent + no PPDS_DISPATCH_MODE -> interactive."""
+        import pipeline
+        import claude_dispatch
+        import argparse
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        captured = {}
+        def fake_spawn(**kw):
+            captured.update(kw)
+            return _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                       poll_sequence=["done"])
+
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PPDS_DISPATCH_MODE", None)
+            with unittest.mock.patch.object(claude_dispatch, "spawn", side_effect=fake_spawn):
+                pipeline.run_claude(str(tmp_path), "t", logger, "test-stage",
+                                    mode=None)
+        assert captured["mode"] == "interactive"
+        logger.close()
+
+    def test_pipeline_mode_flag_env_overrides(self, tmp_path, monkeypatch):
+        """AC-13: PPDS_DISPATCH_MODE=headless makes default mode headless when flag absent."""
+        import pipeline
+        import claude_dispatch
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        monkeypatch.setenv("PPDS_DISPATCH_MODE", "headless")
+        captured = {}
+        def fake_spawn(**kw):
+            captured.update(kw)
+            return _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                       poll_sequence=["done"])
+        with unittest.mock.patch.object(claude_dispatch, "spawn", side_effect=fake_spawn):
+            pipeline.run_claude(str(tmp_path), "t", logger, "test-stage", mode=None)
+        assert captured["mode"] == "headless"
+        logger.close()
+
+    def test_pipeline_mode_flag_wins_over_env(self, tmp_path, monkeypatch):
+        """AC-13: explicit --mode interactive overrides PPDS_DISPATCH_MODE=headless."""
+        import pipeline
+        import claude_dispatch
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        monkeypatch.setenv("PPDS_DISPATCH_MODE", "headless")
+        captured = {}
+        def fake_spawn(**kw):
+            captured.update(kw)
+            return _DispatchHandleStub(transcript_path=tmp_path / "x.jsonl",
+                                       poll_sequence=["done"])
+        with unittest.mock.patch.object(claude_dispatch, "spawn", side_effect=fake_spawn):
+            pipeline.run_claude(str(tmp_path), "t", logger, "test-stage",
+                                mode="interactive")
+        assert captured["mode"] == "interactive"
+        logger.close()
+
+    def test_pipeline_argparse_advertises_mode(self):
+        """AC-13: pipeline.py --help shows --mode option."""
+        import pipeline
+        import io
+        argv = ["pipeline.py", "--help"]
+        with unittest.mock.patch("sys.argv", argv):
+            buf = io.StringIO()
+            with unittest.mock.patch("sys.stdout", buf):
+                with pytest.raises(SystemExit):
+                    pipeline.main()
+        out = buf.getvalue()
+        assert "--mode" in out
+        assert "interactive" in out
+        assert "headless" in out
+
+
+class TestPipelineBlockedLoudFail:
+    def test_pipeline_fails_loud_on_blocked(self, tmp_path):
+        """AC-18: when poll() returns blocked, run_claude calls terminate
+        and raises PipelineFailure with the needs text in the reason."""
+        import pipeline
+        import claude_dispatch
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        class _BlockedStub(_DispatchHandleStub):
+            def needs(self):
+                return "what environment should I deploy to?"
+
+        stub = _BlockedStub(transcript_path=tmp_path / "x.jsonl",
+                            poll_sequence=["blocked"])
+
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub):
+            with unittest.mock.patch("subprocess.run",
+                                     return_value=unittest.mock.MagicMock(returncode=0,
+                                                                          stdout="0",
+                                                                          stderr="")):
+                with pytest.raises(pipeline.PipelineFailure) as exc_info:
+                    pipeline.run_claude(str(tmp_path), "t", logger, "test-stage")
+
+        msg = str(exc_info.value)
+        assert "stage asked question" in msg
+        assert "what environment should I deploy to?" in msg
+        stub.terminate.assert_called_once()
+        logger.close()
