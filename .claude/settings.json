@@ -435,16 +435,6 @@
         ]
       },
       {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/taskcreate-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash(dotnet test:*)",
         "hooks": [
           {

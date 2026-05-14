@@ -125,7 +125,6 @@ Hard rules (MUST in SKILL.md, not REFERENCE.md): <!-- enforcement: T3 -->
 
 - Inline prompt MUST carry the full context for the dispatched worktree - spawning without an inline prompt is what forced retrospective B3. <!-- enforcement: T3 -->
 - Launch command MUST carry an inline prompt referencing the issue and the planned scope. <!-- enforcement: T3 -->
-- Dispatch wave size: <=3 worktrees by default; ask before exceeding (CLAUDE.md TaskCreate cap is enforced by `taskcreate-cap.py`).
 - Dispatch entries are written to `.claude/state/in-flight-issues.json` via `python scripts/inflight-register.py`.
 
 ```bash

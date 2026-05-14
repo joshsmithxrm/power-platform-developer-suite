@@ -22,7 +22,6 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Accept `IProgressReporter` for any operation likely to exceed 1 second. <!-- enforcement: T3 -->
 - Complete the shipping pipeline: `/gates` → `/verify` → `/pr`. Never stop after `/gates` or `/verify` — the work is not done until `/pr` creates the pull request. <!-- enforcement: T1 hook:session-stop-workflow -->
 - On `scripts/pipeline.py` failure, recover via `python scripts/pipeline.py --resume` (or `--from <stage>`) or sequential `/gates` → `/verify` → `/pr` — never ad-hoc parallel debug. <!-- since: PR#956 rationale --> <!-- enforcement: T3 escape-hatch: cannot detect omission of --resume flag -->
-- Hard cap on simultaneous background TaskCreate jobs: ≤3. If a 4th is needed, stop and ask. <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:taskcreate-cap -->
 - For any test/build failure, invoke `/debug` first; do not hypothesize without evidence. <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:debug-first -->
 
 ## Testing
