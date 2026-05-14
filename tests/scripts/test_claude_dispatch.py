@@ -549,3 +549,100 @@ def test_headless_handle_wait_returns_exit_code(tmp_path):
     h = HeadlessHandle(proc=_PollProc(exit_code=42),
                        transcript_path=tmp_path / "log.jsonl")
     assert h.wait(timeout=1) == 42
+
+
+
+# ---------------------------------------------------------------------------
+# Regression: state.json populates sessionId before linkScanPath
+# ---------------------------------------------------------------------------
+
+def test_spawn_polls_for_linkscanpath_after_sessionid(monkeypatch, tmp_path):
+    """state.json is written in stages: sessionId+cwd first, linkScanPath
+    later. spawn() must re-poll for linkScanPath, not bail on the first read."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    short = "abc12345"
+    state_dir = jobs_dir / short
+    state_dir.mkdir()
+    state_path = state_dir / "state.json"
+    final_lsp = str(tmp_path / "transcript.jsonl")
+
+    # First read: sessionId present, linkScanPath empty.
+    import json as _json
+    state_path.write_text(_json.dumps({
+        "sessionId": "s1", "cwd": str(tmp_path).replace("\\", "/"),
+        "state": "working", "linkScanPath": "",
+    }), encoding="utf-8")
+
+    # _identify_bg_session returns on sessionId, so the first read succeeds.
+    # The spawn() linkScanPath poll loop then keeps reading until it appears.
+    # Simulate the daemon writing the field after a short delay.
+    real_sleep = time.sleep
+    sleep_count = [0]
+    def fake_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] == 2:
+            state_path.write_text(_json.dumps({
+                "sessionId": "s1", "cwd": str(tmp_path).replace("\\", "/"),
+                "state": "working", "linkScanPath": final_lsp,
+            }), encoding="utf-8")
+        # don't actually sleep in the test
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+
+    def fake_run(argv, **kw):
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    handle = spawn(
+        mode="interactive",
+        prompt="hi",
+        caller="regression-test",
+        name="stage",
+        cwd=str(tmp_path),
+        jobs_dir=jobs_dir,
+    )
+    assert isinstance(handle, BgHandle)
+    assert handle.transcript_path == Path(final_lsp)
+
+
+def test_spawn_fails_if_linkscanpath_never_populates(monkeypatch, tmp_path):
+    """Negative case: if linkScanPath never arrives within the budget, raise."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    short = "abc12345"
+    state_dir = jobs_dir / short
+    state_dir.mkdir()
+    state_path = state_dir / "state.json"
+    import json as _json
+    state_path.write_text(_json.dumps({
+        "sessionId": "s1", "cwd": str(tmp_path).replace("\\", "/"),
+        "state": "working", "linkScanPath": "",
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+
+    # Force the poll budget to elapse fast.
+    monkeypatch.setattr(claude_dispatch, "STATE_POLL_BUDGET_SEC", 0.05)
+
+    def fake_run(argv, **kw):
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(DispatchError) as exc_info:
+        spawn(
+            mode="interactive",
+            prompt="hi",
+            caller="regression-test",
+            name="stage",
+            cwd=str(tmp_path),
+            jobs_dir=jobs_dir,
+        )
+    assert "linkScanPath" in str(exc_info.value)

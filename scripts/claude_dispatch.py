@@ -457,11 +457,28 @@ def spawn(
     short_hint = _parse_banner(proc.stdout)
     jd = jobs_dir if jobs_dir is not None else JOBS_DIR
     short, state = _identify_bg_session(short_hint, cwd_str, jd)
+    # claude --bg writes state.json in stages: sessionId+cwd land first,
+    # linkScanPath populates a moment later. Re-poll the same state.json
+    # within the remaining budget rather than failing on the first read.
     link_scan_path = state.get("linkScanPath")
     if not link_scan_path:
-        raise DispatchError(
-            f"linkScanPath missing/empty in state.json for {short}"
-        )
+        state_path = jd / short / "state.json"
+        lsp_deadline = time.time() + STATE_POLL_BUDGET_SEC
+        while time.time() < lsp_deadline:
+            try:
+                data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = None
+            if data and data.get("linkScanPath"):
+                state = data
+                link_scan_path = data["linkScanPath"]
+                break
+            time.sleep(STATE_POLL_INTERVAL_SEC)
+        if not link_scan_path:
+            raise DispatchError(
+                f"linkScanPath missing/empty in state.json for {short} "
+                f"after waiting {STATE_POLL_BUDGET_SEC}s"
+            )
     return BgHandle(
         short=short,
         session_id=state["sessionId"],

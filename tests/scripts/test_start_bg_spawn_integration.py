@@ -60,20 +60,22 @@ def test_prompt_verbatim_5k(tmp_path):
     )
 
     spawn_info = json.loads(result.stdout)
-    state_path = (
-        Path.home() / ".claude" / "jobs" / spawn_info["short"] / "state.json"
-    )
-    assert state_path.exists(), f"state.json not found at {state_path}"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
+    try:
+        state_path = (
+            Path.home() / ".claude" / "jobs" / spawn_info["short"] / "state.json"
+        )
+        assert state_path.exists(), f"state.json not found at {state_path}"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
 
-    assert state.get("intent") == prompt, (
-        "AC-08: prompt was not delivered byte-for-byte. "
-        f"Expected length {len(prompt)}, got length {len(state.get('intent', ''))}"
-    )
+        assert state.get("intent") == prompt, (
+            "AC-08: prompt was not delivered byte-for-byte. "
+            f"Expected length {len(prompt)}, got length {len(state.get('intent', ''))}"
+        )
 
-    # Cleanup: stop the bg session we just spawned.
-    subprocess.run(
-        ["claude", "stop", spawn_info["short"]],
-        check=False,
-        capture_output=True,
-    )
+    finally:
+        # Cleanup: stop the bg session we just spawned.
+        subprocess.run(
+            ["claude", "stop", spawn_info["short"]],
+            check=False,
+            capture_output=True,
+        )
