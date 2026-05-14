@@ -518,30 +518,18 @@ def _fetch_latest_gemini_review_body(worktree, pr_number):
                                    or latest.get("created_at") or ""):
             latest = r
     return (latest or {}).get("body") or ""
+def run_triage(worktree, pr_number, comments, logger, mode=None):
+    """Triage PR comments via claude_dispatch.spawn. Returns result list or None.
 
-
-def _build_triage_cmd(full_prompt):
-    """Build argv for the gemini-triage claude session.
-
-    Extracted so tests can assert on the cmd shape without mocking the full
-    run_triage flow (subprocess, file I/O, polling).
+    On non-zero exit raises DispatchFallbackError (loud-fail per Req #8).
     """
-    return [
-        "claude", "-p", full_prompt,
-        "--verbose", "--output-format", "stream-json",
-        "--model", "sonnet",
-        "--agent", "gemini-triage",
-    ]
-
-
-def run_triage(worktree, pr_number, comments, logger):
-    """Spawn claude -p with gemini-triage agent. Returns triage result list or None."""
     if SHAKEDOWN:
         logger.log("triage", "SHAKEDOWN_SKIPPED")
         return []
 
-    prompt = build_triage_prompt(worktree, pr_number, comments)
+    import claude_dispatch
 
+    prompt = build_triage_prompt(worktree, pr_number, comments)
     full_prompt = (
         "You are running in headless mode via the pr-monitor background process. "
         "Do not ask clarifying questions — make reasonable decisions and proceed.\n\n"
@@ -552,65 +540,52 @@ def run_triage(worktree, pr_number, comments, logger):
     env["PPDS_PIPELINE"] = "1"
     env["CLAUDE_PROJECT_DIR"] = str(Path(worktree).resolve())
 
-    # Stage log for triage output
     stage_log_dir = os.path.join(worktree, ".workflow", "stages")
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-triage.jsonl")
 
-    cmd = _build_triage_cmd(full_prompt)
-
-    logger.log("triage", "START", comments=len(comments))
+    logger.log("triage", "START", comments=len(comments), mode=mode or "default")
 
     try:
-        stage_log_file = open(stage_jsonl_path, "a", encoding="utf-8")  # Append — preserve previous triage rounds
-    except OSError as e:
-        logger.log("triage", "ERROR", reason=f"Cannot open stage log: {e}")
-        return None
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
+        handle = claude_dispatch.spawn(
+            mode=claude_dispatch._resolve_mode(mode),
+            prompt=full_prompt,
+            caller="pr_monitor.run_triage",
+            name="gemini-triage",
+            agent="gemini-triage",
+            model="sonnet",
             cwd=worktree,
+            dangerous=True,
+            stage_log=stage_jsonl_path,
             env=env,
-            stdout=stage_log_file,
-            stderr=subprocess.DEVNULL,
         )
-        proc.wait(timeout=1800)  # 30 min hard ceiling
-        exit_code = proc.returncode
+    except claude_dispatch.DispatchError as e:
+        logger.log("triage", "ERROR", reason=f"dispatch failed: {e}")
+        raise claude_dispatch.DispatchFallbackError(str(e))
+
+    try:
+        exit_code = handle.wait(timeout=1800)
+    except claude_dispatch.BlockedSessionError as e:
+        handle.terminate()
+        logger.log("triage", "BLOCKED", needs=str(e.needs)[:200])
+        raise claude_dispatch.DispatchFallbackError(f"triage blocked: {e.needs}")
     except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        handle.terminate()
         logger.log("triage", "TIMEOUT")
-        stage_log_file.close()
         return None
-    except FileNotFoundError:
-        logger.log("triage", "ERROR", reason="claude command not found")
-        stage_log_file.close()
-        return None
-    except OSError as e:
-        logger.log("triage", "ERROR", reason=str(e))
-        stage_log_file.close()
-        return None
-    finally:
-        if not stage_log_file.closed:
-            stage_log_file.close()
 
     logger.log("triage", "DONE", exit=exit_code)
 
     if exit_code != 0:
-        return None
+        raise claude_dispatch.DispatchFallbackError(
+            f"triage exited {exit_code}"
+        )
 
-    # Extract triage results from JSONL output
     results = parse_triage_jsonl(stage_jsonl_path)
     if results is None:
         logger.log("triage", "PARSE_FAILED",
                    reason="No JSON array found in triage output")
     return results
-
 
 def _detect_base_branch(worktree, pr_number, logger):
     """Detect the PR's base branch via ``gh pr view``. Falls back to 'main'."""
@@ -863,7 +838,7 @@ def post_replies(worktree, pr_number, triage_results, logger):
 
 
 def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
-                       triage_iteration):
+                       triage_iteration, mode=None):
     """Post replies then reconcile unreplied comments (up to 3 rounds).
 
     1. AC-92 gate: refuse to post replies if the working tree has uncommitted
@@ -934,7 +909,7 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                    iteration=triage_iteration)
 
         # Re-triage with only unreplied comments
-        delta_results = run_triage(worktree, pr_number, unreplied, logger)
+        delta_results = run_triage(worktree, pr_number, unreplied, logger, mode=mode)
         recon_key = f"reconcile_{triage_iteration}_r{recon_round}"
 
         if delta_results:
@@ -977,26 +952,13 @@ def _reconcile_replies(worktree, pr_number, triage_results, logger, result,
                 pass
         mark_step(result, f"reconcile_{triage_iteration}", "manual_review")
         write_result(worktree, result)
-
-
-def _build_retro_cmd(prompt):
-    """Build argv for the retro claude session.
-
-    Extracted so tests can assert on the cmd shape without mocking the full
-    run_retro flow.
-    """
-    return [
-        "claude", "-p", prompt, "--verbose",
-        "--output-format", "stream-json",
-        "--model", "sonnet",
-    ]
-
-
-def run_retro(worktree, logger):
-    """Run claude -p '/retro' for retrospective."""
+def run_retro(worktree, logger, mode=None):
+    """Run /retro via claude_dispatch.spawn."""
     if SHAKEDOWN:
         logger.log("retro", "SHAKEDOWN_SKIPPED")
         return "skipped"
+
+    import claude_dispatch
 
     env = os.environ.copy()
     env["PPDS_PIPELINE"] = "1"
@@ -1012,48 +974,38 @@ def run_retro(worktree, logger):
     os.makedirs(stage_log_dir, exist_ok=True)
     stage_jsonl_path = os.path.join(stage_log_dir, "pr-monitor-retro.jsonl")
 
-    cmd = _build_retro_cmd(prompt)
-
-    logger.log("retro", "START")
+    logger.log("retro", "START", mode=mode or "default")
 
     try:
-        stage_log_file = open(stage_jsonl_path, "w", encoding="utf-8")
-    except OSError as e:
-        logger.log("retro", "ERROR", reason=f"Cannot open stage log: {e}")
-        return "error"
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
+        handle = claude_dispatch.spawn(
+            mode=claude_dispatch._resolve_mode(mode),
+            prompt=prompt,
+            caller="pr_monitor.run_retro",
+            name="retro",
+            model="sonnet",
             cwd=worktree,
+            dangerous=True,
+            stage_log=stage_jsonl_path,
             env=env,
-            stdout=stage_log_file,
-            stderr=subprocess.DEVNULL,
         )
-        proc.wait(timeout=600)  # 10 min ceiling
-        exit_code = proc.returncode
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        logger.log("retro", "TIMEOUT")
-        stage_log_file.close()
-        return "timeout"
-    except (FileNotFoundError, OSError) as e:
-        logger.log("retro", "ERROR", reason=str(e))
-        stage_log_file.close()
+    except claude_dispatch.DispatchError as e:
+        logger.log("retro", "ERROR", reason=f"dispatch failed: {e}")
         return "error"
-    finally:
-        if not stage_log_file.closed:
-            stage_log_file.close()
+
+    try:
+        exit_code = handle.wait(timeout=600)
+    except claude_dispatch.BlockedSessionError as e:
+        handle.terminate()
+        logger.log("retro", "BLOCKED", needs=str(e.needs)[:200])
+        return "error"
+    except subprocess.TimeoutExpired:
+        handle.terminate()
+        logger.log("retro", "TIMEOUT")
+        return "timeout"
 
     status = "done" if exit_code == 0 else "error"
     logger.log("retro", "DONE", exit=exit_code, status=status)
     return status
-
 
 def run_notify(worktree, pr_number, logger, message=None):
     """Run the notify hook script.
@@ -1490,7 +1442,7 @@ def _parse_github_repo(remote_url):
     return None
 
 
-def run_monitor(worktree, pr_number, resume=False, repo=None):
+def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
     """Main monitor loop — state-machine orchestrator (v9.1).
 
     Args:
@@ -1792,7 +1744,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None):
                     try:
                         _reconcile_replies(
                             worktree, pr_number, triage_results, logger, result,
-                            triage_rounds_used,
+                            triage_rounds_used, mode=mode,
                         )
                     except _UncommittedTriageError:
                         # AC-92: triage agent left uncommitted changes.
@@ -1860,7 +1812,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None):
             _step_ready(worktree, pr_number, logger, result)
 
         if not (resume and step_completed(result, "retro")):
-            _step_retro(worktree, logger, result)
+            _step_retro(worktree, logger, result, mode=mode)
 
         if not (resume and step_completed(result, "notify")):
             _deregister_inflight(worktree, logger)
@@ -1969,7 +1921,7 @@ def _step_triage(worktree, pr_number, comments, logger, result,
                  step_key, iteration):
     """Triage step. Returns triage results list or None."""
     try:
-        triage_results = run_triage(worktree, pr_number, comments, logger)
+        triage_results = run_triage(worktree, pr_number, comments, logger, mode=mode)
         summary_entry = {
             "iteration": iteration,
             "comments_in": len(comments),
@@ -2102,10 +2054,10 @@ def _step_ready(worktree, pr_number, logger, result):
         write_result(worktree, result)
 
 
-def _step_retro(worktree, logger, result):
+def _step_retro(worktree, logger, result, mode=None):
     """Run retro step."""
     try:
-        retro_status = run_retro(worktree, logger)
+        retro_status = run_retro(worktree, logger, mode=mode)
         result["retro_status"] = retro_status
         mark_step(result, "retro", retro_status)
         write_result(worktree, result)
@@ -2146,6 +2098,8 @@ def main():
     parser.add_argument("--repo",
                         help="GitHub owner/repo slug (e.g. owner/repo). "
                              "Resolved from git remote if omitted.")
+    parser.add_argument("--mode", choices=("interactive", "headless"), default=None,
+                        help="Dispatch mode: interactive (claude --bg) or headless (claude -p). Default: PPDS_DISPATCH_MODE env or interactive.")
     args = parser.parse_args()
 
     worktree = str(Path(args.worktree).resolve())
@@ -2155,7 +2109,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo)
+    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo, mode=args.mode)
     sys.exit(exit_code)
 
 
