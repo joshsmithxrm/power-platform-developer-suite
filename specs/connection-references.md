@@ -20,7 +20,6 @@ View connection references in an environment, see which Power Platform connectio
 
 ### Non-Goals
 
-- Connection Picker / rebinding (deferred — tracked as separate issue)
 - Connection creation or management (Power Platform admin operations)
 - Connector registration or custom connector management
 
@@ -83,6 +82,7 @@ View connection references in an environment, see which Power Platform connectio
 | `connectionReferences/list` | `{ solutionId?, environmentUrl? }` | `{ references: ConnectionReferenceInfo[] }` |
 | `connectionReferences/get` | `{ logicalName, environmentUrl? }` | `{ reference: ConnectionReferenceDetail, flows: FlowInfo[], connection?: ConnectionInfo }` |
 | `connectionReferences/analyze` | `{ environmentUrl? }` | `{ orphanedReferences: [], orphanedFlows: [] }` |
+| `connectionReferences/bind` | `{ logicalName, connectionId, environmentUrl? }` | `{ reference: ConnectionReferenceDetail }` |
 | `connections/list` | `{ connectorId?, environmentUrl? }` | `{ connections: ConnectionInfo[] }` |
 
 **ConnectionReferenceInfo fields:** logicalName, displayName, connectorId, connectionId, isManaged, modifiedOn, connectionStatus (Connected/Error/Unknown), connectorDisplayName
@@ -131,6 +131,7 @@ View connection references in an environment, see which Power Platform connectio
 | AC-CR-09 | MCP ppds_connection_references_analyze returns structured orphan analysis | TBD | ✅ |
 | AC-CR-10 | Open in Maker uses `buildMakerUrl()` (not inline URL construction) | TBD | 🔲 |
 | AC-CR-11 | Panel unit tests cover message handling, environment switching, data loading | TBD | 🔲 |
+| AC-CR-12 | Connection picker dialog binds a connection to a CR via `connectionReferences/bind`; picker dropdown is filtered by connector ID; managed CRs disable the Change action; clearing the dropdown unbinds | `ConnectionReferenceServiceTests.BindAsync_*` | ✅ |
 
 ---
 
@@ -140,9 +141,17 @@ View connection references in an environment, see which Power Platform connectio
 
 **Context:** Panel could show only Dataverse data (connection reference records without connection health).
 
-**Decision:** Include connection status from Power Platform API and detail pane with dependent flows. Defer connection picker/rebinding.
+**Decision:** Include connection status from Power Platform API and detail pane with dependent flows. The connection picker was initially deferred but landed in v1.2 (issue #592, AC-CR-12).
 
-**Rationale:** `IConnectionService` already exists. Without status, panel shows raw connector IDs — low value. SPN graceful degradation keeps panel functional for all auth methods. Connection picker deferred because the legacy extension never shipped it and deployment settings sync covers the automated use case.
+**Rationale:** `IConnectionService` already exists. Without status, panel shows raw connector IDs — low value. SPN graceful degradation keeps panel functional for all auth methods.
+
+### Why bind via Dataverse update, not the Connections API?
+
+**Context:** A connection reference's binding is an attribute (`connectionid`) on the Dataverse `connectionreference` entity. We could plausibly route a bind through the Power Apps API, but that API only manages Connections — not the binding back to a CR.
+
+**Decision:** `BindAsync` writes directly to `connectionreference.connectionid` through `IDataverseConnectionPool`. The Connections API is only read on the picker side (to populate the dropdown and surface connector/status/owner).
+
+**Rationale:** Single source of truth (Dataverse), no double-write, and works with the same auth path as every other Dataverse operation. SPN limitations on the Connections API only affect dropdown enrichment — the bind itself succeeds under SPN.
 
 ### Why orphan detection as a dedicated analyze action?
 

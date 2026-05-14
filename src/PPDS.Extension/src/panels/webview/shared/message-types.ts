@@ -339,6 +339,17 @@ export interface SolutionOptionDto {
     friendlyName: string;
 }
 
+/** Connection option rendered in the connection picker dropdown (issue #592). */
+export interface ConnectionPickerOptionDto {
+    connectionId: string;
+    displayName: string | null;
+    connectorId: string;
+    connectorDisplayName: string | null;
+    status: string;
+    isShared: boolean;
+    createdBy: string | null;
+}
+
 /** Messages the Connection References Panel webview sends to the extension host. */
 export type ConnectionReferencesPanelWebviewToHost =
     | { command: 'ready' }
@@ -354,6 +365,8 @@ export type ConnectionReferencesPanelWebviewToHost =
     | { command: 'openFlowInMaker'; url: string }
     | { command: 'syncDeploymentSettings' }
     | { command: 'copyToClipboard'; text: string }
+    | { command: 'requestConnections'; logicalName: string; connectorId: string | null }
+    | { command: 'bindConnection'; logicalName: string; connectionId: string | null }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Connection References Panel webview. */
@@ -365,6 +378,8 @@ export type ConnectionReferencesPanelHostToWebview =
     | { command: 'analyzeResult'; result: ConnectionReferencesAnalyzeViewDto }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
     | { command: 'deploymentSettingsSynced'; filePath: string; envVars: DeploymentSettingsSyncStatsDto; connectionRefs: DeploymentSettingsSyncStatsDto }
+    | { command: 'connectionsLoaded'; logicalName: string; connections: ConnectionPickerOptionDto[] }
+    | { command: 'connectionBound'; detail: ConnectionReferenceDetailViewDto; environmentId: string | null }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
 

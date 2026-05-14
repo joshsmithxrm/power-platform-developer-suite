@@ -128,6 +128,12 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             case 'syncDeploymentSettings':
                 await this.syncDeploymentSettings();
                 break;
+            case 'requestConnections':
+                await this.loadConnectionsForPicker(message.logicalName, message.connectorId);
+                break;
+            case 'bindConnection':
+                await this.bindConnection(message.logicalName, message.connectionId);
+                break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
                 break;
@@ -354,6 +360,74 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
         } finally {
             clearTimeout(timeout);
             cts.dispose();
+        }
+    }
+
+    private async loadConnectionsForPicker(logicalName: string, connectorId: string | null): Promise<void> {
+        try {
+            const result = await this.daemon.connectionsList(
+                connectorId ?? undefined,
+                this.environmentUrl,
+                this.profileName,
+            );
+            this.postMessage({
+                command: 'connectionsLoaded',
+                logicalName,
+                connections: result.connections.map(c => ({
+                    connectionId: c.connectionId,
+                    displayName: c.displayName,
+                    connectorId: c.connectorId,
+                    connectorDisplayName: c.connectorDisplayName,
+                    status: c.status,
+                    isShared: c.isShared,
+                    createdBy: c.createdBy,
+                })),
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to load connections: ${msg}` });
+        }
+    }
+
+    private async bindConnection(logicalName: string, connectionId: string | null): Promise<void> {
+        try {
+            const result = await this.daemon.connectionReferencesBind(
+                logicalName,
+                connectionId,
+                this.environmentUrl,
+                this.profileName,
+            );
+            const ref = result.reference;
+            this.postMessage({
+                command: 'connectionBound',
+                environmentId: this.environmentId,
+                detail: {
+                    logicalName: ref.logicalName,
+                    displayName: ref.displayName,
+                    connectorId: ref.connectorId,
+                    connectionId: ref.connectionId,
+                    isManaged: ref.isManaged,
+                    modifiedOn: ref.modifiedOn,
+                    connectionStatus: ref.connectionStatus,
+                    connectorDisplayName: ref.connectorDisplayName,
+                    description: ref.description,
+                    isBound: ref.isBound,
+                    createdOn: ref.createdOn,
+                    flows: ref.flows.map(f => ({
+                        flowId: f.flowId,
+                        uniqueName: f.uniqueName,
+                        displayName: f.displayName,
+                        state: f.state,
+                    })),
+                    connectionOwner: ref.connectionOwner,
+                    connectionIsShared: ref.connectionIsShared,
+                    flowCount: ref.flows.length,
+                    hasHealthWarning: !ref.isBound || ref.connectionStatus?.toLowerCase() === 'error',
+                },
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to bind connection: ${msg}` });
         }
     }
 

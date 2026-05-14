@@ -53,6 +53,7 @@ import type {
     ConnectionReferencesListResponse,
     ConnectionReferencesGetResponse,
     ConnectionReferencesAnalyzeResponse,
+    ConnectionsListResponse,
     EnvironmentVariablesListResponse,
     EnvironmentVariablesGetResponse,
     EnvironmentVariablesSetResponse,
@@ -940,6 +941,34 @@ export class DaemonClient implements vscode.Disposable {
         if (profileName !== undefined) params.profileName = profileName;
         this.log.info('Calling connectionReferences/analyze...');
         return await this.connection!.sendRequest<ConnectionReferencesAnalyzeResponse>('connectionReferences/analyze', params);
+    }
+
+    async connectionReferencesBind(
+        logicalName: string,
+        connectionId: string | null,
+        environmentUrl?: string,
+        profileName?: string,
+    ): Promise<ConnectionReferencesGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { logicalName, connectionId };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
+        this.log.info(`Calling connectionReferences/bind for ${logicalName} -> ${connectionId ?? '(cleared)'}...`);
+        return await this.connection!.sendRequest<ConnectionReferencesGetResponse>('connectionReferences/bind', params);
+    }
+
+    async connectionsList(
+        connectorId?: string,
+        environmentUrl?: string,
+        profileName?: string,
+    ): Promise<ConnectionsListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (connectorId !== undefined) params.connectorId = connectorId;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (profileName !== undefined) params.profileName = profileName;
+        this.log.info('Calling connections/list...');
+        return await this.connection!.sendRequest<ConnectionsListResponse>('connections/list', params);
     }
 
     // ── Environment Variables ───────────────────────────────────────────────

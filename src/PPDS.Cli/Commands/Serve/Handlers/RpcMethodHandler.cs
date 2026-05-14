@@ -4471,6 +4471,86 @@ public class RpcMethodHandler : IDisposable
         };
     }
 
+    /// <summary>
+    /// Lists Power Platform connections from the Power Apps Admin API,
+    /// optionally filtered by connector ID. Used by the VS Code connection picker.
+    /// </summary>
+    [JsonRpcMethod("connections/list")]
+    public async Task<ConnectionsListResponse> ConnectionsListAsync(
+        string? connectorId = null,
+        string? environmentUrl = null,
+        string? profileName = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
+        {
+            var connectionService = sp.GetRequiredService<IConnectionService>();
+            var connections = await connectionService.ListAsync(connectorId, ct);
+
+            return new ConnectionsListResponse
+            {
+                Connections = connections.Select(c => new ConnectionDto
+                {
+                    ConnectionId = c.ConnectionId,
+                    DisplayName = c.DisplayName,
+                    ConnectorId = c.ConnectorId,
+                    ConnectorDisplayName = c.ConnectorDisplayName,
+                    Status = c.Status.ToString(),
+                    IsShared = c.IsShared,
+                    CreatedBy = c.CreatedBy,
+                    ModifiedOn = c.ModifiedOn?.ToString("o")
+                }).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Binds a Power Platform connection to a connection reference.
+    /// Pass an empty/null connectionId to clear the binding.
+    /// </summary>
+    [JsonRpcMethod("connectionReferences/bind")]
+    public async Task<ConnectionReferencesGetResponse> ConnectionReferencesBindAsync(
+        string logicalName,
+        string? connectionId = null,
+        string? environmentUrl = null,
+        string? profileName = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalName))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'logicalName' parameter is required");
+        }
+
+        return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
+        {
+            var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
+            var updated = await connRefService.BindAsync(logicalName, connectionId, ct);
+
+            var flows = await connRefService.GetFlowsUsingAsync(logicalName, ct);
+
+            ConnectionInfo? connectionInfo = null;
+            if (!string.IsNullOrEmpty(updated.ConnectionId))
+            {
+                try
+                {
+                    var connectionService = sp.GetRequiredService<IConnectionService>();
+                    connectionInfo = await connectionService.GetAsync(updated.ConnectionId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Unable to retrieve connection details for '{ConnectionId}' after bind (SPN may not have access).", updated.ConnectionId);
+                }
+            }
+
+            return new ConnectionReferencesGetResponse
+            {
+                Reference = MapConnectionReferenceToDetailDto(updated, flows, connectionInfo)
+            };
+        }, cancellationToken);
+    }
+
     #endregion
 
     #region Environment Variables
@@ -7885,6 +7965,43 @@ public class OrphanedFlowDto
     [JsonPropertyName("missingReference")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MissingReference { get; set; }
+}
+
+public class ConnectionsListResponse
+{
+    [JsonPropertyName("connections")]
+    public List<ConnectionDto> Connections { get; set; } = [];
+}
+
+public class ConnectionDto
+{
+    [JsonPropertyName("connectionId")]
+    public string ConnectionId { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("connectorId")]
+    public string ConnectorId { get; set; } = "";
+
+    [JsonPropertyName("connectorDisplayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConnectorDisplayName { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("isShared")]
+    public bool IsShared { get; set; }
+
+    [JsonPropertyName("createdBy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedBy { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
 }
 
 // ── Environment Variables DTOs ─────────────────────────────────────────────────

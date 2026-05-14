@@ -417,3 +417,106 @@
     text-decoration: underline;
     color: var(--vscode-textLink-activeForeground, #4daafc);
 }
+
+/* ── Connection picker dialog (issue #592) ──────────────────── */
+.cr-bind-btn {
+    margin-left: 8px;
+    padding: 1px 8px;
+    font-size: 11px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid transparent;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.cr-bind-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+.cr-bind-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.cr-picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.cr-picker-dialog {
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    border: 1px solid var(--vscode-panel-border, var(--vscode-contrastBorder, #555));
+    border-radius: 4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    min-width: 420px;
+    max-width: 640px;
+}
+
+.cr-picker-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--vscode-panel-border, transparent);
+    font-weight: 600;
+}
+
+.cr-picker-body {
+    padding: 14px;
+    min-height: 80px;
+}
+
+.cr-picker-label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.cr-picker-select {
+    width: 100%;
+    padding: 4px 6px;
+    background: var(--vscode-dropdown-background, var(--vscode-input-background));
+    color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+    font-size: 12px;
+}
+
+.cr-picker-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.cr-picker-footer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--vscode-panel-border, transparent);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.cr-picker-footer button {
+    padding: 4px 12px;
+    font-size: 12px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid transparent;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.cr-picker-footer button:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+.cr-picker-footer button.cr-picker-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+.cr-picker-footer button.cr-picker-primary:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground);
+}
+.cr-picker-footer button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

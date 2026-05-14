@@ -71,6 +71,24 @@ public interface IConnectionReferenceService
     Task<FlowConnectionAnalysis> AnalyzeAsync(
         string? solutionName = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Binds a connection to a connection reference by updating the Dataverse
+    /// connectionreference entity's connectionid attribute. Pass <c>null</c> or
+    /// empty for <paramref name="connectionId"/> to clear an existing binding.
+    /// </summary>
+    /// <param name="logicalName">The connection reference logical name.</param>
+    /// <param name="connectionId">The target connection ID, or null/empty to unbind.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated connection reference info.</returns>
+    /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
+    /// Thrown when the connection reference does not exist (ErrorCode = Operation.NotFound)
+    /// or the update fails (ErrorCode = External.ServiceUnavailable).
+    /// </exception>
+    Task<ConnectionReferenceInfo> BindAsync(
+        string logicalName,
+        string? connectionId,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

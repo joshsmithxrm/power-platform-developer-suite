@@ -6,6 +6,7 @@ import type {
     ConnectionReferenceViewDto,
     ConnectionReferenceDetailViewDto,
     ConnectionReferencesAnalyzeViewDto,
+    ConnectionPickerOptionDto,
 } from '../../panels/webview/shared/message-types.js';
 
 describe('ConnectionReferencesPanel message types', () => {
@@ -23,9 +24,11 @@ describe('ConnectionReferencesPanel message types', () => {
             { command: 'openFlowInMaker', url: 'https://make.powerautomate.com/environments/env1/flows/flow1/details' },
             { command: 'syncDeploymentSettings' },
             { command: 'copyToClipboard', text: 'test' },
+            { command: 'requestConnections', logicalName: 'cr_test', connectorId: 'shared_test' },
+            { command: 'bindConnection', logicalName: 'cr_test', connectionId: 'conn-1' },
             { command: 'webviewError', error: 'test', stack: 'trace' },
         ];
-        expect(messages).toHaveLength(13);
+        expect(messages).toHaveLength(15);
     });
 
     it('WebviewToHost filterBySolution accepts null for "(No filter)"', () => {
@@ -60,10 +63,42 @@ describe('ConnectionReferencesPanel message types', () => {
             { command: 'analyzeResult', result: { orphanedReferences: [], orphanedFlows: [], totalReferences: 0, totalFlows: 0 } },
             { command: 'solutionListLoaded', solutions: [] },
             { command: 'deploymentSettingsSynced', filePath: '/path/to/file.json', envVars: { added: 1, removed: 0, preserved: 2 }, connectionRefs: { added: 0, removed: 0, preserved: 1 } },
+            { command: 'connectionsLoaded', logicalName: 'cr_test', connections: [] },
+            { command: 'connectionBound', environmentId: null, detail: {
+                logicalName: 'cr_test',
+                displayName: 'Test',
+                connectorId: null,
+                connectionId: 'conn-1',
+                isManaged: false,
+                modifiedOn: null,
+                connectionStatus: 'Connected',
+                connectorDisplayName: null,
+                description: null,
+                isBound: true,
+                createdOn: null,
+                flows: [],
+                connectionOwner: null,
+                connectionIsShared: null,
+            } },
             { command: 'error', message: 'test' },
             { command: 'daemonReconnected' },
         ];
-        expect(messages).toHaveLength(9);
+        expect(messages).toHaveLength(11);
+    });
+
+    it('ConnectionPickerOptionDto carries connector and status metadata', () => {
+        const dto: ConnectionPickerOptionDto = {
+            connectionId: '00000000-0000-0000-0000-000000000abc',
+            displayName: 'Prod CDS',
+            connectorId: 'shared_commondataserviceforapps',
+            connectorDisplayName: 'Common Data Service',
+            status: 'Connected',
+            isShared: true,
+            createdBy: 'admin@contoso.com',
+        };
+        expect(dto.status).toBe('Connected');
+        expect(dto.isShared).toBe(true);
+        expect(dto.connectorId).toBe('shared_commondataserviceforapps');
     });
 
     it('ConnectionReferenceViewDto has all required fields', () => {

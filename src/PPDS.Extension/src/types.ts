@@ -612,6 +612,21 @@ export interface ConnectionReferencesAnalyzeResponse {
     totalFlows: number;
 }
 
+export interface ConnectionsListResponse {
+    connections: ConnectionDto[];
+}
+
+export interface ConnectionDto {
+    connectionId: string;
+    displayName: string | null;
+    connectorId: string;
+    connectorDisplayName: string | null;
+    status: string;
+    isShared: boolean;
+    createdBy: string | null;
+    modifiedOn: string | null;
+}
+
 export interface ConnectionReferenceInfoDto {
     logicalName: string;
     displayName: string | null;
