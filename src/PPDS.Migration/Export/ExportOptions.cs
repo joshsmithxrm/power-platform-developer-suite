@@ -45,5 +45,11 @@ namespace PPDS.Migration.Export
         /// Default: 5000
         /// </summary>
         public int PageLevelParallelismThreshold { get; set; } = 5000;
+
+        /// <summary>
+        /// Gets or sets the serialization format for the exported data.
+        /// Default: <see cref="ExportDataFormat.Cmt"/> (CMT-compatible XML ZIP).
+        /// </summary>
+        public ExportDataFormat Format { get; set; } = ExportDataFormat.Cmt;
     }
 }

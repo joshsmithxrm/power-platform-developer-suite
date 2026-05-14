@@ -87,6 +87,12 @@ public static class ExportCommand
             DefaultValueFactory = _ => OutputFormat.Text
         };
 
+        var dataFormatOption = new Option<ExportDataFormat>("--format")
+        {
+            Description = "Data export format: cmt (CMT-compatible XML ZIP) or json (PPDS-native JSON)",
+            DefaultValueFactory = _ => ExportDataFormat.Cmt
+        };
+
         var verboseOption = new Option<bool>("--verbose", "-v")
         {
             Description = "Enable verbose logging output",
@@ -110,6 +116,7 @@ public static class ExportCommand
             pageParallelOption,
             pageParallelThresholdOption,
             outputFormatOption,
+            dataFormatOption,
             verboseOption,
             debugOption
         };
@@ -125,13 +132,14 @@ public static class ExportCommand
             var pageParallel = parseResult.GetValue(pageParallelOption);
             var pageParallelThreshold = parseResult.GetValue(pageParallelThresholdOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
+            var dataFormat = parseResult.GetValue(dataFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteAsync(
                 profile, environment, schema, output, parallel, batchSize,
                 pageParallel, pageParallelThreshold,
-                outputFormat, verbose, debug, cancellationToken);
+                outputFormat, dataFormat, verbose, debug, cancellationToken);
         });
 
         return command;
@@ -147,6 +155,7 @@ public static class ExportCommand
         int pageParallel,
         int pageParallelThreshold,
         OutputFormat outputFormat,
+        ExportDataFormat dataFormat,
         bool verbose,
         bool debug,
         CancellationToken cancellationToken)
@@ -177,7 +186,8 @@ public static class ExportCommand
                 DegreeOfParallelism = parallel,
                 PageSize = batchSize,
                 PageLevelParallelism = pageParallel,
-                PageLevelParallelismThreshold = pageParallelThreshold
+                PageLevelParallelismThreshold = pageParallelThreshold,
+                Format = dataFormat
             };
 
             var result = await exporter.ExportAsync(

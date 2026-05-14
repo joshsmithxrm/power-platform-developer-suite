@@ -30,6 +30,7 @@ namespace PPDS.Migration.Export
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly ICmtSchemaReader _schemaReader;
         private readonly ICmtDataWriter _dataWriter;
+        private readonly IJsonDataWriter? _jsonDataWriter;
         private readonly FileColumnTransferHelper? _fileTransferHelper;
         private readonly ExportOptions _defaultOptions;
         private readonly ILogger<ParallelExporter>? _logger;
@@ -56,7 +57,8 @@ namespace PPDS.Migration.Export
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
         /// <param name="schemaReader">The schema reader.</param>
-        /// <param name="dataWriter">The data writer.</param>
+        /// <param name="dataWriter">The CMT XML data writer.</param>
+        /// <param name="jsonDataWriter">The JSON data writer (used when <see cref="ExportOptions.Format"/> is <see cref="ExportDataFormat.Json"/>).</param>
         /// <param name="fileTransferHelper">Optional file column transfer helper for downloading file data.</param>
         /// <param name="migrationOptions">Migration options from DI.</param>
         /// <param name="logger">The logger.</param>
@@ -64,11 +66,13 @@ namespace PPDS.Migration.Export
             IDataverseConnectionPool connectionPool,
             ICmtSchemaReader schemaReader,
             ICmtDataWriter dataWriter,
+            IJsonDataWriter? jsonDataWriter = null,
             FileColumnTransferHelper? fileTransferHelper = null,
             IOptions<MigrationOptions>? migrationOptions = null,
             ILogger<ParallelExporter>? logger = null)
             : this(connectionPool, schemaReader, dataWriter)
         {
+            _jsonDataWriter = jsonDataWriter;
             _fileTransferHelper = fileTransferHelper;
             _defaultOptions = migrationOptions?.Value.Export ?? new ExportOptions();
             _logger = logger;
@@ -220,7 +224,20 @@ namespace PPDS.Migration.Export
                     ExportedAt = DateTime.UtcNow
                 };
 
-                await _dataWriter.WriteAsync(migrationData, outputPath, progress, cancellationToken).ConfigureAwait(false);
+                if (options.Format == ExportDataFormat.Json)
+                {
+                    if (_jsonDataWriter == null)
+                    {
+                        throw new InvalidOperationException(
+                            "JSON export format requested but no IJsonDataWriter is registered. " +
+                            "Register PPDS.Migration via AddDataverseMigration() so the JSON writer is available.");
+                    }
+                    await _jsonDataWriter.WriteAsync(migrationData, outputPath, progress, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _dataWriter.WriteAsync(migrationData, outputPath, progress, cancellationToken).ConfigureAwait(false);
+                }
 
                 stopwatch.Stop();
 
