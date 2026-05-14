@@ -10,6 +10,7 @@ using PPDS.Cli.Commands.Flows;
 using PPDS.Cli.Commands.ImportJobs;
 using PPDS.Cli.Commands.Internal;
 using PPDS.Cli.Commands.Metadata;
+using PPDS.Cli.Commands.Schema;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Commands.PluginTraces;
 using PPDS.Cli.Commands.CustomApis;
@@ -98,6 +99,7 @@ public static class Program
         rootCommand.Subcommands.Add(DataProvidersCommandGroup.Create());
         rootCommand.Subcommands.Add(DataSourcesCommandGroup.Create());
         rootCommand.Subcommands.Add(MetadataCommandGroup.Create());
+        rootCommand.Subcommands.Add(SchemaCommandGroup.Create());
         rootCommand.Subcommands.Add(QueryCommandGroup.Create());
         rootCommand.Subcommands.Add(SolutionsCommandGroup.Create());
         rootCommand.Subcommands.Add(ImportJobsCommandGroup.Create());
