@@ -88,9 +88,19 @@ def _read_text_bytes(path: Path) -> bytes | None:
 # ---- AC-21 ----------------------------------------------------------------
 
 _AC21_ALLOWLIST = {
+    # The dispatcher itself.
     "scripts/claude_dispatch.py",
+    # The /start foreground helper builds its own claude --bg argv
+    # locally (no --dangerously-skip-permissions, foreground UX).
+    "scripts/start-bg-spawn.py",
+    # Test files that assert on the literal argv shape produced by spawn().
     "tests/scripts/test_claude_dispatch_routing.py",
+    "tests/scripts/test_claude_dispatch.py",
+    "tests/scripts/test_start_bg_spawn.py",
+    "tests/test_pipeline.py",
+    # Specs and plans that describe the dispatcher contract.
     "specs/dispatch-routing.md",
+    "specs/workflow-enforcement.md",
     ".plans/2026-05-14-dispatch-routing.md",
 }
 
@@ -369,3 +379,69 @@ def test_claudemd_line_cap():
 
 
 # === end Phase 5D ===
+
+
+# === Phase 2E (AC-17 cross-cutting smoke test) ===
+
+def test_dangerous_flag_unattended_only():
+    """AC-17: All pipeline.py and pr_monitor.py spawn() invocations include
+    dangerous=True (unattended daemons); start-bg-spawn.py does NOT (foreground
+    /start helper has a human attached).
+
+    Token-scan (not AST) because the dispatcher's spawn() is the only entry
+    point and both pipeline/pr_monitor call it with kwargs; a literal
+    'dangerous=True' must appear in each spawn(...) call.
+    """
+    import re as _re
+    # 1) pipeline.py must contain dangerous=True somewhere inside its spawn() call.
+    pipeline_src = (_REPO_ROOT / "scripts" / "pipeline.py").read_text(encoding="utf-8")
+    assert _re.search(r"claude_dispatch\.spawn\(.*?dangerous=True", pipeline_src, _re.S), \
+        "AC-17: pipeline.run_claude must pass dangerous=True to claude_dispatch.spawn"
+
+    # 2) pr_monitor.py must contain dangerous=True in both run_triage and run_retro spawns.
+    pr_src = (_REPO_ROOT / "scripts" / "pr_monitor.py").read_text(encoding="utf-8")
+    spawn_calls = _balanced_call_bodies(pr_src, "claude_dispatch.spawn(")
+    assert len(spawn_calls) >= 2, \
+        "AC-17: pr_monitor must have at least 2 claude_dispatch.spawn() calls (triage + retro)"
+    for call_body in spawn_calls:
+        assert "dangerous=True" in call_body, \
+            "AC-17: every pr_monitor.spawn() invocation must include dangerous=True"
+
+    # 3) start-bg-spawn.py must NOT import or use claude_dispatch.spawn or pass
+    # --dangerously-skip-permissions. It builds its own --bg argv locally for
+    # the foreground UX.
+    start_src = (_REPO_ROOT / "scripts" / "start-bg-spawn.py").read_text(encoding="utf-8")
+    assert "claude_dispatch.spawn" not in start_src, \
+        "AC-17: start-bg-spawn.py must NOT call claude_dispatch.spawn " \
+        "(foreground UX, no unattended-daemon flag)"
+    assert "--dangerously-skip-permissions" not in start_src, \
+        "AC-17: start-bg-spawn.py must NOT pass --dangerously-skip-permissions " \
+        "(human-attached foreground session)"
+
+
+# === end Phase 2E ===
+
+
+
+def _balanced_call_bodies(src, prefix):
+    """Extract the body of every f(...) call matching prefix."""
+    bodies = []
+    i = 0
+    while True:
+        idx = src.find(prefix, i)
+        if idx < 0:
+            return bodies
+        start = idx + len(prefix)
+        depth = 1
+        j = start
+        while j < len(src) and depth > 0:
+            c = src[j]
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    bodies.append(src[start:j])
+                    break
+            j += 1
+        i = j + 1
