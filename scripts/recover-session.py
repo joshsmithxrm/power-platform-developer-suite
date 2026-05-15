@@ -5,12 +5,13 @@ Recover a Claude Code session that's invisible to the resume picker.
 A workflow helper for the `/recover-session` skill. Mechanics only —
 the skill drives the operator dialogue and decision points.
 
-Subcommands (Phase 1 ships `identify` only; `diagnose`, `restore`, and
-`prepare` are added in later phases per
-specs/recover-session.md).
+Subcommands (Phases 1–2 ship `identify` + `diagnose`; `restore` and
+`prepare` are added in later phases per specs/recover-session.md).
 
 Usage:
     python scripts/recover-session.py identify --query "<phrase>"
+    python scripts/recover-session.py diagnose --session <uuid>
+            [--ccd-sessions-file <path>]
 
 Output contract (per Constitution I1):
     stdout: JSON only (data)
@@ -35,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -51,6 +53,28 @@ def _projects_dir() -> Path:
     if override:
         return Path(override)
     return Path(os.path.expanduser("~/.claude/projects"))
+
+
+@dataclass(frozen=True)
+class DiagnoseResult:
+    """Diagnosis verdict for a session.
+
+    See specs/recover-session.md "Core Types" for field semantics.
+    `is_archived` is `None` when the caller didn't supply CCD session
+    state — the skill is expected to fetch it via MCP and merge.
+    """
+
+    session_id: str
+    transcript_exists: bool
+    is_archived: bool | None
+    worktree_exists: bool
+    branch_exists: bool
+    entrypoint: str
+    recoverable: bool
+    next_action: str
+    recorded_cwd: str
+    branch: str
+    repo_root: str
 
 
 @dataclass(frozen=True)
@@ -294,6 +318,172 @@ def _iso_epoch(iso: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Diagnose helpers — pure-Python wrappers around git/CCD state.
+# ---------------------------------------------------------------------------
+
+
+def find_transcript_by_uuid(session_id: str, projects_dir: Path) -> Path | None:
+    """Return the first top-level transcript matching <session_id>.jsonl.
+
+    Walks the same top-level-only set that identify uses, so subagent
+    JSONLs cannot masquerade as a session.
+    """
+    if not session_id or not projects_dir.exists():
+        return None
+    for transcript in iter_top_level_transcripts(projects_dir):
+        if transcript.stem == session_id:
+            return transcript
+    return None
+
+
+def resolve_repo_root_from_cwd(recorded_cwd: str) -> str:
+    """Walk up from recorded_cwd looking for the main repo root.
+
+    A worktree's `.git` is a *file* pointing at `<main>/.git/worktrees/<n>`.
+    A main repo has a `.git` *directory*. Both contain `commondir` info.
+    We resolve to the directory that contains a `.git` entry — caller can
+    verify it's a repo by attempting `git -C <root> rev-parse --git-dir`.
+
+    Returns "" if no .git found by walking up.
+    """
+    if not recorded_cwd:
+        return ""
+    p = Path(recorded_cwd).resolve() if Path(recorded_cwd).exists() else Path(recorded_cwd)
+    # Walk up. Stop at filesystem root.
+    seen: set[str] = set()
+    while str(p) not in seen:
+        seen.add(str(p))
+        git_entry = p / ".git"
+        if git_entry.exists():
+            # If recorded_cwd is itself a worktree, the main repo root is
+            # the parent referenced in .git/commondir. We prefer to return
+            # the *main* repo root so callers can `git -C <root> worktree add`
+            # without that command being confused by being inside a worktree.
+            return _find_main_repo_root(p)
+        parent = p.parent
+        if parent == p:
+            break
+        p = parent
+    return ""
+
+
+def _find_main_repo_root(start: Path) -> str:
+    """Given a path whose .git points into a worktree, return the main repo path."""
+    git_entry = start / ".git"
+    try:
+        if git_entry.is_dir():
+            return str(start).replace("\\", "/")
+        if git_entry.is_file():
+            # gitdir: C:/path/to/main/.git/worktrees/<name>
+            content = git_entry.read_text(encoding="utf-8", errors="replace").strip()
+            if content.startswith("gitdir:"):
+                gitdir = Path(content.split(":", 1)[1].strip())
+                # Walk up from gitdir to find the directory containing the .git dir
+                # gitdir = <main>/.git/worktrees/<name>; parent.parent = <main>/.git;
+                # parent.parent.parent = <main>
+                main_git = gitdir.parent.parent  # <main>/.git
+                if main_git.name == ".git":
+                    return str(main_git.parent).replace("\\", "/")
+    except OSError:
+        pass
+    return str(start).replace("\\", "/")
+
+
+def git_branch_exists(repo_root: str, branch: str) -> bool:
+    """True iff `git -C <repo_root> branch --list <branch>` returns non-empty."""
+    if not repo_root or not branch:
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo_root, "branch", "--list", branch],
+            capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+        return bool(proc.stdout.strip())
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
+
+def parse_worktree_porcelain(porcelain: str) -> list[str]:
+    """Extract worktree paths from `git worktree list --porcelain` output."""
+    paths: list[str] = []
+    for line in porcelain.splitlines():
+        if line.startswith("worktree "):
+            paths.append(line[len("worktree "):].strip().replace("\\", "/"))
+    return paths
+
+
+def worktree_exists_at(repo_root: str, recorded_cwd: str) -> bool:
+    """True iff recorded_cwd is registered as a worktree AND the dir exists.
+
+    Both conditions matter: a registered worktree whose directory was
+    rm-rf'd looks present to git until pruned, but Claude Desktop can't
+    anchor to it. Conversely, a populated directory not registered with
+    git is not a worktree.
+    """
+    if not repo_root or not recorded_cwd:
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo_root, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+    registered = {p.lower() for p in parse_worktree_porcelain(proc.stdout)}
+    target = recorded_cwd.replace("\\", "/").lower()
+    return target in registered and Path(recorded_cwd).exists()
+
+
+def lookup_archived_in_ccd_sessions(session_id: str, ccd_sessions: list[dict]) -> bool | None:
+    """Find `session_id` in the CCD list_sessions payload and return is_archived.
+
+    The CCD MCP tool returns sessionId values prefixed with `local_`, but
+    the transcript filename is the bare UUID without prefix. Match by
+    suffix to be robust.
+    """
+    if not session_id:
+        return None
+    for s in ccd_sessions:
+        sid = s.get("sessionId", "")
+        # local_<uuid> or just <uuid>
+        if sid.endswith(session_id) or session_id.endswith(sid.removeprefix("local_")):
+            return bool(s.get("isArchived", False))
+    return None
+
+
+def decide_next_action(
+    transcript_exists: bool,
+    branch_exists: bool,
+    worktree_exists: bool,
+    is_archived: bool | None,
+) -> str:
+    """State machine for the recovery next-step.
+
+    See specs/recover-session.md Specification Flows A-D.
+    """
+    if not transcript_exists:
+        return "unrecoverable-transcript-missing"
+    if not branch_exists:
+        return "unrecoverable-branch-missing"
+
+    if is_archived is None:
+        # Skill must fetch CCD state and re-call, OR present conditional handoff.
+        if worktree_exists:
+            return "check-archive-then-resume"
+        return "restore-then-check-archive-then-resume"
+
+    if is_archived and worktree_exists:
+        return "unarchive-and-resume"
+    if is_archived and not worktree_exists:
+        return "restore-unarchive-resume"
+    if not is_archived and not worktree_exists:
+        return "restore-and-resume"
+    return "resume"
+
+
+# ---------------------------------------------------------------------------
 # CLI entry
 # ---------------------------------------------------------------------------
 
@@ -325,6 +515,75 @@ def cmd_identify(query: str, projects_dir: Path | None = None) -> int:
     return 0
 
 
+def cmd_diagnose(
+    session_id: str,
+    projects_dir: Path | None = None,
+    ccd_sessions_file: Path | None = None,
+) -> int:
+    pd = projects_dir or _projects_dir()
+    transcript = find_transcript_by_uuid(session_id, pd)
+
+    if transcript is None:
+        result = DiagnoseResult(
+            session_id=session_id,
+            transcript_exists=False,
+            is_archived=None,
+            worktree_exists=False,
+            branch_exists=False,
+            entrypoint="unknown",
+            recoverable=False,
+            next_action="unrecoverable-transcript-missing",
+            recorded_cwd="",
+            branch="",
+            repo_root="",
+        )
+        print(json.dumps(asdict(result), indent=2))
+        return 0
+
+    meta = read_session_metadata(transcript)
+    recorded_cwd = meta.get("cwd", "")
+    branch = meta.get("gitBranch", "")
+    entrypoint = meta.get("entrypoint", "unknown")
+
+    repo_root = resolve_repo_root_from_cwd(recorded_cwd)
+
+    branch_ok = git_branch_exists(repo_root, branch) if (repo_root and branch) else False
+    worktree_ok = worktree_exists_at(repo_root, recorded_cwd) if (repo_root and recorded_cwd) else False
+
+    is_archived: bool | None = None
+    if ccd_sessions_file and ccd_sessions_file.exists():
+        try:
+            sessions = json.loads(ccd_sessions_file.read_text(encoding="utf-8"))
+            if isinstance(sessions, list):
+                is_archived = lookup_archived_in_ccd_sessions(session_id, sessions)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    recoverable = branch_ok or worktree_ok
+    next_action = decide_next_action(
+        transcript_exists=True,
+        branch_exists=branch_ok,
+        worktree_exists=worktree_ok,
+        is_archived=is_archived,
+    )
+
+    result = DiagnoseResult(
+        session_id=session_id,
+        transcript_exists=True,
+        is_archived=is_archived,
+        worktree_exists=worktree_ok,
+        branch_exists=branch_ok,
+        entrypoint=entrypoint,
+        recoverable=recoverable,
+        next_action=next_action,
+        recorded_cwd=recorded_cwd,
+        branch=branch,
+        repo_root=repo_root,
+    )
+    print(json.dumps(asdict(result), indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="recover-session",
@@ -342,9 +601,28 @@ def main(argv: list[str] | None = None) -> int:
         help="Phrase the operator remembers (>=4 chars).",
     )
 
+    p_diagnose = subparsers.add_parser(
+        "diagnose",
+        help="Report archive/worktree/branch state for a session UUID.",
+    )
+    p_diagnose.add_argument(
+        "--session",
+        required=True,
+        help="Session UUID (transcript filename stem).",
+    )
+    p_diagnose.add_argument(
+        "--ccd-sessions-file",
+        type=Path,
+        default=None,
+        help="Path to a JSON file containing mcp__ccd_session_mgmt__list_sessions output. "
+             "If omitted, is_archived is reported as null.",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "identify":
         return cmd_identify(args.query)
+    if args.cmd == "diagnose":
+        return cmd_diagnose(args.session, ccd_sessions_file=args.ccd_sessions_file)
     parser.error(f"unknown subcommand: {args.cmd}")
     return 2
 

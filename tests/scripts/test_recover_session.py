@@ -1,7 +1,8 @@
-"""Unit tests for scripts/recover-session.py — Phase 1 (identify).
+"""Unit tests for scripts/recover-session.py — Phases 1 & 2.
 
-Covers AC-01, AC-02 from specs/recover-session.md plus the supporting
-edge-case tests called out in .plans/2026-05-15-recover-session.md.
+Covers AC-01, AC-02, AC-03, AC-10 from specs/recover-session.md plus
+the supporting edge-case tests called out in
+.plans/2026-05-15-recover-session.md.
 """
 from __future__ import annotations
 
@@ -23,13 +24,22 @@ _spec.loader.exec_module(_mod)
 
 # Re-export for terseness
 cmd_identify = _mod.cmd_identify
+cmd_diagnose = _mod.cmd_diagnose
 score_match = _mod.score_match
 scan_for_query = _mod.scan_for_query
 read_first_user_message = _mod.read_first_user_message
 iter_top_level_transcripts = _mod.iter_top_level_transcripts
 build_identify_result = _mod.build_identify_result
 rank_results = _mod.rank_results
+find_transcript_by_uuid = _mod.find_transcript_by_uuid
+resolve_repo_root_from_cwd = _mod.resolve_repo_root_from_cwd
+git_branch_exists = _mod.git_branch_exists
+parse_worktree_porcelain = _mod.parse_worktree_porcelain
+worktree_exists_at = _mod.worktree_exists_at
+lookup_archived_in_ccd_sessions = _mod.lookup_archived_in_ccd_sessions
+decide_next_action = _mod.decide_next_action
 IdentifyResult = _mod.IdentifyResult
+DiagnoseResult = _mod.DiagnoseResult
 
 
 # ---------------------------------------------------------------------------
@@ -375,3 +385,220 @@ def test_identify_returns_error_when_projects_dir_missing(tmp_path, capsys):
     assert rc == 3
     err = json.loads(capsys.readouterr().err)
     assert err["error"] == "ProjectsDirNotFound"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: diagnose
+# ---------------------------------------------------------------------------
+
+
+import os  # noqa: E402  (needed for _init_git_repo's env merge)
+
+
+def _init_git_repo(path: Path, branches: list[str] | None = None) -> None:
+    """Create a real git repo with one commit so branch operations work."""
+    import subprocess as _sp
+
+    path.mkdir(parents=True, exist_ok=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    _sp.run(
+        ["git", "init", "-q", "--initial-branch=main", str(path)],
+        check=True, env=env,
+    )
+    (path / "README.md").write_text("seed\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(path), "add", "README.md"], check=True, env=env)
+    _sp.run(
+        ["git", "-C", str(path), "commit", "-q", "-m", "init"],
+        check=True, env=env,
+    )
+    for b in branches or []:
+        _sp.run(["git", "-C", str(path), "branch", b], check=True, env=env)
+
+
+def test_find_transcript_by_uuid_locates_top_level(tmp_path):
+    _write_transcript(tmp_path, "proj_a", "needle-uuid",
+                      first_user_message="anything")
+    found = find_transcript_by_uuid("needle-uuid", tmp_path)
+    assert found is not None
+    assert found.stem == "needle-uuid"
+
+
+def test_find_transcript_by_uuid_returns_none_when_missing(tmp_path):
+    _write_transcript(tmp_path, "proj_a", "other-uuid",
+                      first_user_message="anything")
+    found = find_transcript_by_uuid("nonexistent-uuid", tmp_path)
+    assert found is None
+
+
+def test_find_transcript_by_uuid_ignores_subagents(tmp_path):
+    """A subagent UUID at <session>/subagents/<uuid>.jsonl is not findable."""
+    _write_subagent_transcript(
+        tmp_path, "proj_a", "parent-uuid", "lurking-uuid",
+        first_user_message="anything",
+    )
+    found = find_transcript_by_uuid("lurking-uuid", tmp_path)
+    assert found is None
+
+
+def test_parse_worktree_porcelain_extracts_paths():
+    sample = """worktree C:/main/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree C:/main/repo/.worktrees/feat-a
+HEAD def456
+branch refs/heads/feat/a
+"""
+    paths = parse_worktree_porcelain(sample)
+    assert paths == ["C:/main/repo", "C:/main/repo/.worktrees/feat-a"]
+
+
+def test_git_branch_exists_against_real_repo(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, branches=["feat/exists"])
+    assert git_branch_exists(str(repo).replace("\\", "/"), "feat/exists") is True
+    assert git_branch_exists(str(repo).replace("\\", "/"), "feat/missing") is False
+
+
+def test_git_branch_exists_returns_false_when_repo_missing(tmp_path):
+    assert git_branch_exists("", "feat/x") is False
+    assert git_branch_exists(str(tmp_path / "nope"), "feat/x") is False
+
+
+def test_worktree_exists_at_detects_registered_path(tmp_path):
+    """Main repo's own path is its first registered worktree."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    repo_str = str(repo).replace("\\", "/")
+    assert worktree_exists_at(repo_str, str(repo)) is True
+
+
+def test_worktree_exists_at_false_when_path_not_registered(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    repo_str = str(repo).replace("\\", "/")
+    bogus = str(tmp_path / "bogus")
+    (tmp_path / "bogus").mkdir()  # path exists but not a worktree
+    assert worktree_exists_at(repo_str, bogus) is False
+
+
+def test_lookup_archived_in_ccd_sessions_finds_with_local_prefix():
+    sessions = [
+        {"sessionId": "local_aaa-bbb-ccc", "isArchived": True},
+        {"sessionId": "local_xxx-yyy-zzz", "isArchived": False},
+    ]
+    assert lookup_archived_in_ccd_sessions("aaa-bbb-ccc", sessions) is True
+    assert lookup_archived_in_ccd_sessions("xxx-yyy-zzz", sessions) is False
+
+
+def test_lookup_archived_in_ccd_sessions_returns_none_when_absent():
+    sessions = [{"sessionId": "local_aaa", "isArchived": True}]
+    assert lookup_archived_in_ccd_sessions("not-here", sessions) is None
+
+
+def test_decide_next_action_full_matrix():
+    # Unrecoverable cases
+    assert decide_next_action(False, True, True, False) == "unrecoverable-transcript-missing"
+    assert decide_next_action(True, False, True, False) == "unrecoverable-branch-missing"
+
+    # Known-archive-state cases
+    assert decide_next_action(True, True, True, True) == "unarchive-and-resume"
+    assert decide_next_action(True, True, False, True) == "restore-unarchive-resume"
+    assert decide_next_action(True, True, False, False) == "restore-and-resume"
+    assert decide_next_action(True, True, True, False) == "resume"
+
+    # Unknown-archive (skill didn't pass CCD state)
+    assert decide_next_action(True, True, True, None) == "check-archive-then-resume"
+    assert decide_next_action(True, True, False, None) == "restore-then-check-archive-then-resume"
+
+
+def test_cmd_diagnose_returns_transcript_missing_for_unknown_uuid(tmp_path, capsys):
+    """AC-10: transcript missing → recoverable=False, reason in next_action."""
+    rc = cmd_diagnose("totally-unknown-uuid", projects_dir=tmp_path)
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["transcript_exists"] is False
+    assert out["recoverable"] is False
+    assert out["next_action"] == "unrecoverable-transcript-missing"
+
+
+def test_cmd_diagnose_returns_three_booleans_against_live_repo(tmp_path, capsys):
+    """AC-03: diagnose returns is_archived, worktree_exists, branch_exists, entrypoint.
+
+    Uses a real tmp git repo so worktree + branch checks exercise real git.
+    """
+    # Create a real repo
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/diag-session"])
+    repo_str = str(repo).replace("\\", "/")
+
+    # Synthesize a transcript that points at the repo
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_diag", "diag-uuid",
+        first_user_message="diagnose me",
+        cwd=repo_str,
+        git_branch="claude/diag-session",
+        entrypoint="cli",
+    )
+
+    rc = cmd_diagnose("diag-uuid", projects_dir=projects)
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["transcript_exists"] is True
+    assert out["branch_exists"] is True
+    assert out["worktree_exists"] is True  # repo's own path is a worktree
+    assert out["entrypoint"] == "cli"
+    assert out["is_archived"] is None  # no --ccd-sessions-file provided
+    assert out["recoverable"] is True
+    # No CCD info → next_action says "check-archive-then-resume"
+    assert out["next_action"] == "check-archive-then-resume"
+
+
+def test_cmd_diagnose_uses_ccd_sessions_file(tmp_path, capsys):
+    """When --ccd-sessions-file is provided, is_archived is filled in."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/archived-session"])
+    repo_str = str(repo).replace("\\", "/")
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_arch", "archived-uuid",
+        first_user_message="i'm archived",
+        cwd=repo_str,
+        git_branch="claude/archived-session",
+    )
+    ccd_file = tmp_path / "ccd-sessions.json"
+    ccd_file.write_text(json.dumps([
+        {"sessionId": "local_archived-uuid", "isArchived": True},
+        {"sessionId": "local_other-uuid", "isArchived": False},
+    ]), encoding="utf-8")
+
+    rc = cmd_diagnose("archived-uuid", projects_dir=projects, ccd_sessions_file=ccd_file)
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["is_archived"] is True
+    assert out["next_action"] == "unarchive-and-resume"
+
+
+def test_cmd_diagnose_branch_missing_is_unrecoverable(tmp_path, capsys):
+    """Branch deleted → next_action = unrecoverable-branch-missing."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo)  # no extra branches; only 'main' exists
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_x", "branch-gone-uuid",
+        first_user_message="branch is gone",
+        cwd=str(repo).replace("\\", "/"),
+        git_branch="claude/deleted-branch",
+    )
+    rc = cmd_diagnose("branch-gone-uuid", projects_dir=projects)
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["branch_exists"] is False
+    assert out["next_action"] == "unrecoverable-branch-missing"
