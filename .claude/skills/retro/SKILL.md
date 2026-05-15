@@ -60,10 +60,18 @@ Run non-LLM extractors via `scripts/retro_helpers.py`. NEVER use `grep` on JSONL
 python -c "
 import json, sys
 sys.path.insert(0, 'scripts')
-from retro_helpers import extract_transcript_signals, extract_enforcement_signals, discover_transcripts
+from retro_helpers import (
+    extract_transcript_signals, extract_enforcement_signals,
+    discover_transcripts, detect_allowlist_drift, write_drift_proposals,
+)
 for t in discover_transcripts('.'):
     print(json.dumps({'transcript': t, 'signals': extract_transcript_signals(t)}))
 print(json.dumps({'enforcement': extract_enforcement_signals('.workflow/state.json')}))
+# Post-/verify allowlist-drift: flags fix commits touching subprocess-spawning
+# files NOT in the shakedown allowlist. Proposals merge into retro-findings.json.
+proposals = detect_allowlist_drift()
+print(json.dumps({'allowlist_drift': proposals}))
+write_drift_proposals('.workflow/retro-findings.json', proposals)
 "
 ```
 

@@ -210,6 +210,61 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 - Update task tracking
 - Continue until all phases are complete
 
+**G. Goal Verification (per-phase fast feedback)**
+
+If the spec has a `**Verification:**` frontmatter line, run a single-pass goal check after the phase commit. This catches the case where the phase landed clean against its own ACs but regressed the spec-level verification command.
+
+```python
+# inside the orchestrator (no agent dispatch at this level — just a probe)
+from goal_loop import read_goal_from_spec, run_until_green, GoalLoopOutcome
+goal = read_goal_from_spec(spec_path)
+if goal.verification_command is not None:
+    result = run_until_green(
+        goal,
+        attempt_fix=lambda r: None,  # per-phase: probe only, don't iterate
+        max_iterations=1,
+    )
+    if result.outcome is not GoalLoopOutcome.GREEN:
+        # surface the failure in the stage log and proceed to the next phase;
+        # the pre-tail sweep at Step 5.5 will iterate with the full budget.
+        log_phase_verification_red(phase, result)
+```
+
+If the spec has no `**Verification:**` line, skip Step 5.G entirely — backward compatible with all existing specs.
+
+### Step 5.5: Pre-Tail Goal Loop
+
+After all phases are committed and BEFORE running Step 6, run the full goal loop with the spec's configured `verification_max_iterations` (default 10). This is the "is the feature actually done" sweep — it iterates verify → fix-subagent → verify until GREEN, BLOCKED_HARD, STUCK_OUTPUT, or ITERATION_CAP. Mechanical stops only; never ask the operator.
+
+```python
+from goal_loop import read_goal_from_spec, run_until_green, GoalLoopOutcome
+goal = read_goal_from_spec(spec_path)
+if goal.verification_command is None:
+    pass  # spec opted out; proceed to Step 6
+else:
+    def attempt_fix(last):
+        # dispatch a fix subagent via the Agent tool with the failing output;
+        # the subagent reads the failure, debugs root cause, edits, and commits.
+        # Surface a BlockedSessionError only when the subagent's daemon has
+        # populated `needs` — empty `needs` is a transient (mirrors PR #1051 d1bfe877).
+        dispatch_fix_agent(last)
+
+    result = run_until_green(goal, attempt_fix=attempt_fix)
+    if result.outcome is GoalLoopOutcome.GREEN:
+        proceed_to_tail()
+    elif result.outcome is GoalLoopOutcome.BLOCKED_HARD:
+        # standard --bg blocked-state path; daemon state.json carries `needs`
+        raise_blocked_to_operator(result.blocked_needs)
+    else:
+        # ITERATION_CAP / STUCK_OUTPUT / FIX_ERROR — record in the PR description
+        # so the post-merge reviewer can see what stuck.
+        record_goal_loop_failure_in_pr(result)
+        # still proceed to Step 6: the phase commits are real work; the operator
+        # decides whether to ship or hold.
+```
+
+The helper lives at `scripts/goal_loop.py` and is unit-tested in `tests/scripts/test_goal_loop.py`. See `specs/goal-driven-implement.md` for the full contract (ACs 01-16) including stop conditions and the empty-needs `BlockedSessionError` tolerance.
+
 ### Step 6: Mandatory Tail — Full Verification Pipeline
 
 After ALL phases are committed, you MUST run the complete verification pipeline. This is not optional. The whole point of /implement is that it does not declare victory after just running the phases — it proves the work is done. <!-- enforcement: T1 hook:session-stop-workflow -->
