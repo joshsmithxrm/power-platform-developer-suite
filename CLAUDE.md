@@ -14,6 +14,7 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Throw raw exceptions from Application Services — wrap in `PpdsException` with an `ErrorCode`. <!-- enforcement: T2 hook:exception-wrap-check -->
 - Trust an agent research summary without reading the underlying code yourself. <!-- enforcement: T3 -->
 - Edit `PublicAPI.Unshipped.txt` during a rebase — accept `--theirs` and let it regenerate; manual edits produce phantom API-drift conflicts. <!-- since: PR#956 rationale --> <!-- enforcement: T3 escape-hatch: rebase-context detection too brittle for hook -->
+- Trust a `release/X` branch as the source of truth for what shipped as version X — verify with `git merge-base --is-ancestor <release-tag> <branch>`. Tags are authoritative; the branch tip may sit on a separate lineage. <!-- since: 2026-05-15 cleanup retro --> <!-- enforcement: T3 escape-hatch: only fires when reasoning about release history -->
 - Invoke `claude -p` or any Anthropic SDK without going through `scripts/claude_dispatch.py:spawn()`. <!-- enforcement: T2 hook:sdk-spend-warn -->
 
 ## ALWAYS <!-- enforcement: T3 not-a-directive -->

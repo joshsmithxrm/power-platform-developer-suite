@@ -5,315 +5,117 @@ description: Clean up merged worktrees and branches, prune stale remotes, rebase
 
 # Cleanup
 
-Remove merged worktrees and branches, prune stale remote tracking refs, and rebase remaining active worktrees onto main.
+Enumerate everything in one pass, dispatch parallel investigators for divergent items, auto-classify into SAFE / AMBIGUOUS / PROTECTED, bulk-approve SAFE in ONE prompt, discuss only AMBIGUOUS, execute one-at-a-time.
 
-## When to Use
+**Design principle:** default action, not default discussion. Read `REFERENCE.md §1` for the framing.
 
-- Before starting new feature work
-- After a PR is merged
-- "Clean up my branches"
-- "Tidy up worktrees"
-- Periodic housekeeping
+Phases: PARSE → PULL+PRE-SCAN → GATHER → CLASSIFY → BUCKET → APPROVE-SAFE → DISCUSS-AMBIGUOUS → EXECUTE-LOCAL → REBASE+POST-SCAN → REMOTE-SWEEP → SESSION-ARCHIVE → REPORT.
 
-## Process
+## 1. Parse args
 
-### 1. Parse Arguments
+- `/cleanup` — all phases
+- `/cleanup --dry-run` — run reads + the bulk-approval prompt; skip destructive commands
 
-Check `$ARGUMENTS` for flags:
-
-- `/cleanup` (no args) — execute all phases
-- `/cleanup --dry-run` — preview what would be cleaned without acting
-
-If `--dry-run` is set, skip all destructive commands but still run all read-only commands to produce the preview report.
-
-### 2. Pull Latest Main
+## 2. Pull main + pre-scan mid-rebase
 
 ```bash
-git fetch origin main
-git checkout main
-git merge --ff-only origin/main
+git fetch origin main && git checkout main && git merge --ff-only origin/main
 ```
 
-If `merge --ff-only` fails, main has local commits not on origin. STOP and report — do not force-reset main.
+`--ff-only` fail → STOP, report. Do not force-reset.
 
-### 3. Prune Stale Remotes and Classify Branches
+**Pre-scan (AC-7):** for every worktree in `git worktree list --porcelain`, if `<path>/.git/rebase-merge` or `<path>/.git/rebase-apply` exists, run `git -C <path> rebase --abort`. Mid-rebase leftovers break this run if not cleared.
 
-Prune first so we know which remote branches were deleted (indicating merged PRs):
+## 3. Gather (single pass — AC-1)
 
-```bash
-git remote prune origin --dry-run   # capture what will be pruned (lines like "* [would prune] origin/feature/foo")
-```
-
-If `--dry-run` mode is **not** active, execute the actual prune:
+Run in parallel:
 
 ```bash
-git remote prune origin             # actually prune
-```
-
-If `--dry-run` mode **is** active, skip the actual prune — use the `--dry-run` output for classification only.
-
-Save the list of pruned refs (extract the ref name after `[would prune]`, e.g., `origin/feature/foo`) for squash-merge detection below.
-
-Now identify merged branches:
-
-```bash
-# Machine-parseable worktree list
 git worktree list --porcelain
-
-# Branches merged into main (excluding main itself)
-git branch --merged main | grep -v '^\*\?\s*main$'
+git branch --format='%(refname:short) %(committerdate:iso8601) %(upstream:short)'
+git branch --merged main --format='%(refname:short)'
+git remote prune origin --dry-run                       # squash signal
+git ls-remote --heads origin
+git tag --list --sort=-version:refname
+gh pr list --state all --limit 500 --json number,headRefName,state,mergedAt,closedAt
+gh issue list --state open --limit 500 --json number,title,body
 ```
 
-For each branch in the merged list, check for divergent commits:
+Then `mcp__ccd_session_mgmt__list_sessions` (AC-4). Build `pr_by_branch`, `tag_set`, session map. In non-dry-run, execute `git remote prune origin` so reads see cleaned state. `gh` unavailable → warn, skip step 10.
+
+## 4. Classify
+
+Apply rule filters first (cheap, no agent). Canonical mapping in `REFERENCE.md §2 "Rule-filter table"`.
+
+**Workflow-artifact filter (AC-3):**
 
 ```bash
-git log main..<branch> --oneline
+git log main..<branch> --name-only --pretty=format: | sort -u
 ```
 
-If this produces **no output**, the branch has zero commits beyond main — it was created for future work or was fast-forward merged. Remove it from the merged list and classify it as **"not started"** (to be skipped).
+If every non-empty path matches `^(\.retros/|\.workflow/|\.claude/state/)` → SAFE (drift-merged).
 
-**Squash-merge detection (freshly pruned only):** For each local branch (whether or not it has a worktree) that is NOT in the merged list **and NOT classified as "not started"**, check if `origin/<branch>` appears in the pruned refs list from the prune command above. If so, classify as **squash-merged**.
-
-**Do NOT infer squash-merge from a missing remote tracking ref alone.** A missing remote could mean the branch was pruned in a prior session, OR that the branch was never pushed (in-flight local work) — these are indistinguishable after the fact. Deleting in-flight work is catastrophic; leaving a stale branch is harmless. If a branch has no remote tracking ref and wasn't freshly pruned this run, classify as **active** and leave it alone.
-
-Squash-merged detection only fires for branches whose remote was pruned in *this* run's `git remote prune`. Branches whose remotes were pruned in a previous session without being cleaned up will stay around indefinitely — that's the safe trade-off. Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
-
-Build five lists:
-- **Merged:** branches in the `--merged` list (after filtering) — with or without worktrees
-- **Squash-merged:** branches detected via the pruned-remote heuristic — with or without worktrees
-- **Active:** branches NOT merged, NOT squash-merged, NOT "not started"
-- **Not started:** branches removed from the merged list by the divergence check — report as skipped
-- **Locked worktrees:** worktrees with `locked` attribute in porcelain output — but check for **stale locks** first (see below)
-
-**Stale git lock detection:** For each locked worktree, extract the PID from the lock reason (e.g., `locked claude agent agent-xxx (pid 43216)`). If the lock reason has no PID or no reason text at all, the lock is ambiguous — classify as locked and skip it (do not unlock).
-
-When a PID is present, check whether it is still running:
+**Release tag-lineage (AC-6):** for `release/*`, derive candidate tag (`release/v1.0.0` → try `Cli-v1.0.0`, `Tui-v1.0.0`, `v1.0.0`):
 
 ```bash
-# Windows
-powershell -NoProfile -Command "Get-Process -Id <pid> -ErrorAction SilentlyContinue | Select-Object Id, ProcessName"
-
-# Unix
-kill -0 <pid> 2>/dev/null && echo "running" || echo "dead"
+git merge-base --is-ancestor <tag> <branch>
 ```
 
-If the PID is **dead**, the lock is stale. Unlock it and reclassify:
+Exit 0 = shipped = PROTECTED. Non-zero = NOT shipped = AMBIGUOUS. Never auto-SAFE a release branch.
+
+**Dispatch parallel investigators (AC-2)** for every branch with divergent commits not classified by rules. Issue all in a single `Agent` message (Lane A, read-only). Prompt template in `REFERENCE.md §3 "Investigator brief"`. Each returns `{last_author_date, divergent_commits, divergent_loc, paths_touched, ships_elsewhere, summary, recommendation, confidence, rationale}`. Collect before bucketing.
+
+## 5. Bucket
+
+Combine rule outputs + investigator returns into SAFE / AMBIGUOUS / PROTECTED. Full mapping in `REFERENCE.md §4 "Bucketing rules"`.
+
+**Stale-lock recovery before final bucketing:** parse PID from each locked worktree's reason; PID-alive check commands in `REFERENCE.md §5 "Stale-lock detection"`. Dead PID → `git worktree unlock <path>`, reclassify by rules. No PID in reason → PROTECTED. In `--dry-run`, record but do not unlock.
+
+## 6. Approve SAFE bulk (AC-10)
+
+ONE message: counts + SAFE list grouped by reason. Ask: **"Approve SAFE bucket?"** Options: `yes` / `no` / `show <branch>`. The only bulk prompt of the run.
+
+## 7. Discuss AMBIGUOUS
+
+Per item: branch + last-author-date + divergent-LOC + investigator summary + lean + one-sentence ask. Cap at 5; if more, re-dispatch investigators with sharper briefs (interaction-patterns §4).
+
+## 8. Execute LOCAL (one-at-a-time — AC-8)
+
+Permission classifier denies batched destructive ops. Process sequentially: never batch `branch -d`, parallel `rebase`, or `rm -rf` across paths.
+
+For each approved worktree (skip locked, skip main), in order:
+
+1. **Kill zombies** referencing the **full worktree path** (not just dirname). Commands in `REFERENCE.md §6 "Zombie + daemon shutdown"`. Wait 2 s.
+2. **Shut down daemons** — find `*-session.json` in the worktree, POST `/shutdown` to `daemonPort`, fall back to killing `daemonPid`, delete the session file.
+3. **Remove worktree:** `git worktree remove --force <path>`. NEVER remove main. Permission-denied after zombie kill → log "partially removed", do not retry.
+4. **Delete branch:** `git branch -d <branch>` for regular-merged; `git branch -D <branch>` for squash / drift / investigator-DELETE.
+5. **Orphan sweep:** list `.worktrees/*/`; for each not registered in step 3 porcelain output, guard against main path, kill zombies, `rm -rf`. Windows junctions: remove the link, do not follow target. Skip in `--dry-run`.
+6. **In-flight deregister** (for every removed branch): `python scripts/inflight-deregister.py --branch <branch>`, then once `python scripts/inflight-check.py --area scripts/ >/dev/null 2>&1 || true` to sweep stale registry entries.
+
+## 9. Rebase active + post-scan (AC-7)
+
+For each remaining active worktree: `git -C <path> rebase origin/main` sequentially. Conflict → `rebase --abort`, record, continue.
+
+**Post-scan:** re-check every worktree for `.git/rebase-merge` / `.git/rebase-apply`. Abort any found. Catches cancelled-mid-batch leftovers.
+
+## 10. Remote sweep (AC-5 + AC-6)
+
+Skip if `gh` unavailable. Classify each remote per `REFERENCE.md §7 "Remote-sweep classification"`. Present remote SAFE as a second bulk-approval prompt, then delete one-at-a-time:
 
 ```bash
-git worktree unlock <worktree-path>
+git push origin --delete <branch>
 ```
 
-After unlocking, re-evaluate the worktree's branch against the merged/squash-merged lists and move it to the appropriate category for removal. If `--dry-run`, report the stale lock but do not unlock.
+Remote AMBIGUOUS → per-item prompts. `release/*` failing tag-lineage are AMBIGUOUS by default.
 
-### 4. Remove Merged Worktrees
+## 11. Session archive batch (AC-4)
 
-Process worktrees **one at a time, sequentially** — do NOT run removals in parallel. A single failure in a parallel batch cancels all sibling calls.
+Select sessions where `isRunning: false` AND `cwd` not in `git worktree list`. Present batch: "Archive N stale sessions?" → yes/no. On approval, call `mcp__ccd_session_mgmt__archive_session` once per session. **Main-session only — do not delegate to a subagent** (the MCP tool rejects unsupervised mode). `--dry-run` lists only.
 
-For each merged or squash-merged worktree (not locked, not the main worktree):
+## 12. Report
 
-**Before removal, kill zombie shell processes and shut down daemons:**
+Use the template in `REFERENCE.md §8 "Final report"`. Prefix title with `[DRY RUN]` when applicable.
 
-**Zombie process detection:** Dead Claude agent sessions leave behind bash/shell processes stuck in `until ... sleep` loops polling for task output files that will never arrive. These hold filesystem locks on the worktree directory, causing `git worktree remove` and `rm -rf` to fail with "Permission denied" or "Device or resource busy."
+## Error handling
 
-For each worktree about to be removed, search for processes whose command line contains the **full worktree path** (e.g., `.worktrees/profile-env-ux`, not just `profile-env-ux`) to avoid false matches on short directory names:
-
-```bash
-# Windows — use the full relative or absolute path in the -like pattern
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<full-worktree-path>*' } | Select-Object ProcessId, Name, CommandLine"
-
-# Unix
-pgrep -af '<full-worktree-path>'
-```
-
-Report the matched processes before killing. Kill any matching processes (exclude the current cleanup session's own PID). Wait 2 seconds after killing to allow file handles to release before attempting removal:
-
-```bash
-# Windows
-taskkill /PID <pid> /F
-
-# Unix
-kill -9 <pid>
-```
-
-**Daemon shutdown:**
-
-1. Search for `*-session.json` files in the worktree (e.g., `tests/PPDS.Tui.E2eTests/tools/.tui-verify-session.json`)
-2. For each session file found:
-   - Read `daemonPort` and `daemonPid` from the JSON
-   - Send `POST http://localhost:{port}/shutdown` (timeout 5s)
-   - If the HTTP request fails, kill the PID directly: `taskkill /PID {pid} /F` (Windows) or `kill {pid}` (Unix)
-   - Delete the session file
-3. Proceed with worktree removal after zombies and daemons are shut down
-
-```bash
-git worktree remove --force .worktrees/<name>
-```
-
-`--force` handles worktrees with uncommitted changes. Report each removal including whether force was needed.
-
-**Safety rules:**
-- NEVER remove the main worktree (the repo root) <!-- enforcement: T1 hook:worktree-safety -->
-- Skip locked worktrees — report them as skipped with reason
-- Report any removal failures and continue with the next worktree
-
-### 4b. Sweep Orphan Directories
-
-After removing merged worktrees, check for orphan directories — directories in `.worktrees/` that are not registered git worktrees (e.g., left behind when `git worktree remove` deregistered but failed to delete the directory).
-
-1. List all directories in `.worktrees/`:
-   ```bash
-   ls -d .worktrees/*/ 2>/dev/null
-   ```
-
-2. Compare against registered worktree paths from `git worktree list --porcelain` (already parsed in step 3). Extract the `worktree` lines to get the full path of each registered worktree.
-
-3. For each directory in `.worktrees/` that does NOT appear in the registered worktree list:
-   - **Guard:** Compare the directory's resolved absolute path against the main worktree path (the first `worktree` entry in `git worktree list --porcelain`). If they match, skip it — never remove the main worktree.
-   - **Kill zombie processes first:** Before attempting `rm -rf`, search for processes referencing the orphan's full path (same technique as step 4's zombie detection) and kill them. Wait 2 seconds after killing. Orphan directories are the most common place where zombie processes block cleanup.
-   - If `--dry-run`: add to orphan report, do NOT delete
-   - Otherwise: `rm -rf .worktrees/<name>`
-   - On Windows, if the orphan is a junction/symlink, remove the link itself — do not follow into the target directory
-
-4. If `rm -rf` fails (e.g., permission denied) even after killing zombies, log as failed in the report and continue with the next orphan.
-
-### 4c. Deregister In-Flight Entries
-
-For every branch that was removed (merged, squash-merged, or its
-worktree deleted), deregister its entry from the cross-session in-flight
-state file so sibling sessions stop seeing stale claims:
-
-```bash
-python scripts/inflight-deregister.py --branch <branch-name>
-```
-
-This is idempotent — sessions that were never registered (or already
-deregistered) succeed silently. Skip in `--dry-run` mode.
-
-Additionally, sweep stale entries (older than 24h with a missing local
-branch) by issuing a no-op check:
-
-```bash
-python scripts/inflight-check.py --area scripts/ >/dev/null 2>&1 || true
-```
-
-The pruning is a side-effect of `inflight-check` — running it ensures
-abandoned sessions do not accumulate in the registry forever.
-
-### 5. Delete Local Branches
-
-After worktrees are removed, delete their local branches:
-
-**Regular-merged branches** (detected by `--merged`):
-
-```bash
-git branch -d <branch-name>
-```
-
-Use `-d` as a safety check — git will refuse if the branch is not actually merged.
-
-**Squash-merged branches** (detected by pruned-remote heuristic):
-
-```bash
-git branch -D <branch-name>
-```
-
-Use `-D` because git cannot see squash-merge ancestry, so `-d` will always refuse. The pruned-remote heuristic provides a strong signal that the branch is safe to delete.
-
-If either command fails, log the error and continue.
-
-### 6. Rebase Active Worktrees
-
-Process worktrees **one at a time, sequentially** — do NOT run rebases in parallel. A single conflict in a parallel batch cancels all sibling calls.
-
-For each remaining (non-locked) active worktree:
-
-```bash
-git -C <worktree-path> rebase origin/main
-```
-
-If rebase produces conflicts:
-1. Run `git -C <worktree-path> rebase --abort` immediately
-2. Record the worktree as "rebase conflict" in the report
-3. Continue to the next worktree
-
-Do NOT leave any worktree in a mid-rebase state.
-
-### 7. Final Report
-
-Present a summary:
-
-```
-## Cleanup Report
-
-### Removed (merged)
-| Worktree | Branch | Merge Type | Forced? |
-|----------|--------|------------|---------|
-| .worktrees/foo | feature/foo | regular | No |
-| .worktrees/bar | feature/bar | squash (used -D) | Yes (uncommitted changes) |
-
-### Deleted Branches (no worktree)
-- feature/old-thing (regular → -d)
-- fix/stale-fix (squash → -D)
-
-### Orphans Removed
-| Directory | Status |
-|-----------|--------|
-| .worktrees/old-thing | Removed |
-| .worktrees/stale-dir | Failed (permission denied) |
-
-### Pruned Remote Refs
-- origin/feature/old-thing
-- origin/fix/stale-fix
-
-### Rebased (active)
-| Worktree | Branch | Result |
-|----------|--------|--------|
-| .worktrees/baz | feature/baz | OK |
-| .worktrees/qux | feature/qux | Conflict — aborted |
-
-### Skipped
-| Worktree | Branch | Reason |
-|----------|--------|--------|
-| .worktrees/wip | feature/wip | Locked |
-| .worktrees/prep | feature/prep | No divergent commits (not started) |
-
-### Stale Locks Recovered
-| Worktree | Branch | Lock PID | Action |
-|----------|--------|----------|--------|
-| .claude/worktrees/agent-xxx | docs/old-thing | 43216 (dead) | Unlocked → removed |
-
-### Zombie Processes Killed
-| PID | Worktree | Process |
-|-----|----------|---------|
-| 12345 | .worktrees/foo | bash.exe (stale until-loop) |
-
-### Summary
-- Removed: N worktrees (N regular, N squash-merged), N branches
-- Orphans: N removed, N failed
-- Stale locks: N recovered
-- Zombies killed: N processes
-- Pruned: N remote refs
-- Rebased: N OK, N conflicts
-- Skipped: N locked, N not started
-```
-
-If `--dry-run` was specified, prefix the report title with `[DRY RUN]` and note that no changes were made.
-
-## Error Handling
-
-| Error | Recovery |
-|-------|----------|
-| `merge --ff-only` fails on main | STOP — report that main has diverged, do not proceed |
-| `git remote prune origin` fails | Log warning, continue — classification will still work via `--merged` |
-| Worktree removal fails (Permission denied) | Kill zombie processes referencing the worktree (step 4 zombie detection), then retry once. If still failing, log as "partially removed — directory locked by another process" and continue. Do NOT retry more than once. |
-| Worktree removal fails (other) | Log error, continue with next worktree |
-| `branch -d` fails (regular-merged) | Log error — branch may not actually be merged, skip it |
-| `branch -D` fails (squash-merged) | Log error — unexpected, report for manual investigation |
-| Rebase conflict | `git rebase --abort`, record in report, continue |
-| Locked worktree (PID alive) | Skip with note in report |
-| Locked worktree (PID dead) | Unlock with `git worktree unlock`, reclassify, proceed with removal |
-| Not on main branch | `git checkout main` before starting |
-| Branch has no remote tracking ref and is not in `--merged` | Classify as active — no signal to determine merge status |
-| `rm -rf` fails on orphan directory (permission denied) | Log as failed in report, continue with next orphan |
-| `.worktrees/` directory doesn't exist | Skip orphan sweep — nothing to check |
-| Orphan is a symlink/junction (Windows) | Remove the link itself, do not follow into the target |
+Full recovery table in `REFERENCE.md §9 "Error catalogue"`.
