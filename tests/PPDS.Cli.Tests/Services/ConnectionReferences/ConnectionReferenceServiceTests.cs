@@ -238,4 +238,25 @@ public class ConnectionReferenceServiceTests
         ex.Which.ErrorCode.Should().Be(ErrorCodes.External.ServiceUnavailable);
         ex.Which.InnerException.Should().BeOfType<InvalidOperationException>();
     }
+
+    [Fact]
+    public async Task GetAsync_QueryDoesNotFilterByStateCode_SoInactiveRefsResolve()
+    {
+        // The "All" toggle in the panel surfaces inactive (statecode=1) refs.
+        // Bind must resolve their Id via GetAsync, so logical-name lookup
+        // must NOT add a statecode filter.
+        var (service, client) = CreateServiceWithPool();
+        QueryBase? capturedQuery = null;
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryBase, CancellationToken>((q, _) => capturedQuery = q)
+            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(Guid.NewGuid(), "myapp_cr", connectionId: null) }));
+
+        var result = await service.GetAsync("myapp_cr");
+
+        result.Should().NotBeNull();
+        var query = capturedQuery.Should().BeOfType<QueryExpression>().Subject;
+        query.Criteria.Conditions
+            .Should().NotContain(c => c.AttributeName == "statecode",
+                "GetAsync is keyed by unique logical name; state filtering is a list-level concern.");
+    }
 }

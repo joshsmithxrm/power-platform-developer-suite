@@ -673,9 +673,28 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
                 renderPickerOptions();
             }
             break;
-        case 'connectionBound':
+        case 'connectionBound': {
             currentEnvironmentId = msg.environmentId;
             rowDetails.set(msg.detail.logicalName, msg.detail);
+
+            // Refresh the main row so the Status badge mirrors the new bound state.
+            const items = table.getItems();
+            const idx = items.findIndex(it => it.logicalName === msg.detail.logicalName);
+            if (idx !== -1) {
+                const updated = {
+                    ...items[idx],
+                    connectionId: msg.detail.connectionId,
+                    connectionStatus: msg.detail.connectionStatus,
+                    connectorDisplayName: msg.detail.connectorDisplayName,
+                    modifiedOn: msg.detail.modifiedOn,
+                    hasHealthWarning: !msg.detail.isBound || msg.detail.connectionStatus?.toLowerCase() === 'error',
+                };
+                const next = items.slice();
+                next[idx] = updated;
+                table.setItems(next);
+                searchFilter.setItems(next);
+            }
+
             if (expandedRows.has(msg.detail.logicalName)) {
                 insertInlineDetail(msg.detail.logicalName, msg.detail);
             }
@@ -684,6 +703,7 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
                 ? 'Connection bound to ' + msg.detail.logicalName
                 : 'Connection cleared on ' + msg.detail.logicalName;
             break;
+        }
         case 'deploymentSettingsSynced':
             (syncBtn as HTMLButtonElement).disabled = false;
             syncBtn.textContent = 'Sync Deployment Settings';

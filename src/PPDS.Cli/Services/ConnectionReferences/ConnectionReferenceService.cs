@@ -119,6 +119,8 @@ public class ConnectionReferenceService : IConnectionReferenceService
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
+        // Logical name is unique; do not filter by state — the panel's "All"
+        // toggle surfaces inactive refs and Bind must still resolve their Id.
         var query = new QueryExpression(ConnectionReference.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(true),
@@ -128,7 +130,6 @@ public class ConnectionReferenceService : IConnectionReferenceService
             ConnectionReference.Fields.ConnectionReferenceLogicalName,
             ConditionOperator.Equal,
             logicalName);
-        query.Criteria.AddCondition(ConnectionReference.Fields.StateCode, ConditionOperator.Equal, 0);
 
         var results = await client.RetrieveMultipleAsync(query, cancellationToken);
 
