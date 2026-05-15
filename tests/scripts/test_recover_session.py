@@ -27,6 +27,10 @@ _spec.loader.exec_module(_mod)
 cmd_identify = _mod.cmd_identify
 cmd_diagnose = _mod.cmd_diagnose
 cmd_restore = _mod.cmd_restore
+cmd_prepare = _mod.cmd_prepare
+git_ahead_behind = _mod.git_ahead_behind
+scan_transcript_for_issue_refs = _mod.scan_transcript_for_issue_refs
+format_catch_up_message = _mod.format_catch_up_message
 score_match = _mod.score_match
 scan_for_query = _mod.scan_for_query
 read_first_user_message = _mod.read_first_user_message
@@ -768,6 +772,168 @@ def test_restore_reports_transcript_not_found(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert rc == 1
     assert out["restored"] is False
+    assert out["reason"] == "TranscriptNotFound"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: prepare
+# ---------------------------------------------------------------------------
+
+
+def test_scan_transcript_for_issue_refs_finds_hash_numbers(tmp_path):
+    t = _write_transcript(
+        tmp_path, "proj_p", "prep-uuid",
+        first_user_message="working on #1074 and #1066",
+        body_lines=[
+            "let's also look at #1068",
+            "no issue here just text",
+            "ref to #1074 again should dedupe",
+        ],
+    )
+    refs = scan_transcript_for_issue_refs(t)
+    assert refs == [1066, 1068, 1074]
+
+
+def test_scan_transcript_for_issue_refs_empty_for_no_matches(tmp_path):
+    t = _write_transcript(
+        tmp_path, "proj_p", "no-refs",
+        first_user_message="no issue references here",
+    )
+    refs = scan_transcript_for_issue_refs(t)
+    assert refs == []
+
+
+def test_git_ahead_behind_zero_zero_for_branch_at_main(tmp_path):
+    """A branch pointing at the same commit as main is (0, 0)."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["feat/parity"])
+    # Set up origin/main pointing at same commit
+    subprocess.run(
+        ["git", "-C", str(repo), "branch", "--track", "main2", "main"],
+        check=True, capture_output=True, stdin=subprocess.DEVNULL,
+    )
+    # When base ref doesn't exist, fall back to 'main' which is local
+    ahead, behind = git_ahead_behind(str(repo).replace("\\", "/"), "feat/parity", "main")
+    assert ahead == 0
+    assert behind == 0
+
+
+def test_git_ahead_behind_returns_zero_on_invalid_repo():
+    assert git_ahead_behind("", "feat/x") == (0, 0)
+    assert git_ahead_behind("/does/not/exist", "feat/x") == (0, 0)
+
+
+def test_format_catch_up_message_includes_behind_count():
+    diag = _mod.DiagnoseResult(
+        session_id="abc", transcript_exists=True, is_archived=False,
+        worktree_exists=True, branch_exists=True, entrypoint="cli",
+        recoverable=True, next_action="resume",
+        recorded_cwd="C:/path/to/wt", branch="feat/x",
+        repo_root="C:/path/to/repo",
+    )
+    msg = format_catch_up_message(diag, (1, 7), [], [])
+    assert "7 commits BEHIND" in msg
+    assert "PublicAPI.Unshipped.txt" in msg  # rebase hint
+
+
+def test_format_catch_up_message_lists_merged_prs():
+    diag = _mod.DiagnoseResult(
+        session_id="abc", transcript_exists=True, is_archived=False,
+        worktree_exists=True, branch_exists=True, entrypoint="cli",
+        recoverable=True, next_action="resume",
+        recorded_cwd="C:/path", branch="feat/x", repo_root="C:/repo",
+    )
+    prs = [
+        {"number": 1073, "title": "fix(workflow): post-#1057 robustness"},
+        {"number": 1075, "title": "fix(workflow): node/npm PATH"},
+    ]
+    msg = format_catch_up_message(diag, (0, 2), prs, [])
+    assert "#1073" in msg
+    assert "#1075" in msg
+    assert "node/npm PATH" in msg
+
+
+def test_format_catch_up_message_lists_issue_refs():
+    diag = _mod.DiagnoseResult(
+        session_id="abc", transcript_exists=True, is_archived=False,
+        worktree_exists=True, branch_exists=True, entrypoint="cli",
+        recoverable=True, next_action="resume",
+        recorded_cwd="C:/path", branch="feat/x", repo_root="C:/repo",
+    )
+    msg = format_catch_up_message(diag, (0, 0), [], [1066, 1074])
+    assert "#1066" in msg
+    assert "#1074" in msg
+    assert "gh issue view" in msg
+
+
+def test_cmd_prepare_returns_catch_up_against_live_repo(tmp_path, capsys):
+    """AC-07: prepare returns branch delta, merged PRs (stub), issue refs,
+    and a copy-pasteable resume command."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/prepare-test"])
+    target = repo / ".worktrees" / "prepare-test"
+
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_p", "prep-uuid",
+        first_user_message="working on #1074 and #1066",
+        body_lines=["ref to #1068 mid-session"],
+        cwd=str(target).replace("\\", "/"),
+        git_branch="claude/prepare-test",
+    )
+
+    # Inject a stub gh fetcher so the test doesn't depend on the system gh
+    fake_prs = [
+        {"number": 1075, "title": "fix(workflow): node/npm PATH"},
+        {"number": 1073, "title": "fix(workflow): post-#1057 robustness"},
+    ]
+    rc = cmd_prepare(
+        "prep-uuid",
+        projects_dir=projects,
+        gh_fetcher=lambda since: fake_prs,
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["prepared"] is True
+    assert out["branch"] == "claude/prepare-test"
+    assert out["issue_refs"] == [1066, 1068, 1074]
+    assert out["merged_prs"] == fake_prs
+    assert "#1074" in out["catch_up_message"]
+    assert "#1075" in out["catch_up_message"]
+    assert out["resume_command"].endswith("claude --resume prep-uuid")
+    assert out["resume_command"].startswith(f"cd {str(target).replace(chr(92), '/')}")
+
+
+def test_cmd_prepare_handles_gh_unavailable(tmp_path, capsys):
+    """When gh fetcher returns [], catch-up message degrades gracefully."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/no-gh"])
+    target = repo / ".worktrees" / "no-gh"
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_q", "nogh-uuid",
+        first_user_message="testing without gh",
+        cwd=str(target).replace("\\", "/"),
+        git_branch="claude/no-gh",
+    )
+    rc = cmd_prepare(
+        "nogh-uuid",
+        projects_dir=projects,
+        gh_fetcher=lambda since: [],
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["prepared"] is True
+    assert out["merged_prs"] == []
+    # Message should explicitly state no PR delta available
+    assert "No merged-PR delta available" in out["catch_up_message"]
+
+
+def test_cmd_prepare_returns_transcript_not_found_for_unknown(tmp_path, capsys):
+    rc = cmd_prepare("nothere-uuid", projects_dir=tmp_path)
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["prepared"] is False
     assert out["reason"] == "TranscriptNotFound"
 
 

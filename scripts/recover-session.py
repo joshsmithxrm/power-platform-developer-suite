@@ -5,14 +5,16 @@ Recover a Claude Code session that's invisible to the resume picker.
 A workflow helper for the `/recover-session` skill. Mechanics only —
 the skill drives the operator dialogue and decision points.
 
-Subcommands (Phases 1–3 ship `identify` + `diagnose` + `restore`;
-`prepare` is added in Phase 4 per specs/recover-session.md).
+Subcommands (Phases 1–4 ship `identify` + `diagnose` + `restore` +
+`prepare` per specs/recover-session.md).
 
 Usage:
     python scripts/recover-session.py identify --query "<phrase>"
     python scripts/recover-session.py diagnose --session <uuid>
             [--ccd-sessions-file <path>]
     python scripts/recover-session.py restore  --session <uuid>
+            [--ccd-sessions-file <path>]
+    python scripts/recover-session.py prepare  --session <uuid>
             [--ccd-sessions-file <path>]
 
 Output contract (per Constitution I1):
@@ -569,6 +571,196 @@ def cmd_diagnose(
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Prepare helpers (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def git_ahead_behind(repo_root: str, branch: str, base: str = "origin/main") -> tuple[int, int]:
+    """Return (ahead, behind) commit counts of `branch` relative to `base`.
+
+    Uses `git rev-list --left-right --count <branch>...<base>` which
+    emits two whitespace-separated integers: left=ahead, right=behind.
+
+    Returns (0, 0) on any error — the caller renders this as "no delta
+    available" rather than failing the whole prepare phase.
+    """
+    if not repo_root or not branch:
+        return (0, 0)
+    spec = f"{branch}...{base}"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo_root, "rev-list", "--left-right", "--count", spec],
+            capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return (0, 0)
+    if proc.returncode != 0:
+        return (0, 0)
+    parts = proc.stdout.split()
+    if len(parts) != 2:
+        return (0, 0)
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except ValueError:
+        return (0, 0)
+
+
+def gh_pr_list_merged_since(since_iso: str, limit: int = 30) -> list[dict]:
+    """Return PRs merged on/after `since_iso` (best-effort).
+
+    Uses `gh pr list --state merged --search "merged:>=<date>"`. If
+    `gh` is unavailable, returns []. The skill renders a softer
+    catch-up in that case.
+    """
+    if not since_iso:
+        return []
+    # Trim to date portion for gh's search syntax (it accepts YYYY-MM-DD).
+    date_part = since_iso.split("T", 1)[0]
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "list",
+             "--state", "merged",
+             "--search", f"merged:>={date_part}",
+             "--limit", str(limit),
+             "--json", "number,title,mergedAt"],
+            capture_output=True, text=True, timeout=20,
+            stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+    return []
+
+
+def scan_transcript_for_issue_refs(transcript: Path, max_bytes: int = MAX_SCAN_BYTES) -> list[int]:
+    """Find #NNN issue references in the transcript. Returns sorted unique ints."""
+    import re as _re
+
+    pattern = _re.compile(r"#(\d{2,6})\b")
+    found: set[int] = set()
+    bytes_read = 0
+    try:
+        with transcript.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                bytes_read += len(line)
+                if bytes_read > max_bytes:
+                    break
+                for m in pattern.finditer(line):
+                    try:
+                        n = int(m.group(1))
+                    except ValueError:
+                        continue
+                    # Skip UUIDs masquerading as issue refs: a hex char
+                    # immediately before `#` would mean we're inside a
+                    # longer hex token. The `\b` already filters most.
+                    found.add(n)
+    except OSError:
+        return []
+    return sorted(found)
+
+
+def format_catch_up_message(
+    diag: DiagnoseResult,
+    ahead_behind: tuple[int, int],
+    merged_prs: list[dict],
+    issue_refs: list[int],
+) -> str:
+    """Render the operator-facing catch-up text."""
+    ahead, behind = ahead_behind
+    lines: list[str] = []
+    lines.append(
+        f"Recovered session `{diag.session_id}` on branch `{diag.branch}`. "
+        "Before continuing, reconcile what's changed while the session was dark:"
+    )
+    lines.append("")
+    if behind:
+        lines.append(
+            f"- Branch is {behind} commit{'s' if behind != 1 else ''} BEHIND `origin/main` "
+            f"(and {ahead} ahead). Run `git pull --rebase origin main` to catch up. "
+            "If `PublicAPI.Unshipped.txt` conflicts, accept `--theirs` "
+            "(see CLAUDE.md NEVER-rule on rebase API drift)."
+        )
+    else:
+        lines.append(f"- Branch is up to date with `origin/main` ({ahead} ahead).")
+
+    if merged_prs:
+        lines.append("")
+        lines.append(f"- {len(merged_prs)} PR{'s' if len(merged_prs) != 1 else ''} merged into main since "
+                     f"this session went quiet ({diag.session_id}):")
+        for pr in merged_prs[:10]:
+            num = pr.get("number", "?")
+            title = pr.get("title", "(no title)")
+            lines.append(f"    - #{num} — {title}")
+        if len(merged_prs) > 10:
+            lines.append(f"    - … and {len(merged_prs) - 10} more")
+        lines.append(
+            "  Check whether any of these are work this session was about to dispatch."
+        )
+    else:
+        lines.append("")
+        lines.append("- No merged-PR delta available (gh unavailable, or none merged).")
+
+    if issue_refs:
+        lines.append("")
+        refs = ", ".join(f"#{n}" for n in issue_refs[:20])
+        lines.append(f"- Issues referenced in this session's transcript: {refs}")
+        lines.append("  Run `gh issue view <N>` for each to confirm current state before redispatching.")
+
+    lines.append("")
+    lines.append("Once you've reconciled, resume the original task.")
+    return "\n".join(lines)
+
+
+def cmd_prepare(
+    session_id: str,
+    projects_dir: Path | None = None,
+    ccd_sessions_file: Path | None = None,
+    gh_fetcher=None,  # injection seam for tests
+) -> int:
+    pd = projects_dir or _projects_dir()
+    diag = _diagnose_internal(session_id, pd, ccd_sessions_file)
+
+    if not diag.transcript_exists:
+        print(json.dumps({
+            "prepared": False,
+            "reason": "TranscriptNotFound",
+            "session_id": session_id,
+        }))
+        return 1
+
+    transcript = find_transcript_by_uuid(session_id, pd)
+    # transcript can't be None here because diag.transcript_exists is True.
+    assert transcript is not None
+    issue_refs = scan_transcript_for_issue_refs(transcript)
+    ahead_behind = git_ahead_behind(diag.repo_root, diag.branch)
+    since = last_activity_iso(transcript)
+    fetcher = gh_fetcher if gh_fetcher is not None else gh_pr_list_merged_since
+    merged_prs = fetcher(since)
+
+    catch_up = format_catch_up_message(diag, ahead_behind, merged_prs, issue_refs)
+    payload = {
+        "prepared": True,
+        "session_id": session_id,
+        "branch": diag.branch,
+        "branch_delta": {"ahead": ahead_behind[0], "behind": ahead_behind[1]},
+        "merged_prs": merged_prs,
+        "issue_refs": issue_refs,
+        "catch_up_message": catch_up,
+        "resume_command": f"cd {diag.recorded_cwd} && claude --resume {session_id}",
+    }
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
 def cmd_restore(
     session_id: str,
     projects_dir: Path | None = None,
@@ -728,6 +920,17 @@ def main(argv: list[str] | None = None) -> int:
         help="(Optional) CCD list_sessions JSON; consulted for the diagnose pre-check.",
     )
 
+    p_prepare = subparsers.add_parser(
+        "prepare",
+        help="Compose the catch-up message + resume command for a session.",
+    )
+    p_prepare.add_argument("--session", required=True, help="Session UUID.")
+    p_prepare.add_argument(
+        "--ccd-sessions-file",
+        type=Path, default=None,
+        help="(Optional) CCD list_sessions JSON; consulted for the diagnose pre-check.",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "identify":
         return cmd_identify(args.query)
@@ -735,6 +938,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_diagnose(args.session, ccd_sessions_file=args.ccd_sessions_file)
     if args.cmd == "restore":
         return cmd_restore(args.session, ccd_sessions_file=args.ccd_sessions_file)
+    if args.cmd == "prepare":
+        return cmd_prepare(args.session, ccd_sessions_file=args.ccd_sessions_file)
     parser.error(f"unknown subcommand: {args.cmd}")
     return 2
 
