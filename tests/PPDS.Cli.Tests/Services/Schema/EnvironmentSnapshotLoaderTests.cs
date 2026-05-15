@@ -134,4 +134,82 @@ public class EnvironmentSnapshotLoaderTests
         mock.Verify(m => m.GetEntityAsync("contact", It.IsAny<bool>(), It.IsAny<bool>(),
             It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Fact]
+    public async Task LoadAsync_IncludesOneToMany_ManyToOne_AndManyToMany_Relationships()
+    {
+        // Regression coverage for issue surfaced by /review on PR #1060:
+        // ManyToOneRelationships had been silently omitted from the snapshot, so
+        // package-vs-env compare could never detect ManyToOne drift and env-vs-env
+        // only caught it via the inverse OneToMany row. This test asserts all three
+        // relationship kinds appear in the snapshot's Relationships list.
+        var mock = new Mock<IMetadataQueryService>();
+        mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Summary("account") });
+
+        mock.Setup(m => m.GetEntityAsync("account", true, true, false, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityMetadataDto
+            {
+                LogicalName = "account",
+                DisplayName = "Account",
+                SchemaName = "Account",
+                Attributes = new List<AttributeMetadataDto>(),
+                OneToManyRelationships = new List<RelationshipMetadataDto>
+                {
+                    new()
+                    {
+                        SchemaName = "account_contacts",
+                        RelationshipType = "OneToMany",
+                        ReferencedEntity = "account",
+                        ReferencedAttribute = "accountid",
+                        ReferencingEntity = "contact",
+                        ReferencingAttribute = "parentcustomerid"
+                    }
+                },
+                ManyToOneRelationships = new List<RelationshipMetadataDto>
+                {
+                    new()
+                    {
+                        SchemaName = "account_parentaccount",
+                        RelationshipType = "ManyToOne",
+                        ReferencedEntity = "account",
+                        ReferencedAttribute = "accountid",
+                        ReferencingEntity = "account",
+                        ReferencingAttribute = "parentaccountid"
+                    }
+                },
+                ManyToManyRelationships = new List<ManyToManyRelationshipDto>
+                {
+                    new()
+                    {
+                        SchemaName = "account_competitors",
+                        IntersectEntityName = "accountcompetitors",
+                        Entity1LogicalName = "account",
+                        Entity1IntersectAttribute = "accountid",
+                        Entity2LogicalName = "competitor",
+                        Entity2IntersectAttribute = "competitorid"
+                    }
+                }
+            });
+
+        var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test");
+
+        var snapshot = await loader.LoadAsync();
+
+        var account = snapshot.Entities.Should().ContainSingle().Subject;
+        account.Relationships.Should().HaveCount(3);
+
+        var oneToMany = account.Relationships.Should().ContainSingle(r => r.RelationshipType == "OneToMany").Subject;
+        oneToMany.SchemaName.Should().Be("account_contacts");
+        oneToMany.ReferencingEntity.Should().Be("contact");
+        oneToMany.ReferencedEntity.Should().Be("account");
+
+        var manyToOne = account.Relationships.Should().ContainSingle(r => r.RelationshipType == "ManyToOne").Subject;
+        manyToOne.SchemaName.Should().Be("account_parentaccount");
+        manyToOne.ReferencingEntity.Should().Be("account");
+        manyToOne.ReferencedEntity.Should().Be("account");
+
+        var manyToMany = account.Relationships.Should().ContainSingle(r => r.RelationshipType == "ManyToMany").Subject;
+        manyToMany.SchemaName.Should().Be("account_competitors");
+    }
 }

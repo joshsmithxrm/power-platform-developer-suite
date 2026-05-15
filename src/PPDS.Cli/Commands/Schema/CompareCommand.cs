@@ -50,7 +50,7 @@ public static class CompareCommand
             "compare",
             "Compare schema between a data package and an environment, or between two environments. "
             + "Differences are classified by severity (Error / Warning / Info); the highest severity "
-            + "determines the exit code. Output format selectable via -f (Text / Json / Csv).")
+            + "determines the exit code. Supported output formats: Text (default), Json.")
         {
             DataOption, EnvOption, SourceOption, TargetOption, ProfileOption
         };
@@ -63,6 +63,15 @@ public static class CompareCommand
             var env = result.GetValue(EnvOption);
             var source = result.GetValue(SourceOption);
             var target = result.GetValue(TargetOption);
+            var format = result.GetValue(GlobalOptions.OutputFormat);
+
+            if (format == Commands.OutputFormat.Csv)
+            {
+                // CSV output is not implemented for schema compare. System-wide CSV
+                // support is tracked in #1078.
+                result.AddError("CSV output is not supported for 'schema compare'. Use --output-format Json or Text.");
+                return;
+            }
 
             var packageMode = data is not null || env is not null;
             var envMode = source is not null || target is not null;
@@ -279,15 +288,17 @@ public static class CompareCommand
 
     private static void WriteTextReport(SchemaCompareReport report)
     {
+        // Report body is data: per CLAUDE.md "stdout is for data", every report line
+        // goes to stdout. Progress/status messages elsewhere correctly stay on stderr.
         var s = report.Summary;
-        Console.Error.WriteLine();
-        Console.Error.WriteLine($"Schema comparison: {report.Source} → {report.Target}");
-        Console.Error.WriteLine($"  {s.Errors} error(s), {s.Warnings} warning(s), {s.Infos} info");
-        Console.Error.WriteLine();
+        Console.WriteLine();
+        Console.WriteLine($"Schema comparison: {report.Source} → {report.Target}");
+        Console.WriteLine($"  {s.Errors} error(s), {s.Warnings} warning(s), {s.Infos} info");
+        Console.WriteLine();
 
         if (report.Differences.Count == 0)
         {
-            Console.Error.WriteLine("No schema differences detected.");
+            Console.WriteLine("No schema differences detected.");
             return;
         }
 
@@ -295,12 +306,12 @@ public static class CompareCommand
             .GroupBy(d => d.Severity)
             .OrderByDescending(g => g.Key))
         {
-            Console.Error.WriteLine($"[{group.Key.ToString().ToUpperInvariant()}]");
+            Console.WriteLine($"[{group.Key.ToString().ToUpperInvariant()}]");
             foreach (var diff in group)
             {
-                Console.Error.WriteLine($"  {diff.Kind}: {diff.Message}");
+                Console.WriteLine($"  {diff.Kind}: {diff.Message}");
             }
-            Console.Error.WriteLine();
+            Console.WriteLine();
         }
     }
 }

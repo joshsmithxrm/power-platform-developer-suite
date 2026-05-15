@@ -106,6 +106,13 @@ public sealed class EnvironmentSnapshotLoader : ISnapshotLoader
                             ReferencingEntity = r.ReferencingEntity,
                             ReferencedEntity = r.ReferencedEntity
                         })
+                        .Concat(entity.ManyToOneRelationships.Select(r => new RelationshipSnapshot
+                        {
+                            SchemaName = r.SchemaName,
+                            RelationshipType = "ManyToOne",
+                            ReferencingEntity = r.ReferencingEntity,
+                            ReferencedEntity = r.ReferencedEntity
+                        }))
                         .Concat(entity.ManyToManyRelationships.Select(r => new RelationshipSnapshot
                         {
                             SchemaName = r.SchemaName,
