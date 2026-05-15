@@ -117,7 +117,7 @@ Wait 2 s after kill so file handles release before the removal command runs.
 **Daemon shutdown:** for each `*-session.json` file in the worktree (e.g., `tests/PPDS.Tui.E2eTests/tools/.tui-verify-session.json`):
 
 1. Read `daemonPort`, `daemonPid` from the JSON.
-2. `POST http://localhost:{port}/shutdown` (5 s timeout).
+2. `curl -X POST --max-time 5 http://localhost:{port}/shutdown`.
 3. On failure, kill `daemonPid` directly (`taskkill /PID {pid} /F` or `kill {pid}`).
 4. Delete the session file.
 
