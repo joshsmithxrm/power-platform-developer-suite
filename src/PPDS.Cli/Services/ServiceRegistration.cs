@@ -20,6 +20,7 @@ using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Services.Roles;
+using PPDS.Cli.Services.Schema;
 using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
@@ -92,6 +93,9 @@ public static class ServiceRegistration
 
         // Export services
         services.AddTransient<IExportService, ExportService>();
+
+        // Schema comparison — pure, stateless service (no Dataverse dependencies).
+        services.AddSingleton<ISchemaComparisonService, SchemaComparisonService>();
 
         // Plugin registration service - requires connection pool + shakedown guard
         services.AddTransient<IPluginRegistrationService>(sp =>
