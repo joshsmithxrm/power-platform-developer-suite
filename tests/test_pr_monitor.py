@@ -269,6 +269,54 @@ class TestResumeSkips:
         result = pr_monitor.read_result(wt)
         assert result["steps_completed"]["ci"]["status"] == "pass"
 
+    def test_resume_persists_gemini_review_received_status(self, tmp_path):
+        """Resume path must persist gemini_review_posted=True so the
+        ready-flip gate sees the same state as a fresh-launch run.
+
+        Bug reproducer: first run timed out before Gemini posted, marking
+        the gemini step "done" with gemini_review_posted=False. Resume
+        then took the shortcut path that called poll_gemini_comments
+        directly (bypassing _step_gemini) and never persisted the new
+        review_received status to result.json — so the ready-flip gate
+        kept skipping with reason=gemini_review_not_posted on every
+        subsequent resume.
+        """
+        wt = _make_worktree(tmp_path)
+
+        # Pre-populate: CI passed, gemini step marked done, but the prior
+        # run timed out before Gemini posted (so review_posted is False).
+        pre_result = pr_monitor._empty_result()
+        pre_result["steps_completed"]["ci"] = {
+            "status": "pass", "timestamp": "2026-01-01T00:00:00Z"
+        }
+        pre_result["ci_result"] = "pass"
+        pre_result["steps_completed"]["gemini"] = {
+            "status": "done", "timestamp": "2026-01-01T00:01:00Z"
+        }
+        pre_result["gemini_review_posted"] = False
+        pr_monitor.write_result(wt, pre_result)
+
+        def fake_poll(worktree, pr_number, logger):
+            # Mirror what the real poll does: stash status/body on logger.
+            logger.last_gemini_status = "review_received"
+            logger.last_gemini_review_body = "LGTM"
+            return []
+
+        with patch("pr_monitor.poll_ci") as mock_ci, \
+             patch("pr_monitor.poll_gemini_comments", side_effect=fake_poll), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            pr_monitor.run_monitor(wt, 1, resume=True)
+
+        # poll_ci skipped because ci was already done
+        mock_ci.assert_not_called()
+        # And — the critical assertion — gemini state persisted on resume
+        result = pr_monitor.read_result(wt)
+        assert result["gemini_review_posted"] is True, \
+            "Resume must persist gemini_review_posted=True so ready-flip works"
+        assert result["gemini_review_body"] == "LGTM"
+
 
 class TestTriageOnComments:
     """AC-110: Spawns triage when inline comments > 0."""

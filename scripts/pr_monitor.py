@@ -1525,8 +1525,14 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
         if not (resume and step_completed(result, "gemini")):
             comments = _step_gemini(worktree, pr_number, logger, result)
         else:
+            # Resume path: the gemini step was already marked done in a
+            # prior run, but its on-disk state may be stale (e.g. that run
+            # timed out before Gemini posted). Re-poll and persist the
+            # current status so the ready-flip gate sees fresh state.
             logger.log("gemini", "RESUMED")
             comments = poll_gemini_comments(worktree, pr_number, logger)
+            _persist_gemini_status(logger, result)
+            write_result(worktree, result)
 
         # --- Phase C: Classifier loop ---
         HARD_CEILING = MAX_CI_FIX_ROUNDS + MAX_TRIAGE_ITERATIONS + 4
@@ -1909,6 +1915,23 @@ def _step_ci(worktree, pr_number, logger, step_suffix=""):
         return "error"
 
 
+def _persist_gemini_status(logger, result):
+    """Copy ``logger.last_gemini_status`` / ``last_gemini_review_body`` onto
+    *result*. Both the fresh-launch (`_step_gemini`) and ``--resume`` paths
+    must persist these so the ready-flip gate (which reads
+    ``result["gemini_review_posted"]``) sees the same state regardless of
+    how the monitor was started. Without this, a ``--resume`` after a
+    first-run gemini timeout never flips the PR to ready because
+    ``gemini_review_posted`` would stay at its initial ``False`` value.
+    """
+    status = getattr(logger, "last_gemini_status", None)
+    if status == "review_received":
+        result["gemini_review_posted"] = True
+    body = getattr(logger, "last_gemini_review_body", "")
+    if body:
+        result["gemini_review_body"] = body
+
+
 def _step_gemini(worktree, pr_number, logger, result, step_suffix=""):
     """Gemini comment polling step. Returns comment list."""
     step_name = f"gemini{step_suffix}"
@@ -1916,17 +1939,7 @@ def _step_gemini(worktree, pr_number, logger, result, step_suffix=""):
         logger.log(step_name, "BEGIN")
         comments = poll_gemini_comments(worktree, pr_number, logger)
         result["comment_counts"][step_name] = len(comments)
-        # Capture review-received status for the ready-flip gate
-        # (meta-retro finding #2). Any poll that saw a Gemini review
-        # flips this flag true for the remainder of the monitor run.
-        status = getattr(logger, "last_gemini_status", None)
-        if status == "review_received":
-            result["gemini_review_posted"] = True
-        # Persist the latest review body (may be empty string) so the
-        # ready-flip gate can detect clean/declined approval patterns.
-        body = getattr(logger, "last_gemini_review_body", "")
-        if body:
-            result["gemini_review_body"] = body
+        _persist_gemini_status(logger, result)
         mark_step(result, step_name, "done")
         write_result(worktree, result)
         return comments
