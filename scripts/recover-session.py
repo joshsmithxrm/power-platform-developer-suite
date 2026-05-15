@@ -440,20 +440,63 @@ def worktree_exists_at(repo_root: str, recorded_cwd: str) -> bool:
     return target in registered and Path(recorded_cwd).exists()
 
 
-def lookup_archived_in_ccd_sessions(session_id: str, ccd_sessions: list[dict]) -> bool | None:
-    """Find `session_id` in the CCD list_sessions payload and return is_archived.
+def _norm_path(p: str) -> str:
+    """Normalize a path for cross-OS comparison: forward slashes, lowercased on win."""
+    if not p:
+        return ""
+    norm = p.replace("\\", "/").rstrip("/")
+    # On Windows, paths are case-insensitive; lowercase for comparison.
+    if os.name == "nt":
+        norm = norm.lower()
+    return norm
 
-    The CCD MCP tool returns sessionId values prefixed with `local_`, but
-    the transcript filename is the bare UUID without prefix. Match by
-    suffix to be robust.
+
+def lookup_archived_in_ccd_sessions(
+    ccd_sessions: list[dict],
+    *,
+    cwd: str = "",
+    branch: str = "",
+    session_id: str = "",
+) -> bool | None:
+    """Find the CCD session whose cwd or branch matches and return is_archived.
+
+    The CCD `sessionId` (e.g., `local_0cd45537-...`) is a different UUID
+    from the transcript filename stem (e.g., `fefdaf81-...`); they do
+    not share a substring. The reliable link between a transcript and a
+    CCD session is the absolute `cwd` (both record it identically) or,
+    as a fallback, the `branch` name.
+
+    Match priority: cwd exact > branch exact > sessionId substring
+    (last-resort, kept for installations where the IDs do correlate).
+
+    Returns None if no match.
     """
-    if not session_id:
+    if not ccd_sessions:
         return None
-    for s in ccd_sessions:
-        sid = s.get("sessionId", "")
-        # local_<uuid> or just <uuid>
-        if sid.endswith(session_id) or session_id.endswith(sid.removeprefix("local_")):
-            return bool(s.get("isArchived", False))
+    norm_cwd = _norm_path(cwd)
+    # Priority 1: cwd match
+    if norm_cwd:
+        for s in ccd_sessions:
+            s_cwd = _norm_path(s.get("cwd", ""))
+            if s_cwd and s_cwd == norm_cwd:
+                return bool(s.get("isArchived", False))
+    # Priority 2: branch match (multiple sessions can share a branch only
+    # if you reused a worktree, but the active one is the unarchived one;
+    # prefer the most-recent non-archived match)
+    if branch:
+        archived_candidates = []
+        for s in ccd_sessions:
+            if s.get("branch") == branch:
+                archived_candidates.append(bool(s.get("isArchived", False)))
+        if archived_candidates:
+            # If any non-archived match exists, the session is not archived.
+            return not any(not a for a in archived_candidates)
+    # Priority 3: sessionId substring (last resort)
+    if session_id:
+        for s in ccd_sessions:
+            sid = s.get("sessionId", "")
+            if sid.endswith(session_id) or session_id.endswith(sid.removeprefix("local_")):
+                return bool(s.get("isArchived", False))
     return None
 
 
@@ -545,7 +588,12 @@ def _diagnose_internal(
         try:
             sessions = json.loads(ccd_sessions_file.read_text(encoding="utf-8"))
             if isinstance(sessions, list):
-                is_archived = lookup_archived_in_ccd_sessions(session_id, sessions)
+                is_archived = lookup_archived_in_ccd_sessions(
+                    sessions,
+                    cwd=recorded_cwd,
+                    branch=branch,
+                    session_id=session_id,
+                )
         except (OSError, json.JSONDecodeError):
             pass
     return DiagnoseResult(

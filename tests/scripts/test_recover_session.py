@@ -494,18 +494,75 @@ def test_worktree_exists_at_false_when_path_not_registered(tmp_path):
     assert worktree_exists_at(repo_str, bogus) is False
 
 
-def test_lookup_archived_in_ccd_sessions_finds_with_local_prefix():
+def test_lookup_archived_matches_by_cwd_priority_1():
+    """The transcript UUID and CCD sessionId are different UUIDs; cwd is
+    the reliable link between them.
+    """
     sessions = [
-        {"sessionId": "local_aaa-bbb-ccc", "isArchived": True},
-        {"sessionId": "local_xxx-yyy-zzz", "isArchived": False},
+        {
+            "sessionId": "local_aaa-bbb-ccc",
+            "cwd": "C:/foo/repo/.worktrees/feat-a",
+            "branch": "feat/a",
+            "isArchived": True,
+        },
+        {
+            "sessionId": "local_xxx-yyy-zzz",
+            "cwd": "C:/foo/repo/.worktrees/feat-b",
+            "branch": "feat/b",
+            "isArchived": False,
+        },
     ]
-    assert lookup_archived_in_ccd_sessions("aaa-bbb-ccc", sessions) is True
-    assert lookup_archived_in_ccd_sessions("xxx-yyy-zzz", sessions) is False
+    # Match by cwd — note transcript UUID has no relation to CCD sessionId.
+    assert lookup_archived_in_ccd_sessions(
+        sessions, cwd="C:/foo/repo/.worktrees/feat-a"
+    ) is True
+    assert lookup_archived_in_ccd_sessions(
+        sessions, cwd="C:/foo/repo/.worktrees/feat-b"
+    ) is False
 
 
-def test_lookup_archived_in_ccd_sessions_returns_none_when_absent():
-    sessions = [{"sessionId": "local_aaa", "isArchived": True}]
-    assert lookup_archived_in_ccd_sessions("not-here", sessions) is None
+def test_lookup_archived_matches_cwd_case_insensitively_on_windows():
+    """Windows paths are case-insensitive; CCD records casing varies."""
+    sessions = [{
+        "sessionId": "local_a", "cwd": "C:\\Foo\\Repo\\Worktree",
+        "branch": "feat/a", "isArchived": True,
+    }]
+    assert lookup_archived_in_ccd_sessions(
+        sessions, cwd="c:/foo/repo/worktree"
+    ) is True
+
+
+def test_lookup_archived_falls_back_to_branch():
+    sessions = [{
+        "sessionId": "local_a", "cwd": "C:/different/path",
+        "branch": "feat/the-branch", "isArchived": True,
+    }]
+    # cwd doesn't match anything; branch fallback should find it
+    assert lookup_archived_in_ccd_sessions(
+        sessions, cwd="C:/some/other/path", branch="feat/the-branch"
+    ) is True
+
+
+def test_lookup_archived_session_id_last_resort():
+    """When neither cwd nor branch match, fall back to sessionId substring."""
+    sessions = [{
+        "sessionId": "local_aaa-bbb-ccc",
+        "cwd": "", "branch": "", "isArchived": True,
+    }]
+    assert lookup_archived_in_ccd_sessions(
+        sessions, session_id="aaa-bbb-ccc"
+    ) is True
+
+
+def test_lookup_archived_returns_none_when_no_match():
+    sessions = [{
+        "sessionId": "local_x", "cwd": "C:/here", "branch": "feat/x",
+        "isArchived": True,
+    }]
+    assert lookup_archived_in_ccd_sessions(
+        sessions, cwd="C:/elsewhere", branch="feat/different"
+    ) is None
+    assert lookup_archived_in_ccd_sessions([]) is None
 
 
 def test_decide_next_action_full_matrix():
@@ -579,10 +636,23 @@ def test_cmd_diagnose_uses_ccd_sessions_file(tmp_path, capsys):
         cwd=repo_str,
         git_branch="claude/archived-session",
     )
+    # Note: CCD sessionId is intentionally DIFFERENT from the transcript
+    # UUID — they're separate UUIDs in real CCD installations. The link
+    # is cwd+branch, not sessionId.
     ccd_file = tmp_path / "ccd-sessions.json"
     ccd_file.write_text(json.dumps([
-        {"sessionId": "local_archived-uuid", "isArchived": True},
-        {"sessionId": "local_other-uuid", "isArchived": False},
+        {
+            "sessionId": "local_some-other-uuid",
+            "cwd": repo_str,
+            "branch": "claude/archived-session",
+            "isArchived": True,
+        },
+        {
+            "sessionId": "local_unrelated",
+            "cwd": "C:/elsewhere",
+            "branch": "feat/something-else",
+            "isArchived": False,
+        },
     ]), encoding="utf-8")
 
     rc = cmd_diagnose("archived-uuid", projects_dir=projects, ccd_sessions_file=ccd_file)
