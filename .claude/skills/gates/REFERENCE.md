@@ -104,9 +104,9 @@ to `dotnet` for .NET gates.
 This failure mode is real, not hypothetical: a session in May 2026 ran
 six TS gates with `npm: command not found`, piped each through
 `| tail -10`, and reported all six PASS because `tail` returned 0. See
-`.investigation/node-gates-recommendation.md` on `fix/node-gates-investigation`
-for the full root cause (fnm's per-shell PATH activation not firing in
-the shell that launched Claude Code).
+`.investigation/node-gates-recommendation.md` for the full root cause
+(fnm's per-shell PATH activation not firing in the shell that launched
+Claude Code).
 
 ### Why pipefail matters
 
