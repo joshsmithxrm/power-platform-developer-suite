@@ -108,6 +108,13 @@ public sealed class DataPackageSnapshotLoader : ISnapshotLoader
                 IncludesOptionSetValues = false
             };
         }
+        catch (InvalidDataException ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.SchemaInvalid,
+                $"Data package is not a valid zip archive: {_packagePath}",
+                ex);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException)
         {
             throw new PpdsException(

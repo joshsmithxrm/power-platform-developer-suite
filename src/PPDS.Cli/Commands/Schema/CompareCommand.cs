@@ -18,22 +18,22 @@ public static class CompareCommand
 {
     private static readonly Option<FileInfo?> DataOption = new("--data")
     {
-        Description = "Path to a data package zip whose schema should be compared against the target environment."
+        Description = "[Required with --environment] Path to a data package zip whose schema is compared against the target environment."
     };
 
-    private static readonly Option<string?> EnvOption = new("--env")
+    private static readonly Option<string?> EnvOption = new("--environment", "-e")
     {
-        Description = "Target environment - URL, friendly name, unique name, or ID. Used with --data."
+        Description = "[Required with --data] Target environment - URL, friendly name, unique name, or ID."
     };
 
-    private static readonly Option<string?> SourceOption = new("--source")
+    private static readonly Option<string?> SourceOption = new("--source-env", "-se")
     {
-        Description = "Source environment for env-to-env comparison."
+        Description = "[Required with --target-env] Source environment for env-to-env comparison."
     };
 
-    private static readonly Option<string?> TargetOption = new("--target")
+    private static readonly Option<string?> TargetOption = new("--target-env", "-te")
     {
-        Description = "Target environment for env-to-env comparison."
+        Description = "[Required with --source-env] Target environment for env-to-env comparison."
     };
 
     private static readonly Option<string?> ProfileOption = new("--profile", "-p")
@@ -48,7 +48,9 @@ public static class CompareCommand
     {
         var command = new Command(
             "compare",
-            "Compare schema between a data package and an environment, or between two environments.")
+            "Compare schema between a data package and an environment, or between two environments. "
+            + "Differences are classified by severity (Error / Warning / Info); the highest severity "
+            + "determines the exit code. Output format selectable via -f (Text / Json / Csv).")
         {
             DataOption, EnvOption, SourceOption, TargetOption, ProfileOption
         };
@@ -67,21 +69,21 @@ public static class CompareCommand
 
             if (packageMode && envMode)
             {
-                result.AddError("--data/--env cannot be combined with --source/--target.");
+                result.AddError("--data/--environment cannot be combined with --source-env/--target-env.");
                 return;
             }
             if (!packageMode && !envMode)
             {
-                result.AddError("Provide either (--data + --env) for package-vs-env, or (--source + --target) for env-vs-env.");
+                result.AddError("Provide either (--data + --environment) for package-vs-env, or (--source-env + --target-env) for env-vs-env.");
                 return;
             }
             if (packageMode && (data is null || env is null))
             {
-                result.AddError("--data and --env must be supplied together.");
+                result.AddError("--data and --environment must be supplied together.");
             }
             if (envMode && (source is null || target is null))
             {
-                result.AddError("--source and --target must be supplied together.");
+                result.AddError("--source-env and --target-env must be supplied together.");
             }
         });
 
