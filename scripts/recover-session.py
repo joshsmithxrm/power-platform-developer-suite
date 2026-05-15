@@ -301,10 +301,6 @@ def rank_results(results: list[IdentifyResult]) -> list[IdentifyResult]:
     """
     return sorted(
         results,
-        key=lambda r: (-r.match_score, r.last_activity_ts),
-        reverse=False,
-    ) if False else sorted(
-        results,
         key=lambda r: (-r.match_score, -_iso_epoch(r.last_activity_ts)),
     )
 
@@ -690,10 +686,16 @@ def gh_pr_list_merged_since(since_iso: str, limit: int = 30) -> list[dict]:
 
 
 def scan_transcript_for_issue_refs(transcript: Path, max_bytes: int = MAX_SCAN_BYTES) -> list[int]:
-    """Find #NNN issue references in the transcript. Returns sorted unique ints."""
+    """Find #NNN issue references in the transcript. Returns sorted unique ints.
+
+    Uses a negative lookbehind `(?<!\\w)#(...)\\b` so the `#` cannot be
+    preceded by a word character — guards against UUID-fragment false
+    positives like `deadbeef#1234` where the digits aren't an actual
+    issue reference.
+    """
     import re as _re
 
-    pattern = _re.compile(r"#(\d{2,6})\b")
+    pattern = _re.compile(r"(?<!\w)#(\d{2,6})\b")
     found: set[int] = set()
     bytes_read = 0
     try:
@@ -704,13 +706,9 @@ def scan_transcript_for_issue_refs(transcript: Path, max_bytes: int = MAX_SCAN_B
                     break
                 for m in pattern.finditer(line):
                     try:
-                        n = int(m.group(1))
+                        found.add(int(m.group(1)))
                     except ValueError:
                         continue
-                    # Skip UUIDs masquerading as issue refs: a hex char
-                    # immediately before `#` would mean we're inside a
-                    # longer hex token. The `\b` already filters most.
-                    found.add(n)
     except OSError:
         return []
     return sorted(found)

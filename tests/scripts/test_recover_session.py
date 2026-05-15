@@ -864,6 +864,21 @@ def test_scan_transcript_for_issue_refs_finds_hash_numbers(tmp_path):
     assert refs == [1066, 1068, 1074]
 
 
+def test_scan_transcript_for_issue_refs_rejects_word_prefixed_hashes(tmp_path):
+    """Negative lookbehind: `deadbeef#1234` is a UUID fragment, not an issue ref."""
+    t = _write_transcript(
+        tmp_path, "proj_p", "neg-lookbehind",
+        first_user_message="real ref #1074 here, but deadbeef#1234 is a UUID fragment",
+        body_lines=["another fake: cafe#2222", "and a real one: #1099"],
+    )
+    refs = scan_transcript_for_issue_refs(t)
+    # Only the truly-prefix-clean refs should appear
+    assert 1074 in refs
+    assert 1099 in refs
+    assert 1234 not in refs  # preceded by 'f' (word char)
+    assert 2222 not in refs  # preceded by 'e' (word char)
+
+
 def test_scan_transcript_for_issue_refs_empty_for_no_matches(tmp_path):
     t = _write_transcript(
         tmp_path, "proj_p", "no-refs",
