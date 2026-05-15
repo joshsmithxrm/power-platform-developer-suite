@@ -136,8 +136,8 @@ class TestDiscoverTranscripts:
         encoded = retro_helpers._encode_project_dir(path)
         # Underscore replaced
         assert "_" not in encoded
-        # Matches the dispatcher's derivation (after abspath normalization)
-        assert encoded == derive_slug(os.path.abspath(path))
+        # Matches the dispatcher's derivation (derive_slug normalizes internally)
+        assert encoded == derive_slug(path)
 
     def test_discover_transcripts_since_filter(self, monkeypatch):
         """discover_transcripts skips transcripts older than ``since`` mtime."""
@@ -227,6 +227,30 @@ class TestAllowlistDriftDetector:
             foo = next(p for p in proposals if p["file"] == "scripts/foo.py")
             assert foo["fix_count"] == 2
             assert "shakedown allowlist" in foo["proposal"]
+
+    def test_feat_referencing_verify_is_not_a_marker(self):
+        """Subjects that *reference* /verify but aren't a verify run (e.g.
+        ``feat(verify): ...``) must not be picked as the marker — the
+        detector should anchor on subject-prefix patterns only."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._init_repo(tmpdir)
+            # The real /verify marker
+            self._commit(tmpdir, env, "verify: workflow ok",
+                         {"docs/notes.md": "x\n"})
+            # A later commit whose subject merely contains the word
+            # "verify" — must NOT be treated as a new marker.
+            self._commit(tmpdir, env, "feat(verify): tighten marker",
+                         {"docs/notes.md": "y\n"})
+            # A post-verify fix on a subprocess-spawning file outside the
+            # allowlist — must still be flagged because the real marker is
+            # the first commit, not the feat() above.
+            self._commit(tmpdir, env, "fix: foo crash",
+                         {"scripts/foo.py": "import subprocess\n"})
+
+            proposals = retro_helpers.detect_allowlist_drift(cwd=tmpdir)
+            flagged = [p["file"] for p in proposals]
+            assert "scripts/foo.py" in flagged
 
     def test_no_verify_marker_returns_empty(self):
         """Detector is a no-op when no /verify commit appears in history."""
