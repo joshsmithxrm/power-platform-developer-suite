@@ -1,0 +1,12 @@
+{
+  "round": 1,
+  "timestamp": "2026-05-15T15:57:19Z",
+  "pr": 1058,
+  "failure_summary": "",
+  "files_touched": [],
+  "lines_added": 0,
+  "lines_removed": 0,
+  "action": "escalate",
+  "escalation_reason": "agent dispatch failed: blocked: What would you like me to do?",
+  "scope_violation": false
+}

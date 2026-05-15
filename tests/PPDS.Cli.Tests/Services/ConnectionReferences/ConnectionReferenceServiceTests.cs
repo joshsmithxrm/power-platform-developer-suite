@@ -173,11 +173,12 @@ public class ConnectionReferenceServiceTests
         var (service, client) = CreateServiceWithPool();
         var crId = Guid.NewGuid();
 
-        // GetAsync (pre-update) returns existing CR with no binding;
-        // GetAsync (post-update re-read) returns CR with the new connectionid.
-        client.SetupSequence(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: null) }))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: "new-conn-id") }));
+        // GetAsync (pre-update logical-name lookup) returns existing CR with no binding;
+        // GetByIdAsync (post-update re-read by Guid) returns CR with the new connectionid.
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: null) }));
+        client.Setup(c => c.RetrieveAsync("connectionreference", crId, It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeConnRefEntity(crId, "myapp_cr", connectionId: "new-conn-id"));
 
         Entity? capturedUpdate = null;
         client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
@@ -204,9 +205,10 @@ public class ConnectionReferenceServiceTests
         var (service, client) = CreateServiceWithPool();
         var crId = Guid.NewGuid();
 
-        client.SetupSequence(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: "old-conn") }))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: null) }));
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { MakeConnRefEntity(crId, "myapp_cr", connectionId: "old-conn") }));
+        client.Setup(c => c.RetrieveAsync("connectionreference", crId, It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeConnRefEntity(crId, "myapp_cr", connectionId: null));
 
         Entity? capturedUpdate = null;
         client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
