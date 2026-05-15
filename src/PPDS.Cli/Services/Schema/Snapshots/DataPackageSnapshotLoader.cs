@@ -69,15 +69,14 @@ public sealed class DataPackageSnapshotLoader : ISnapshotLoader
             }
 
             await using var schemaStream = schemaEntry.Open();
-            using var buffer = new MemoryStream();
-            await schemaStream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-            buffer.Position = 0;
+            var migrationSchema = await _schemaReader.ReadAsync(schemaStream, cancellationToken).ConfigureAwait(false);
 
-            var migrationSchema = await _schemaReader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            var filterSet = entityFilter is { Count: > 0 }
+                ? new HashSet<string>(entityFilter, StringComparer.OrdinalIgnoreCase)
+                : null;
 
             var entities = migrationSchema.Entities
-                .Where(e => entityFilter is null || entityFilter.Count == 0 ||
-                            entityFilter.Contains(e.LogicalName, StringComparer.OrdinalIgnoreCase))
+                .Where(e => filterSet is null || filterSet.Contains(e.LogicalName))
                 .Select(e => new EntitySnapshot
                 {
                     LogicalName = e.LogicalName,
