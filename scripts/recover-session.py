@@ -5,12 +5,14 @@ Recover a Claude Code session that's invisible to the resume picker.
 A workflow helper for the `/recover-session` skill. Mechanics only —
 the skill drives the operator dialogue and decision points.
 
-Subcommands (Phases 1–2 ship `identify` + `diagnose`; `restore` and
-`prepare` are added in later phases per specs/recover-session.md).
+Subcommands (Phases 1–3 ship `identify` + `diagnose` + `restore`;
+`prepare` is added in Phase 4 per specs/recover-session.md).
 
 Usage:
     python scripts/recover-session.py identify --query "<phrase>"
     python scripts/recover-session.py diagnose --session <uuid>
+            [--ccd-sessions-file <path>]
+    python scripts/recover-session.py restore  --session <uuid>
             [--ccd-sessions-file <path>]
 
 Output contract (per Constitution I1):
@@ -515,41 +517,27 @@ def cmd_identify(query: str, projects_dir: Path | None = None) -> int:
     return 0
 
 
-def cmd_diagnose(
+def _diagnose_internal(
     session_id: str,
-    projects_dir: Path | None = None,
-    ccd_sessions_file: Path | None = None,
-) -> int:
-    pd = projects_dir or _projects_dir()
-    transcript = find_transcript_by_uuid(session_id, pd)
-
+    projects_dir: Path,
+    ccd_sessions_file: Path | None,
+) -> DiagnoseResult:
+    """Shared diagnosis logic — used by cmd_diagnose and cmd_restore."""
+    transcript = find_transcript_by_uuid(session_id, projects_dir)
     if transcript is None:
-        result = DiagnoseResult(
-            session_id=session_id,
-            transcript_exists=False,
-            is_archived=None,
-            worktree_exists=False,
-            branch_exists=False,
-            entrypoint="unknown",
-            recoverable=False,
-            next_action="unrecoverable-transcript-missing",
-            recorded_cwd="",
-            branch="",
-            repo_root="",
+        return DiagnoseResult(
+            session_id=session_id, transcript_exists=False, is_archived=None,
+            worktree_exists=False, branch_exists=False, entrypoint="unknown",
+            recoverable=False, next_action="unrecoverable-transcript-missing",
+            recorded_cwd="", branch="", repo_root="",
         )
-        print(json.dumps(asdict(result), indent=2))
-        return 0
-
     meta = read_session_metadata(transcript)
     recorded_cwd = meta.get("cwd", "")
     branch = meta.get("gitBranch", "")
     entrypoint = meta.get("entrypoint", "unknown")
-
     repo_root = resolve_repo_root_from_cwd(recorded_cwd)
-
     branch_ok = git_branch_exists(repo_root, branch) if (repo_root and branch) else False
     worktree_ok = worktree_exists_at(repo_root, recorded_cwd) if (repo_root and recorded_cwd) else False
-
     is_archived: bool | None = None
     if ccd_sessions_file and ccd_sessions_file.exists():
         try:
@@ -558,30 +546,136 @@ def cmd_diagnose(
                 is_archived = lookup_archived_in_ccd_sessions(session_id, sessions)
         except (OSError, json.JSONDecodeError):
             pass
-
-    recoverable = branch_ok or worktree_ok
-    next_action = decide_next_action(
-        transcript_exists=True,
-        branch_exists=branch_ok,
-        worktree_exists=worktree_ok,
-        is_archived=is_archived,
+    return DiagnoseResult(
+        session_id=session_id, transcript_exists=True, is_archived=is_archived,
+        worktree_exists=worktree_ok, branch_exists=branch_ok, entrypoint=entrypoint,
+        recoverable=branch_ok or worktree_ok,
+        next_action=decide_next_action(
+            transcript_exists=True, branch_exists=branch_ok,
+            worktree_exists=worktree_ok, is_archived=is_archived,
+        ),
+        recorded_cwd=recorded_cwd, branch=branch, repo_root=repo_root,
     )
 
-    result = DiagnoseResult(
-        session_id=session_id,
-        transcript_exists=True,
-        is_archived=is_archived,
-        worktree_exists=worktree_ok,
-        branch_exists=branch_ok,
-        entrypoint=entrypoint,
-        recoverable=recoverable,
-        next_action=next_action,
-        recorded_cwd=recorded_cwd,
-        branch=branch,
-        repo_root=repo_root,
-    )
+
+def cmd_diagnose(
+    session_id: str,
+    projects_dir: Path | None = None,
+    ccd_sessions_file: Path | None = None,
+) -> int:
+    pd = projects_dir or _projects_dir()
+    result = _diagnose_internal(session_id, pd, ccd_sessions_file)
     print(json.dumps(asdict(result), indent=2))
     return 0
+
+
+def cmd_restore(
+    session_id: str,
+    projects_dir: Path | None = None,
+    ccd_sessions_file: Path | None = None,
+) -> int:
+    """Recreate the session's worktree at its recorded cwd.
+
+    Safety guards (per Design Decisions in specs/recover-session.md):
+      - Target path must be absolute (rejects NestedWorktreeRefused class)
+      - Uses `git -C <repo_root>` so the caller's cwd cannot influence
+        the resolution.
+      - Refuses cleanly when the worktree already exists or when the
+        branch is checked out in a different worktree.
+    """
+    pd = projects_dir or _projects_dir()
+    diag = _diagnose_internal(session_id, pd, ccd_sessions_file)
+
+    if not diag.transcript_exists:
+        print(json.dumps({
+            "restored": False,
+            "reason": "TranscriptNotFound",
+            "session_id": session_id,
+        }))
+        return 1
+
+    if not diag.branch_exists:
+        print(json.dumps({
+            "restored": False,
+            "reason": "BranchNotFound",
+            "session_id": session_id,
+            "branch": diag.branch,
+            "hint": "use `git reflog` to find the branch tip and recreate manually",
+        }))
+        return 1
+
+    target = diag.recorded_cwd
+    if not target:
+        print(json.dumps({
+            "restored": False,
+            "reason": "NoRecordedCwd",
+            "session_id": session_id,
+        }))
+        return 1
+
+    if not os.path.isabs(target):
+        print(json.dumps({
+            "restored": False,
+            "reason": "NestedWorktreeRefused",
+            "detail": "recorded cwd is not absolute; refusing to restore via relative path",
+            "recorded_cwd": target,
+        }))
+        return 2
+
+    if diag.worktree_exists:
+        print(json.dumps({
+            "restored": False,
+            "reason": "already-present",
+            "path": target,
+            "branch": diag.branch,
+        }))
+        return 0  # idempotent — running twice is success
+
+    # `git -C <repo_root> worktree add <abs-path> <branch>`
+    cmd = ["git", "-C", diag.repo_root, "worktree", "add", target, diag.branch]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30,
+            stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
+        print(json.dumps({"restored": False, "reason": "git-invocation-failed", "detail": str(e)}))
+        return 1
+
+    if proc.returncode == 0:
+        print(json.dumps({
+            "restored": True,
+            "path": target,
+            "branch": diag.branch,
+            "repo_root": diag.repo_root,
+        }))
+        return 0
+
+    stderr = (proc.stderr or "").strip()
+    # Git's two variants of the branch-already-in-use error:
+    #   "is already checked out at '<path>'"        (older)
+    #   "is already used by worktree at '<path>'"   (newer)
+    if "already checked out" in stderr or "already used by worktree" in stderr:
+        import re as _re
+        m = _re.search(
+            r"(?:already checked out at|already used by worktree at) '([^']+)'",
+            stderr,
+        )
+        current = m.group(1) if m else ""
+        print(json.dumps({
+            "restored": False,
+            "reason": "BranchInUseElsewhere",
+            "branch": diag.branch,
+            "current_worktree": current,
+        }))
+        return 1
+
+    print(json.dumps({
+        "restored": False,
+        "reason": "git-failed",
+        "stderr": stderr,
+    }))
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -618,11 +712,29 @@ def main(argv: list[str] | None = None) -> int:
              "If omitted, is_archived is reported as null.",
     )
 
+    p_restore = subparsers.add_parser(
+        "restore",
+        help="Recreate the session's worktree at its recorded cwd.",
+    )
+    p_restore.add_argument(
+        "--session",
+        required=True,
+        help="Session UUID (transcript filename stem).",
+    )
+    p_restore.add_argument(
+        "--ccd-sessions-file",
+        type=Path,
+        default=None,
+        help="(Optional) CCD list_sessions JSON; consulted for the diagnose pre-check.",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "identify":
         return cmd_identify(args.query)
     if args.cmd == "diagnose":
         return cmd_diagnose(args.session, ccd_sessions_file=args.ccd_sessions_file)
+    if args.cmd == "restore":
+        return cmd_restore(args.session, ccd_sessions_file=args.ccd_sessions_file)
     parser.error(f"unknown subcommand: {args.cmd}")
     return 2
 

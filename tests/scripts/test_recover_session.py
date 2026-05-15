@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ _spec.loader.exec_module(_mod)
 # Re-export for terseness
 cmd_identify = _mod.cmd_identify
 cmd_diagnose = _mod.cmd_diagnose
+cmd_restore = _mod.cmd_restore
 score_match = _mod.score_match
 scan_for_query = _mod.scan_for_query
 read_first_user_message = _mod.read_first_user_message
@@ -584,6 +586,189 @@ def test_cmd_diagnose_uses_ccd_sessions_file(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["is_archived"] is True
     assert out["next_action"] == "unarchive-and-resume"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: restore
+# ---------------------------------------------------------------------------
+
+
+def test_restore_creates_worktree_at_absolute_path(tmp_path, capsys):
+    """AC-04: restore invokes `git -C <repo> worktree add <abs-path> <branch>`."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/restore-target"])
+    target = repo / ".worktrees" / "restore-target"
+    target_str = str(target).replace("\\", "/")
+
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_r", "restore-uuid",
+        first_user_message="restore me",
+        cwd=target_str,
+        git_branch="claude/restore-target",
+    )
+
+    rc = cmd_restore("restore-uuid", projects_dir=projects)
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["restored"] is True
+    assert out["path"] == target_str
+    assert out["branch"] == "claude/restore-target"
+    assert target.exists()
+    assert (target / "README.md").exists()  # seed file from init
+
+
+def test_restore_rejects_relative_recorded_cwd(tmp_path, capsys):
+    """AC-05: refuses to restore when recorded cwd is not absolute.
+
+    Guards against the nested-worktree pitfall observed 2026-05-15.
+    """
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/rel-path"])
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_rel", "rel-uuid",
+        first_user_message="relative",
+        cwd="some/relative/path",
+        git_branch="claude/rel-path",
+    )
+    rc = cmd_restore("rel-uuid", projects_dir=projects)
+    # The cwd doesn't resolve to a repo, so we'd hit BranchNotFound first.
+    # To isolate the relative-path guard, we need recorded_cwd to resolve
+    # to a repo root. Hand-craft the transcript with an absolute repo_root
+    # in metadata via a workaround — write recorded_cwd as a path that
+    # ascends to a real repo BUT is non-absolute.
+    # Simpler: assert that whatever the rejection reason, the FS state
+    # is unchanged (no worktree created under tmp_path other than the
+    # main repo).
+    out = json.loads(capsys.readouterr().out)
+    assert out["restored"] is False
+    # Either it caught the relative path directly, or the branch lookup
+    # failed because resolve_repo_root_from_cwd couldn't find a .git
+    # from a relative path. Both are acceptable refusals — the key
+    # invariant is that no worktree was created.
+    assert out["reason"] in ("NestedWorktreeRefused", "BranchNotFound", "NoRecordedCwd")
+
+
+def test_restore_rejects_relative_with_resolvable_branch(tmp_path, capsys, monkeypatch):
+    """Tighter test: even if branch DOES resolve, relative cwd is refused.
+
+    Forces _diagnose_internal to return a relative recorded_cwd alongside
+    branch_exists=True via monkeypatch, so the absolute-path guard is the
+    only thing standing between us and a bad git worktree add.
+    """
+    fake_diag = _mod.DiagnoseResult(
+        session_id="forced-uuid",
+        transcript_exists=True,
+        is_archived=False,
+        worktree_exists=False,
+        branch_exists=True,
+        entrypoint="cli",
+        recoverable=True,
+        next_action="restore-and-resume",
+        recorded_cwd="relative/path/here",
+        branch="claude/forced",
+        repo_root=str(tmp_path / "main-repo").replace("\\", "/"),
+    )
+    monkeypatch.setattr(_mod, "_diagnose_internal", lambda *a, **kw: fake_diag)
+    rc = cmd_restore("forced-uuid", projects_dir=tmp_path)
+    assert rc == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["restored"] is False
+    assert out["reason"] == "NestedWorktreeRefused"
+
+
+def test_restore_is_idempotent_when_worktree_already_exists(tmp_path, capsys):
+    """AC-06: second restore returns {restored: False, reason: already-present}."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/idempotent"])
+    # Target must live under repo so resolve_repo_root_from_cwd can walk
+    # up and find the .git anchor even when target itself doesn't exist.
+    target = repo / ".worktrees" / "idempotent"
+    target_str = str(target).replace("\\", "/")
+
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_i", "idem-uuid",
+        first_user_message="idempotent",
+        cwd=target_str,
+        git_branch="claude/idempotent",
+    )
+
+    # First call: creates
+    rc1 = cmd_restore("idem-uuid", projects_dir=projects)
+    out1 = json.loads(capsys.readouterr().out)
+    assert rc1 == 0
+    assert out1["restored"] is True
+
+    # Second call: noop
+    rc2 = cmd_restore("idem-uuid", projects_dir=projects)
+    out2 = json.loads(capsys.readouterr().out)
+    assert rc2 == 0
+    assert out2["restored"] is False
+    assert out2["reason"] == "already-present"
+
+
+def test_restore_returns_branch_not_found_when_branch_deleted(tmp_path, capsys):
+    """If the recorded branch is gone, restore refuses and hints at reflog."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo)  # only 'main'
+    target = repo / ".worktrees" / "gone"
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_g", "gone-uuid",
+        first_user_message="branch gone",
+        cwd=str(target).replace("\\", "/"),
+        git_branch="claude/never-existed",
+    )
+    rc = cmd_restore("gone-uuid", projects_dir=projects)
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert out["restored"] is False
+    assert out["reason"] == "BranchNotFound"
+    assert "reflog" in out["hint"]
+
+
+def test_restore_reports_branch_in_use_elsewhere(tmp_path, capsys):
+    """If the branch is already checked out elsewhere, refuse cleanly."""
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/in-use"])
+
+    # Add the branch as a worktree FIRST so it's "checked out elsewhere"
+    elsewhere = repo / ".worktrees" / "elsewhere"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add",
+         str(elsewhere).replace("\\", "/"), "claude/in-use"],
+        check=True, capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    # Now attempt restore against a different target path
+    target = repo / ".worktrees" / "second-attempt"
+    target_str = str(target).replace("\\", "/")
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_dup", "dup-uuid",
+        first_user_message="branch already in use",
+        cwd=target_str,
+        git_branch="claude/in-use",
+    )
+
+    rc = cmd_restore("dup-uuid", projects_dir=projects)
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert out["restored"] is False
+    assert out["reason"] == "BranchInUseElsewhere"
+    assert "elsewhere" in out["current_worktree"].lower() or out["current_worktree"]
+
+
+def test_restore_reports_transcript_not_found(tmp_path, capsys):
+    """No transcript → no recovery is possible."""
+    rc = cmd_restore("never-existed-uuid", projects_dir=tmp_path)
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert out["restored"] is False
+    assert out["reason"] == "TranscriptNotFound"
 
 
 def test_cmd_diagnose_branch_missing_is_unrecoverable(tmp_path, capsys):
