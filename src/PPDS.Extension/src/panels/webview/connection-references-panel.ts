@@ -423,18 +423,32 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
 // ── Connection picker dialog (issue #592) ──
 let pickerState: {
     logicalName: string;
+    connectorId: string | null;
     currentConnectionId: string | null | undefined;
     options: ConnectionPickerOptionDto[];
 } | null = null;
+let pickerKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function openConnectionPicker(logicalName: string, connectorId: string | null, currentConnectionId: string | null | undefined): void {
-    pickerState = { logicalName, currentConnectionId, options: [] };
+    pickerState = { logicalName, connectorId, currentConnectionId, options: [] };
     renderPickerLoading(logicalName);
+    // Escape closes the modal — universal expectation; helps keyboard-only users.
+    pickerKeydownHandler = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && pickerState) {
+            e.preventDefault();
+            closeConnectionPicker();
+        }
+    };
+    document.addEventListener('keydown', pickerKeydownHandler);
     vscode.postMessage({ command: 'requestConnections', logicalName, connectorId });
 }
 
 function closeConnectionPicker(): void {
     pickerState = null;
+    if (pickerKeydownHandler) {
+        document.removeEventListener('keydown', pickerKeydownHandler);
+        pickerKeydownHandler = null;
+    }
     const overlay = document.getElementById('cr-picker-overlay');
     if (overlay) overlay.remove();
 }
@@ -467,11 +481,25 @@ function renderPickerOptions(): void {
     const overlay = document.getElementById('cr-picker-overlay');
     if (!overlay) return;
 
-    const { logicalName, currentConnectionId, options } = pickerState;
+    const { logicalName, connectorId, currentConnectionId, options } = pickerState;
+
+    // Show the connector name (last segment) plus the friendly name if any
+    // connection carries one. The full admin-scoped URL is noisy for users.
+    const friendlyConnector = options.find(o => o.connectorDisplayName)?.connectorDisplayName ?? null;
+    const connectorSuffix = (() => {
+        const src = connectorId ?? options[0]?.connectorId ?? '';
+        const apiSlash = src.lastIndexOf('/apis/');
+        return apiSlash >= 0 ? src.substring(apiSlash + '/apis/'.length) : src;
+    })();
+    const connectorLabel = friendlyConnector
+        ? friendlyConnector + ' (' + connectorSuffix + ')'
+        : connectorSuffix;
 
     let body = '';
     if (options.length === 0) {
-        body = '<div class="empty-state">No connections found for this connector. Create one in the Maker Portal first.</div>';
+        body = '<div class="empty-state">No connections found for connector <code>'
+            + escapeHtml(connectorLabel)
+            + '</code>. Create one in the Maker Portal first.</div>';
     } else {
         body += '<label for="cr-picker-select" class="cr-picker-label">Connection</label>';
         body += '<select id="cr-picker-select" class="cr-picker-select">';
@@ -486,7 +514,7 @@ function renderPickerOptions(): void {
         }
         body += '</select>';
         body += '<div class="cr-picker-hint">Filtered by connector <code>'
-            + escapeHtml(options[0].connectorId)
+            + escapeHtml(connectorLabel)
             + '</code>. Selecting the empty option clears the binding.</div>';
     }
 

@@ -124,6 +124,71 @@ public class ConnectionServiceTests
         _mockTokenProvider.Verify(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ListAsync_WithConnectorFilter_FiltersByApiSuffix()
+    {
+        // The Power Apps Admin API returns connections with apiId in the
+        // environment-scoped form (.../scopes/admin/environments/{env}/apis/<name>),
+        // but the panel passes the simple form (/providers/Microsoft.PowerApps/apis/<name>).
+        // The server-side $filter cannot match either form against the other,
+        // so we filter client-side on the /apis/<name> suffix.
+        _mockTokenProvider
+            .Setup(x => x.GetFlowApiTokenAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PowerPlatformToken
+            {
+                AccessToken = "test-token",
+                ExpiresOn = DateTimeOffset.UtcNow.AddHours(1),
+                Resource = "https://service.powerapps.com"
+            });
+
+        // Two connections — different connectors. Server may return both even
+        // when filter is set (observed in practice). Client must narrow.
+        var json = """
+        {
+          "value": [
+            {
+              "name": "conn-1",
+              "properties": {
+                "displayName": "Dataverse Connection",
+                "apiId": "/providers/Microsoft.PowerApps/scopes/admin/environments/env-1/apis/shared_commondataserviceforapps",
+                "statuses": [{"status": "Connected"}],
+                "createdBy": {"displayName": "Test User"}
+              }
+            },
+            {
+              "name": "conn-2",
+              "properties": {
+                "displayName": "Conversion Connection",
+                "apiId": "/providers/Microsoft.PowerApps/scopes/admin/environments/env-1/apis/shared_conversionservice",
+                "statuses": [{"status": "Connected"}],
+                "createdBy": {"displayName": "Test User"}
+              }
+            }
+          ]
+        }
+        """;
+
+        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, json);
+
+        var service = new ConnectionService(
+            _mockTokenProvider.Object,
+            _cloud,
+            _environmentId,
+            _mockLogger.Object,
+            httpClient);
+
+        // Caller passes simple form, as stored on the connection reference.
+        var result = await service.ListAsync(
+            "/providers/Microsoft.PowerApps/apis/shared_conversionservice");
+
+        Assert.Single(result);
+        Assert.Equal("conn-2", result[0].ConnectionId);
+        Assert.EndsWith(
+            "/apis/shared_conversionservice",
+            result[0].ConnectorId,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     #endregion
 
     #region GetAsync Tests

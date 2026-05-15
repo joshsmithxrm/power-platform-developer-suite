@@ -122,6 +122,26 @@ public class ConnectionService : IConnectionService, IDisposable
         }
 
         var connections = apiResponse.Value.Select(MapToConnectionInfo).ToList();
+
+        // The Power Apps Admin API stores apiId in environment-scoped form
+        // (.../scopes/admin/environments/{env}/apis/<name>), but Dataverse
+        // connection references store the simple form (/providers/Microsoft.PowerApps/apis/<name>).
+        // The server-side $filter therefore fails to match — and at least some
+        // tenants get back the full unfiltered list instead of an empty one.
+        // Match on the connector-name suffix to filter correctly regardless.
+        if (!string.IsNullOrEmpty(connectorFilter))
+        {
+            var apiSlash = connectorFilter.LastIndexOf("/apis/", StringComparison.OrdinalIgnoreCase);
+            if (apiSlash >= 0)
+            {
+                var suffix = connectorFilter.Substring(apiSlash);
+                connections = connections
+                    .Where(c => c.ConnectorId != null
+                        && c.ConnectorId.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+        }
+
         _logger.LogDebug("Found {Count} connections", connections.Count);
 
         return connections;
