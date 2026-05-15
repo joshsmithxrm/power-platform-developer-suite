@@ -99,6 +99,54 @@ def test_spawn_argv(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# AC-17: --permission-mode opt-in pass-through (no default bypass)
+# ---------------------------------------------------------------------------
+
+def test_permission_mode_passthrough(monkeypatch, tmp_path):
+    """AC-17: --permission-mode opt-in is threaded to argv between 'claude' and
+    '--bg'; omitted by default. No implicit bypass."""
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+
+    fake_jobs_dir = tmp_path / "jobs"
+    fake_jobs_dir.mkdir()
+    state_dir = fake_jobs_dir / "abc12345"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text(
+        json.dumps({"sessionId": "abc12345-0000-0000-0000-000000000000", "cwd": str(tmp_path).replace("\\", "/")}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # Default: no permission-mode in argv (AC-17 no-default-bypass guarantee).
+    spawn(worktree_abs=str(tmp_path), branch="feat/x", prompt="hi", jobs_dir=fake_jobs_dir)
+    bg_default = next(c for c in calls if "--bg" in c)
+    assert "--permission-mode" not in bg_default, \
+        "AC-17: spawn() must not emit --permission-mode unless caller opts in"
+
+    # Opt-in: caller-provided mode threaded through between 'claude' and '--bg'.
+    calls.clear()
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs_dir,
+        permission_mode="bypassPermissions",
+    )
+    bg_opt = next(c for c in calls if "--bg" in c)
+    assert bg_opt[:3] == ["claude", "--permission-mode", "bypassPermissions"], \
+        f"AC-17: opt-in permission-mode must appear before --bg; got {bg_opt[:5]}"
+    assert "--bg" in bg_opt and "feat/x" in bg_opt and "hi" in bg_opt
+
+
+# ---------------------------------------------------------------------------
 # AC-03: banner parser, plain and ANSI
 # ---------------------------------------------------------------------------
 

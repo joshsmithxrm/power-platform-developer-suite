@@ -139,13 +139,13 @@ Three layers, in order of importance:
 
 ---
 
-## Open questions for the operator
+## Decisions (resolved with operator, captured in this PR)
 
-1. **fnm vs system-node policy.** Do you want to keep fnm (for multi-version) or switch to a pinned system install? Affects which fix path we take for Defect A.
-2. **Skill-edit blast radius.** The fix recommendations touch `.claude/skills/gates/SKILL.md` and (optionally) `CLAUDE.md`. Should this PR include those edits, or land just the patch + recommendation and let you queue the skill edits via a separate PR after approval?
-3. **Bypass-PATH escape hatch.** If snapshots can be inconsistent, would you accept a one-line addition to `~/.bashrc` (auto-created if missing) as part of a `/setup` or `/cleanup` skill? Or is that too much surgery on user shell config?
-4. **Retro of past PRs.** Are there merged PRs whose local `/gates` passed but whose CI passed for unrelated reasons (e.g., TS gates never actually ran locally for a node-broken session)? If so, we may want a one-time audit. Probably low-risk because CI is authoritative, but worth flagging.
-5. **GitHub issues.** Should I file `type:bug,area:workflow,priority:high` issues now (one for each defect) milestoned `v1.2`, or hold pending your decision on #2 above?
+1. **fnm vs system-node**: keep fnm. Root-cause fix is to make fnm activation user-global by adding it to `~/.bashrc` (PowerShell `$PROFILE` already has it).
+2. **PR scope**: this PR ships all fixes — the `start-bg-spawn.py` pass-through, the `/gates` SKILL.md preflight + pipefail guidance, REFERENCE.md §8 with rationale and safe patterns, and the past-PR audit results.
+3. **Shell profile**: `~/.bashrc` is a machine-local change applied outside the repo. PowerShell `$PROFILE` already activates fnm — no edit there.
+4. **Past-PR audit**: run (see "Past-PR audit" section below) — verdict was that no merged PR shipped broken code, because CI's `actions/setup-node` matrix was authoritative throughout the affected period.
+5. **GitHub issues**: defer. The two follow-up candidates (T2 hook for tail-without-pipefail enforcement; snapshot inspection tool for PATH-shape drift detection) are not needed now. File only when a retro surfaces the pattern recurring.
 
 ---
 
