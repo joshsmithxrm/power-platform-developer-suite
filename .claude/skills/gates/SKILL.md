@@ -23,6 +23,17 @@ git diff --name-only main...HEAD
 
 Categorize: `.cs` -> .NET gates; `.ts`/`.js` -> TypeScript gates; both -> all. If $ARGUMENTS specifies a scope, use that.
 
+### Step 1.5: Preflight Toolchain & Output Discipline
+
+Before running any gate, confirm its toolchain is on PATH. A missing toolchain is a **FAIL**, never a SKIP - never report a TS gate as PASS or SKIP when `npm` is missing.
+
+```bash
+command -v dotnet >/dev/null 2>&1 || { echo "FAIL (preflight): dotnet missing"; exit 1; }  # if .NET gates scheduled
+command -v npm    >/dev/null 2>&1 || { echo "FAIL (preflight): npm missing";    exit 1; }  # if TS gates scheduled
+```
+
+**Never pipe gate commands through `tail`/`head`/`grep` without `set -o pipefail`.** The trailing command's exit code masks the real one. `Read REFERENCE.md §8 "Preflight + pipefail"` for safe truncation patterns.
+
 ### Step 2: Run Gates
 
 **Gate 1: .NET Build** (if C# changed)

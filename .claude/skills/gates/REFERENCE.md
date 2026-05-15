@@ -89,3 +89,53 @@ passed but verify has not yet run.
 5. **No fixes** - report problems, don't fix them. Mixing detection with
    repair makes the gate non-deterministic and obscures what was actually
    broken.
+
+## §8 - Preflight + pipefail
+
+### Why preflight is FAIL not SKIP
+
+If `npm` is missing the toolchain is unavailable in this shell — the gate
+cannot tell whether the code is correct. Reporting SKIP creates a false
+"didn't run, probably fine" signal that callers (and humans) treat as
+PASS. Reporting FAIL forces the operator to either fix the environment
+or rerun from a shell with the toolchain active. The same logic applies
+to `dotnet` for .NET gates.
+
+This failure mode is real, not hypothetical: a session in May 2026 ran
+six TS gates with `npm: command not found`, piped each through
+`| tail -10`, and reported all six PASS because `tail` returned 0. See
+`.investigation/node-gates-recommendation.md` on `fix/node-gates-investigation`
+for the full root cause (fnm's per-shell PATH activation not firing in
+the shell that launched Claude Code).
+
+### Why pipefail matters
+
+POSIX shells (Git Bash included) return the exit status of the *last*
+command in a pipeline by default. So:
+
+```bash
+$ false | tail -10; echo "exit=$?"
+exit=0                              # tail succeeded reading stdin
+```
+
+`tail` is happy reading the error output and returns 0, masking the
+upstream failure. The three safe patterns:
+
+```bash
+# A: capture to file, tail only on failure (preferred — preserves full log)
+npm run compile --prefix src/PPDS.Extension >.gates.log 2>&1 \
+    || { tail -40 .gates.log; exit 1; }
+
+# B: enable pipefail for the pipeline
+set -o pipefail
+npm run compile --prefix src/PPDS.Extension 2>&1 | tail -40
+
+# C: inspect ${PIPESTATUS[0]} explicitly
+npm run compile --prefix src/PPDS.Extension 2>&1 | tail -40
+[ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+```
+
+Pattern A is preferred for gate commands because the full log is on disk
+for later inspection — `tail` is only invoked on failure to surface a
+preview. Patterns B and C are fine for ad-hoc shell work but lose the
+upstream lines on long failures.
