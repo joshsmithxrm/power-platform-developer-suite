@@ -455,6 +455,32 @@ def post_replies(worktree, pr_number, triage_results, log_fn, shakedown=False):
             log_fn("FAILED", comment_id=comment_id)
 
 
+def _read_agent_profile_body(profile_name, worktree="."):
+    """Return the body of .claude/agents/<profile_name>.md (frontmatter stripped).
+
+    Interactive ``claude --bg`` mode silently drops the ``--agent`` flag, so the
+    spawned session never auto-loads its profile. We inline the profile body
+    into the prompt so the session knows its role regardless of mode.
+
+    Returns the empty string if the profile file is missing — callers must rely
+    on the embedded directive plus the payload to convey the task.
+    """
+    profile_path = os.path.join(worktree, ".claude", "agents", f"{profile_name}.md")
+    try:
+        with open(profile_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return ""
+    # Strip YAML frontmatter if present (--- ... ---) so only the task body
+    # remains. The frontmatter is consumed by Claude Code's loader; the model
+    # only needs the human-readable instructions.
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end >= 0:
+            text = text[end + 4:].lstrip("\n")
+    return text
+
+
 def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
                       timeout=1800, mode=None, caller=None,
                       stage_log=None):
@@ -466,11 +492,24 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
     defaults to ``"triage_common.dispatch_subagent"`` for the spend-journal
     audit row. Constitution A2: single code path.
 
+    The constructed prompt has three parts so the spawned session has enough
+    context to act without the operator answering questions:
+      1. A directive forbidding clarifying questions (matches the pattern that
+         ``pr_monitor.run_triage`` already uses successfully).
+      2. The agent profile body, inlined from ``.claude/agents/<name>.md``
+         because interactive mode silently drops ``--agent`` (see #1086).
+      3. The JSON payload under a clear ``=== PAYLOAD ===`` marker.
+
+    ``dangerous=True`` is passed to ``spawn`` because the subprocess is fully
+    automated — permission prompts here would surface as ``BlockedSessionError``
+    with no operator to respond.
+
     Args:
         profile_name: agent profile name (matches .claude/agents/<name>.md).
-        payload: dict serialized as JSON and passed as the prompt.
+        payload: dict serialized as JSON and embedded in the prompt.
         model: model slug (floating name, no version pin).
-        worktree: working directory for the subprocess.
+        worktree: working directory for the subprocess; also the root used
+            to resolve the agent profile file.
         timeout: seconds before the process is killed (default 30 min).
         mode: ``"interactive"`` / ``"headless"`` / ``None``. ``None`` defers
             to ``claude_dispatch._resolve_mode``.
@@ -486,7 +525,16 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
     if caller is None:
         caller = "triage_common.dispatch_subagent"
     resolved_mode = claude_dispatch._resolve_mode(mode)
-    prompt = json.dumps(payload)
+    profile_body = _read_agent_profile_body(profile_name, worktree=worktree)
+    payload_json = json.dumps(payload, indent=2)
+    prompt = (
+        "You are running in headless mode via a background subprocess. "
+        "There is no operator to answer questions — make reasonable decisions "
+        "and proceed with the task described below. "
+        f"Behave as the '{profile_name}' agent.\n\n"
+        f"=== AGENT PROFILE ===\n{profile_body}\n\n"
+        f"=== PAYLOAD ===\n{payload_json}\n"
+    )
 
     # Headless needs a stage_log path; auto-create a per-call temp file when caller
     # didn't provide one. The temp file is deleted after output() reads it.
@@ -509,6 +557,7 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
                 agent=profile_name,
                 model=model,
                 cwd=worktree,
+                dangerous=True,
                 stage_log=stage_log,
             )
         except claude_dispatch.DispatchError as e:

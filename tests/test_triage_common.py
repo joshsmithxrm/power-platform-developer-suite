@@ -509,7 +509,8 @@ class _FakeHandle:
 @pytest.mark.parametrize("mode", ["interactive", "headless"])
 def test_dispatch_subagent_both_modes(mode, tmp_path):
     """AC-15: dispatch_subagent forwards mode and shape to claude_dispatch.spawn,
-    returning {stdout, stderr, exit_code}."""
+    returning {stdout, stderr, exit_code}. The prompt is a wrapped form
+    (directive + profile body + payload), not the raw JSON payload."""
     from triage_common import dispatch_subagent
     import claude_dispatch
 
@@ -532,8 +533,65 @@ def test_dispatch_subagent_both_modes(mode, tmp_path):
     assert captured["caller"] == "test.dispatch_subagent"
     assert captured["agent"] == "reviewer"
     assert captured["name"] == "reviewer"
-    # JSON-serialized payload reaches the dispatcher unchanged.
-    assert json.loads(captured["prompt"]) == {"key": "value"}
+    # dangerous=True is required so permission prompts don't strand the session.
+    assert captured["dangerous"] is True
+    # Prompt is wrapped: directive + profile section + payload section,
+    # with the payload embedded as pretty-printed JSON.
+    prompt = captured["prompt"]
+    assert "headless mode" in prompt
+    assert "no operator to answer questions" in prompt
+    assert "'reviewer' agent" in prompt
+    assert "=== AGENT PROFILE ===" in prompt
+    assert "=== PAYLOAD ===" in prompt
+    assert '"key": "value"' in prompt
+
+
+def test_dispatch_subagent_inlines_profile_body(tmp_path):
+    """#1086: interactive mode silently drops --agent, so the profile body must
+    be inlined into the prompt. dispatch_subagent reads
+    .claude/agents/<name>.md from the worktree and embeds the body
+    (frontmatter stripped) under the AGENT PROFILE marker."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+
+    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "demo.md").write_text(
+        "---\nname: demo\nmodel: sonnet\n---\n\n"
+        "# Demo Agent\n\nDo the demo task.\n",
+        encoding="utf-8",
+    )
+
+    captured = {}
+    def fake_spawn(**kw):
+        captured.update(kw)
+        return _FakeHandle()
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        dispatch_subagent(profile_name="demo", payload={}, worktree=str(tmp_path),
+                          mode="interactive")
+    prompt = captured["prompt"]
+    assert "# Demo Agent" in prompt
+    assert "Do the demo task." in prompt
+    # Frontmatter MUST be stripped — the model only sees the body.
+    assert "model: sonnet" not in prompt
+
+
+def test_dispatch_subagent_missing_profile_does_not_crash(tmp_path):
+    """When the profile file is missing the prompt still has directive + payload —
+    callers may use ad-hoc profile names for one-off agents."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+    captured = {}
+    def fake_spawn(**kw):
+        captured.update(kw)
+        return _FakeHandle()
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        dispatch_subagent(profile_name="nonexistent", payload={"x": 1},
+                          worktree=str(tmp_path), mode="interactive")
+    prompt = captured["prompt"]
+    assert "headless mode" in prompt
+    assert "'nonexistent' agent" in prompt
+    assert '"x": 1' in prompt
 
 
 def test_dispatch_subagent_caller_default(tmp_path):
