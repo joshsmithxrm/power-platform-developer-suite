@@ -47,6 +47,7 @@ namespace PPDS.Migration.DependencyInjection
             services.AddTransient<ICmtSchemaWriter, CmtSchemaWriter>();
             services.AddTransient<ICmtDataReader, CmtDataReader>();
             services.AddTransient<ICmtDataWriter, CmtDataWriter>();
+            services.AddTransient<IJsonDataWriter, JsonDataWriter>();
 
             // Schema generation
             services.AddTransient<ISchemaGenerator, DataverseSchemaGenerator>();
