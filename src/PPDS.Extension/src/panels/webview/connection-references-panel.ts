@@ -692,8 +692,20 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
         case 'error':
             (refreshBtn as HTMLButtonElement).disabled = false;
             refreshBtn.textContent = 'Refresh';
-            content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
-            statusText.textContent = 'Error';
+            // If the picker is open (bind failed), re-enable Save so the user can retry.
+            if (pickerState) {
+                const save = document.getElementById('cr-picker-save') as HTMLButtonElement | null;
+                if (save) {
+                    save.disabled = false;
+                    save.textContent = 'Save';
+                }
+            }
+            // Preserve loaded table state on operational errors (bind/detail/analyze/sync).
+            // Only replace the main content if the table is empty — i.e. an initial-load failure.
+            if (table.getItems().length === 0) {
+                content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
+            }
+            statusText.textContent = 'Error: ' + msg.message;
             break;
         case 'connectionsLoaded':
             if (pickerState && pickerState.logicalName === msg.logicalName) {

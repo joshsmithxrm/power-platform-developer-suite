@@ -315,8 +315,8 @@ public class ConnectionReferenceService : IConnectionReferenceService
             normalized ?? "(cleared)",
             logicalName);
 
-        // Re-read so callers get the freshly persisted state (matches GetAsync semantics).
-        return await GetAsync(logicalName, cancellationToken)
+        // Re-read by Id so callers get the freshly persisted state without a second logical-name query.
+        return await GetByIdAsync(existing.Id, cancellationToken)
             ?? throw new PpdsException(
                 ErrorCodes.Operation.NotFound,
                 $"Connection reference '{logicalName}' disappeared after update.");
