@@ -937,6 +937,121 @@ def test_cmd_prepare_returns_transcript_not_found_for_unknown(tmp_path, capsys):
     assert out["reason"] == "TranscriptNotFound"
 
 
+# ---------------------------------------------------------------------------
+# Phase 5/6: SKILL.md structural tests (AC-08, AC-09)
+# ---------------------------------------------------------------------------
+
+
+_SKILL_DIR = _REPO / ".claude" / "skills" / "recover-session"
+
+
+def test_skill_md_under_line_cap():
+    """AC-08: SKILL.md is <=150 lines (the skill-line-cap.py hook bar)."""
+    skill = _SKILL_DIR / "SKILL.md"
+    assert skill.exists(), f"SKILL.md missing at {skill}"
+    lines = skill.read_text(encoding="utf-8").splitlines()
+    assert len(lines) <= 150, f"SKILL.md is {len(lines)} lines; cap is 150"
+
+
+def test_skill_md_references_reference_sections():
+    """AC-09: SKILL.md cites REFERENCE.md §N using canonical syntax."""
+    skill = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    # The TWO-FILE-PATTERN canonical form: "Read REFERENCE.md §<N>"
+    import re as _re
+    refs = _re.findall(r"Read REFERENCE\.md §(\d+)", skill)
+    assert refs, "SKILL.md must cite REFERENCE.md sections via `Read REFERENCE.md §N`"
+    assert len(set(refs)) >= 3, (
+        f"SKILL.md should reference multiple REFERENCE.md sections; found only {set(refs)}"
+    )
+
+
+def test_reference_md_has_corresponding_sections():
+    """Every §N cited in SKILL.md must exist as a heading in REFERENCE.md."""
+    skill = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    reference = (_SKILL_DIR / "REFERENCE.md").read_text(encoding="utf-8")
+    import re as _re
+
+    cited = set(_re.findall(r"Read REFERENCE\.md §(\d+)", skill))
+    defined = set(_re.findall(r"## §(\d+) —", reference))
+    missing = cited - defined
+    assert not missing, f"SKILL.md cites missing REFERENCE sections: {missing}"
+
+
+def test_skill_frontmatter_present():
+    """SKILL.md must have name and description frontmatter."""
+    skill = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert skill.startswith("---\n"), "SKILL.md must start with YAML frontmatter"
+    fm_end = skill.find("\n---\n", 4)
+    assert fm_end > 0, "SKILL.md frontmatter must close"
+    fm = skill[4:fm_end]
+    assert "name: recover-session" in fm
+    assert "description:" in fm
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: filesystem audit (AC-11)
+# ---------------------------------------------------------------------------
+
+
+def test_no_writes_to_ccd_state_store(tmp_path, monkeypatch, capsys):
+    """AC-11: helper subcommands never write to $APPDATA/Claude/claude-code-sessions
+    nor to ~/.claude/projects (those are read-only inputs).
+    """
+    # Wrap builtins.open to capture write attempts
+    import builtins
+    original_open = builtins.open
+    write_paths: list[str] = []
+
+    def auditing_open(file, mode="r", *args, **kwargs):
+        if isinstance(file, (str, Path)) and any(c in str(mode) for c in ("w", "a", "x", "+")):
+            write_paths.append(str(file))
+        return original_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", auditing_open)
+
+    # Set up a real but isolated environment
+    repo = tmp_path / "main-repo"
+    _init_git_repo(repo, branches=["claude/audit-test"])
+    target = repo / ".worktrees" / "audit-test"
+    projects = tmp_path / "projects"
+    _write_transcript(
+        projects, "proj_audit", "audit-uuid",
+        first_user_message="audit me",
+        cwd=str(target).replace("\\", "/"),
+        git_branch="claude/audit-test",
+    )
+
+    # Clear any writes from setup
+    write_paths.clear()
+
+    # Run all four subcommands
+    cmd_identify("audit", projects_dir=projects)
+    capsys.readouterr()
+    cmd_diagnose("audit-uuid", projects_dir=projects)
+    capsys.readouterr()
+    cmd_restore("audit-uuid", projects_dir=projects)
+    capsys.readouterr()
+    cmd_prepare("audit-uuid", projects_dir=projects, gh_fetcher=lambda since: [])
+    capsys.readouterr()
+
+    # Assert no writes to forbidden trees
+    forbidden_substrings = [
+        "claude-code-sessions",
+        "/AppData/Local/Claude",
+        "/AppData/Roaming/Claude",
+    ]
+    bad = [
+        p for p in write_paths
+        if any(sub.replace("/", os.sep) in p or sub in p.replace("\\", "/") for sub in forbidden_substrings)
+    ]
+    assert not bad, f"helper wrote to forbidden CCD state-store paths: {bad}"
+
+    # Projects dir reads only — the script must never write a transcript JSONL
+    projects_writes = [p for p in write_paths if "/projects/" in p.replace("\\", "/")
+                       and (".jsonl" in p)]
+    assert not projects_writes, f"helper wrote to transcript files: {projects_writes}"
+
+
 def test_cmd_diagnose_branch_missing_is_unrecoverable(tmp_path, capsys):
     """Branch deleted → next_action = unrecoverable-branch-missing."""
     repo = tmp_path / "main-repo"
