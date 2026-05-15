@@ -157,7 +157,7 @@ def _encode_project_dir(path):
     with ``-``, not just ``:\\/.`` (the older retro rule missed underscores
     and dropped transcripts on Windows usernames like ``josh_``).
     """
-    return derive_slug(os.path.abspath(path))
+    return derive_slug(path)
 
 
 def discover_transcripts(worktree_path, since=None):
@@ -258,7 +258,14 @@ def _commit_subject(sha, cwd=None):
 
 def _commit_files(sha, cwd=None):
     out = _git_log(["-1", "--name-only", "--format=", sha], cwd=cwd)
-    return [line.strip().replace("\\", "/") for line in out.splitlines() if line.strip()]
+    # Git wraps paths containing special characters (spaces, unicode) in
+    # double quotes when ``core.quotePath`` is on (default). Strip them so
+    # downstream allowlist matching sees the raw path.
+    return [
+        line.strip().strip('"').replace("\\", "/")
+        for line in out.splitlines()
+        if line.strip()
+    ]
 
 
 _FIX_PREFIX_RE = ("fix", "bug", "hotfix", "patch", "revert")

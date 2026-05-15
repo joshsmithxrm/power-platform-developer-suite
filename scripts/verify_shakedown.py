@@ -59,7 +59,8 @@ def _changed_files(base: str | None) -> list[str]:
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise _SetupError(f"git diff failed: {exc}") from exc
         if out.returncode == 0:
-            return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+            # Strip git's quoting of paths with special chars (core.quotePath default on).
+            return [line.strip().strip('"') for line in out.stdout.splitlines() if line.strip()]
     try:
         out = subprocess.run(
             ["git", "status", "--porcelain"],

@@ -105,9 +105,11 @@ def derive_slug(cwd: str) -> str:
     Replaces every non-[A-Za-z0-9-] character with `-`. This is the same
     encoding Claude Code uses for ``~/.claude/projects/<slug>/``. Other
     PPDS scripts (e.g. retro transcript discovery) must call this helper
-    rather than re-deriving the rule.
+    rather than re-deriving the rule. ``cwd`` is normalized to an absolute
+    path first — Claude Code's slug is keyed off the absolute cwd, so a
+    relative input would otherwise produce a slug that fails to match.
     """
-    return _SLUG_CHAR_RE.sub("-", cwd)
+    return _SLUG_CHAR_RE.sub("-", os.path.abspath(cwd))
 
 
 def _derive_transcript_path(cwd: str, session_id: str) -> Path:

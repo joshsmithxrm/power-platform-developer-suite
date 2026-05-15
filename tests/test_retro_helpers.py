@@ -136,8 +136,8 @@ class TestDiscoverTranscripts:
         encoded = retro_helpers._encode_project_dir(path)
         # Underscore replaced
         assert "_" not in encoded
-        # Matches the dispatcher's derivation (after abspath normalization)
-        assert encoded == derive_slug(os.path.abspath(path))
+        # Matches the dispatcher's derivation (derive_slug normalizes internally)
+        assert encoded == derive_slug(path)
 
     def test_discover_transcripts_since_filter(self, monkeypatch):
         """discover_transcripts skips transcripts older than ``since`` mtime."""
