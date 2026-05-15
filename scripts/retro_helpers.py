@@ -205,12 +205,27 @@ def discover_transcripts(worktree_path, since=None):
 
 
 def _git_log(args, cwd=None):
-    """Run ``git log`` and return stdout text, empty string on failure."""
+    """Run ``git log`` and return stdout text, empty string on failure.
+
+    Two configuration choices matter here for path handling:
+
+    - ``-c core.quotePath=off`` disables git's C-style escaping of paths
+      with spaces, unicode, or backslashes. Without it, a path like
+      ``scripts/é.py`` arrives as ``"scripts/\\303\\251.py"`` with octal
+      escapes — disabling at the source is more correct than trying to
+      unescape on the consumer side.
+    - ``encoding="utf-8"`` overrides Python's default of decoding via the
+      system codepage (cp1252 on Windows), which would otherwise turn
+      git's UTF-8 ``é`` (bytes ``0xC3 0xA9``) into the two-char string
+      ``Ã©`` and break disk-path matching against the actual NTFS entry.
+    """
     try:
         out = subprocess.run(
-            ["git", "log", *args],
+            ["git", "-c", "core.quotePath=off", "log", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=cwd,
             timeout=30,
         )
@@ -257,12 +272,11 @@ def _commit_subject(sha, cwd=None):
 
 
 def _commit_files(sha, cwd=None):
+    # ``_git_log`` runs with ``core.quotePath=off`` so paths arrive raw
+    # (no surrounding quotes, no C-style escapes) regardless of git config.
     out = _git_log(["-1", "--name-only", "--format=", sha], cwd=cwd)
-    # Git wraps paths containing special characters (spaces, unicode) in
-    # double quotes when ``core.quotePath`` is on (default). Strip them so
-    # downstream allowlist matching sees the raw path.
     return [
-        line.strip().strip('"').replace("\\", "/")
+        line.strip().replace("\\", "/")
         for line in out.splitlines()
         if line.strip()
     ]

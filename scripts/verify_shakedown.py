@@ -50,21 +50,30 @@ def _changed_files(base: str | None) -> list[str]:
     Uses ``git diff --name-only <base>...HEAD`` when *base* is provided,
     otherwise falls back to ``git status --porcelain`` (uncommitted work).
     """
+    # ``-c core.quotePath=off`` + ``encoding="utf-8"`` together ensure
+    # paths arrive raw and decoded correctly:
+    #   - core.quotePath=off: git emits ``scripts/é.py`` instead of the
+    #     C-style-escaped ``"scripts/\303\251.py"``.
+    #   - encoding="utf-8": overrides Python's default of using the system
+    #     codepage (cp1252 on Windows), which would otherwise turn git's
+    #     UTF-8 ``é`` (``0xC3 0xA9``) into ``Ã©`` and break allowlist
+    #     matching against the actual NTFS path.
     if base:
         try:
             out = subprocess.run(
-                ["git", "diff", "--name-only", f"{base}...HEAD"],
-                capture_output=True, text=True, timeout=30,
+                ["git", "-c", "core.quotePath=off", "diff", "--name-only", f"{base}...HEAD"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise _SetupError(f"git diff failed: {exc}") from exc
         if out.returncode == 0:
-            # Strip git's quoting of paths with special chars (core.quotePath default on).
-            return [line.strip().strip('"') for line in out.stdout.splitlines() if line.strip()]
+            return [line.strip() for line in out.stdout.splitlines() if line.strip()]
     try:
         out = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True, text=True, timeout=30,
+            ["git", "-c", "core.quotePath=off", "status", "--porcelain"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise _SetupError(f"git status failed: {exc}") from exc
@@ -78,7 +87,7 @@ def _changed_files(base: str | None) -> list[str]:
         rest = line[3:]
         if " -> " in rest:
             rest = rest.split(" -> ", 1)[1]
-        files.append(rest.strip().strip('"'))
+        files.append(rest.strip())
     return files
 
 

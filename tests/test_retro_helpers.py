@@ -286,3 +286,24 @@ class TestAllowlistDriftDetector:
             findings = os.path.join(tmpdir, ".workflow", "retro-findings.json")
             retro_helpers.write_drift_proposals(findings, [])
             assert not os.path.exists(findings)
+
+    def test_unicode_path_in_post_verify_fix_is_flagged(self):
+        """Paths with unicode characters arrive raw (no octal escapes) so
+        the detector matches them against the allowlist correctly. Regression
+        for Gemini PR #1073: ``.strip('"')`` alone could not handle git's
+        C-style escaping when ``core.quotePath`` was on; the fix is to pass
+        ``-c core.quotePath=off`` to git."""
+        import retro_helpers
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._init_repo(tmpdir)
+            self._commit(tmpdir, env, "verify: workflow ok",
+                         {"docs/notes.md": "x\n"})
+            # Path with a non-ASCII character — git would normally emit
+            # this as ``"scripts/\303\251.py"`` under default core.quotePath.
+            self._commit(tmpdir, env, "fix: unicode path",
+                         {"scripts/é.py": "import subprocess\n"})
+            proposals = retro_helpers.detect_allowlist_drift(cwd=tmpdir)
+            flagged = [p["file"] for p in proposals]
+            assert "scripts/é.py" in flagged, (
+                f"unicode path missed; got: {flagged!r}"
+            )
