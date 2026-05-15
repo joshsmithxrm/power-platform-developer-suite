@@ -142,17 +142,32 @@ def identify_session(
     )
 
 
+PERMISSION_MODES = (
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "default",
+    "dontAsk",
+    "plan",
+)
+
+
 def spawn(
     worktree_abs: str,
     branch: str,
     prompt: str,
     jobs_dir: Path | None = None,
+    permission_mode: str | None = None,
 ) -> SpawnResult:
     if jobs_dir is None:
         jobs_dir = JOBS_DIR
     require_min_version()
+    cmd = ["claude"]
+    if permission_mode:
+        cmd.extend(["--permission-mode", permission_mode])
+    cmd.extend(["--bg", "--name", branch, "--", prompt])
     proc = subprocess.run(
-        ["claude", "--bg", "--name", branch, "--", prompt],
+        cmd,
         cwd=worktree_abs, capture_output=True, text=True, timeout=30,
     )
     if proc.returncode != 0:
@@ -194,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--worktree-abs", required=True)
     p.add_argument("--branch", required=True)
     p.add_argument("--prompt-file", required=True)
+    p.add_argument(
+        "--permission-mode",
+        choices=PERMISSION_MODES,
+        default=None,
+        help="Pass-through to `claude --permission-mode <mode>`. Omit for default.",
+    )
     args = p.parse_args(argv)
     try:
         try:
@@ -201,7 +222,12 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             raise SpawnError(f"could not read prompt file: {exc}", 1)
         _validate(args, prompt)
-        result = spawn(args.worktree_abs, args.branch, prompt)
+        result = spawn(
+            args.worktree_abs,
+            args.branch,
+            prompt,
+            permission_mode=args.permission_mode,
+        )
         json.dump(
             {"short": result.short, "sessionId": result.sessionId, "cwd": result.cwd},
             sys.stdout,
