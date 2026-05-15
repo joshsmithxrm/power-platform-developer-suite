@@ -1,0 +1,157 @@
+# Workflow Defects: Node Absence + Pipeline Exit-Code Masking
+
+**Branch:** `fix/node-gates-investigation`
+**Date:** 2026-05-15
+**Status:** Investigation complete; awaiting operator approval before any fix.
+
+---
+
+## TL;DR
+
+Two independent bugs combined to produce a false-pass on `/gates`:
+
+- **Defect A** is environmental — `fnm` (Fast Node Manager) installs `node`/`npm` under a per-shell PID-keyed directory that is only on `PATH` if `fnm env` ran in the launching shell. Some Claude Code sessions get spawned from a shell context where it didn't, so the captured shell snapshot has no node on `PATH`. About **12.5%** of recent shell snapshots on this machine are in this broken state (5 out of last 40).
+- **Defect B** is procedural — the parent session improvised `npm run X 2>&1 | tail -10` to truncate output. Bash's last-segment exit-code semantics meant every npm failure was reported as a pass. The `/gates` skill text does **not** prescribe `| tail`; this was Claude-side improvisation.
+
+The `/gates` skill currently has no node-availability gate and no guidance on safe output truncation, so the bug is fully reproducible by any session with either an unlucky snapshot or a habit of piping through `tail`.
+
+---
+
+## Defect A — Node/npm not findable from Bash tool
+
+### Root cause
+
+Node.js on this machine is installed via **fnm** (managed via WinGet — `Schniz.fnm`). fnm's runtime convention:
+
+1. Each interactive shell calls `fnm env` (typically in a `.bashrc`/`.bash_profile`).
+2. `fnm env` mints a fresh directory at `%LOCALAPPDATA%\fnm_multishells\<PID>_<unix-ms>\` containing symlinks to the currently-active node toolchain.
+3. That directory is appended to `PATH` for **that shell only**.
+
+Claude Code's `Bash` tool does **not** start a fresh interactive shell per call. Instead it captures a one-time **shell snapshot** at session start (`~/.claude/shell-snapshots/snapshot-bash-<unix-ms>-<rand>.sh`) and `source`s that snapshot for every Bash invocation thereafter. The snapshot bakes in the `PATH` that was active in the launching shell.
+
+**Consequence:** if the shell that launched Claude Code had not yet sourced `fnm env`, the snapshot is missing the `fnm_multishells/<...>` entry, and **no Bash tool call in that session will ever see `node` or `npm`**, period — until the user starts a new session.
+
+### Evidence
+
+| Source | Finding |
+|---|---|
+| This session's snapshot (`snapshot-bash-1778825851785-05uqe6.sh`) | Contains `/c/Users/josh_/AppData/Local/fnm_multishells/12176_1778723526665` in `PATH`. `npm --version` ⇒ `10.9.4`. ✅ |
+| Parent-session-era snapshot (`snapshot-bash-1778815770953-pnlbd7.sh`, May 14 22:29) | **No** `fnm_multishells` entry. Otherwise identical PATH. ❌ |
+| Recent snapshots (40 most recent) | 5 of 40 missing fnm (12.5%). Scattered, not clustered — consistent with "sometimes the launching shell hadn't initialized fnm yet." |
+| `Schniz.fnm_Microsoft.Winget.Source_8wekyb3d8bbwe` | Present in PATH on every snapshot — fnm binary itself is reachable, only its activated environment isn't. |
+| `.github/workflows/*.yml` | All 4 TS-touching workflows use `actions/setup-node@v6`. CI provisions node deterministically, so PRs that touch TS never hit this bug there. |
+| `/gates` skill text | Has no preflight check for node availability and no opinion on `tail`. |
+
+### Why it doesn't show up everywhere
+
+- Foreground Claude Code sessions: usually launched from a terminal the user has been working in, where `fnm env` has already run. Snapshot has node. /gates works.
+- Background sessions launched by `/start`: `claude --bg` inherits from the daemon's environment, which inherits from whichever shell spawned Claude originally. If `/start` got run from a session that itself had no fnm, the bg session won't either.
+- The 5/40 broken snapshots correspond to specific historical Claude launches that happened from PATH-incomplete shells.
+
+### Fix recommendation (operator-actionable)
+
+Pick one of the three; #1 is the cleanest.
+
+1. **Make node user-global, not per-shell** *(recommended)*
+
+   Add fnm activation to PowerShell `$PROFILE` AND bash `~/.bashrc` so every interactive shell gets a multishell PATH entry before Claude Code is launched. Currently neither profile exists (`cat ~/.bashrc` ⇒ "No such file or directory"), which is why activation is sporadic.
+
+   ```powershell
+   # In $PROFILE
+   fnm env --use-on-cd | Out-String | Invoke-Expression
+   ```
+
+   ```bash
+   # In ~/.bashrc
+   eval "$(fnm env --use-on-cd --shell bash)"
+   ```
+
+   After this, every snapshot Claude captures will have fnm in PATH.
+
+2. **Pin the node version system-wide.** Install node directly from nodejs.org (puts it at `C:\Program Files\nodejs\`) and uninstall fnm. PATH entry becomes static and survives any shell context. Trades flexibility (fnm's multi-version support) for reliability.
+
+3. **Make `/gates` defensive.** Add a preflight check in the skill text:
+
+   ```bash
+   if ! command -v npm >/dev/null 2>&1; then
+       echo "FAIL (preflight): npm not on PATH — node toolchain unavailable in this shell"
+       # SKIP all TS gates with explicit FAIL verdict, do NOT mark them PASS
+       exit 1
+   fi
+   ```
+
+   This doesn't fix the environment, but it converts a silent false-pass into a loud, actionable failure. Worth doing **even if #1 is also adopted**, since it costs ~5 lines and protects against unknown future PATH regressions.
+
+**My recommendation:** do **#1 + #3**. #1 fixes the root cause. #3 hardens the skill against any future PATH-shape we haven't anticipated.
+
+---
+
+## Defect B — `npm run X 2>&1 | tail -10` masks the exit code
+
+### Root cause
+
+Confirmed exactly as suspected. POSIX shells (including Git Bash) propagate the exit status of the **last** command in a pipeline by default:
+
+```bash
+$ false | tail -10; echo "exit=$?"
+exit=0                              # tail succeeded reading stdin → 0
+
+$ set -o pipefail; false | tail -10; echo "exit=$?"
+exit=1                              # pipefail propagates the worst exit code
+
+$ false | tail -10; echo "PIPESTATUS=${PIPESTATUS[@]}"
+PIPESTATUS=1 0                      # original codes recoverable per-stage
+```
+
+So when the parent session ran:
+
+```bash
+npm run compile --prefix src/PPDS.Extension 2>&1 | tail -10
+```
+
+…and `npm` printed `npm: command not found` to stderr (which was redirected to stdout, then piped to `tail`), `tail` happily read those 10 lines, returned 0, and Claude saw "exit=0 → PASS." The actual `npm: command not found` text was sitting right in the tail output, but Claude didn't read it as a failure indicator because the exit code said otherwise.
+
+### Where the bug was introduced
+
+- **Not in the `/gates` skill text.** I read `.claude/skills/gates/SKILL.md` end-to-end — every command is bare (e.g. `npm run compile --prefix src/PPDS.Extension`). No `| tail`, no `| head`, no `2>&1 |` patterns anywhere in the skill.
+- **In Claude's improvisation.** The parent session decided to truncate output with `| tail -10` to keep its context window manageable. This is a reasonable instinct but a foot-gun without `set -o pipefail`.
+- **Compounded by the lack of any project-level shell discipline.** There's no `set -euo pipefail` boilerplate in skill commands, no hook that flags suspicious pipelines.
+
+### Fix recommendation
+
+Three layers, in order of importance:
+
+1. **Add explicit guidance to `.claude/skills/gates/SKILL.md`** — a short "Output handling" section near the top:
+
+   > **Never pipe gate commands through `tail`/`head` without `set -o pipefail`.** Bash returns the last pipeline command's exit code, so `npm run compile | tail -10` reports PASS even when npm errored out. If you must truncate output, use `set -o pipefail` first, or check `${PIPESTATUS[0]}` explicitly, or capture to a file and `tail` the file separately:
+   >
+   > ```bash
+   > npm run compile --prefix src/PPDS.Extension >.gates.log 2>&1 || { tail -20 .gates.log; exit 1; }
+   > ```
+
+2. **Generalize to a workflow-wide convention** in `CLAUDE.md` under NEVER:
+
+   > Pipe a gate/test command through `tail`/`head`/`grep` without `set -o pipefail` — the trailing command's exit code masks the real one. Capture to a log file and `tail` the file instead.
+
+3. **Optional hook (T2)** — `scripts/hooks/check-pipefail.py` that scans tool-call shell strings for `| tail`/`| head`/`| grep` without a preceding `pipefail` and warns. Probably overkill for now, but cheap to add later if the pattern recurs.
+
+**My recommendation:** do **#1 + #2**. #3 only if we see the pattern again in retros.
+
+---
+
+## Open questions for the operator
+
+1. **fnm vs system-node policy.** Do you want to keep fnm (for multi-version) or switch to a pinned system install? Affects which fix path we take for Defect A.
+2. **Skill-edit blast radius.** The fix recommendations touch `.claude/skills/gates/SKILL.md` and (optionally) `CLAUDE.md`. Should this PR include those edits, or land just the patch + recommendation and let you queue the skill edits via a separate PR after approval?
+3. **Bypass-PATH escape hatch.** If snapshots can be inconsistent, would you accept a one-line addition to `~/.bashrc` (auto-created if missing) as part of a `/setup` or `/cleanup` skill? Or is that too much surgery on user shell config?
+4. **Retro of past PRs.** Are there merged PRs whose local `/gates` passed but whose CI passed for unrelated reasons (e.g., TS gates never actually ran locally for a node-broken session)? If so, we may want a one-time audit. Probably low-risk because CI is authoritative, but worth flagging.
+5. **GitHub issues.** Should I file `type:bug,area:workflow,priority:high` issues now (one for each defect) milestoned `v1.2`, or hold pending your decision on #2 above?
+
+---
+
+## Out of scope (intentionally not touched)
+
+- No edits to `.claude/skills/gates/SKILL.md` — recommendation only, per task constraints.
+- No installation/uninstallation of node, fnm, or anything else.
+- No edits to other scripts.
+- The only code change in this branch is the `--permission-mode` pass-through commit on `scripts/start-bg-spawn.py`, which is what enabled bypass-spawning for this investigation in the first place and is already tested (12/12 unit tests pass on the patched file).
