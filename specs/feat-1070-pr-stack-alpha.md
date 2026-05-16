@@ -230,20 +230,20 @@ The supervisor in #1069 will likely need to track per-entry runtime state (sessi
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `build_envelope(spec, entries)` returns a dict with `schema_version="1.0"`, `spec`, `created_at`, and `stack` keys | `TestPrStack.test_build_envelope_returns_required_keys` | ❌ |
-| AC-02 | `build_envelope` raises `ValueError` when `entries` list has 1 item and no `justification` kwarg is provided | `TestPrStack.test_build_envelope_single_entry_requires_justification` | ❌ |
-| AC-03 | `validate_envelope` raises `ValueError` with a descriptive message when any required stack-entry field (`id`, `title`, `branch_suffix`, `plan`, `files`, `size_estimate`, `depends_on`, `ac_refs`) is absent | `TestPrStack.test_validate_envelope_missing_required_field` | ❌ |
-| AC-04 | `validate_envelope` raises `ValueError` when `depends_on` references an `id` not present in the stack | `TestPrStack.test_validate_envelope_unknown_depends_on` | ❌ |
-| AC-05 | `validate_envelope` raises `ValueError` containing the word "circular" when a dependency cycle exists | `TestPrStack.test_validate_envelope_circular_dependency` | ❌ |
-| AC-06 | `write_envelope` writes valid JSON with 2-space indentation and a trailing newline to the given path | `TestPrStack.test_write_envelope_writes_json` | ❌ |
-| AC-07 | `write_envelope` raises `ValueError` (via `validate_envelope`) without writing any bytes when the envelope is invalid | `TestPrStack.test_write_envelope_does_not_write_on_invalid` | ❌ |
-| AC-08 | `.claude/skills/design/SKILL.md` documents Step 4.D: decomposition trigger fires when any phases are independently shippable | `TestPrStackSkill.test_design_skill_documents_step_4d` | ❌ |
-| AC-09 | `.claude/skills/design/SKILL.md` documents Step 4.E: writes sub-plans, appends `## PR Stack` section to parent plan, AND calls `scripts/pr_stack.py` to validate + write JSON sidecar | `TestPrStackSkill.test_design_skill_documents_step_4e` | ❌ |
-| AC-10 | `.claude/skills/design/SKILL.md` specifies the JSON sidecar output path pattern as `-stack.json` within `.plans/` | `TestPrStackSkill.test_design_skill_specifies_stack_json_path` | ❌ |
-| AC-11 | `.claude/skills/design/SKILL.md` specifies that declining decomposition leaves the original plan unchanged with no artifacts written | `TestPrStackSkill.test_design_skill_documents_decline_path` | ❌ |
-| AC-12 | `build_envelope` with a single-entry list AND a non-empty `justification` kwarg returns a valid envelope with `justification` and a 1-entry `stack` | `TestPrStack.test_build_envelope_single_entry_with_justification` | ❌ |
-| AC-13 | `validate_envelope` raises `ValueError` containing "justification" when `stack` has 1 entry and `justification` is absent or empty | `TestPrStack.test_validate_envelope_single_entry_no_justification` | ❌ |
-| AC-14 | `.claude/skills/design/SKILL.md` specifies that the `## PR Stack` section in the parent plan includes `files` and `size_estimate` columns | `TestPrStackSkill.test_design_skill_pr_stack_section_has_files_and_size` | ❌ |
+| AC-01 | `build_envelope(spec, entries)` returns a dict with `schema_version="1.0"`, `spec`, `created_at`, and `stack` keys | `TestPrStack.test_build_envelope_returns_required_keys` | ✅ |
+| AC-02 | `build_envelope` raises `ValueError` when `entries` list has 1 item and no `justification` kwarg is provided | `TestPrStack.test_build_envelope_single_entry_requires_justification` | ✅ |
+| AC-03 | `validate_envelope` raises `ValueError` with a descriptive message when any required stack-entry field (`id`, `title`, `branch_suffix`, `plan`, `files`, `size_estimate`, `depends_on`, `ac_refs`) is absent | `TestPrStack.test_validate_envelope_missing_required_field` | ✅ |
+| AC-04 | `validate_envelope` raises `ValueError` when `depends_on` references an `id` not present in the stack | `TestPrStack.test_validate_envelope_unknown_depends_on` | ✅ |
+| AC-05 | `validate_envelope` raises `ValueError` containing the word "circular" when a dependency cycle exists | `TestPrStack.test_validate_envelope_circular_dependency` | ✅ |
+| AC-06 | `write_envelope` writes valid JSON with 2-space indentation and a trailing newline to the given path | `TestPrStack.test_write_envelope_writes_json` | ✅ |
+| AC-07 | `write_envelope` raises `ValueError` (via `validate_envelope`) without writing any bytes when the envelope is invalid | `TestPrStack.test_write_envelope_does_not_write_on_invalid` | ✅ |
+| AC-08 | `.claude/skills/design/SKILL.md` documents Step 4.D: decomposition trigger fires when any phases are independently shippable | `TestPrStackSkill.test_design_skill_documents_step_4d` | ✅ |
+| AC-09 | `.claude/skills/design/SKILL.md` documents Step 4.E: writes sub-plans, appends `## PR Stack` section to parent plan, AND calls `scripts/pr_stack.py` to validate + write JSON sidecar | `TestPrStackSkill.test_design_skill_documents_step_4e` | ✅ |
+| AC-10 | `.claude/skills/design/SKILL.md` specifies the JSON sidecar output path pattern as `-stack.json` within `.plans/` | `TestPrStackSkill.test_design_skill_specifies_stack_json_path` | ✅ |
+| AC-11 | `.claude/skills/design/SKILL.md` specifies that declining decomposition leaves the original plan unchanged with no artifacts written | `TestPrStackSkill.test_design_skill_documents_decline_path` | ✅ |
+| AC-12 | `build_envelope` with a single-entry list AND a non-empty `justification` kwarg returns a valid envelope with `justification` and a 1-entry `stack` | `TestPrStack.test_build_envelope_single_entry_with_justification` | ✅ |
+| AC-13 | `validate_envelope` raises `ValueError` containing "justification" when `stack` has 1 entry and `justification` is absent or empty | `TestPrStack.test_validate_envelope_single_entry_no_justification` | ✅ |
+| AC-14 | `.claude/skills/design/SKILL.md` specifies that the `## PR Stack` section in the parent plan includes `files` and `size_estimate` columns | `TestPrStackSkill.test_design_skill_pr_stack_section_has_files_and_size` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 

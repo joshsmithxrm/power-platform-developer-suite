@@ -50,3 +50,30 @@ The fix: leave phase as `design` and let the downstream skill own its transition
 | Using plan mode with /design | /design has its own approval gates. Exit plan mode first. |
 | Running on main | /design requires a worktree. Run /start first. |
 | Skipping spec search | Always search existing specs before creating new ones. |
+
+## §7 - Step 4 PR-Stack Decomposition
+
+See `specs/feat-1070-pr-stack-alpha.md` — that spec is the canonical envelope schema for both PR-stack alpha and the Phase 2 goal-supervisor (#1069).
+
+**Independently-shippable heuristic** (Step 4.D):
+
+A phase is independently shippable when its spec ACs are disjoint from other phases AND it does not share the primary modified files. Single tightly-coupled phases should not be decomposed even if ACs are disjoint (e.g., shared service class, shared DB migration, shared public API surface).
+
+**`## PR Stack` table format** (appended to parent plan file):
+
+```markdown
+## PR Stack
+
+| # | ID | Branch Suffix | Title | Files | Size | Depends On | ACs |
+|---|----|--------------|-------|-------|------|------------|-----|
+| 1 | pr-1 | `pr1` | feat(name): phase 1 | `src/a.py` | ~80 LOC | — | AC-01, AC-02 |
+| 2 | pr-2 | `pr2` | feat(name): phase 2 | `src/b.py` | ~120 LOC | pr-1 | AC-03, AC-04 |
+```
+
+For multi-file entries, list the primary file in the table cell; the full list goes in the JSON sidecar `files` array. The `Size` column carries the `size_estimate` value (e.g., `~150 LOC`).
+
+**Single-entry stacks:** allowed but require a non-empty `justification` field in the envelope explaining why full decomposition was not possible (e.g., "phases share a DB migration"). Record the justification text below the `## PR Stack` table in the parent plan.
+
+**User decline path:** if the user says no to the Step 4.D question, leave the original plan unchanged, write no sub-plans, write no `## PR Stack` section, write no JSON sidecar. Proceed to Step 5 as if 4.D never fired.
+
+**Envelope schema source of truth:** `specs/feat-1070-pr-stack-alpha.md`. Phase 2 (#1069) must extend this spec with additive fields and bump `schema_version` from `1.0` to `1.1`, not define a parallel schema.

@@ -226,3 +226,44 @@ class TestPrStack:
         captured = capsys.readouterr()
         assert rc == 1
         assert "usage" in captured.err
+
+
+class TestPrStackSkill:
+    """ACs 08-11, 14 — /design SKILL.md + REFERENCE.md documents the PR-stack flow."""
+
+    REPO = Path(__file__).resolve().parent.parent.parent
+    SKILL = REPO / ".claude" / "skills" / "design" / "SKILL.md"
+    REF = REPO / ".claude" / "skills" / "design" / "REFERENCE.md"
+
+    def _skill(self) -> str:
+        return self.SKILL.read_text(encoding="utf-8")
+
+    def _ref(self) -> str:
+        return self.REF.read_text(encoding="utf-8")
+
+    def test_design_skill_documents_step_4d(self):  # AC-08
+        t = self._skill()
+        assert "4.D" in t or "Step 4.D" in t
+        assert "independently" in t or "independent" in t
+
+    def test_design_skill_documents_step_4e(self):  # AC-09
+        t = self._skill()
+        assert "4.E" in t or "Step 4.E" in t
+        assert "pr_stack.py" in t
+        assert "PR Stack" in t
+
+    def test_design_skill_specifies_stack_json_path(self):  # AC-10
+        assert "stack.json" in self._skill()
+
+    def test_design_skill_documents_decline_path(self):  # AC-11
+        t = self._skill().lower()
+        assert (
+            "decline" in t
+            or "skip to step 5" in t
+            or "no artifacts" in t
+        )
+
+    def test_design_skill_pr_stack_section_has_files_and_size(self):  # AC-14
+        combined = self._skill() + self._ref()
+        assert "files" in combined
+        assert "size" in combined.lower()
