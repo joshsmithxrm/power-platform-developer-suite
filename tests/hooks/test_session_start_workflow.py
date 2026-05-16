@@ -101,6 +101,9 @@ class TestWorkingTreeStateInjection:
         assert "Working tree clean" not in result_before.stderr, (
             "Hook should NOT report clean tree when summary.json is untracked"
         )
+        assert "uncommitted" in result_before.stderr.lower(), (
+            "Hook must positively report uncommitted files when tree is dirty"
+        )
 
         # Simulate what /retro Phase 9 now does: commit the retro output
         env = {**os.environ, **_GIT_ENV}

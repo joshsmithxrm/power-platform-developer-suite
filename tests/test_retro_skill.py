@@ -54,6 +54,6 @@ class TestRetroAutoCommit:
     def test_phase9_commit_includes_executive_synthesis_body(self):
         """Phase 9 commit must instruct inclusion of executive synthesis as body."""
         block = _phase_block(self._content(), 9)
-        assert "executive synthesis" in block.lower() or "executive" in block.lower(), (
+        assert "executive synthesis" in block.lower(), (
             "Phase 9 must instruct that executive synthesis is the commit body"
         )
