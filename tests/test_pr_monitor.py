@@ -510,6 +510,7 @@ class TestRepollCi:
              patch("pr_monitor.run_triage", return_value=[
                  {"id": 1, "action": "fixed", "description": "done", "commit": "abc"}
              ]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -627,6 +628,7 @@ class TestResultJsonSchema:
 
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -648,6 +650,7 @@ class TestResultJsonSchema:
 
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -1009,7 +1012,7 @@ class TestReadyFlipGates:
         assert result["steps_completed"]["ready"]["status"] == "skipped"
 
     def test_ready_flip_skipped_when_no_gemini_review(self, tmp_path):
-        """No Gemini review means no flip and escalation block fires (#1127)."""
+        """No Gemini review raises _GeminiTimeoutError for escalation (#1127)."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
         result = self._base_result(gemini_review_posted=False)
@@ -1017,16 +1020,14 @@ class TestReadyFlipGates:
         with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
              patch("pr_monitor._rebase_source_branch") as mock_rebase, \
              patch("pr_monitor.mark_pr_ready") as mock_ready, \
-             patch("pr_monitor._notify_terminal") as mock_escalate, \
              patch("pr_monitor.run_notify") as mock_notify:
-            pr_monitor._step_ready(wt, 42, logger, result)
+            with pytest.raises(pr_monitor._GeminiTimeoutError):
+                pr_monitor._step_ready(wt, 42, logger, result)
 
         mock_rebase.assert_not_called()
         mock_ready.assert_not_called()
-        # Escalation fires for gemini_review_not_posted; basic notify does not.
-        mock_escalate.assert_called_once()
-        assert "gemini_review_not_posted" in mock_escalate.call_args[0][3]
         mock_notify.assert_not_called()
+        # State is written before the raise.
         assert result["steps_completed"]["ready"]["status"] == "skipped"
         assert "gemini_review_not_posted" in result["ready_skip_reasons"]
 

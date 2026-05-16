@@ -205,6 +205,15 @@ class _DirtyWorktreeOnReadyFlipError(Exception):
     """
 
 
+class _GeminiTimeoutError(Exception):
+    """Raised by _step_ready when Gemini never posted within GEMINI_MAX_WAIT.
+
+    Propagated up to run_monitor to trigger the #1088 escalation block and
+    return exit code 1, preventing _step_notify from firing a duplicate
+    notification after _notify_terminal already ran inside _step_ready.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -2077,6 +2086,17 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
         logger.close()
         return 1
 
+    except _GeminiTimeoutError:
+        result["status"] = "gemini-timeout"
+        write_result(worktree, result)
+        logger.log("monitor", "ABORT", reason="gemini_review_not_posted")
+        _notify_terminal(
+            worktree, pr_number, logger,
+            f"PR #{pr_number}: gemini_review_not_posted",
+        )
+        logger.close()
+        return 1
+
     except KeyboardInterrupt:
         result["status"] = "interrupted"
         write_result(worktree, result)
@@ -2222,14 +2242,10 @@ def _step_ready(worktree, pr_number, logger, result):
             result["ready_skip_reasons"] = reasons
             write_result(worktree, result)
             if "gemini_review_not_posted" in reasons:
-                # Gemini never posted within the poll window — fire the full
-                # escalation block (#1127/#1088): state marker + GitHub comment
-                # + label + platform notify so the operator sees a visible signal
-                # rather than a silent "ready=SKIPPED" with monitor COMPLETE.
-                _notify_terminal(
-                    worktree, pr_number, logger,
-                    f"PR #{pr_number}: gemini_review_not_posted",
-                )
+                # Raise so run_monitor's except block fires the #1088 escalation
+                # block and returns exit 1 — prevents _step_notify from issuing
+                # a duplicate notification after _notify_terminal runs (#1127).
+                raise _GeminiTimeoutError("gemini_review_not_posted")
             else:
                 # Other gate failures (CI not green, unreplied comments) — basic
                 # toast only; no escalation label since the monitor can still
@@ -2289,7 +2305,7 @@ def _step_ready(worktree, pr_number, logger, result):
         success = mark_pr_ready(worktree, pr_number, logger)
         mark_step(result, "ready", "done" if success else "error")
         write_result(worktree, result)
-    except (_DirtyWorktreeOnReadyFlipError, _UncommittedTriageError):
+    except (_DirtyWorktreeOnReadyFlipError, _UncommittedTriageError, _GeminiTimeoutError):
         raise  # propagate terminal-state errors to run_monitor
     except Exception as e:
         logger.log("ready", "EXCEPTION", error=str(e))
