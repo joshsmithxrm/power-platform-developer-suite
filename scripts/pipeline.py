@@ -522,6 +522,404 @@ def get_git_activity(worktree_path):
     return changes, commits
 
 
+# --- PR-stack helpers (specs/feat-1070-pr-stack-beta.md) --------------------
+
+def topological_sort(entries):
+    """Return entries in Kahn topological order; stable within each level.
+
+    Assumes a valid DAG (validate_envelope guarantees no cycles).
+    """
+    by_id = {e["id"]: e for e in entries}
+    in_degree = {e["id"]: 0 for e in entries}
+    adjacency = {e["id"]: [] for e in entries}
+    for e in entries:
+        for dep in e.get("depends_on", []):
+            if dep in by_id:
+                in_degree[e["id"]] += 1
+                adjacency[dep].append(e["id"])
+
+    order = [e["id"] for e in entries]
+    result = []
+    processed = set()
+    queue = [eid for eid in order if in_degree[eid] == 0]
+    while queue:
+        for eid in queue:
+            result.append(by_id[eid])
+            processed.add(eid)
+            for dep_id in adjacency[eid]:
+                in_degree[dep_id] -= 1
+        queue = [eid for eid in order if in_degree[eid] == 0 and eid not in processed]
+    return result
+
+
+def wait_for_merge(worktree_path, pr_number, timeout_sec=3600, *,
+                   poll_interval=30, gh_runner=None):
+    """Poll `gh pr view --json state --jq .state` until MERGED or timeout/CLOSED.
+
+    Returns True on MERGED, False on CLOSED or timeout. Writes progress to stderr.
+    gh_runner is injectable for tests; it is called as gh_runner(pr_number) and
+    must return the state string (e.g., "OPEN", "MERGED", "CLOSED") or "" on error.
+    """
+    if gh_runner is None:
+        def _default_gh_runner(num):
+            try:
+                result = subprocess.run(
+                    ["gh", "pr", "view", str(num), "--json", "state", "--jq", ".state"],
+                    cwd=worktree_path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=30,
+                )
+                if result.returncode != 0:
+                    print(f"[wait_for_merge] gh pr view failed: {result.stderr.strip()}",
+                          file=sys.stderr)
+                    return ""
+                return result.stdout.strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+                print(f"[wait_for_merge] gh pr view error: {exc}", file=sys.stderr)
+                return ""
+        gh_runner = _default_gh_runner
+
+    start = time.time()
+    while True:
+        elapsed = time.time() - start
+        if elapsed > timeout_sec:
+            print(f"[wait_for_merge] timeout after {elapsed:.0f}s waiting for PR #{pr_number}",
+                  file=sys.stderr)
+            return False
+        try:
+            state = (gh_runner(pr_number) or "").strip().upper()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[wait_for_merge] gh_runner raised: {exc}", file=sys.stderr)
+            state = ""
+        if state == "MERGED":
+            print(f"[wait_for_merge] PR #{pr_number} MERGED", file=sys.stderr)
+            return True
+        if state == "CLOSED":
+            print(f"[wait_for_merge] PR #{pr_number} CLOSED (not merged); abandoning",
+                  file=sys.stderr)
+            return False
+        print(f"[wait_for_merge] PR #{pr_number} state={state or 'UNKNOWN'}; "
+              f"sleeping {poll_interval}s", file=sys.stderr)
+        # Sleep up to poll_interval, but never past the deadline.
+        remaining = timeout_sec - (time.time() - start)
+        if remaining <= 0:
+            print(f"[wait_for_merge] timeout reached for PR #{pr_number}", file=sys.stderr)
+            return False
+        time.sleep(min(poll_interval, max(remaining, 0)))
+
+
+def rebase_on_main(worktree_path, logger):
+    """Run `git fetch origin main && git rebase origin/main` in worktree_path.
+
+    Returns True on success, False on rebase conflict. Logs via log(logger, ...).
+    A failing fetch (e.g., offline) logs a warning and continues with the
+    last-known origin/main (same behavior as run_pr_stage).
+    """
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=worktree_path, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if fetch.returncode != 0:
+        log(logger, "rebase", "FETCH_WARN", error=fetch.stderr.strip())
+
+    rebase = subprocess.run(
+        ["git", "rebase", "origin/main"],
+        cwd=worktree_path, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if rebase.returncode != 0:
+        log(logger, "rebase", "REBASE_CONFLICT", error=rebase.stderr.strip())
+        return False
+    log(logger, "rebase", "OK")
+    return True
+
+
+def write_stack_result(worktree_path, stack_path, entries, status,
+                       started_at, completed_at=None):
+    """Serialize `.workflow/stack-result.json` per spec §Stack Result Schema."""
+    result = {
+        "schema_version": "1.0",
+        "stack_path": str(stack_path),
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "status": status,
+        "entries": entries,
+    }
+    result_path = os.path.join(worktree_path, ".workflow", "stack-result.json")
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+        f.write("\n")
+
+
+def _entry_states_list(entry_states, ordered_ids):
+    """Return entries in topological order as a list-of-dicts for serialization."""
+    out = []
+    for eid in ordered_ids:
+        st = entry_states[eid]
+        out.append({
+            "id": eid,
+            "worktree_path": st.get("worktree_path"),
+            "branch": st.get("branch"),
+            "plan": st.get("plan"),
+            "pr_url": st.get("pr_url"),
+            "pr_number": st.get("pr_number"),
+            "status": st.get("status"),
+            "started_at": st.get("started_at"),
+            "completed_at": st.get("completed_at"),
+            "merged_at": st.get("merged_at"),
+        })
+    return out
+
+
+def _compute_stack_status(entry_states):
+    """Compute overall stack status from per-entry states."""
+    statuses = [s["status"] for s in entry_states.values()]
+    merged = sum(1 for s in statuses if s == "merged")
+    failed_or_skipped = sum(1 for s in statuses if s in ("failed", "skipped"))
+    if merged == len(statuses):
+        return "complete"
+    if merged > 0 and failed_or_skipped > 0:
+        return "partial"
+    if merged == 0 and failed_or_skipped > 0:
+        return "failed"
+    return "partial"
+
+
+def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
+              no_retro=False, merge_wait_sec=3600, max_stage_seconds=None,
+              model=None, issues=None, pipeline_runner=None, gh_runner=None,
+              worktree_creator=None, rebaser=None):
+    """Execute a PR-stack envelope sequentially with merge-gating.
+
+    Returns 0 on complete success (all entries merged), 1 on any failure.
+    """
+    import pr_stack
+
+    if worktree_creator is None:
+        worktree_creator = create_worktree
+    if rebaser is None:
+        rebaser = rebase_on_main
+
+    log_dir = os.path.join(worktree_path, ".workflow")
+    os.makedirs(log_dir, exist_ok=True)
+    logger = open_logger(os.path.join(log_dir, "stack.log"), mode="a")
+
+    started_at = timestamp()
+
+    try:
+        with open(stack_path, encoding="utf-8") as f:
+            envelope = json.load(f)
+        pr_stack.validate_envelope(envelope)
+
+        ordered = topological_sort(envelope["stack"])
+        ordered_ids = [e["id"] for e in ordered]
+
+        entry_states = {}
+        for e in ordered:
+            entry_states[e["id"]] = {
+                "status": "pending",
+                "pr_url": None,
+                "pr_number": None,
+                "worktree_path": None,
+                "branch": f"feat/{e['branch_suffix']}",
+                "plan": e["plan"],
+                "started_at": None,
+                "completed_at": None,
+                "merged_at": None,
+            }
+
+        log(logger, "stack", "START", stack=stack_path, entries=len(ordered),
+            dry_run=dry_run)
+
+        # Write initial pending stack result so observers see early state.
+        write_stack_result(
+            worktree_path, stack_path,
+            _entry_states_list(entry_states, ordered_ids),
+            "partial" if not ordered else "failed",
+            started_at, completed_at=None,
+        )
+
+        failed_ids = set()
+
+        for entry in ordered:
+            eid = entry["id"]
+            st = entry_states[eid]
+
+            # Gate: any failed/skipped dependency → skip this entry.
+            depends_failed = [d for d in entry.get("depends_on", []) if d in failed_ids]
+            if depends_failed:
+                st["status"] = "skipped"
+                st["completed_at"] = timestamp()
+                failed_ids.add(eid)
+                log(logger, "stack", "SKIPPED", id=eid, depends_failed=",".join(depends_failed))
+                write_stack_result(
+                    worktree_path, stack_path,
+                    _entry_states_list(entry_states, ordered_ids),
+                    _compute_stack_status(entry_states), started_at, None,
+                )
+                continue
+
+            st["status"] = "running"
+            st["started_at"] = timestamp()
+            branch = f"feat/{entry['branch_suffix']}"
+            entry_worktree = os.path.join(repo_root, ".worktrees", entry["branch_suffix"])
+            st["branch"] = branch
+            st["worktree_path"] = entry_worktree
+
+            log(logger, "stack", "ENTRY_START", id=eid, branch=branch,
+                worktree=entry_worktree, plan=entry["plan"])
+
+            if dry_run:
+                log(logger, "stack", "DRY_RUN_PLAN", id=eid, branch=branch,
+                    plan=entry["plan"], worktree=entry_worktree)
+                st["status"] = "pending"
+                st["completed_at"] = None
+                st["started_at"] = None
+                write_stack_result(
+                    worktree_path, stack_path,
+                    _entry_states_list(entry_states, ordered_ids),
+                    _compute_stack_status(entry_states), started_at, None,
+                )
+                continue
+
+            created = worktree_creator(repo_root, entry["branch_suffix"], branch, logger)
+            if not created:
+                st["status"] = "failed"
+                st["completed_at"] = timestamp()
+                failed_ids.add(eid)
+                log(logger, "stack", "WORKTREE_FAILED", id=eid)
+                write_stack_result(
+                    worktree_path, stack_path,
+                    _entry_states_list(entry_states, ordered_ids),
+                    _compute_stack_status(entry_states), started_at, None,
+                )
+                continue
+
+            ok = rebaser(entry_worktree, logger)
+            if not ok:
+                st["status"] = "failed"
+                st["completed_at"] = timestamp()
+                failed_ids.add(eid)
+                log(logger, "stack", "REBASE_FAILED", id=eid)
+                write_stack_result(
+                    worktree_path, stack_path,
+                    _entry_states_list(entry_states, ordered_ids),
+                    _compute_stack_status(entry_states), started_at, None,
+                )
+                continue
+
+            # Copy plan file from repo_root to entry worktree if not present.
+            plan_src = entry["plan"]
+            if not os.path.isabs(plan_src):
+                plan_src_abs = os.path.join(repo_root, plan_src)
+            else:
+                plan_src_abs = plan_src
+            plan_dest = os.path.join(entry_worktree, entry["plan"])
+            try:
+                if os.path.exists(plan_src_abs) and not os.path.exists(plan_dest):
+                    os.makedirs(os.path.dirname(plan_dest), exist_ok=True)
+                    shutil.copy2(plan_src_abs, plan_dest)
+                    log(logger, "stack", "PLAN_COPIED", id=eid, src=plan_src_abs, dest=plan_dest)
+            except OSError as exc:
+                log(logger, "stack", "PLAN_COPY_WARN", id=eid, error=str(exc))
+
+            # Build sub-pipeline command (used when pipeline_runner is None).
+            cmd = [sys.executable, os.path.join("scripts", "pipeline.py"),
+                   "--plan", plan_dest, "--worktree", entry_worktree]
+            if no_retro:
+                cmd.append("--no-retro")
+            if max_stage_seconds:
+                cmd += ["--max-stage-seconds", str(max_stage_seconds)]
+            if model:
+                cmd += ["--model", model]
+            for issue in (issues or []):
+                cmd += ["--issue", str(issue)]
+
+            if pipeline_runner is not None:
+                exit_code = pipeline_runner(entry, entry_worktree)
+            else:
+                log(logger, "stack", "SUBPROCESS_START", id=eid, cmd=" ".join(cmd))
+                proc = subprocess.run(cmd, cwd=repo_root)
+                exit_code = proc.returncode
+
+            if exit_code != 0:
+                st["status"] = "failed"
+                st["completed_at"] = timestamp()
+                failed_ids.add(eid)
+                log(logger, "stack", "PIPELINE_FAILED", id=eid, exit_code=exit_code)
+                write_stack_result(
+                    worktree_path, stack_path,
+                    _entry_states_list(entry_states, ordered_ids),
+                    _compute_stack_status(entry_states), started_at, None,
+                )
+                continue
+
+            # Extract PR URL/number from entry worktree state.
+            entry_state_data = read_state(entry_worktree)
+            pr_info = entry_state_data.get("pr") or {}
+            pr_url = pr_info.get("url") or ""
+            pr_number = None
+            if pr_url:
+                pr_number = pr_url.rstrip("/").split("/")[-1]
+            st["pr_url"] = pr_url or None
+            try:
+                st["pr_number"] = int(pr_number) if pr_number else None
+            except (TypeError, ValueError):
+                st["pr_number"] = None
+            st["status"] = "pr_ready"
+            log(logger, "stack", "PR_READY", id=eid, pr_url=pr_url, pr_number=pr_number)
+
+            write_stack_result(
+                worktree_path, stack_path,
+                _entry_states_list(entry_states, ordered_ids),
+                _compute_stack_status(entry_states), started_at, None,
+            )
+
+            # Wait for merge.
+            merged = False
+            if pr_number:
+                merged = wait_for_merge(
+                    entry_worktree, pr_number,
+                    timeout_sec=merge_wait_sec,
+                    gh_runner=gh_runner,
+                )
+
+            if merged:
+                st["status"] = "merged"
+                st["merged_at"] = timestamp()
+                st["completed_at"] = timestamp()
+                log(logger, "stack", "MERGED", id=eid, pr_number=pr_number)
+            else:
+                st["status"] = "failed"
+                st["completed_at"] = timestamp()
+                failed_ids.add(eid)
+                log(logger, "stack", "MERGE_WAIT_FAILED", id=eid, pr_number=pr_number)
+
+            write_stack_result(
+                worktree_path, stack_path,
+                _entry_states_list(entry_states, ordered_ids),
+                _compute_stack_status(entry_states), started_at, None,
+            )
+
+        overall = _compute_stack_status(entry_states)
+        write_stack_result(
+            worktree_path, stack_path,
+            _entry_states_list(entry_states, ordered_ids),
+            overall, started_at, timestamp(),
+        )
+        log(logger, "stack", "DONE", status=overall)
+        return 0 if overall == "complete" else 1
+    finally:
+        try:
+            logger.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# --- end PR-stack helpers ---------------------------------------------------
+
+
 # Transcript reader lives in scripts/bg_transcript.py — re-export so existing
 # callers keep working. See specs/dispatch-routing.md Core Requirement #6.
 from bg_transcript import extract_text_from_jsonl, parse_outcome  # noqa: E402,F401
@@ -1523,6 +1921,21 @@ def main():
     parser.add_argument("--issue", type=int, action="append", default=[], help="GitHub issue number(s) (repeatable)")
     parser.add_argument("--dry-run", action="store_true", help="Run orchestration without invoking claude -p")
     parser.add_argument(
+        "--stack",
+        metavar="PATH",
+        help=(
+            "PR-stack envelope JSON path; drives sequential per-entry pipeline "
+            "with merge-gating. Mutually exclusive with --plan and --spec."
+        ),
+    )
+    parser.add_argument(
+        "--merge-wait-sec",
+        type=int,
+        default=3600,
+        metavar="N",
+        help="Seconds to wait for each entry's PR to be merged (default: 3600). Stack mode only.",
+    )
+    parser.add_argument(
         "--model",
         default=None,
         metavar="ID",
@@ -1534,6 +1947,43 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    if args.stack and (args.plan or args.plan_positional or args.spec):
+        print("ERROR: --stack is mutually exclusive with --plan and --spec.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    if args.stack:
+        stack_abs = os.path.abspath(args.stack)
+        if not os.path.exists(stack_abs):
+            print(f"ERROR: Stack envelope not found: {stack_abs}", file=sys.stderr)
+            sys.exit(1)
+        import pr_stack as _pr_stack_mod
+        try:
+            with open(stack_abs, encoding="utf-8") as _f:
+                _env = json.load(_f)
+            _pr_stack_mod.validate_envelope(_env)
+        except FileNotFoundError:
+            print(f"ERROR: Stack envelope not found: {stack_abs}", file=sys.stderr)
+            sys.exit(1)
+        except json.JSONDecodeError as _e:
+            print(f"ERROR: Stack envelope is not valid JSON: {_e}", file=sys.stderr)
+            sys.exit(1)
+        except ValueError as _e:
+            print(f"ERROR: Stack envelope invalid: {_e}", file=sys.stderr)
+            sys.exit(1)
+
+        sys.exit(run_stack(
+            stack_abs,
+            repo_root=os.getcwd(),
+            worktree_path=os.path.abspath(args.worktree) if args.worktree else os.getcwd(),
+            dry_run=args.dry_run,
+            no_retro=args.no_retro,
+            merge_wait_sec=args.merge_wait_sec,
+            max_stage_seconds=args.max_stage_seconds,
+            model=args.model,
+            issues=args.issue or [],
+        ))
 
     if args.model:
         global MODEL_OVERRIDE
