@@ -360,6 +360,25 @@ def test_dispatch_headless_argv(monkeypatch, tmp_path):
     assert handle.transcript_path == stage_log
 
 
+def test_dispatch_headless_drops_permission_mode(monkeypatch, tmp_path):
+    """Headless (claude -p) has no permission dialog — permission_mode must be
+    silently dropped from the argv even when callers pass it (covers the
+    "Ignored in headless mode" docstring contract; #1067)."""
+    captured = []
+    _patch_headless(monkeypatch, captured)
+    spawn(
+        mode="headless",
+        prompt="hi",
+        caller="t",
+        permission_mode="bypassPermissions",
+        stage_log=tmp_path / "log.jsonl",
+        spend_log_path=tmp_path / "spend.jsonl",
+    )
+    argv = captured[0]["argv"]
+    assert "--permission-mode" not in argv
+    assert "bypassPermissions" not in argv
+
+
 def test_dispatch_headless_no_model_no_agent(monkeypatch, tmp_path):
     """When model/agent are omitted, the argv must not include them."""
     captured = []
