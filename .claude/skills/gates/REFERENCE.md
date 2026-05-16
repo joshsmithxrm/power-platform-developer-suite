@@ -145,7 +145,7 @@ upstream lines on long failures.
 When `npm` is not on PATH the preflight tries to recover before failing:
 
 1. Check if `fnm` is reachable (`command -v fnm`).
-2. If yes: `eval "$(fnm env --use-on-cd --shell bash)"` and re-check `npm`.
+2. If yes: `eval "$(fnm env --shell bash)"` and re-check `npm`.
 3. If npm is now reachable: log `preflight: self-healed via fnm activation` and proceed.
 4. If npm is still absent, or if `fnm` was not on PATH: loud-fail per normal behavior.
 
