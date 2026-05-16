@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "last_updated": "2026-05-16",
-  "total_retros": 21,
+  "total_retros": 22,
   "findings_by_category": {
     "external": [
       {
@@ -180,6 +180,26 @@
         "date": "2026-05-16",
         "branch": "feat/1069-supervisor-pattern",
         "finding_id": "F5"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-05"
       }
     ],
     "design": [
@@ -376,6 +396,11 @@
         "date": "2026-05-16",
         "branch": "feat/1098-prompt-template",
         "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-03"
       }
     ],
     "setup": [
@@ -448,9 +473,9 @@
     "avg_fix_ratio": 0.692,
     "pipeline_success_rate": 0.412,
     "avg_convergence_rounds": 2.206,
-    "last_session_findings": 2,
+    "last_session_findings": 5,
     "last_session_status": "rough",
-    "last_session_branch": "fix/1122-subagent-hang",
+    "last_session_branch": "refactor/1071-retro-phase5-6",
     "last_session_pr": null
   },
   "notes": [
@@ -458,6 +483,11 @@
       "date": "2026-05-16",
       "branch": "feat/1069-supervisor-pattern",
       "note": "Second consecutive failure-retro for the same root cause: gates verdict PASS + state.json gates.passed land correctly, but exit=-1 from STALL_TIMEOUT causes pipeline to misclassify the stage as failed. F1/F2 still open from prior retro at 10:36."
+    },
+    {
+      "date": "2026-05-16",
+      "branch": "refactor/1071-retro-phase5-6",
+      "note": "Pipeline retro for /retro Phase 5/6 refactor work. Stop-hook fired 3x; pipeline-result misclassified gates as failed despite verdict PASS (third consecutive occurrence \u2014 see prior notes). 5 mechanical observations; no judgment in pipeline mode."
     }
   ]
 }
