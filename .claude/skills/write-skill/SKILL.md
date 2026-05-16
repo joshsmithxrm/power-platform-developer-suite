@@ -59,7 +59,7 @@ description: One sentence describing when to use this skill. Write for AI discov
 
 Skills that represent workflow steps should write to `.workflow/state.json` on completion.
 
-**When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Supporting knowledge skills (ext-verify, tui-verify, cli-verify, mcp-verify) do NOT write state — the orchestrator skill that invokes them does.
+**When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Surface-specific reference sections (e.g., `/verify` `REFERENCE.md §tui/§ext/§cli`) do NOT write state — the orchestrating skill that invokes them does.
 
 **How to write state:** Use the utility script — never write JSON by hand:
 
