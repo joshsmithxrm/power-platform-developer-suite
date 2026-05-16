@@ -1643,10 +1643,14 @@ def main():
             sys.exit(1)
         lock_acquired = True
 
-        # Write pipeline phase to state (if worktree exists)
+        # Write pipeline phase and in_flight flag to state (if worktree exists)
         if worktree_path and os.path.exists(worktree_path):
             subprocess.run(
                 [sys.executable, "scripts/workflow-state.py", "set", "phase", "pipeline"],
+                cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+            )
+            subprocess.run(
+                [sys.executable, "scripts/workflow-state.py", "set", "pipeline.in_flight", "true"],
                 cwd=worktree_path, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
 
@@ -1710,6 +1714,7 @@ def main():
                 for state_args in [
                     ["set", "plan", source_rel],
                     ["set", "started", "now"],
+                    ["set", "pipeline.in_flight", "true"],
                 ]:
                     subprocess.run(
                         [sys.executable, "scripts/workflow-state.py"] + state_args,
@@ -1948,6 +1953,16 @@ def main():
             duration = int(time.time() - pipeline_start)
             write_result(worktree_path, "failed", duration, stage_durations,
                          failed_stage=_failed_stage, error=_failed_reason)
+        # Clear in_flight flag so stop-hook enforcement resumes after pipeline exits
+        if worktree_path and os.path.exists(worktree_path):
+            try:
+                subprocess.run(
+                    [sys.executable, "scripts/workflow-state.py", "set", "pipeline.in_flight", "false"],
+                    cwd=worktree_path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=10,
+                )
+            except OSError:
+                pass
         if lock_acquired:
             release_lock(lock_path)
         logger.close()

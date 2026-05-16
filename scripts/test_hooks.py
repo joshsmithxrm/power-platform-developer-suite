@@ -178,6 +178,60 @@ class TestStopHookEscapeValve(unittest.TestCase):
         self.assertIn("OVERRIDE_GRANTED", proc.stderr)
 
 
+class TestStopHookPipelineInFlight(unittest.TestCase):
+    """AC-197, AC-198, AC-199 — pipeline.in_flight bypass."""
+
+    def _setup(self, state: dict, *, ahead: int = 0) -> str:
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        _git_init_branch(tmp, "feat/x")
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp, capture_output=True,
+            text=True, stdin=subprocess.DEVNULL,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", head],
+            cwd=tmp, check=True, stdin=subprocess.DEVNULL,
+        )
+        for i in range(ahead):
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-q", "-m", f"c{i}"],
+                cwd=tmp, check=True, stdin=subprocess.DEVNULL,
+            )
+        _make_state(tmp, state)
+        return tmp
+
+    def test_bypass_when_in_flight(self):
+        # AC-197 — in_flight=true bypasses even with commits ahead + implementing
+        tmp = self._setup(
+            {"phase": "implementing", "pipeline": {"in_flight": True}, "pr": {}},
+            ahead=2,
+        )
+        proc = _run_hook("session-stop-workflow.py", {}, project_dir=tmp)
+        self.assertEqual(proc.returncode, 0,
+                         f"expected exit 0; got {proc.returncode}\nstdout={proc.stdout}")
+
+    def test_no_bypass_when_not_in_flight(self):
+        # AC-198 — in_flight=false → still blocks with commits ahead
+        tmp = self._setup(
+            {"phase": "implementing", "pipeline": {"in_flight": False}, "pr": {}},
+            ahead=1,
+        )
+        proc = _run_hook("session-stop-workflow.py", {}, project_dir=tmp)
+        self.assertEqual(proc.returncode, 2,
+                         f"expected exit 2; got {proc.returncode}\nstdout={proc.stdout}")
+
+    def test_no_bypass_when_flag_absent(self):
+        # AC-199 — flag absent → behavior unchanged (blocks with commits ahead)
+        tmp = self._setup(
+            {"phase": "implementing", "pr": {}},
+            ahead=1,
+        )
+        proc = _run_hook("session-stop-workflow.py", {}, project_dir=tmp)
+        self.assertEqual(proc.returncode, 2,
+                         f"expected exit 2; got {proc.returncode}\nstdout={proc.stdout}")
+
+
 # ---------------------------------------------------------------------------
 # skill-line-cap.py
 # ---------------------------------------------------------------------------

@@ -64,6 +64,10 @@ def main():
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
+    # Bypass: pipeline orchestrator is actively running (AC-197)
+    if state.get("pipeline", {}).get("in_flight"):
+        sys.exit(0)
+
     # If stop hook has already blocked 3+ times, allow stop to prevent infinite loop
     if state.get("stop_hook_count", 0) >= 3:
         print(
