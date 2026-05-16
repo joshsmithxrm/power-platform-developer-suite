@@ -230,6 +230,26 @@ class TestToolFailureFix(unittest.TestCase):
         sigs = _run_on_events([_PR1094_TOOL_FAILURE_IS_ERROR, _PR1094_TOOL_FAILURE_IS_ERROR])
         self.assertEqual(len(sigs["tool_failures"]), 2)
 
+    def test_is_error_true_with_identifiable_content_attributes_tool(self):
+        """is_error: true with content matching a known tool marker attributes to that tool, not 'unknown'."""
+        event = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_jkl",
+                        "content": "old_string not found in scripts/pipeline.py",
+                        "is_error": True,
+                    }
+                ],
+            },
+        }
+        sigs = _run_on_events([event])
+        self.assertEqual(len(sigs["tool_failures"]), 1)
+        self.assertEqual(sigs["tool_failures"][0]["tool"], "Edit")
+
 
 # ---------------------------------------------------------------------------
 # Bug 3: question-form correction patterns

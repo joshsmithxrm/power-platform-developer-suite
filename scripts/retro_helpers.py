@@ -108,20 +108,17 @@ def extract_transcript_signals(jsonl_path):
                             else:
                                 result_text = ""
 
-                            if block.get("is_error"):
+                            result_lower = result_text.lower()
+                            tool_name = "unknown"
+                            if "file not found" in result_lower or "no such file" in result_lower:
+                                tool_name = "Read"
+                            elif "old_string not found" in result_lower:
+                                tool_name = "Edit"
+
+                            if block.get("is_error") or tool_name != "unknown":
                                 signals["tool_failures"].append(
-                                    {"tool": "unknown", "error": result_text[:200]}
+                                    {"tool": tool_name, "error": result_text[:200]}
                                 )
-                            else:
-                                result_lower = result_text.lower()
-                                if "file not found" in result_lower or "no such file" in result_lower:
-                                    signals["tool_failures"].append(
-                                        {"tool": "Read", "error": result_text[:200]}
-                                    )
-                                if "old_string not found" in result_lower:
-                                    signals["tool_failures"].append(
-                                        {"tool": "Edit", "error": result_text[:200]}
-                                    )
 
                 if event_type == "assistant":
                     msg_content = event.get("message", {}).get("content", [])
