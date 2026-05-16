@@ -864,7 +864,8 @@ class TestEmptyBodyReplyGuard:
             {"id": 202, "action": "noop", "description": "\t\n  "},
         ]
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        with patch("pr_monitor._post_replies_common") as mock_common, \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]):
             pr_monitor.post_replies(wt, 42, items, logger)
 
         # All items had whitespace-only bodies — common POSTer never invoked.

@@ -201,6 +201,30 @@ class TestFormatReplyBody:
         })
         assert body == "patched"
 
+    def test_strips_already_fixed_prefix(self):
+        """issue #1096: avoid 'Fixed in X — Already fixed in commit X — …' doubling."""
+        body = format_reply_body({
+            "action": "fixed", "commit": "eb19a01e6",
+            "description": "Already fixed in commit eb19a01e6 — REFERENCE.md line 120",
+        })
+        assert body == "Fixed in eb19a01e6 — REFERENCE.md line 120"
+        assert "Already fixed" not in body
+
+    def test_strips_already_dismissed_prefix(self):
+        body = format_reply_body({
+            "action": "dismissed",
+            "description": "Already dismissed in commit abc123 — not applicable here",
+        })
+        assert body == "Not applicable — not applicable here"
+        assert "Already dismissed" not in body
+
+    def test_normal_description_unchanged(self):
+        body = format_reply_body({
+            "action": "fixed", "commit": "abc",
+            "description": "Updated the config file",
+        })
+        assert body == "Fixed in abc — Updated the config file"
+
 
 # ---------------------------------------------------------------------------
 # get_unreplied_comments (AC-139)

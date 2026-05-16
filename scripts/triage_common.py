@@ -5,6 +5,7 @@ delegate to these pure-ish functions instead of duplicating logic.
 """
 import json
 import os
+import re
 import subprocess
 import time
 from itertools import chain
@@ -403,6 +404,16 @@ def format_reply_body(item):
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
+
+    # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
+    # triage agents sometimes emit, which would produce doubled phrasing like
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (issue #1096 style nit).
+    description = re.sub(
+        r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
 
     if action == "fixed" and commit_sha:
         return f"Fixed in {commit_sha} \u2014 {description}"

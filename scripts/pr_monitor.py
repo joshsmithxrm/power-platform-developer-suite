@@ -18,6 +18,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -795,13 +796,12 @@ _POSTED_REPLY_KEYS: "set[tuple]" = set()
 
 def _reply_body_for(item):
     """Mirror of triage_common.format_reply_body for pre-POST filtering."""
-    import re
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
     # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
     # triage agents sometimes emit, which would produce doubled phrasing like
-    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (PR #1094 style nit).
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (issue #1096 style nit).
     description = re.sub(
         r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
         "",
@@ -855,7 +855,7 @@ def post_replies(worktree, pr_number, triage_results, logger):
     if not filtered:
         return
 
-    unreplied_ids = {c["id"] for c in get_unreplied_comments(worktree, pr_number)}
+    unreplied_ids = {c["id"] for c in get_unreplied_comments(worktree, pr_number, shakedown=bool(SHAKEDOWN))}
     cross_process_filtered = []
     for item in filtered:
         cid = item.get("id")
