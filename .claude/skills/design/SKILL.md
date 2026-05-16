@@ -15,7 +15,8 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
-### Step 0: Set Phase — `python scripts/workflow-state.py set phase design`
+### Step 0: Set Phase and Check Inbox
+`python scripts/workflow-state.py set phase design` then `python scripts/supervisor_msg.py read --consume` — see REFERENCE.md §8 (abort/revise → stop before brainstorm).
 
 ### Step 1: Load Context and Search
 

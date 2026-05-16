@@ -1,6 +1,15 @@
 # Implement — Reference
 
-## §1 - Pipeline Mode
+## §1 - No-Spec Fallback Chain (SKILL.md Input step)
+
+When `$ARGUMENTS` is absent and no spec is found via workflow state:
+
+1. **Check `.plans/context.md`** (written by `/start` from the issue body): if it exists, read it, generate a plan from the issue context and constraints it contains, save to `.plans/`, proceed.
+2. **No context.md**: prompt the user — "(1) Run `/design` to create a spec, or (2) describe the work for plan generation."
+3. **User chooses `/design`**: stop; instruct user to run `/design` first.
+4. **User chooses continue**: ask user to describe the work; generate a plan from their description.
+
+## §2 - Pipeline Mode
 
 When `PPDS_PIPELINE=1` is set, the pipeline orchestrator invoked this skill.
 - Execute Steps 1–5 only; skip Step 6 (orchestrator handles gates/verify/qa/review).

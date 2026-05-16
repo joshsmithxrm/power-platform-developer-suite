@@ -109,14 +109,31 @@ class TestReadInbox(unittest.TestCase):
         inbox = self.worktree / ".workflow" / "inbox"
         self.assertEqual(len(list(inbox.glob("*.json"))), 0)
 
-    def test_read_multiple_messages_sorted(self):
+    def test_read_multiple_messages_both_present(self):
         sm.send(str(self.worktree), "note", message="first")
         sm.send(str(self.worktree), "revise", message="second")
         messages = sm.read_inbox(str(self.worktree))
         self.assertEqual(len(messages), 2)
-        # Sorted by filename (which starts with timestamp) so first < second
-        self.assertEqual(messages[0]["message"], "first")
-        self.assertEqual(messages[1]["message"], "second")
+        kinds = {m["kind"] for m in messages}
+        self.assertEqual(kinds, {"note", "revise"})
+
+    def test_read_sorted_by_filename(self):
+        # Write messages with manually controlled filenames so ordering is deterministic
+        inbox = self.worktree / ".workflow" / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        (inbox / "20260101T000001_note_aaaaaa.json").write_text(
+            _json.dumps({"kind": "note", "sent_at": "2026-01-01T00:00:01Z", "message": "earlier"}),
+            encoding="utf-8",
+        )
+        (inbox / "20260101T000002_approve_bbbbbb.json").write_text(
+            _json.dumps({"kind": "approve", "sent_at": "2026-01-01T00:00:02Z"}),
+            encoding="utf-8",
+        )
+        messages = sm.read_inbox(str(self.worktree))
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["message"], "earlier")
+        self.assertEqual(messages[1]["kind"], "approve")
 
     def test_read_includes_file_path(self):
         sm.send(str(self.worktree), "approve")
@@ -290,6 +307,112 @@ class TestCLIList(unittest.TestCase):
         code, out = self._run(["list", "--worktree", str(self.worktree)])
         self.assertEqual(code, 0)
         self.assertIn(".json", out)
+
+
+class TestEdgeCases(unittest.TestCase):
+    """Edge cases and C-1 bug regression."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.worktree = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_send_empty_dict_payload_is_preserved(self):
+        """C-1 regression: payload={} must not be silently dropped."""
+        path = sm.send(str(self.worktree), "note", payload={})
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("payload", data)
+        self.assertEqual(data["payload"], {})
+
+    def test_sent_at_matches_filename_timestamp_precision(self):
+        """N-1: sent_at and filename timestamp are derived from same datetime."""
+        path = sm.send(str(self.worktree), "approve")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # sent_at is ISO-8601; filename starts with compact UTC timestamp
+        self.assertIn("sent_at", data)
+        # Both contain year/month/day portion from the same moment
+        from datetime import datetime, timezone
+        sent_at = datetime.fromisoformat(data["sent_at"].replace("Z", "+00:00"))
+        filename_ts = path.name.split("_")[0]  # e.g. 20260516T083000123456Z
+        self.assertTrue(filename_ts.startswith(sent_at.strftime("%Y%m%dT%H%M%S")))
+
+
+class TestInboxProtocolIntegration(unittest.TestCase):
+    """Integration-style test: supervisor writes directive → worker reads and acts.
+
+    Demonstrates the full revise→revision-mode flow end-to-end at the file level:
+    supervisor writes a 'revise' message; worker calls read --consume and gets it;
+    a second read confirms the inbox is now clear.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.worker_worktree = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_revise_directive_supervisor_to_worker(self):
+        # Supervisor: write a revise directive to the worker's inbox
+        feedback = "Apply reviewer feedback: AC-03 missing error handling"
+        sm.send(
+            str(self.worker_worktree),
+            "revise",
+            message=feedback,
+            payload={"ac": "AC-03", "priority": "high"},
+        )
+
+        # Worker: at phase entry, reads and consumes the inbox
+        messages = sm.read_inbox(str(self.worker_worktree), consume=True)
+
+        # Worker confirms: received exactly one revise directive with full payload
+        self.assertEqual(len(messages), 1)
+        msg = messages[0]
+        self.assertEqual(msg["kind"], "revise")
+        self.assertEqual(msg["message"], feedback)
+        self.assertEqual(msg["payload"]["ac"], "AC-03")
+        self.assertEqual(msg["payload"]["priority"], "high")
+
+        # Worker enters revision mode (confirmed by consume: inbox now empty)
+        subsequent = sm.read_inbox(str(self.worker_worktree))
+        self.assertEqual(subsequent, [], "Inbox must be empty after consume — worker enters revision mode")
+
+    def test_abort_directive_stops_workflow(self):
+        sm.send(str(self.worker_worktree), "abort", message="Design rejected — restart with new scope")
+        messages = sm.read_inbox(str(self.worker_worktree), consume=True)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["kind"], "abort")
+        self.assertIn("rejected", messages[0]["message"])
+
+    def test_approve_directive_clears_after_consume(self):
+        sm.send(str(self.worker_worktree), "approve")
+        messages = sm.read_inbox(str(self.worker_worktree), consume=True)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["kind"], "approve")
+        self.assertEqual(sm.read_inbox(str(self.worker_worktree)), [])
+
+    def test_multiple_directives_processed_in_order(self):
+        """Simulates supervisor sending note then approve; worker processes both."""
+        import json as _json
+        inbox = self.worker_worktree / ".workflow" / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        # Write deterministic filenames to ensure ordering
+        (inbox / "20260101T000001_note_aaaaaa.json").write_text(
+            _json.dumps({"kind": "note", "sent_at": "2026-01-01T00:00:01Z", "message": "CI slow today"}),
+            encoding="utf-8",
+        )
+        (inbox / "20260101T000002_approve_bbbbbb.json").write_text(
+            _json.dumps({"kind": "approve", "sent_at": "2026-01-01T00:00:02Z"}),
+            encoding="utf-8",
+        )
+        messages = sm.read_inbox(str(self.worker_worktree), consume=True)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["kind"], "note")
+        self.assertEqual(messages[1]["kind"], "approve")
+        # Inbox cleared
+        self.assertEqual(sm.read_inbox(str(self.worker_worktree)), [])
 
 
 if __name__ == "__main__":

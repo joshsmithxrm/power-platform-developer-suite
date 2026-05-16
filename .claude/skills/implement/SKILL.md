@@ -18,7 +18,7 @@ Agent tool, `/review`, `/verify`, `/qa`, `/debug`, `/gates`.
 
 `$ARGUMENTS` = path to plan file. If omitted: use spec from `.workflow/state.json`, generate plan, save to `.plans/`, proceed.
 
-**Fallback — no spec:** prompt user: run `/design` or continue without spec?
+**Fallback — no spec:** check `.plans/context.md` first (written by `/start`); if present, generate plan from it. Otherwise: prompt user — run `/design` or continue without spec? See REFERENCE.md §1 for the full fallback chain.
 
 ## Process
 

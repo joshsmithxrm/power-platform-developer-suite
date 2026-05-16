@@ -58,10 +58,6 @@ VALID_KINDS = ("approve", "revise", "abort", "note")
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-
-
 def _inbox_dir(worktree: Path) -> Path:
     return worktree / ".workflow" / "inbox"
 
@@ -104,18 +100,19 @@ def send(worktree_path: str, kind: str, *,
     inbox = _inbox_dir(wt)
     inbox.mkdir(parents=True, exist_ok=True)
 
-    ts = _now_utc_iso()
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%dT%H%M%S%fZ")
     rand = uuid.uuid4().hex[:6]
     filename = f"{ts}_{kind}_{rand}.json"
     target = inbox / filename
 
     msg = {
         "kind": kind,
-        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "sent_at": now.isoformat(),
     }
     if message is not None:
         msg["message"] = message
-    if payload:
+    if payload is not None:
         msg["payload"] = payload
 
     # Atomic write: write to a temp file in the same directory, then rename.
