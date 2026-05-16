@@ -1235,8 +1235,8 @@ def _add_escalation_label(worktree, pr_number, logger):
             cwd=worktree, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=20,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "LABEL_CREATE_ERROR", error=str(e))
     try:
         result = subprocess.run(
             ["gh", "pr", "edit", str(pr_number), "--add-label", _ESCALATION_LABEL],
@@ -1256,6 +1256,7 @@ def _set_terminal_state_marker(worktree, terminal_state, reason, logger):
     """Write pr_monitor.terminal_state marker to .workflow/state.json."""
     state_path = os.path.join(worktree, ".workflow", "state.json")
     try:
+        os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
         try:
             with open(state_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
@@ -1265,7 +1266,6 @@ def _set_terminal_state_marker(worktree, terminal_state, reason, logger):
         pm["terminal_state"] = terminal_state
         pm["timestamp"] = _timestamp()
         pm["reason"] = (reason or "")[:500]
-        os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
             f.write("\n")
@@ -1285,6 +1285,9 @@ def _notify_terminal(worktree, pr_number, logger, message):
 
     All actions are fire-and-forget — failures are logged but never cascade.
     Also deregisters the worktree's branch from the in-flight registry (AC-178).
+
+    Clean-exit path uses _step_notify → run_notify directly and never reaches
+    this function, so no guard against clean-exit is needed here.
     """
     _deregister_inflight(worktree, logger)
 
