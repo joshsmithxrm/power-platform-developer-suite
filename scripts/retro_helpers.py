@@ -114,6 +114,8 @@ def extract_transcript_signals(jsonl_path):
                                 tool_name = "Read"
                             elif "old_string not found" in result_lower:
                                 tool_name = "Edit"
+                            elif "exit code:" in result_lower:
+                                tool_name = "Bash"
 
                             if block.get("is_error") or tool_name != "unknown":
                                 signals["tool_failures"].append(
