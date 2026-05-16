@@ -255,6 +255,58 @@ def discover_transcripts(worktree_path, since=None):
                         except OSError:
                             continue
                     transcripts.append(p)
+    # Desktop app (Windows): AppData/Roaming/Claude/claude-code-sessions/<userId>/<machineId>/local_*.json
+    # Each manifest carries cliSessionId pointing to ~/.claude/projects/<slug>/<cliSessionId>.jsonl
+    # Use a normalized seen-set so mixed separators (/ vs \) don't cause duplicates.
+    seen_norm = {os.path.normcase(os.path.abspath(t)) for t in transcripts}
+    normed_worktree = os.path.normcase(os.path.abspath(worktree_path))
+    appdata = os.environ.get("APPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming"
+    )
+    ccd_root = os.path.join(appdata, "Claude", "claude-code-sessions")
+    if os.path.isdir(ccd_root):
+        for uid in os.listdir(ccd_root):
+            uid_path = os.path.join(ccd_root, uid)
+            if not os.path.isdir(uid_path):
+                continue
+            for mid in os.listdir(uid_path):
+                mid_path = os.path.join(uid_path, mid)
+                if not os.path.isdir(mid_path):
+                    continue
+                for fname in os.listdir(mid_path):
+                    if not (fname.startswith("local_") and fname.endswith(".json")):
+                        continue
+                    manifest_path = os.path.join(mid_path, fname)
+                    try:
+                        with open(manifest_path, "r", encoding="utf-8", errors="replace") as mf:
+                            manifest = json.load(mf)
+                    except (json.JSONDecodeError, OSError):
+                        continue
+                    cwd = manifest.get("worktreePath") or manifest.get("cwd", "")
+                    if not cwd:
+                        continue
+                    if os.path.normcase(os.path.abspath(cwd)) != normed_worktree:
+                        continue
+                    cli_id = manifest.get("cliSessionId")
+                    if not cli_id:
+                        continue
+                    slug = _encode_project_dir(cwd)
+                    p = os.path.join(
+                        os.path.expanduser("~"), ".claude", "projects", slug, cli_id + ".jsonl"
+                    )
+                    if not os.path.isfile(p):
+                        continue
+                    p_norm = os.path.normcase(os.path.abspath(p))
+                    if p_norm in seen_norm:
+                        continue
+                    if since is not None:
+                        try:
+                            if os.stat(p).st_mtime < since:
+                                continue
+                        except OSError:
+                            continue
+                    transcripts.append(p)
+                    seen_norm.add(p_norm)
     return transcripts
 
 

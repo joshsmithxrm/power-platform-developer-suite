@@ -81,13 +81,13 @@ Output a single structured blob for Phase 4. Do NOT synthesize yet.
 
 Read REFERENCE.md SS1 "Tier definitions" and SS2 "Finding taxonomy" before classifying. Build the findings table; row schema: `# | issue | rec | rationale | confidence | tier | kind`. Tag every incident with contributing factors (`tooling | behavior | skill | setup`). Apply the severity heuristic: any of user_interrupts > 0, frustration_hits > 0, very-short crashes, wrong-branch incidents -> rough session, full depth.
 
-### Phase 5. Decision Phase - plan-with-defaults UX
+### Phase 5. Decision Phase — one-at-a-time
 
-Read REFERENCE.md SS3 "Decision phase rules" before authoring the bulk-plan / contested split. Follow `.claude/interaction-patterns.md` SS4 verbatim. Pre-triage every finding (`DO NOW` / `DEFER` / `DROP` / `RESEARCH-FIRST`) with confidence (HIGH / LOW). Send ONE message with a bulk plan + contested block (cap 5). Serialize meta-recommendations.
+Read `interaction-patterns.md §4a` and REFERENCE.md §9. Present each finding individually (do NOT bulk-plan): one F<N> message per turn → wait for operator → next finding. Serialize meta-recommendations after all findings settle.
 
-### Phase 6. Routing
+### Phase 6. Routing — envelope batch + supervisor dispatch
 
-Read REFERENCE.md SS4 "Routing matrix" before dispatching. One-way flow per decision. Rule-drift kind additionally generates a SKILL.md / rule-surface patch proposal per `.claude/interaction-patterns.md SS7`.
+Read REFERENCE.md §4 + §10 before dispatching. **DEFER** → `Skill(skill="backlog")` (never draft inline). **Lane A** → inline. **Lane B/C** → batch by PR boundary (`interaction-patterns.md §2`), write `.workflow/goal-envelope.json` (v1.1), spawn `scripts/goal_supervisor.py`. **DROP** → record. **Rule-drift** → standalone Lane B PR. Handoff discipline: NEVER draft artifact content inline — invoke the receiving skill.
 
 ### Phase 7. Monitor & Confirm
 
@@ -117,6 +117,8 @@ After updating `summary.json`, commit both retro artifacts in one atomic commit:
 git add .retros/
 git commit -m "retro: <branch> session summary" -m "<one-sentence executive synthesis from Phase 8>"
 ```
+
+After the commit, the retro is complete. New artifacts (issue drafting, design, investigation) are a separate task — invoke the receiving skill (`Skill(skill="backlog")`, `Skill(skill="design")`, `Skill(skill="investigate")`) rather than drafting inline. See REFERENCE.md §10 "Handoff discipline".
 
 ---
 

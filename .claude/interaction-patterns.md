@@ -66,6 +66,30 @@ When presenting N findings or decisions to the user, the AI:
 
 **Rationale**: Cowan 4±1 working-memory capacity; Hick's Law on choice overload; smart-default approval-workflow pattern; Terraform plan/apply idiom; Anthropic guidance on surfacing uncertainty.
 
+## 4a. One-at-a-time variant (retro Phase 5 only) <!-- since: #1071 — PR #1051 retro disproved bulk-plan for retro -->
+
+Applies to `/retro` Phase 5 only. Evidence: PR #1051 retro (2026-05-14) — operator demanded per-finding explanation before approval: *"go back through one by one you explain to me the thing you found what you suggest and i will tell you do it"* and *"why didn't you make a recommendation and provide rationale and then ask for my opinion and decision?"*
+
+**Pattern (repeated F1–FN):**
+
+```
+## F<N> — <title>
+
+**What I found:** ...
+**My recommendation:** <verb> — <lean>
+**Rationale:**
+- ...
+**Your call?**
+```
+
+One finding per turn. AI lean stated. Rationale as bullets. Operator responds: go / change / drop / defer. If redirected, return with a different recommendation — not a menu of options. For sub-questions inside a finding, apply §5 per sub-question.
+
+After all findings are decided, one confirmation turn restating the final plan. Then ask "Want the meta now, or done?" before surfacing meta-observations.
+
+**Falsification:** a retro session where the operator explicitly prefers bulk approval → revert.
+
+**Consumers that retain §4 (bulk plan):** `/backlog` triage, `/pr` Gemini comment triage, `/dependabot-triage`, `/review` suggestion acceptance — these involve larger N with simpler per-item decisions and have not been disproven.
+
 ## 5. Communication style for AI-asked questions
 
 When the AI needs a decision:
