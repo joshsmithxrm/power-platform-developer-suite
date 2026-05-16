@@ -89,56 +89,56 @@ public static class RelationshipsCommand
             }
             else
             {
-                Console.Error.WriteLine();
+                Console.WriteLine();
 
                 if (relationships.OneToMany.Count > 0)
                 {
-                    Console.Error.WriteLine("One-to-Many (1:N) Relationships:");
-                    Console.Error.WriteLine($"  {"Schema Name",-45} {"Related Entity",-30} {"Lookup Field"}");
-                    Console.Error.WriteLine($"  {new string('-', 90)}");
+                    Console.WriteLine("One-to-Many (1:N) Relationships:");
+                    Console.WriteLine($"  {"Schema Name",-45} {"Related Entity",-30} {"Lookup Field"}");
+                    Console.WriteLine($"  {new string('-', 90)}");
 
                     foreach (var rel in relationships.OneToMany)
                     {
                         var customMarker = rel.IsCustomRelationship ? " [custom]" : "";
-                        Console.Error.WriteLine($"  {rel.SchemaName,-45} {rel.ReferencingEntity,-30} {rel.ReferencingAttribute}{customMarker}");
+                        Console.WriteLine($"  {rel.SchemaName,-45} {rel.ReferencingEntity,-30} {rel.ReferencingAttribute}{customMarker}");
                     }
 
-                    Console.Error.WriteLine();
+                    Console.WriteLine();
                 }
 
                 if (relationships.ManyToOne.Count > 0)
                 {
-                    Console.Error.WriteLine("Many-to-One (N:1) Relationships:");
-                    Console.Error.WriteLine($"  {"Schema Name",-45} {"Referenced Entity",-30} {"Lookup Field"}");
-                    Console.Error.WriteLine($"  {new string('-', 90)}");
+                    Console.WriteLine("Many-to-One (N:1) Relationships:");
+                    Console.WriteLine($"  {"Schema Name",-45} {"Referenced Entity",-30} {"Lookup Field"}");
+                    Console.WriteLine($"  {new string('-', 90)}");
 
                     foreach (var rel in relationships.ManyToOne)
                     {
                         var customMarker = rel.IsCustomRelationship ? " [custom]" : "";
-                        Console.Error.WriteLine($"  {rel.SchemaName,-45} {rel.ReferencedEntity,-30} {rel.ReferencingAttribute}{customMarker}");
+                        Console.WriteLine($"  {rel.SchemaName,-45} {rel.ReferencedEntity,-30} {rel.ReferencingAttribute}{customMarker}");
                     }
 
-                    Console.Error.WriteLine();
+                    Console.WriteLine();
                 }
 
                 if (relationships.ManyToMany.Count > 0)
                 {
-                    Console.Error.WriteLine("Many-to-Many (N:N) Relationships:");
-                    Console.Error.WriteLine($"  {"Schema Name",-45} {"Entity 1",-20} {"Entity 2",-20} {"Intersect Entity"}");
-                    Console.Error.WriteLine($"  {new string('-', 100)}");
+                    Console.WriteLine("Many-to-Many (N:N) Relationships:");
+                    Console.WriteLine($"  {"Schema Name",-45} {"Entity 1",-20} {"Entity 2",-20} {"Intersect Entity"}");
+                    Console.WriteLine($"  {new string('-', 100)}");
 
                     foreach (var rel in relationships.ManyToMany)
                     {
                         var customMarker = rel.IsCustomRelationship ? " [custom]" : "";
                         var reflexiveMarker = rel.IsReflexive ? " [reflexive]" : "";
-                        Console.Error.WriteLine($"  {rel.SchemaName,-45} {rel.Entity1LogicalName,-20} {rel.Entity2LogicalName,-20} {rel.IntersectEntityName}{customMarker}{reflexiveMarker}");
+                        Console.WriteLine($"  {rel.SchemaName,-45} {rel.Entity1LogicalName,-20} {rel.Entity2LogicalName,-20} {rel.IntersectEntityName}{customMarker}{reflexiveMarker}");
                     }
 
-                    Console.Error.WriteLine();
+                    Console.WriteLine();
                 }
 
                 var total = relationships.OneToMany.Count + relationships.ManyToOne.Count + relationships.ManyToMany.Count;
-                Console.Error.WriteLine($"Total: {total} relationships (1:N: {relationships.OneToMany.Count}, N:1: {relationships.ManyToOne.Count}, N:N: {relationships.ManyToMany.Count})");
+                Console.WriteLine($"Total: {total} relationships (1:N: {relationships.OneToMany.Count}, N:1: {relationships.ManyToOne.Count}, N:N: {relationships.ManyToMany.Count})");
             }
 
             return ExitCodes.Success;

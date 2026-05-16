@@ -110,12 +110,12 @@ public static class ListCommand
             {
                 if (flows.Count == 0)
                 {
-                    Console.Error.WriteLine("No cloud flows found.");
+                    Console.WriteLine("No cloud flows found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {flows.Count} cloud flow(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {flows.Count} cloud flow(s):");
+                    Console.WriteLine();
 
                     foreach (var f in flows)
                     {

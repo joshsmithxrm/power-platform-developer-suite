@@ -81,9 +81,9 @@ public static class KeysCommand
             }
             else
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"{"Logical Name",-30} {"Display Name",-30} {"Attributes",-30} {"Status"}");
-                Console.Error.WriteLine(new string('-', 100));
+                Console.WriteLine();
+                Console.WriteLine($"{"Logical Name",-30} {"Display Name",-30} {"Attributes",-30} {"Status"}");
+                Console.WriteLine(new string('-', 100));
 
                 foreach (var key in keys)
                 {
@@ -93,11 +93,11 @@ public static class KeysCommand
                     if (key.EntityKeyIndexStatus != "Active") flags.Add(key.EntityKeyIndexStatus ?? "unknown");
 
                     var flagText = flags.Count > 0 ? string.Join(", ", flags) : "Active";
-                    Console.Error.WriteLine($"  {key.LogicalName,-30} {key.DisplayName,-30} {attributes,-30} {flagText}");
+                    Console.WriteLine($"  {key.LogicalName,-30} {key.DisplayName,-30} {attributes,-30} {flagText}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {keys.Count} alternate keys");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {keys.Count} alternate keys");
             }
 
             return ExitCodes.Success;

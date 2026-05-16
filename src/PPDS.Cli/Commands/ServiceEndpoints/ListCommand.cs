@@ -72,7 +72,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No service endpoints found.");
+                    Console.WriteLine("No service endpoints found.");
                 }
                 return ExitCodes.Success;
             }
@@ -108,19 +108,19 @@ public static class ListCommand
                     var managed = endpoint.IsManaged ? " [managed]" : "";
                     if (endpoint.IsWebhook)
                     {
-                        Console.Error.WriteLine($"Webhook: {endpoint.Name}{managed}");
+                        Console.WriteLine($"Webhook: {endpoint.Name}{managed}");
                         if (!string.IsNullOrEmpty(endpoint.Url))
-                            Console.Error.WriteLine($"  URL: {endpoint.Url}");
+                            Console.WriteLine($"  URL: {endpoint.Url}");
                     }
                     else
                     {
-                        Console.Error.WriteLine($"Service Bus ({endpoint.ContractType}): {endpoint.Name}{managed}");
+                        Console.WriteLine($"Service Bus ({endpoint.ContractType}): {endpoint.Name}{managed}");
                         if (!string.IsNullOrEmpty(endpoint.NamespaceAddress))
-                            Console.Error.WriteLine($"  Namespace: {endpoint.NamespaceAddress}");
+                            Console.WriteLine($"  Namespace: {endpoint.NamespaceAddress}");
                         if (!string.IsNullOrEmpty(endpoint.Path))
-                            Console.Error.WriteLine($"  Path: {endpoint.Path}");
+                            Console.WriteLine($"  Path: {endpoint.Path}");
                     }
-                    Console.Error.WriteLine($"  Auth: {endpoint.AuthType}");
+                    Console.WriteLine($"  Auth: {endpoint.AuthType}");
                 }
 
                 var webhookCount = endpoints.Count(e => e.IsWebhook);
@@ -128,8 +128,8 @@ public static class ListCommand
                 var parts = new List<string>();
                 if (webhookCount > 0) parts.Add($"{webhookCount} webhook(s)");
                 if (serviceBusCount > 0) parts.Add($"{serviceBusCount} service bus endpoint(s)");
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {string.Join(", ", parts)}");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {string.Join(", ", parts)}");
             }
 
             return ExitCodes.Success;

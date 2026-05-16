@@ -363,7 +363,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No plugin traces found.");
+                    Console.WriteLine("No plugin traces found.");
                 }
                 return ExitCodes.Success;
             }
@@ -412,8 +412,8 @@ public static class ListCommand
 
     private static void WriteTextOutput(List<PluginTraceInfo> traces)
     {
-        Console.Error.WriteLine($"{"Type",-35} {"Message",-12} {"Entity",-20} {"Mode",-6} {"Duration",-10} {"Status",-6} {"Created",-20}");
-        Console.Error.WriteLine(new string('-', 115));
+        Console.WriteLine($"{"Type",-35} {"Message",-12} {"Entity",-20} {"Mode",-6} {"Duration",-10} {"Status",-6} {"Created",-20}");
+        Console.WriteLine(new string('-', 115));
 
         foreach (var trace in traces)
         {
@@ -425,11 +425,11 @@ public static class ListCommand
             var status = trace.HasException ? "Error" : "OK";
             var created = trace.CreatedOn.ToString("g");
 
-            Console.Error.WriteLine($"{type,-35} {message,-12} {entity,-20} {mode,-6} {duration,-10} {status,-6} {created,-20}");
+            Console.WriteLine($"{type,-35} {message,-12} {entity,-20} {mode,-6} {duration,-10} {status,-6} {created,-20}");
         }
 
-        Console.Error.WriteLine();
-        Console.Error.WriteLine($"Total: {traces.Count} trace(s)");
+        Console.WriteLine();
+        Console.WriteLine($"Total: {traces.Count} trace(s)");
     }
 
     private static string GetCsvHeader()

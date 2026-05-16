@@ -90,7 +90,7 @@ public static class EntitiesCommand
             }
             else
             {
-                Console.Error.WriteLine();
+                Console.WriteLine();
                 foreach (var entity in entities)
                 {
                     var markers = new List<string>();
@@ -98,11 +98,11 @@ public static class EntitiesCommand
                     if (entity.IsManaged) markers.Add("managed");
 
                     var markerText = markers.Count > 0 ? $" [{string.Join(", ", markers)}]" : "";
-                    Console.Error.WriteLine($"  {entity.LogicalName,-40} {entity.DisplayName}{markerText}");
+                    Console.WriteLine($"  {entity.LogicalName,-40} {entity.DisplayName}{markerText}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {entities.Count} entities");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {entities.Count} entities");
             }
 
             return ExitCodes.Success;

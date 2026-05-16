@@ -81,23 +81,23 @@ public static class OptionSetCommand
             }
             else
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Option Set: {optionSet.Name}");
-                Console.Error.WriteLine($"  Display Name: {optionSet.DisplayName}");
-                Console.Error.WriteLine($"  Type:         {optionSet.OptionSetType}");
-                Console.Error.WriteLine($"  Is Global:    {optionSet.IsGlobal}");
-                Console.Error.WriteLine($"  Is Custom:    {optionSet.IsCustomOptionSet}");
-                Console.Error.WriteLine($"  Is Managed:   {optionSet.IsManaged}");
+                Console.WriteLine();
+                Console.WriteLine($"Option Set: {optionSet.Name}");
+                Console.WriteLine($"  Display Name: {optionSet.DisplayName}");
+                Console.WriteLine($"  Type:         {optionSet.OptionSetType}");
+                Console.WriteLine($"  Is Global:    {optionSet.IsGlobal}");
+                Console.WriteLine($"  Is Custom:    {optionSet.IsCustomOptionSet}");
+                Console.WriteLine($"  Is Managed:   {optionSet.IsManaged}");
 
                 if (!string.IsNullOrEmpty(optionSet.Description))
                 {
-                    Console.Error.WriteLine($"  Description:  {optionSet.Description}");
+                    Console.WriteLine($"  Description:  {optionSet.Description}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Options ({optionSet.Options.Count}):");
-                Console.Error.WriteLine($"  {"Value",-10} {"Label",-40} {"Flags"}");
-                Console.Error.WriteLine($"  {new string('-', 70)}");
+                Console.WriteLine();
+                Console.WriteLine($"Options ({optionSet.Options.Count}):");
+                Console.WriteLine($"  {"Value",-10} {"Label",-40} {"Flags"}");
+                Console.WriteLine($"  {new string('-', 70)}");
 
                 foreach (var option in optionSet.Options)
                 {
@@ -107,7 +107,7 @@ public static class OptionSetCommand
                     if (!string.IsNullOrEmpty(option.Color)) flags.Add($"color={option.Color}");
 
                     var flagText = flags.Count > 0 ? string.Join(", ", flags) : "";
-                    Console.Error.WriteLine($"  {option.Value,-10} {option.Label,-40} {flagText}");
+                    Console.WriteLine($"  {option.Value,-10} {option.Label,-40} {flagText}");
                 }
             }
 

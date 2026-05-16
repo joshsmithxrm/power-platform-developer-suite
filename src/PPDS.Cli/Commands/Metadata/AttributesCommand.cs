@@ -89,9 +89,9 @@ public static class AttributesCommand
             }
             else
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"{"Logical Name",-35} {"Type",-20} {"Display Name",-30} {"Flags"}");
-                Console.Error.WriteLine(new string('-', 100));
+                Console.WriteLine();
+                Console.WriteLine($"{"Logical Name",-35} {"Type",-20} {"Display Name",-30} {"Flags"}");
+                Console.WriteLine(new string('-', 100));
 
                 foreach (var attr in attributes)
                 {
@@ -104,11 +104,11 @@ public static class AttributesCommand
                         flags.Add("required");
 
                     var flagText = flags.Count > 0 ? string.Join(", ", flags) : "";
-                    Console.Error.WriteLine($"  {attr.LogicalName,-35} {attr.AttributeType,-20} {attr.DisplayName,-30} {flagText}");
+                    Console.WriteLine($"  {attr.LogicalName,-35} {attr.AttributeType,-20} {attr.DisplayName,-30} {flagText}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {attributes.Count} attributes");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {attributes.Count} attributes");
             }
 
             return ExitCodes.Success;

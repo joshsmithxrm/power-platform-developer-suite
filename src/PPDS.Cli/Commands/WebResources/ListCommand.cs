@@ -166,7 +166,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No web resources found.");
+                    Console.WriteLine("No web resources found.");
                 }
                 return ExitCodes.Success;
             }
@@ -194,8 +194,8 @@ public static class ListCommand
             }
             else
             {
-                Console.Error.WriteLine($"{"Name",-50} {"Type",-12} {"Managed",-10} {"Modified On",-20} {"Modified By"}");
-                Console.Error.WriteLine(new string('-', 112));
+                Console.WriteLine($"{"Name",-50} {"Type",-12} {"Managed",-10} {"Modified On",-20} {"Modified By"}");
+                Console.WriteLine(new string('-', 112));
 
                 foreach (var r in resources)
                 {
@@ -205,11 +205,11 @@ public static class ListCommand
                     var modified = r.ModifiedOn?.ToString("yyyy-MM-dd HH:mm") ?? "-";
                     var modifiedBy = Truncate(r.ModifiedByName ?? "-", 20);
 
-                    Console.Error.WriteLine($"{name,-50} {type_,-12} {managed,-10} {modified,-20} {modifiedBy}");
+                    Console.WriteLine($"{name,-50} {type_,-12} {managed,-10} {modified,-20} {modifiedBy}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {resources.Count} web resource(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {resources.Count} web resource(s)");
             }
 
             return ExitCodes.Success;

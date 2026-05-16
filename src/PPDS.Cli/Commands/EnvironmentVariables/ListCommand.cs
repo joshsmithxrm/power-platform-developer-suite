@@ -94,12 +94,12 @@ public static class ListCommand
             {
                 if (variables.Count == 0)
                 {
-                    Console.Error.WriteLine("No environment variables found.");
+                    Console.WriteLine("No environment variables found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {variables.Count} environment variable(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {variables.Count} environment variable(s):");
+                    Console.WriteLine();
 
                     foreach (var v in variables)
                     {

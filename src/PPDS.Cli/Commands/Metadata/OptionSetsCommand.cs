@@ -81,9 +81,9 @@ public static class OptionSetsCommand
             }
             else
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"{"Name",-45} {"Type",-15} {"Display Name",-30} {"Options"}");
-                Console.Error.WriteLine(new string('-', 100));
+                Console.WriteLine();
+                Console.WriteLine($"{"Name",-45} {"Type",-15} {"Display Name",-30} {"Options"}");
+                Console.WriteLine(new string('-', 100));
 
                 foreach (var os in optionSets)
                 {
@@ -92,11 +92,11 @@ public static class OptionSetsCommand
                     if (os.IsManaged) markers.Add("managed");
 
                     var markerText = markers.Count > 0 ? $" [{string.Join(", ", markers)}]" : "";
-                    Console.Error.WriteLine($"  {os.Name,-45} {os.OptionSetType,-15} {os.DisplayName,-30} {os.OptionCount}{markerText}");
+                    Console.WriteLine($"  {os.Name,-45} {os.OptionSetType,-15} {os.DisplayName,-30} {os.OptionCount}{markerText}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {optionSets.Count} option sets");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {optionSets.Count} option sets");
             }
 
             return ExitCodes.Success;

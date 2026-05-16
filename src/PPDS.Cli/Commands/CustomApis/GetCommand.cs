@@ -156,22 +156,22 @@ public static class GetCommand
 
                 if (api.RequestParameters.Count > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine("  Request Parameters:");
+                    Console.WriteLine();
+                    Console.WriteLine("  Request Parameters:");
                     foreach (var p in api.RequestParameters)
                     {
                         var optional = p.IsOptional ? " [optional]" : "";
-                        Console.Error.WriteLine($"    {p.UniqueName} ({p.Type}){optional}");
+                        Console.WriteLine($"    {p.UniqueName} ({p.Type}){optional}");
                     }
                 }
 
                 if (api.ResponseProperties.Count > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine("  Response Properties:");
+                    Console.WriteLine();
+                    Console.WriteLine("  Response Properties:");
                     foreach (var p in api.ResponseProperties)
                     {
-                        Console.Error.WriteLine($"    {p.UniqueName} ({p.Type})");
+                        Console.WriteLine($"    {p.UniqueName} ({p.Type})");
                     }
                 }
             }
@@ -195,7 +195,7 @@ public static class GetCommand
         foreach (var kvp in properties)
         {
             var key = kvp.Key.PadRight(maxKeyLength);
-            Console.Error.WriteLine($"  {key}  {kvp.Value}");
+            Console.WriteLine($"  {key}  {kvp.Value}");
         }
     }
 
