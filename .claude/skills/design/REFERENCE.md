@@ -112,19 +112,19 @@ Runs after the bias-isolated design-fidelity review (Step 3.B). Goal: verify the
 python scripts/workflow-state.py get issues
 ```
 
-Result is a JSON array, e.g. `[1113]`. If the result is empty (`[]`), null, or the key is absent, skip Step 3.B.2 entirely.
+Result is a JSON array, e.g. `[1113]`. Skip Step 3.B.2 entirely if the output is empty string (key absent), `null`, or `[]`. If the array has more than one entry, concatenate all bodies under separate `## Issue #N` headings and pass the combined text as `<ISSUE_BODY>` in a single reviewer call.
 
 ### 2. Fetch Issue Body
 
 For each issue N in the array:
 
 ```bash
-gh issue view <N> --json title,body --jq '"# " + .title + "\n\n" + .body'
+gh issue view <N> --json title,body --jq '"# Issue #\(.) — " + .title + "\n\n" + .body'
 ```
 
 ### 3. Spawn the Reviewer
 
-Use the Agent tool with this prompt (substitute `<ISSUE_BODY>` and `<SPEC_CONTENT>` with the actual text):
+Read the current spec file content. Then use the Agent tool with this prompt (substitute `<ISSUE_BODY>` and `<SPEC_CONTENT>` with the actual text):
 
 ---
 
@@ -166,7 +166,7 @@ Do not fix anything. Do not suggest improvements. Enumerate and classify only.
 1. Present the findings table and summary to the user.
 2. Block — do not proceed to Step 3.C.
 3. For each `missing` item: worker must add a spec AC that covers it.
-4. For each `reframed` item: worker must either (a) align the spec with the issue's original intent, or (b) add the item to `## Non-Goals` with a rationale explaining why the reframing is acceptable.
+4. For each `reframed` item: worker must either (a) align the spec with the issue's original intent, or (b) add the item to `### Non-Goals` with a rationale explaining why the reframing is acceptable.
 5. After revisions: re-run Step 3.B.2 only (not Step 3.B) — re-read the updated spec and re-spawn the reviewer.
 6. Repeat until all items are `covered` or `in-non-goals`.
 
