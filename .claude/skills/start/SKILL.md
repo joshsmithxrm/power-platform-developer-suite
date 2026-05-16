@@ -134,7 +134,7 @@ Run from main repo root. Idempotent on `--branch`. Deregistration handled by `/c
 
 ### Step 7: Return Control to User
 
-Summarize and return control per REFERENCE.md §5. On non-zero from the helper: surface stderr verbatim and stop.
+Summarize and return control per REFERENCE.md §5 — the new session is visible in Agent View on every Claude Code surface. On non-zero from the helper: surface stderr verbatim and stop.
 
 ## Rules
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-16T06:25:00.000000Z",
-  "total_retros": 17,
+  "last_updated": "2026-05-16",
+  "total_retros": 18,
   "findings_by_category": {
     "external": [
       {
@@ -355,6 +355,28 @@
         "date": "2026-04-26",
         "branch": "feat/monitor-autonomy",
         "finding_id": "R-05"
+      }
+    ],
+    "uncategorized": [
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-04"
       }
     ]
   },
