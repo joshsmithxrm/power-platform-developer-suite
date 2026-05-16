@@ -838,7 +838,9 @@ class TestEmptyBodyReplyGuard:
              "description": "real fix"},  # real body
         ]
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        with patch("pr_monitor._post_replies_common") as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 102}]):
             pr_monitor.post_replies(wt, 42, items, logger)
 
         # _post_replies_common was called exactly once, with only the
@@ -1202,7 +1204,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fake_common) as mock_common:
+                   side_effect=fake_common) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 777}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             pr_monitor.post_replies(wt, 42, [item], logger)
 
@@ -1235,7 +1239,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fake_common) as mock_common:
+                   side_effect=fake_common) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 500}]):
             pr_monitor.post_replies(wt, 42, [item_fixed], logger)
             pr_monitor.post_replies(wt, 42, [item_dismissed], logger)
 
@@ -1270,7 +1276,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fail_once) as mock_common:
+                   side_effect=fail_once) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 999}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             # First call failed; key must not be in the dedupe set.
             assert (42, 999) not in pr_monitor._POSTED_REPLY_KEYS
@@ -1278,7 +1286,9 @@ class TestReplyDedupe:
 
         # Retry succeeds — common is invoked again, then key lands in the set.
         with patch("pr_monitor._post_replies_common",
-                   side_effect=succeed) as mock_common:
+                   side_effect=succeed) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 999}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             assert mock_common.call_count == 1
             assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS

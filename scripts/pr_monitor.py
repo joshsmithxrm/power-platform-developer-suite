@@ -795,9 +795,19 @@ _POSTED_REPLY_KEYS: "set[tuple]" = set()
 
 def _reply_body_for(item):
     """Mirror of triage_common.format_reply_body for pre-POST filtering."""
+    import re
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
+    # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
+    # triage agents sometimes emit, which would produce doubled phrasing like
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (PR #1094 style nit).
+    description = re.sub(
+        r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
     if action == "fixed" and commit_sha:
         return f"Fixed in {commit_sha} \u2014 {description}"
     if action == "dismissed":
@@ -808,9 +818,12 @@ def _reply_body_for(item):
 def post_replies(worktree, pr_number, triage_results, logger):
     """Post threaded replies to Gemini review comments.
 
-    Applies two guards before delegating to _post_replies_common:
+    Applies three guards before delegating to _post_replies_common:
       1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
       2. Dedupe on (pr, comment_id) (meta-retro #3; PR #864 hardening).
+      3. GitHub-side check via get_unreplied_comments (issue #1096) — skip
+         any comment_id that already has a threaded reply in GitHub's state,
+         preventing duplicates across monitor restarts or parallel actors.
 
     The dedupe key is recorded only after a successful POST event so
     transient failures (network, API timeout) don't permanently block
@@ -838,6 +851,19 @@ def post_replies(worktree, pr_number, triage_results, logger):
             _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
             continue
         filtered.append(item)
+
+    if not filtered:
+        return
+
+    unreplied_ids = {c["id"] for c in get_unreplied_comments(worktree, pr_number)}
+    cross_process_filtered = []
+    for item in filtered:
+        cid = item.get("id")
+        if cid not in unreplied_ids:
+            _log_fn("SKIPPED_ALREADY_REPLIED", comment_id=cid, action=item.get("action", "unknown"))
+        else:
+            cross_process_filtered.append(item)
+    filtered = cross_process_filtered
 
     if not filtered:
         return

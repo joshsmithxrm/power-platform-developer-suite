@@ -197,5 +197,84 @@ class TestTerminalDeregistersInflight(unittest.TestCase):
             self.assertIn("feat/test-branch", deregister_call)
 
 
+class TestPostRepliesDedup(unittest.TestCase):
+    """Issue #1096: post_replies must consult get_unreplied_comments before POSTing."""
+
+    def setUp(self):
+        import pr_monitor
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+    def tearDown(self):
+        import pr_monitor
+        pr_monitor._POSTED_REPLY_KEYS.clear()
+
+    def test_skips_already_replied_comment(self):
+        """AC: comment_id X already replied on GitHub → no POST, logs SKIPPED_ALREADY_REPLIED."""
+        import pr_monitor
+
+        triage_results = [{"id": 3251204411, "action": "fixed",
+                           "description": "Fixed it", "commit": "abc123"}]
+        logger = _FakeLogger()
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._post_replies_common") as mock_post:
+            pr_monitor.post_replies("/worktree", 1094, triage_results, logger)
+
+        mock_post.assert_not_called()
+        events = [e[0][1] for e in logger.entries]
+        self.assertIn("SKIPPED_ALREADY_REPLIED", events,
+                      "Must log SKIPPED_ALREADY_REPLIED when comment is already replied")
+        skipped = next(e for e in logger.entries if e[0][1] == "SKIPPED_ALREADY_REPLIED")
+        self.assertEqual(skipped[1].get("comment_id"), 3251204411)
+        self.assertEqual(skipped[1].get("action"), "fixed")
+
+    def test_posts_when_comment_unreplied(self):
+        """AC: comment_id X not yet replied on GitHub → POST proceeds as before."""
+        import pr_monitor
+
+        triage_results = [{"id": 3251204411, "action": "fixed",
+                           "description": "Fixed it", "commit": "abc123"}]
+        logger = _FakeLogger()
+        unreplied = [{"id": 3251204411, "user": "gemini-code-assist[bot]",
+                      "path": "file.py", "line": 10, "body": "Consider X"}]
+
+        with patch("pr_monitor.get_unreplied_comments", return_value=unreplied), \
+             patch("pr_monitor._post_replies_common") as mock_post:
+            pr_monitor.post_replies("/worktree", 1094, triage_results, logger)
+
+        mock_post.assert_called_once()
+        events = [e[0][1] for e in logger.entries]
+        self.assertNotIn("SKIPPED_ALREADY_REPLIED", events)
+
+    def test_reply_body_strips_already_fixed_prefix(self):
+        """Style nit #1096: 'Already fixed in commit X — …' prefix is stripped."""
+        import pr_monitor
+
+        item = {"action": "fixed", "commit": "eb19a01e6",
+                "description": "Already fixed in commit eb19a01e6 — REFERENCE.md line 120 already uses curl"}
+        body = pr_monitor._reply_body_for(item)
+        self.assertEqual(body, "Fixed in eb19a01e6 — REFERENCE.md line 120 already uses curl")
+        self.assertNotIn("Already fixed", body)
+
+    def test_reply_body_strips_already_dismissed_prefix(self):
+        """Style nit #1096: 'Already dismissed in commit X — …' prefix is stripped."""
+        import pr_monitor
+
+        item = {"action": "dismissed",
+                "description": "Already dismissed in commit abc123 — not applicable here"}
+        body = pr_monitor._reply_body_for(item)
+        self.assertEqual(body, "Not applicable — not applicable here")
+        self.assertNotIn("Already dismissed", body)
+
+    def test_reply_body_normal_description_unchanged(self):
+        """Descriptions without the prefix pass through unmodified."""
+        import pr_monitor
+
+        item = {"action": "fixed", "commit": "abc123",
+                "description": "Updated the config file"}
+        body = pr_monitor._reply_body_for(item)
+        self.assertEqual(body, "Fixed in abc123 — Updated the config file")
+
+
 if __name__ == "__main__":
     unittest.main()
