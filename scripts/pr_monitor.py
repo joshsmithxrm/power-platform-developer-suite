@@ -57,8 +57,11 @@ def _resolve_ci_timeout_sec(flag_value):
     if flag_value is not None:
         return flag_value, "flag"
     env_val = os.environ.get("PPDS_PR_MONITOR_CI_TIMEOUT")
-    if env_val is not None:
-        return int(env_val), "env"
+    if env_val:
+        try:
+            return int(env_val), "env"
+        except ValueError:
+            pass
     return CI_MAX_WAIT, "default"
 
 
