@@ -5,106 +5,35 @@ description: Execute a checked-in implementation plan end-to-end using parallel 
 
 # Implement Plan
 
-## Usage
-
 `/implement` — read spec and plan from `.plans/`, execute phases
 `/implement specs/my-feature.md` — explicit spec path
 
-## Pipeline Mode Detection
-
-If the environment variable `PPDS_PIPELINE=1` is set, this skill is being invoked by the
-pipeline orchestrator. In pipeline mode:
-- Execute Steps 1-5 only (plan analysis through phase execution)
-- Skip Step 6 (Mandatory Tail) — the pipeline orchestrator runs gates/verify/qa/review
-  as separate `claude -p` sessions with their own timeouts and monitoring
-- **Do NOT use `ScheduleWakeup`** — the pipeline monitors parent-process output to detect
-  stalls. A sleeping parent produces no output and will be killed. Instead, dispatch agents
-  in foreground (`run_in_background: false`) or poll background agents with `TaskOutput`
-  at ≤60 s intervals so the parent transcript keeps growing.
-- Exit cleanly after all phases are committed
-
-In interactive mode (`PPDS_PIPELINE` not set), execute the full process including Step 6.
-
----
-
-Execute a checked-in implementation plan end-to-end using parallel agents for maximum throughput. You are the orchestrator - agents do the work, you review, fix, commit, and advance.
+If `PPDS_PIPELINE=1`: execute Steps 1–5 only (skip Step 6). Read REFERENCE.md §1.
 
 ## Prerequisites
 
-Key tools and skills used throughout:
-- `Agent` tool for parallel subagent dispatch
-- `/review` for impartial code review at phase gates
-- `/verify` and `/qa` for verification before declaring any phase done
-- `/debug` for systematic debugging when tests fail
-- `/gates` for mechanical pass/fail checks
+Agent tool, `/review`, `/verify`, `/qa`, `/debug`, `/gates`.
 
 ## Input
-$ARGUMENTS = path to the plan file (e.g., `.plans/2026-02-08-query-engine-v3-design.md`)
 
-If no $ARGUMENTS is provided, look for the spec referenced in `.workflow/state.json` (the `spec` field). Read the spec and generate an implementation plan as Step 0, saving it to `.plans/` in the current worktree. Then proceed with Step 1 using the generated plan.
+`$ARGUMENTS` = path to plan file. If omitted: use spec from `.workflow/state.json`, generate plan, save to `.plans/`, proceed.
+
+**Fallback — no spec:** prompt user: run `/design` or continue without spec?
 
 ## Process
 
-### Step 0: Generate Plan from Spec (only if no plan argument)
-- Read the spec file from `specs/` (identified via workflow state or by scanning `specs/` for the most recently modified spec)
-- Generate a phased implementation plan following the spec's acceptance criteria
-- Save to `.plans/{date}-{spec-name}.md`
-- Continue to Step 1 with the generated plan
-**Fallback — no spec found:** If no relevant spec is found (workflow state has no `spec` field AND no spec in `specs/` matches the current work domain):
-- Prompt user: "No spec found for this work. (1) Run `/design` to create one, or (2) continue without a spec?"
-- If user chooses `/design`: stop and instruct user to run `/design`
-- If user chooses continue: check for `.plans/context.md` and generate a plan from issue context if available, otherwise ask the user to describe the work for plan generation
-
-### Step 1: Read & Analyze the Plan
-- Read the plan file at $ARGUMENTS (resolve relative to repo root if needed)
-- Identify ALL phases, their dependencies, and parallelization opportunities
-- Identify which phases are SEQUENTIAL (have dependencies) vs PARALLEL (independent streams)
-- Note the quality gates defined in the plan
-- **Findings reconciliation:** If the plan references a findings document (check for `**Findings:**` or links to a findings file), read it and extract all finding IDs (e.g., CC-01, V-15, CR-06). Cross-reference every finding ID against the plan text. Report any finding IDs that do not appear in the plan — these may have been accidentally dropped during plan authoring. Present the gap to the user before proceeding.
-- **Shared-infrastructure scan:** Identify files that appear in multiple phases (e.g., `message-types.ts`, `shared.css`, `dom-utils.ts`). Verify these files are modified in an earlier sequential phase, not in parallel phases. If a shared file appears in parallel phases, flag it: either serialize those modifications or designate one phase as the owner of the shared file.
+### Step 1: Read & Analyze Plan
+- Identify phases, dependencies, parallelization opportunities (sequential vs. parallel).
+- **Findings reconciliation:** Cross-reference every finding ID (CC-01, V-15) from any findings doc against plan text; report gaps.
+- **Shared-infrastructure scan:** Identify files in multiple phases; flag conflicts (must serialize or designate owner). See REFERENCE.md §4.
 
 ### Step 2: Load Spec Context
-
-Before dispatching any agents, load the specification context that will be injected into every subagent prompt.
-
-**A. Read Foundation**
-- Read `specs/CONSTITUTION.md` — full content will be injected into every subagent prompt
-
-**B. Identify Relevant Specs**
-- From the plan, identify which source directories/files will be touched
-- Grep all `specs/*.md` files for `**Code:**` frontmatter lines. Match each touched source directory against code path prefixes to find governing specs. This replaces hardcoded mappings and the README index.
-- Always include `specs/architecture.md`
-- Read each relevant spec and extract the `## Acceptance Criteria` section
-
-**C. Build Spec Context Block**
-Construct a text block that will be prepended to every subagent prompt:
-
-```
-## Constitution (MUST comply — violations are defects) <!-- enforcement: T3 -->
-{full CONSTITUTION.md content}
-
-## Relevant Specifications — Acceptance Criteria
-### {spec-name}.md
-{AC table rows from that spec}
-
-Your implementation MUST satisfy these criteria. If your task conflicts <!-- enforcement: T3 -->
-with a spec or constitution principle, STOP and report the conflict
-to the orchestrator — do not silently deviate.
-```
-
-**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec's `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
+Read `specs/CONSTITUTION.md` + relevant specs (grep `**Code:**` frontmatter). Build spec context block for every subagent. See REFERENCE.md §3.
 
 ### Step 3: Assess Current State
-- Check git status and current branch
-- Search for any existing work (worktrees, branches) related to this plan
-- Check if a feature branch exists; if not, create one from the plan name
-- Determine what has already been implemented vs what remains
-- Check git log to see if prior phases were already committed
+Check git status, branch, existing worktrees, prior phase commits.
 
 ### Step 3.5: Initialize Workflow State
-
-Record that implementation has started:
-
 ```bash
 python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
 python scripts/workflow-state.py set spec "{spec-path}"
@@ -114,199 +43,44 @@ python scripts/workflow-state.py set phase implementing
 ```
 
 ### Step 4: Create Task Tracking
-- Use TodoWrite to build a task list from the plan phases
-- Mark any already-completed work as done
+Build task list from plan phases; mark already-completed work done.
 
 ### Step 4.5: Assess Model Selection
-
-For each phase, assess complexity to choose the appropriate model for subagents:
-- **Primary model (Opus):** Phases with >3 sub-steps, complex UI work (timelines, query builders, virtual scrolling), cross-cutting refactors touching >10 files, or Constitution-sensitive Dataverse service changes
-- **Lighter model (Sonnet):** Mechanical phases — one-liner fixes, find-and-replace, boilerplate application, CSS-only changes, documentation updates
-
-Do not hardcode model IDs in the plan. Assess at dispatch time based on the phase's actual complexity. When in doubt, use the primary model — the cost of a subagent re-dispatch exceeds the cost difference between models.
+Read REFERENCE.md §2 for Opus vs. Sonnet guidance.
 
 ### Step 5: Execute Each Phase
 
-For EACH phase in the plan, repeat this cycle:
-
-**A. Dispatch Agents**
-- For ALL independent tasks within the current phase, dispatch background agents using the Agent tool with `run_in_background: true`
-- For parallel streams in a phase group (e.g., "Phase 2-4: PARALLEL"), dispatch ALL streams simultaneously
-- Each agent prompt MUST include: <!-- enforcement: T3 -->
-  - The specific task/subtask from the plan with full requirements
-  - Full file paths and codebase context (what exists, what to read first)
-  - Instructions to read existing code before writing anything
-  - Build verification command to run before finishing
-  - Test command to run and verify
-  - The spec context block from Step 2 (constitution + relevant AC tables)
-  - **Test quality rules:** Tests MUST be behavioral — they must call at least one function/method/class from the module under test and assert on return values, side effects, or state changes. NEVER use `inspect.getsource()`, string matching on source code, or other structural introspection as a test strategy. These provide false confidence and will be flagged as CRITICAL defects. For threshold/boundary ACs, include a negative case showing the test fails with wrong values. <!-- enforcement: T3 -->
-  - Reminder: no shell redirections (2>&1, >, >>)
-  - Self-check gate: before reporting completion, run the relevant gate checks for your changed files. For TypeScript/extension changes: `npm run typecheck:all --prefix src/PPDS.Extension` and `npx eslint --quiet {changed-files}`. For C# changes: `dotnet build {project}.csproj -v q`. Report gate results in your summary — do not silently suppress failures.
-- Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
-- **Shared-file guard:** If multiple parallel agents will modify the same file (identified in Step 1's shared-infrastructure scan), either: (a) serialize those agents, (b) have the first agent create the shared additions and later agents import them, or (c) designate one agent as the file owner and have others list their additions as requirements for the owner.
-
-**B. Collect Results**
-- Wait for all agents in the current phase to complete
-- Review each agent's summary (do NOT read full transcripts - save context)
-- Mark tasks as completed
-
-**B2. Cross-Agent Consistency Check**
-When parallel agents implement the same semantic concept across surfaces (e.g., RPC + MCP + TUI + Extension), check for consistency BEFORE proceeding:
-- Same field names and types across surfaces (e.g., `HasOverride` uses the same logic in MCP and RPC)
-- Nullable/non-nullable agreement between C# DTOs and TypeScript interfaces
-- Error codes defined in one layer are actually used in other layers
-- Default values match across surfaces (e.g., "N/A" fallback in both mapper and TS type)
-This prevents the most common parallel-agent defect: each agent delivers its slice correctly but cross-slice contracts are inconsistent.
-
-**C. Verify Phase Gate**
-- Run full solution build: `dotnet build PPDS.sln -v q` (or appropriate build command)
-- Run full test suite: `dotnet test PPDS.sln --filter "Category!=Integration" -v q --no-build`
-- Both MUST show 0 errors / 0 failures <!-- enforcement: T3 -->
-- If build errors exist, dispatch a fix agent with the specific errors
-- If test failures exist, dispatch a fix agent with the failing test names and error messages
-- **AC coverage gate (Constitution I6):** For every AC in the relevant spec(s) that this phase claims to implement, verify:
-  1. The spec AC table `Test` column is filled in (not empty, not "❌ no test yet")
-  2. The referenced test method exists in the codebase
-  3. The test passes: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
-  4. **Behavioral test requirement:** The test MUST call at least one function, method, or class from the module under test. Tests that only use `inspect.getsource()`, string matching on source code, or other structural checks are NOT valid tests — they provide false confidence and will be flagged as CRITICAL by review. The test must exercise a real code path and assert on return values, side effects, or state changes. <!-- enforcement: T3 -->
-  5. **Negative verification:** For bug-fix or threshold ACs, the test SHOULD demonstrate failure when the condition is not met (e.g., assert the function returns a different value with wrong input), not just that the happy path works.
-  If any AC is missing a test or has only a structural/source-inspection test, the phase gate FAILS. Do not proceed — dispatch an agent to write proper behavioral tests. This is not optional — Constitution I6 makes untested ACs a defect.
-- If the phase touches extension code (`src/PPDS.Extension/` directory):
-  Invoke `/verify extension` to check daemon status, tree views, and panel state.
-  Then invoke `/qa extension` to dispatch a blind verifier agent that tests the UI without seeing source code.
-- If the phase touches TUI code (`src/PPDS.Cli/Tui/`):
-  Invoke `/verify tui` to check TUI rendering.
-- If the phase touches MCP code (`src/PPDS.Mcp/`):
-  Invoke `/verify mcp` to check tool responses.
-  Then invoke `/qa mcp` to dispatch a blind verifier for tool responses.
-- If the phase touches CLI commands (`src/PPDS.Cli/Commands/`, not `Serve/`):
-  Invoke `/qa cli` to verify command output matches expectations.
-- Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
-- After all sub-skill invocations (/verify, /qa) complete, restore phase: `python scripts/workflow-state.py set phase implementing`
-
-**D. Review**
-- Invoke `/review` to dispatch an impartial reviewer for the phase's work
-- The reviewer receives ONLY the diff, constitution, and ACs — NO implementation context (no plan, no task descriptions). It reviews code against specs, not against the plan.
-- If the review identifies issues, dispatch fix agents before committing
-- Only proceed to commit when review passes
-- After review completes, restore phase: `python scripts/workflow-state.py set phase implementing`
-
-**E. Commit the Phase**
-- Stage all files for this phase: `git add` specific files (not `git add -A`)
-- Commit with conventional format and descriptive message:
-  ```
-  feat(scope): Phase N - concise description
-
-  Bullet points of what was added/changed.
-
-  Co-Authored-By: {use the format from the system prompt}
-  ```
-- Each phase gets its OWN commit - do not batch multiple phases into one commit
-- Exception: parallel streams within a phase group (e.g., Phases 2-4 running simultaneously) can share a commit since they're one logical gate
-
-**F. Advance**
-- Move to the next phase only after commit succeeds
-- Update task tracking
-- Continue until all phases are complete
-
-**G. Goal Verification (per-phase fast feedback)**
-
-If the spec has a `**Verification:**` frontmatter line, run a single-pass goal check after the phase commit. This catches the case where the phase landed clean against its own ACs but regressed the spec-level verification command.
-
-```python
-# inside the orchestrator (no agent dispatch at this level — just a probe)
-from goal_loop import read_goal_from_spec, run_until_green, GoalLoopOutcome
-goal = read_goal_from_spec(spec_path)
-if goal.verification_command is not None:
-    result = run_until_green(
-        goal,
-        attempt_fix=lambda r: None,  # per-phase: probe only, don't iterate
-        max_iterations=1,
-    )
-    if result.outcome is not GoalLoopOutcome.GREEN:
-        # surface the failure in the stage log and proceed to the next phase;
-        # the pre-tail sweep at Step 5.5 will iterate with the full budget.
-        log_phase_verification_red(phase, result)
+**Phase-entry inbox check (before dispatching any agents):**
+```bash
+python scripts/supervisor_msg.py read --consume
 ```
+Handle each message kind per REFERENCE.md §9. Empty inbox → proceed normally.
 
-If the spec has no `**Verification:**` line, skip Step 5.G entirely — backward compatible with all existing specs.
+**A. Dispatch Agents** — parallel for independent tasks; see REFERENCE.md §4.
+
+**B. Collect Results** — wait for all agents; review summaries.
+
+**B2. Cross-Agent Consistency Check** — verify cross-surface contract consistency; see REFERENCE.md §6.
+
+**C. Verify Phase Gate** — build → tests → AC coverage → surface-specific verify/qa → review. See REFERENCE.md §5. Fix before advancing. Restore phase after sub-skills: `python scripts/workflow-state.py set phase implementing`
+
+**D. Review** — invoke `/review` (reviewer sees diff + constitution + ACs only). Fix issues. Restore phase.
+
+**E. Commit** — `git add` specific files; commit per REFERENCE.md §7.
+
+**F. Advance** — move to next phase after commit. Update task tracking.
+
+**G. Goal Verification** — per-phase fast feedback if spec has `**Verification:**` frontmatter; see REFERENCE.md §8.
 
 ### Step 5.5: Pre-Tail Goal Loop
-
-After all phases are committed and BEFORE running Step 6, run the full goal loop with the spec's configured `verification_max_iterations` (default 10). This is the "is the feature actually done" sweep — it iterates verify → fix-subagent → verify until GREEN, BLOCKED_HARD, STUCK_OUTPUT, or ITERATION_CAP. Mechanical stops only; never ask the operator.
-
-```python
-from goal_loop import read_goal_from_spec, run_until_green, GoalLoopOutcome
-goal = read_goal_from_spec(spec_path)
-if goal.verification_command is None:
-    pass  # spec opted out; proceed to Step 6
-else:
-    def attempt_fix(last):
-        # dispatch a fix subagent via the Agent tool with the failing output;
-        # the subagent reads the failure, debugs root cause, edits, and commits.
-        # Surface a BlockedSessionError only when the subagent's daemon has
-        # populated `needs` — empty `needs` is a transient (mirrors PR #1051 d1bfe877).
-        dispatch_fix_agent(last)
-
-    result = run_until_green(goal, attempt_fix=attempt_fix)
-    if result.outcome is GoalLoopOutcome.GREEN:
-        proceed_to_tail()
-    elif result.outcome is GoalLoopOutcome.BLOCKED_HARD:
-        # standard --bg blocked-state path; daemon state.json carries `needs`
-        raise_blocked_to_operator(result.blocked_needs)
-    else:
-        # ITERATION_CAP / STUCK_OUTPUT / FIX_ERROR — record in the PR description
-        # so the post-merge reviewer can see what stuck.
-        record_goal_loop_failure_in_pr(result)
-        # still proceed to Step 6: the phase commits are real work; the operator
-        # decides whether to ship or hold.
-```
-
-The helper lives at `scripts/goal_loop.py` and is unit-tested in `tests/scripts/test_goal_loop.py`. See `specs/goal-driven-implement.md` for the full contract (ACs 01-16) including stop conditions and the empty-needs `BlockedSessionError` tolerance.
+Full goal loop with spec's `verification_max_iterations` (default 10). See REFERENCE.md §8.
 
 ### Step 6: Mandatory Tail — Full Verification Pipeline
 
-After ALL phases are committed, you MUST run the complete verification pipeline. This is not optional. The whole point of /implement is that it does not declare victory after just running the phases — it proves the work is done. <!-- enforcement: T1 hook:session-stop-workflow -->
-
-**A. Gates**
-Invoke `/gates` — full mechanical checks.
-
-**B. Verify**
-For each affected surface (detected from changed files across all phases):
-- Extension changes → `/verify extension`
-- TUI changes → `/verify tui`
-- CLI changes → `/verify cli`
-- MCP changes → `/verify mcp`
-
-**C. QA**
-For each affected surface:
-- Extension → `/qa extension`
-- CLI → `/qa cli`
-- MCP → `/qa mcp`
-- TUI → `/qa tui`
-
-**D. Review**
-Invoke `/review` for final comprehensive impartial review across all phases.
-
-**E. Converge (if needed)**
-If `/review` finds critical or important issues, run the convergence loop (gates -> review -> fix -> repeat until 0 findings, max 5 cycles).
-
-**F. Final State Check**
-- Verify git log shows clean commit history with one commit per phase
-- Verify `.workflow/state.json` shows fresh timestamps for gates, verify, qa, and review
-- All timestamps must be more recent than the `started` timestamp
-
-**G. Submit**
-After final state check passes, proceed IMMEDIATELY to `/pr`. Do NOT stop to present a summary — Steps 6A–6D already ran the full verification pipeline (gates → verify → qa → review), so go directly to PR submission.
-
-## Rules
-
-1. **YOU are the orchestrator** - agents do the work, you review and coordinate
-2. **Minimize context drain** - trust agent summaries, don't read output files unless there's a failure
-3. **Parallel by default** - if tasks don't depend on each other, run them simultaneously
-4. **Sequential when required** - respect phase gates and dependency chains
-5. **One commit per phase** - each phase gate produces exactly one commit with a clear message
-6. **Review before commit** - invoke `/review` before committing phase work
-7. **Fix before advancing** - if build fails, tests fail, or review finds issues, fix them BEFORE committing. Dispatch fix agents rather than debugging yourself.
-8. **Never skip verification** - always build + test + review before declaring a phase complete
-9. **Continue until done** - execute ALL phases in the plan, don't stop early and ask permission
+**A. Gates** — `/gates`
+**B. Verify** — `/verify extension|tui|cli|mcp` per changed surfaces
+**C. QA** — `/qa extension|cli|mcp|tui` per changed surfaces
+**D. Review** — `/review` final comprehensive review
+**E. Converge** — if critical/important findings: gates→review→fix loop (max 5 cycles)
+**F. Final State Check** — git log clean; `.workflow/state.json` timestamps all post-`started`
+**G. Submit** — proceed IMMEDIATELY to `/pr`; do not stop to summarize
