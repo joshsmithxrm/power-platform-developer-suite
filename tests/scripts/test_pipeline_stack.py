@@ -433,16 +433,12 @@ class TestRunStack:
             worktree_creator=creator, rebaser=rebaser, merge_wait_sec=5,
         )
 
-        # Child stdout must NOT inherit the parent's stdout (which is
-        # reserved for data per CLAUDE.md NEVER #2). Redirecting to
-        # sys.stderr or a captured pipe both satisfy the constraint;
-        # the default (None → inherit) does not.
-        assert "stdout" in captured_kwargs, \
-            "subprocess.run must explicitly redirect child stdout"
-        assert captured_kwargs["stdout"] is not None, \
-            "child stdout must not inherit parent stdout"
-        assert captured_kwargs["stdout"] is not sys.stdout, \
-            "child stdout must not write to parent stdout"
+        # Child stdout must be routed to sys.stderr — both because parent
+        # stdout is reserved for data (CLAUDE.md NEVER #2) and so subprocess
+        # PIPE buffering can't hide child output mid-run. Locking in the
+        # exact contract here prevents regressions like stdout=PIPE.
+        assert captured_kwargs.get("stdout") is sys.stderr, \
+            f"child stdout must be sys.stderr, got: {captured_kwargs.get('stdout')!r}"
 
     def test_skips_transitive_dependents(self, tmp_path):
         # AC-17: depends_on a skipped entry → also skipped (transitive).
