@@ -217,8 +217,10 @@ def _default_subprocess_runner(cmd: list, *, cwd: Optional[str] = None,
         cmd,
         cwd=cwd,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
+        check=True,
     )
 
 
@@ -230,13 +232,15 @@ def _default_gh_runner(pr_number: int) -> Optional[str]:
     """Return PR state string (OPEN/MERGED/CLOSED) or None on failure."""
     try:
         proc = subprocess.run(
-            ["gh", "pr", "view", str(pr_number),
+            ["gh", "pr", "view", "--", str(pr_number),
              "--json", "state", "--jq", ".state"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=True,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-    if proc.returncode != 0:
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
         return None
     out = (proc.stdout or "").strip()
     return out or None
@@ -245,15 +249,29 @@ def _default_gh_runner(pr_number: int) -> Optional[str]:
 def _default_haiku_runner(prompt: str) -> str:
     """Return Haiku stdout (expected to be one-line JSON)."""
     import claude_dispatch  # local — avoid hard dep at import time
-    handle = claude_dispatch.spawn(
-        mode="headless",
-        prompt=prompt,
-        caller="goal_supervisor",
-        model="haiku",
-    )
-    # HeadlessHandle.wait() returns exit code; output() returns stdout text.
-    handle.wait(timeout=120)
-    return handle.output() or ""
+    # Headless mode requires a stage_log path for the transcript.
+    tf = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False)
+    log_path = tf.name
+    tf.close()
+    try:
+        handle = claude_dispatch.spawn(
+            mode="headless",
+            prompt=prompt,
+            caller="goal_supervisor",
+            model="haiku",
+            stage_log=log_path,
+        )
+        # HeadlessHandle.wait() returns exit code; output() returns stdout text.
+        handle.wait(timeout=120)
+        return handle.output() or ""
+    except Exception:
+        return ""
+    finally:
+        if os.path.exists(log_path):
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
 
 
 def _default_workflow_state_reader(worktree_path: str) -> dict:
@@ -616,12 +634,15 @@ def _resolve_supervisor_worktree(arg: Optional[str]) -> str:
         return str(Path(arg).resolve())
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            ["git", "-c", "core.quotePath=off", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=True,
         )
-        if proc.returncode == 0:
-            return proc.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return proc.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
         pass
     return str(Path.cwd().resolve())
 
