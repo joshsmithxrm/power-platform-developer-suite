@@ -256,7 +256,7 @@ public static class FetchCommand
 
         if (result.MoreRecords)
         {
-            Console.WriteLine("More records available (use --page or --paging-cookie for continuation)");
+            Console.Error.WriteLine("More records available (use --page or --paging-cookie for continuation)");
         }
 
         Console.WriteLine($"Execution Time: {result.ExecutionTimeMs}ms");
