@@ -34,6 +34,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -652,9 +653,15 @@ def write_stack_result(worktree_path, stack_path, entries, status,
     }
     result_path = os.path.join(worktree_path, ".workflow", "stack-result.json")
     os.makedirs(os.path.dirname(result_path), exist_ok=True)
-    with open(result_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
-        f.write("\n")
+    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, dir=os.path.dirname(result_path))
+    try:
+        json.dump(result, tmp, indent=2)
+        tmp.write("\n")
+        tmp.close()
+        os.replace(tmp.name, result_path)
+    finally:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
 
 
 def _entry_states_list(entry_states, ordered_ids):
@@ -701,7 +708,7 @@ def _compute_stack_status(entry_states):
 def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
               no_retro=False, merge_wait_sec=3600, max_stage_seconds=None,
               model=None, issues=None, pipeline_runner=None, gh_runner=None,
-              worktree_creator=None, rebaser=None):
+              worktree_creator=None, rebaser=None, mode=None):
     """Execute a PR-stack envelope sequentially with merge-gating.
 
     Returns 0 on complete success (all entries merged), 1 on any failure.
@@ -839,7 +846,7 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
                 plan_src_abs = os.path.join(repo_root, plan_src)
             else:
                 plan_src_abs = plan_src
-            plan_dest = os.path.join(entry_worktree, entry["plan"])
+            plan_dest = os.path.join(entry_worktree, os.path.basename(plan_src)) if os.path.isabs(plan_src) else os.path.join(entry_worktree, plan_src)
             try:
                 if os.path.exists(plan_src_abs) and not os.path.exists(plan_dest):
                     os.makedirs(os.path.dirname(plan_dest), exist_ok=True)
@@ -857,6 +864,8 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
                 cmd += ["--max-stage-seconds", str(max_stage_seconds)]
             if model:
                 cmd += ["--model", model]
+            if mode:
+                cmd += ["--mode", mode]
             for issue in (issues or []):
                 cmd += ["--issue", str(issue)]
 
@@ -867,7 +876,9 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
                 # Route child stdout → parent stderr so the stack runner's own
                 # stdout stays clean even if a child violates discipline
                 # (spec §AC-16, NEVER list "CLI status to stdout").
-                proc = subprocess.run(cmd, cwd=repo_root, stdout=sys.stderr)
+                proc = subprocess.run(cmd, cwd=repo_root, stdout=sys.stderr, stderr=subprocess.PIPE, encoding='utf-8', errors='replace')
+                if proc.returncode != 0 and proc.stderr:
+                    log(logger, "stack", "SUBPROCESS_ERROR", id=eid, error=proc.stderr[:200])
                 exit_code = proc.returncode
 
             if exit_code != 0:
@@ -2013,6 +2024,7 @@ def main():
             max_stage_seconds=args.max_stage_seconds,
             model=args.model,
             issues=args.issue or [],
+            mode=args.mode,
         ))
 
     if args.model:
