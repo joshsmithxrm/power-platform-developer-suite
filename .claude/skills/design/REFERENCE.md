@@ -101,3 +101,78 @@ If the inbox is empty (`[]`), proceed with the normal user-approval flow.
 ```bash
 python scripts/supervisor_msg.py send <worktree-abs-path> <kind> [--message "text"] [--payload-file f.json]
 ```
+
+## §9 - Step 3.B.2 Scope-Conformance Review Protocol
+
+Runs after the bias-isolated design-fidelity review (Step 3.B). Goal: verify the spec faithfully covers the issue body — no scope drops, no reframings. This reviewer sees the issue body (non-bias-isolated by design; separate contract from Step 3.B).
+
+### 1. Get Issue Number
+
+```bash
+python scripts/workflow-state.py get issues
+```
+
+Result is a JSON array, e.g. `[1113]`. Skip Step 3.B.2 entirely if the output is empty string (key absent), `null`, or `[]`. If the array has more than one entry, concatenate all bodies under separate `## Issue #N` headings and pass the combined text as `<ISSUE_BODY>` in a single reviewer call.
+
+### 2. Fetch Issue Body
+
+For each issue N in the array:
+
+```bash
+gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'
+```
+
+### 3. Spawn the Reviewer
+
+Read the current spec file content. Then use the Agent tool with this prompt (substitute `<ISSUE_BODY>` and `<SPEC_CONTENT>` with the actual text):
+
+---
+
+You are a scope-conformance reviewer. Your ONLY job: verify that the spec covers the issue body faithfully — no scope drops, no reframings.
+
+**Issue Body**
+
+```
+<ISSUE_BODY>
+```
+
+**Spec Content**
+
+```
+<SPEC_CONTENT>
+```
+
+**Mandate**
+
+1. Extract every scope item, acceptance criterion, and requirement from the issue body. Include: explicit ACs/checkboxes, bulleted requirements, MUST/SHALL statements, named schemas/fields, and items listed in "Out of scope" (to verify they appear in spec Non-Goals).
+2. For each extracted item, identify the spec AC or Non-Goals entry that covers it.
+3. Flag any item where the spec rewrites or reframes the issue's intent (issue says X, spec does Y — even if spec's Y is technically valid).
+4. Output a Markdown table in exactly this format:
+
+| Issue Item | Spec Coverage | Status |
+|-----------|---------------|--------|
+| \<verbatim issue text, truncated to 80 chars\> | AC-NN or Non-Goals §N or "none" | covered / missing / reframed / in-non-goals |
+
+5. After the table, output a one-line summary:
+   `Covered: N, Missing: N, Reframed: N, In-Non-Goals: N`
+
+Do not fix anything. Do not suggest improvements. Enumerate and classify only.
+
+---
+
+### 4. Handle Findings
+
+**If Missing > 0 or Reframed > 0:**
+1. Present the findings table and summary to the user.
+2. Block — do not proceed to Step 3.C.
+3. For each `missing` item: worker must add a spec AC that covers it.
+4. For each `reframed` item: worker must either (a) align the spec with the issue's original intent, or (b) add the item to `### Non-Goals` with a rationale explaining why the reframing is acceptable.
+5. After revisions: re-run Step 3.B.2 (and re-run Step 3.B if changes are substantial) — re-read the updated spec and re-spawn the reviewer.
+6. Repeat until all items are `covered` or `in-non-goals`.
+
+**If Missing = 0 and Reframed = 0:** all items are covered or explicitly out-of-scope. Proceed to Step 3.C.
+
+After completion (pass or after all items resolved), restore phase:
+```bash
+python scripts/workflow-state.py set phase design
+```
