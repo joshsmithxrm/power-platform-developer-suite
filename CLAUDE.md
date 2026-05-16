@@ -17,6 +17,7 @@ Agent topology, decision UX, lane assignment: **`.claude/interaction-patterns.md
 - Trust a `release/X` branch as the source of truth for what shipped as version X — verify with `git merge-base --is-ancestor <release-tag> <branch>`. Tags are authoritative; the branch tip may sit on a separate lineage. <!-- since: 2026-05-15 cleanup retro --> <!-- enforcement: T3 escape-hatch: only fires when reasoning about release history -->
 - Invoke `claude -p` or any Anthropic SDK without going through `scripts/claude_dispatch.py:spawn()`. <!-- enforcement: T2 hook:sdk-spend-warn -->
 - Use PowerShell cmdlets (`Test-Path`, `Get-ChildItem`, etc.) via the Bash tool, or embed Windows backslash paths in inline `python -c` literals — see `.claude/WORKFLOW.md` "Bash Tool Portability". <!-- since: #1130 #1131 --> <!-- enforcement: T3 escape-hatch: runtime emission; tests/test_skill_bash_portability.py covers checked-in skill files -->
+- Call `AskUserQuestion` from a bg/headless session — the daemon auto-answers within ~15-60s. Use `/await-operator` instead. <!-- since: #1137 --> <!-- enforcement: T2 hook:preuse-askuserquestion -->
 
 ## ALWAYS <!-- enforcement: T3 not-a-directive -->
 
