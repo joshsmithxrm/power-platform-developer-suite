@@ -9,13 +9,14 @@ Enumerate everything in one pass, dispatch parallel investigators for divergent 
 
 **Design principle:** default action, not default discussion. Read `REFERENCE.md §1` for the framing.
 
-Phases: PARSE → PULL+PRE-SCAN → GATHER → CLASSIFY → BUCKET → APPROVE-SAFE → DISCUSS-AMBIGUOUS → EXECUTE-LOCAL → REBASE+POST-SCAN → REMOTE-SWEEP → SESSION-ARCHIVE → REPORT.
+Phases: PARSE → PULL+PRE-SCAN → GATHER → CLASSIFY → BUCKET → APPROVE-SAFE → DISCUSS-AMBIGUOUS → EXECUTE-LOCAL → REBASE+POST-SCAN → REMOTE-SWEEP → SESSION-ARCHIVE → REPORT. Subcommand `/cleanup archive done-sessions` → §13 (JANITOR-ONLY, skips all other phases).
 
 ## 1. Parse args
 
 - `/cleanup` — all phases
 - `/cleanup --dry-run` — run reads + the bulk-approval prompt; skip destructive commands
 - `/cleanup --reset` — delete workflow state for the current branch: `python scripts/workflow-state.py delete`. Skips all other phases.
+- `/cleanup archive done-sessions [--dry-run] [--include-stopped] [--include-failed] [--min-age <min>]` — janitor-only; skip the branch/worktree pipeline, go directly to §13.
 
 ## 2. Pull main + pre-scan mid-rebase
 
@@ -116,6 +117,22 @@ Select sessions where `isRunning: false` AND `cwd` not in `git worktree list`. P
 ## 12. Report
 
 Use the template in `REFERENCE.md §8 "Final report"`. Prefix title with `[DRY RUN]` when applicable.
+
+## 13. Archive done-sessions — standalone janitor
+
+Read REFERENCE.md §11 "Archive done-sessions" for state.json schema and smoke-test procedure.
+
+1. **Parse flags** — `--dry-run`, `--include-stopped`, `--include-failed`, `--min-age <min>` (default 30). `--min-age` applies only to done sessions. Stopped/failed threshold is always 1440 min (24 h).
+2. **Scan `~/.claude/jobs/`** — for each `<id>/state.json`: read `state`, `tempo`, `cwd`, `lastActivityAt` (fall back to file mtime if absent). Compute age in minutes.
+3. **Per-session active-cwd guard** — for each candidate, run `git -C <cwd> worktree list --porcelain` and check whether `cwd` matches any `worktree <path>` line. If it does, skip the session. If `git -C <cwd>` fails (cwd missing or not a repo), the guard does not apply — proceed. See REFERENCE.md §11 "Active-worktree guard".
+4. **Classify candidates** — include only if active-cwd guard does NOT block AND one of:
+   - `state == "done" && tempo == "idle" && age > --min-age`
+   - `state == "stopped" && age > 1440 && --include-stopped`
+   - `state == "failed" && age > 1440 && --include-failed`
+5. **Dry-run gate** — if `--dry-run`: list candidates (id, state, age, cwd); print what would be archived; STOP. No MCP calls.
+6. **Archive** — call `mcp__ccd_session_mgmt__archive_session(sessionId=<id>)` once per candidate. **Main-session only — never delegate to a subagent** (MCP rejects unsupervised mode).
+7. **Log** — append one line per archived session to `~/.claude/janitor.log`: `<ISO timestamp>  archived  <id>  state=<state>  age=<N>m  cwd=<cwd>`. (Central log for the standalone janitor — avoids creating project-local directories when run from arbitrary cwds.)
+8. **Report** — `"Archived N done, M stopped, K failed. Skipped J (active: J1, below-age: J2, excluded-state: J3)."` (omit zero-count terms). Print to user.
 
 ## Error handling
 
