@@ -555,7 +555,7 @@ def run_triage(worktree, pr_number, comments, logger, mode=None):
             agent="gemini-triage",
             model="haiku",
             cwd=worktree,
-            dangerous=True,
+            permission_mode="bypassPermissions",
             stage_log=stage_jsonl_path,
             env=env,
         )
@@ -995,7 +995,7 @@ def run_retro(worktree, logger, mode=None):
             name="retro",
             model="sonnet",
             cwd=worktree,
-            dangerous=True,
+            permission_mode="bypassPermissions",
             stage_log=stage_jsonl_path,
             env=env,
         )

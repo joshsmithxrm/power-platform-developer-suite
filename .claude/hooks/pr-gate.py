@@ -72,6 +72,16 @@ def _is_agent_context(cwd=None, env=None):
     normalized = cwd.replace("\\", "/")
     if "/.worktrees/" in normalized or "/.claude/worktrees/" in normalized:
         return True
+
+    # Also check CLAUDE_PROJECT_DIR — hook subprocess CWD may be the main
+    # repo root rather than the session worktree (covers nested bg-spawned
+    # worktrees at .worktrees/<outer>/worktree-<inner> and foreground
+    # .claude/worktrees/<name> sessions).
+    proj_dir = env.get("CLAUDE_PROJECT_DIR", "")
+    if proj_dir:
+        norm_proj = proj_dir.replace("\\", "/")
+        if "/.worktrees/" in norm_proj or "/.claude/worktrees/" in norm_proj:
+            return True
     return False
 
 

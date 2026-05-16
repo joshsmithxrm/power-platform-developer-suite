@@ -1,7 +1,12 @@
 {
   "schema_version": 1,
+<<<<<<< HEAD
   "last_updated": "2026-05-16",
   "total_retros": 18,
+=======
+  "last_updated": "2026-05-16T06:42:00Z",
+  "total_retros": 17,
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
   "findings_by_category": {
     "external": [
       {
@@ -133,18 +138,31 @@
       },
       {
         "date": "2026-05-16",
+<<<<<<< HEAD
         "branch": "feat/1098-prompt-template",
+=======
+        "branch": "fix/1067-bg-spawn-autonomy",
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
         "finding_id": "R-01"
       },
       {
         "date": "2026-05-16",
+<<<<<<< HEAD
         "branch": "feat/1098-prompt-template",
+=======
+        "branch": "fix/1067-bg-spawn-autonomy",
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
         "finding_id": "R-02"
       },
       {
         "date": "2026-05-16",
+<<<<<<< HEAD
         "branch": "feat/1098-prompt-template",
         "finding_id": "R-04"
+=======
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-03"
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
       }
     ],
     "design": [
@@ -329,8 +347,13 @@
       },
       {
         "date": "2026-05-16",
+<<<<<<< HEAD
         "branch": "feat/1098-prompt-template",
         "finding_id": "R-03"
+=======
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-04"
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
       }
     ],
     "setup": [
@@ -354,6 +377,11 @@
       {
         "date": "2026-04-26",
         "branch": "feat/monitor-autonomy",
+        "finding_id": "R-05"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
         "finding_id": "R-05"
       }
     ],
@@ -381,6 +409,7 @@
     ]
   },
   "metrics": {
+<<<<<<< HEAD
     "avg_fix_ratio": 0.705,
     "pipeline_success_rate": 0.412,
     "avg_convergence_rounds": 2.206,
@@ -388,5 +417,14 @@
     "last_session_status": "shipped_clean",
     "last_session_branch": "feat/1098-prompt-template",
     "last_session_pr": 1116
+=======
+    "avg_fix_ratio": 0.724,
+    "pipeline_success_rate": 0.388,
+    "avg_convergence_rounds": 2.281,
+    "last_session_findings": 5,
+    "last_session_status": "in_flight_awaiting_gemini_post",
+    "last_session_branch": "fix/1067-bg-spawn-autonomy",
+    "last_session_pr": null
+>>>>>>> f9c495066 (chore(qa): auto-commit stranded files on pipeline failure)
   }
 }

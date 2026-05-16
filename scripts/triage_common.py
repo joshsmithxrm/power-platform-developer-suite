@@ -500,9 +500,9 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
          because interactive mode silently drops ``--agent`` (see #1086).
       3. The JSON payload under a clear ``=== PAYLOAD ===`` marker.
 
-    ``dangerous=True`` is passed to ``spawn`` because the subprocess is fully
-    automated — permission prompts here would surface as ``BlockedSessionError``
-    with no operator to respond.
+    ``permission_mode="bypassPermissions"`` is passed to ``spawn`` because the
+    subprocess is fully automated — permission prompts here would surface as
+    ``BlockedSessionError`` with no operator to respond.
 
     Args:
         profile_name: agent profile name (matches .claude/agents/<name>.md).
@@ -557,7 +557,7 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
                 agent=profile_name,
                 model=model,
                 cwd=worktree,
-                dangerous=True,
+                permission_mode="bypassPermissions",
                 stage_log=stage_log,
             )
         except claude_dispatch.DispatchError as e:
