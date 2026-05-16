@@ -253,9 +253,9 @@ Only `state == "done" && tempo == "idle"` entries are candidates for default arc
 
 ### Active-worktree guard
 
-Never archive a session whose `cwd` is a currently-checked-out worktree. The set is built from `git worktree list --porcelain` (parse `worktree <path>` lines). This prevents archiving a session that is paused but whose worktree is still active in another terminal.
+Never archive a session whose `cwd` is a currently-checked-out worktree. Check **per session**: for each candidate, run `git -C <cwd> worktree list --porcelain` and look for a `worktree <path>` line whose path matches the session's `cwd`. This protects sessions across all repositories — not just the repo the janitor was started in.
 
-If `git worktree list` fails (e.g., not inside a git repository), treat the active-cwd set as empty — proceed with archival but log a warning: `"warning: git worktree list unavailable; active-cwd guard skipped"`.
+If `git -C <cwd>` fails (cwd missing, or not inside a git repository), the guard does not apply to that session — proceed with archival. A non-repo cwd cannot belong to an active worktree.
 
 ### Smoke-test procedure (AC-10)
 
@@ -267,7 +267,7 @@ Verify the janitor in a real Claude Desktop session before shipping:
 4. **Live run** — `/cleanup archive done-sessions --min-age 1`. Confirm:
    - Completed session archived: `mcp__ccd_session_mgmt__archive_session` called with its id.
    - Running session skipped: no archive call.
-   - `.workflow/janitor.log` has one entry for the completed session.
+   - `~/.claude/janitor.log` has one entry for the completed session.
    - Summary reports `"Archived 1 done, 0 stopped, 0 failed. Skipped 1 (active: 1)."`.
 5. **Verify Claude Desktop** — open Claude Desktop session list; confirm the archived session no longer appears in the active list.
 
@@ -280,7 +280,7 @@ Verify the janitor in a real Claude Desktop session before shipping:
 | `lastActivityAt` absent | Use file mtime of `state.json` as age proxy |
 | `mcp__ccd_session_mgmt__archive_session` fails | Log `"archive failed <id>: <error>"`; continue with remaining candidates |
 | Called from a subagent / bg session | Print `"archive done-sessions requires a Claude Desktop foreground session (MCP unavailable)"` and exit with non-zero |
-| `git worktree list` fails (not in a repo) | Log warning; treat active-cwd set as empty; proceed with archival |
+| `git -C <cwd> worktree list` fails for a candidate (cwd missing or not a repo) | Guard does not apply to that session; proceed with archival |
 
 ### Caller patterns
 
