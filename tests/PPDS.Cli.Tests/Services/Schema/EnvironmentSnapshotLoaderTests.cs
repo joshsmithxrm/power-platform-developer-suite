@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -211,5 +213,123 @@ public class EnvironmentSnapshotLoaderTests
 
         var manyToMany = account.Relationships.Should().ContainSingle(r => r.RelationshipType == "ManyToMany").Subject;
         manyToMany.SchemaName.Should().Be("account_competitors");
+    }
+
+    [Fact]
+    public async Task LoadAsync_ResultsPreserveOrder_WhenParallel()
+    {
+        // AC-02: With parallelism=4, results must appear in the original list order
+        // regardless of completion order. Each entity's mock delay is inversely
+        // proportional to its position so later entities resolve first.
+        var names = new[] { "a", "b", "c", "d", "e", "f" };
+
+        var mock = new Mock<IMetadataQueryService>();
+        mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(names.Select(Summary).ToArray());
+
+        mock.Setup(m => m.GetEntityAsync(It.IsAny<string>(), true, true, false, false, It.IsAny<CancellationToken>()))
+            .Returns(async (string name, bool _, bool __, bool ___, bool ____, CancellationToken _____) =>
+            {
+                var delayMs = (names.Length - Array.IndexOf(names, name)) * 10;
+                await Task.Delay(delayMs).ConfigureAwait(false);
+                return BuildEntity(name);
+            });
+
+        var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test", progress: null, parallelism: 4);
+
+        var snapshot = await loader.LoadAsync();
+
+        snapshot.Entities.Select(e => e.LogicalName).Should().Equal(names);
+    }
+
+    [Fact]
+    public async Task LoadAsync_BoundsParallelism_ByDegree()
+    {
+        // AC-03: Peak in-flight GetEntityAsync calls never exceeds parallelism.
+        const int parallelism = 4;
+        const int entityCount = 8;
+        var peak = 0;
+        var current = 0;
+
+        var mock = new Mock<IMetadataQueryService>();
+        mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Enumerable.Range(1, entityCount).Select(i => Summary($"e{i}")).ToArray());
+
+        mock.Setup(m => m.GetEntityAsync(It.IsAny<string>(), true, true, false, false, It.IsAny<CancellationToken>()))
+            .Returns(async (string name, bool _, bool __, bool ___, bool ____, CancellationToken _____) =>
+            {
+                var c = Interlocked.Increment(ref current);
+                int observedPeak;
+                do
+                {
+                    observedPeak = Volatile.Read(ref peak);
+                    if (c <= observedPeak) break;
+                } while (Interlocked.CompareExchange(ref peak, c, observedPeak) != observedPeak);
+
+                await Task.Delay(50).ConfigureAwait(false);
+                Interlocked.Decrement(ref current);
+                return BuildEntity(name);
+            });
+
+        var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test", progress: null, parallelism: parallelism);
+
+        await loader.LoadAsync();
+
+        peak.Should().BeLessThanOrEqualTo(parallelism);
+    }
+
+    [Fact]
+    public async Task LoadAsync_AchievesConcurrency_WhenParallelismGreaterThanOne()
+    {
+        // AC-04: With parallelism > 1, peak concurrency must exceed 1 (real parallelism).
+        const int parallelism = 4;
+        const int entityCount = 8;
+        var peak = 0;
+        var current = 0;
+
+        var mock = new Mock<IMetadataQueryService>();
+        mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Enumerable.Range(1, entityCount).Select(i => Summary($"e{i}")).ToArray());
+
+        mock.Setup(m => m.GetEntityAsync(It.IsAny<string>(), true, true, false, false, It.IsAny<CancellationToken>()))
+            .Returns(async (string name, bool _, bool __, bool ___, bool ____, CancellationToken _____) =>
+            {
+                var c = Interlocked.Increment(ref current);
+                int observedPeak;
+                do
+                {
+                    observedPeak = Volatile.Read(ref peak);
+                    if (c <= observedPeak) break;
+                } while (Interlocked.CompareExchange(ref peak, c, observedPeak) != observedPeak);
+
+                await Task.Delay(50).ConfigureAwait(false);
+                Interlocked.Decrement(ref current);
+                return BuildEntity(name);
+            });
+
+        var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test", progress: null, parallelism: parallelism);
+
+        await loader.LoadAsync();
+
+        peak.Should().BeGreaterThan(1);
+    }
+
+    [Fact]
+    public async Task LoadAsync_PropagatesCancellation_WhenTokenCancelled()
+    {
+        // AC-06: OperationCanceledException propagates out of LoadAsync.
+        var mock = new Mock<IMetadataQueryService>();
+        mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Summary("account"), Summary("contact") });
+        mock.Setup(m => m.GetEntityAsync(It.IsAny<string>(), true, true, false, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, bool _, bool __, bool ___, bool ____, CancellationToken _____) => BuildEntity(name));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test", progress: null, parallelism: 2);
+
+        await loader.Invoking(l => l.LoadAsync(cancellationToken: cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
     }
 }

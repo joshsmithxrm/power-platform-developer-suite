@@ -18,6 +18,7 @@ public sealed class EnvironmentSnapshotLoader : ISnapshotLoader
     private readonly IMetadataQueryService _metadata;
     private readonly string _sourceDescriptor;
     private readonly Action<string>? _progress;
+    private readonly int _parallelism;
 
     /// <summary>
     /// Initializes a new instance.
@@ -25,14 +26,17 @@ public sealed class EnvironmentSnapshotLoader : ISnapshotLoader
     /// <param name="metadata">Metadata query service for the target environment.</param>
     /// <param name="sourceDescriptor">Descriptor used in the report (e.g. <c>env:https://qa.crm.dynamics.com</c>).</param>
     /// <param name="progress">Optional callback for per-entity progress messages.</param>
+    /// <param name="parallelism">Max degree of parallelism for per-entity metadata fetches. Defaults to 1 (sequential).</param>
     public EnvironmentSnapshotLoader(
         IMetadataQueryService metadata,
         string sourceDescriptor,
-        Action<string>? progress = null)
+        Action<string>? progress = null,
+        int parallelism = 1)
     {
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _sourceDescriptor = sourceDescriptor ?? throw new ArgumentNullException(nameof(sourceDescriptor));
         _progress = progress;
+        _parallelism = Math.Max(1, parallelism);
     }
 
     /// <summary>
@@ -69,63 +73,77 @@ public sealed class EnvironmentSnapshotLoader : ISnapshotLoader
                 UnloadedEntities = Array.Empty<string>();
             }
 
-            var snapshots = new List<EntitySnapshot>(selected.Count);
-            var index = 0;
-            foreach (var summary in selected)
-            {
-                index++;
-                _progress?.Invoke($"  Loading entity {index}/{selected.Count}: {summary.LogicalName}");
-                cancellationToken.ThrowIfCancellationRequested();
-                var entity = await _metadata.GetEntityAsync(
-                    summary.LogicalName,
-                    includeAttributes: true,
-                    includeRelationships: true,
-                    includeKeys: false,
-                    includePrivileges: false,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            var results = new EntitySnapshot[selected.Count];
 
-                snapshots.Add(new EntitySnapshot
+            await Parallel.ForEachAsync(
+                selected.Select((summary, i) => (Summary: summary, Index: i)),
+                new ParallelOptions
                 {
-                    LogicalName = entity.LogicalName,
-                    DisplayName = entity.DisplayName,
-                    Attributes = entity.Attributes.Select(a => new AttributeSnapshot
+                    MaxDegreeOfParallelism = _parallelism,
+                    CancellationToken = cancellationToken
+                },
+                async (item, ct) =>
+                {
+                    _progress?.Invoke(
+                        $"  Loading entity {item.Index + 1}/{selected.Count}: {item.Summary.LogicalName}");
+
+                    var entity = await _metadata.GetEntityAsync(
+                        item.Summary.LogicalName,
+                        includeAttributes: true,
+                        includeRelationships: true,
+                        includeKeys: false,
+                        includePrivileges: false,
+                        cancellationToken: ct).ConfigureAwait(false);
+
+                    if (entity == null)
                     {
-                        LogicalName = a.LogicalName,
-                        AttributeType = NormalizeType(a.AttributeType),
-                        RequiredLevel = a.RequiredLevel,
-                        MaxLength = a.MaxLength,
-                        Precision = a.Precision,
-                        LookupTargets = a.Targets?.Select(t => t.ToLowerInvariant()).ToList(),
-                        OptionValues = a.Options?.Select(o => o.Value).ToList()
-                    }).ToList(),
-                    Relationships = entity.OneToManyRelationships
-                        .Select(r => new RelationshipSnapshot
+                        throw new PpdsException(
+                            ErrorCodes.Operation.NotFound,
+                            $"Failed to retrieve metadata for entity '{item.Summary.LogicalName}'.");
+                    }
+
+                    results[item.Index] = new EntitySnapshot
+                    {
+                        LogicalName = entity.LogicalName,
+                        DisplayName = entity.DisplayName,
+                        Attributes = entity.Attributes.Select(a => new AttributeSnapshot
                         {
-                            SchemaName = r.SchemaName,
-                            RelationshipType = "OneToMany",
-                            ReferencingEntity = r.ReferencingEntity,
-                            ReferencedEntity = r.ReferencedEntity
-                        })
-                        .Concat(entity.ManyToOneRelationships.Select(r => new RelationshipSnapshot
-                        {
-                            SchemaName = r.SchemaName,
-                            RelationshipType = "ManyToOne",
-                            ReferencingEntity = r.ReferencingEntity,
-                            ReferencedEntity = r.ReferencedEntity
-                        }))
-                        .Concat(entity.ManyToManyRelationships.Select(r => new RelationshipSnapshot
-                        {
-                            SchemaName = r.SchemaName,
-                            RelationshipType = "ManyToMany"
-                        }))
-                        .ToList()
-                });
-            }
+                            LogicalName = a.LogicalName,
+                            AttributeType = NormalizeType(a.AttributeType),
+                            RequiredLevel = a.RequiredLevel,
+                            MaxLength = a.MaxLength,
+                            Precision = a.Precision,
+                            LookupTargets = a.Targets?.Select(t => t.ToLowerInvariant()).ToList(),
+                            OptionValues = a.Options?.Select(o => o.Value).ToList()
+                        }).ToList(),
+                        Relationships = entity.OneToManyRelationships
+                            .Select(r => new RelationshipSnapshot
+                            {
+                                SchemaName = r.SchemaName,
+                                RelationshipType = "OneToMany",
+                                ReferencingEntity = r.ReferencingEntity,
+                                ReferencedEntity = r.ReferencedEntity
+                            })
+                            .Concat(entity.ManyToOneRelationships.Select(r => new RelationshipSnapshot
+                            {
+                                SchemaName = r.SchemaName,
+                                RelationshipType = "ManyToOne",
+                                ReferencingEntity = r.ReferencingEntity,
+                                ReferencedEntity = r.ReferencedEntity
+                            }))
+                            .Concat(entity.ManyToManyRelationships.Select(r => new RelationshipSnapshot
+                            {
+                                SchemaName = r.SchemaName,
+                                RelationshipType = "ManyToMany"
+                            }))
+                            .ToList()
+                    };
+                }).ConfigureAwait(false);
 
             return new SchemaSnapshot
             {
                 Source = _sourceDescriptor,
-                Entities = snapshots,
+                Entities = new List<EntitySnapshot>(results),
                 IncludesOptionSetValues = true
             };
         }
