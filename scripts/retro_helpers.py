@@ -282,7 +282,9 @@ def discover_transcripts(worktree_path, since=None):
                             manifest = json.load(mf)
                     except (json.JSONDecodeError, OSError):
                         continue
-                    cwd = manifest.get("worktreePath") or manifest.get("cwd", "")
+                    if not isinstance(manifest, dict):
+                        continue
+                    cwd = manifest.get("worktreePath") or manifest.get("cwd") or ""
                     if not cwd:
                         continue
                     if os.path.normcase(os.path.abspath(cwd)) != normed_worktree:
