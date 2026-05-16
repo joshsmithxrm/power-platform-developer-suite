@@ -46,7 +46,7 @@ CI_MAX_WAIT = 1800          # 30 minutes max for CI (AC-125; bumped from 900 per
 CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
 CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
-GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
+GEMINI_MAX_WAIT = 1800      # 30 minutes max for Gemini (bumped from 300 per #1127)
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 MAX_CI_FIX_ROUNDS = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
@@ -63,6 +63,19 @@ def _resolve_ci_timeout_sec(flag_value):
         except ValueError:
             pass
     return CI_MAX_WAIT, "default"
+
+
+def _resolve_gemini_timeout_sec(flag_value):
+    """Return (effective_seconds, source) with flag > env > default precedence."""
+    if flag_value is not None:
+        return flag_value, "flag"
+    env_val = os.environ.get("PPDS_PR_MONITOR_GEMINI_TIMEOUT")
+    if env_val:
+        try:
+            return int(env_val), "env"
+        except ValueError:
+            pass
+    return GEMINI_MAX_WAIT, "default"
 
 
 KNOWN_FLAKE_PATTERNS = [
@@ -1646,7 +1659,7 @@ def _parse_github_repo(remote_url):
 
 
 def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
-                ci_timeout_source="default"):
+                ci_timeout_source="default", gemini_timeout_source="default"):
     """Main monitor loop — state-machine orchestrator (v9.1).
 
     Args:
@@ -1679,6 +1692,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
 
     logger.log("monitor", "START", pr=pr_number, resume=resume, pid=os.getpid())
     logger.log("monitor", "CI_TIMEOUT", ci_timeout_sec=CI_MAX_WAIT, source=ci_timeout_source)
+    logger.log("monitor", "GEMINI_TIMEOUT", gemini_timeout_sec=GEMINI_MAX_WAIT, source=gemini_timeout_source)
 
     ci_fix_rounds_used = 0
     triage_rounds_used = 0
@@ -2207,14 +2221,25 @@ def _step_ready(worktree, pr_number, logger, result):
             mark_step(result, "ready", "skipped")
             result["ready_skip_reasons"] = reasons
             write_result(worktree, result)
-            # Notify the user so they know the PR is still in draft.
-            # (Gemini review #3107696760 — use a message that explains why.)
-            msg = (f"PR #{pr_number} still in draft: "
-                   + ", ".join(reasons))
-            try:
-                run_notify(worktree, pr_number, logger, message=msg)
-            except Exception as e:  # noqa: BLE001
-                logger.log("ready", "NOTIFY_ERROR", error=str(e))
+            if "gemini_review_not_posted" in reasons:
+                # Gemini never posted within the poll window — fire the full
+                # escalation block (#1127/#1088): state marker + GitHub comment
+                # + label + platform notify so the operator sees a visible signal
+                # rather than a silent "ready=SKIPPED" with monitor COMPLETE.
+                _notify_terminal(
+                    worktree, pr_number, logger,
+                    f"PR #{pr_number}: gemini_review_not_posted",
+                )
+            else:
+                # Other gate failures (CI not green, unreplied comments) — basic
+                # toast only; no escalation label since the monitor can still
+                # recover those on a resume run.
+                msg = (f"PR #{pr_number} still in draft: "
+                       + ", ".join(reasons))
+                try:
+                    run_notify(worktree, pr_number, logger, message=msg)
+                except Exception as e:  # noqa: BLE001
+                    logger.log("ready", "NOTIFY_ERROR", error=str(e))
             return
 
         # Bug 4 / belt-and-suspenders: refuse rebase+ready-flip if the worktree
@@ -2321,11 +2346,18 @@ def main():
     parser.add_argument("--ci-timeout-sec", type=int, default=None,
                         help="CI polling timeout in seconds (default: 1800). "
                              "Env: PPDS_PR_MONITOR_CI_TIMEOUT. Flag takes precedence over env.")
+    parser.add_argument("--gemini-timeout-sec", type=int, default=None,
+                        help="Gemini review polling timeout in seconds (default: 1800). "
+                             "Env: PPDS_PR_MONITOR_GEMINI_TIMEOUT. Flag takes precedence over env.")
     args = parser.parse_args()
 
     global CI_MAX_WAIT
     ci_timeout_sec, ci_timeout_source = _resolve_ci_timeout_sec(args.ci_timeout_sec)
     CI_MAX_WAIT = ci_timeout_sec
+
+    global GEMINI_MAX_WAIT
+    gemini_timeout_sec, gemini_timeout_source = _resolve_gemini_timeout_sec(args.gemini_timeout_sec)
+    GEMINI_MAX_WAIT = gemini_timeout_sec
 
     worktree = str(Path(args.worktree).resolve())
 
@@ -2335,7 +2367,8 @@ def main():
         sys.exit(1)
 
     exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo,
-                            mode=args.mode, ci_timeout_source=ci_timeout_source)
+                            mode=args.mode, ci_timeout_source=ci_timeout_source,
+                            gemini_timeout_source=gemini_timeout_source)
     sys.exit(exit_code)
 
 
