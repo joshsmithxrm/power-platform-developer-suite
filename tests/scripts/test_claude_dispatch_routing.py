@@ -101,6 +101,7 @@ _AC21_ALLOWLIST = {
     # Specs and plans that describe the dispatcher contract.
     "specs/dispatch-routing.md",
     "specs/workflow-enforcement.md",
+    "specs/fix-1067-bg-spawn-autonomy.md",
     ".plans/2026-05-14-dispatch-routing.md",
 }
 
@@ -384,28 +385,31 @@ def test_claudemd_line_cap():
 # === Phase 2E (AC-17 cross-cutting smoke test) ===
 
 def test_dangerous_flag_unattended_only():
-    """AC-17: All pipeline.py and pr_monitor.py spawn() invocations include
-    dangerous=True (unattended daemons); start-bg-spawn.py does NOT (foreground
-    /start helper has a human attached).
+    """AC-17: All pipeline.py and pr_monitor.py spawn() invocations pass the
+    unattended-daemon contract — either dangerous=True or
+    permission_mode='bypassPermissions' (after #1067 plumbing).
+    start-bg-spawn.py does NOT use claude_dispatch.spawn (foreground /start
+    helper has a human attached).
 
     Token-scan (not AST) because the dispatcher's spawn() is the only entry
-    point and both pipeline/pr_monitor call it with kwargs; a literal
-    'dangerous=True' must appear in each spawn(...) call.
+    point and both pipeline/pr_monitor call it with kwargs.
     """
     import re as _re
-    # 1) pipeline.py must contain dangerous=True somewhere inside its spawn() call.
+    # 1) pipeline.py must contain bypassPermissions or dangerous=True somewhere
+    # inside its spawn() call.
     pipeline_src = (_REPO_ROOT / "scripts" / "pipeline.py").read_text(encoding="utf-8")
-    assert _re.search(r"claude_dispatch\.spawn\(.*?dangerous=True", pipeline_src, _re.S), \
-        "AC-17: pipeline.run_claude must pass dangerous=True to claude_dispatch.spawn"
+    assert _re.search(r"claude_dispatch\.spawn\(.*?(dangerous=True|bypassPermissions)", pipeline_src, _re.S), \
+        "AC-17: pipeline.run_claude must pass dangerous=True or permission_mode='bypassPermissions' to claude_dispatch.spawn"
 
-    # 2) pr_monitor.py must contain dangerous=True in both run_triage and run_retro spawns.
+    # 2) pr_monitor.py must use bypassPermissions or dangerous=True in every
+    # claude_dispatch.spawn call (post-#1067 prefers permission_mode='bypassPermissions').
     pr_src = (_REPO_ROOT / "scripts" / "pr_monitor.py").read_text(encoding="utf-8")
     spawn_calls = _balanced_call_bodies(pr_src, "claude_dispatch.spawn(")
     assert len(spawn_calls) >= 2, \
         "AC-17: pr_monitor must have at least 2 claude_dispatch.spawn() calls (triage + retro)"
     for call_body in spawn_calls:
-        assert "dangerous=True" in call_body, \
-            "AC-17: every pr_monitor.spawn() invocation must include dangerous=True"
+        assert ("dangerous=True" in call_body) or ('permission_mode="bypassPermissions"' in call_body) or ("permission_mode='bypassPermissions'" in call_body), \
+            "AC-17: every pr_monitor.spawn() invocation must pass dangerous=True or permission_mode='bypassPermissions'"
 
     # 3) start-bg-spawn.py must NOT import or use claude_dispatch.spawn or pass
     # --dangerously-skip-permissions. It builds its own --bg argv locally for

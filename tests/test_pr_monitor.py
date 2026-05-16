@@ -2265,7 +2265,7 @@ class TestTerminalStateEnum:
     """AC-194: TERMINAL_STATES tuple contains exactly the specified values."""
 
     def test_terminal_state_enum(self):
-        """TERMINAL_STATES is a tuple with exactly the 8 required terminal state names."""
+        """TERMINAL_STATES is a tuple with exactly the 9 required terminal state names."""
         states = pr_monitor.TERMINAL_STATES
         assert isinstance(states, tuple), "TERMINAL_STATES must be a tuple"
         required = {
@@ -2276,6 +2276,7 @@ class TestTerminalStateEnum:
             "stuck-uncommitted-triage",
             "stuck-dirty-worktree-on-ready-flip",
             "ci-timeout",
+            "gemini-timeout",
             "monitor-crash",
         }
         assert set(states) == required, (
@@ -2283,7 +2284,7 @@ class TestTerminalStateEnum:
             f"Expected: {sorted(required)}\n"
             f"Got:      {sorted(states)}"
         )
-        assert len(states) == 8, "TERMINAL_STATES must have exactly 8 entries (no duplicates)"
+        assert len(states) == 9, "TERMINAL_STATES must have exactly 9 entries (no duplicates)"
 
 
 # ---------------------------------------------------------------------------

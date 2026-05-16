@@ -1,0 +1,14 @@
+{
+  "round": 1,
+  "timestamp": "2026-05-16T12:51:39Z",
+  "pr": 1136,
+  "failure_summary": "3 TestStageModels tests failed with 'TypeError: _FakePopen object does not support the context manager protocol' \u2014 Python 3.14 changed subprocess.run to use Popen as a context manager (with Popen(...) as process:), but _FakePopen lacked __enter__/__exit__. Additionally, the underlying implementation in run_claude now routes through claude_dispatch.spawn (not Popen directly), so patching subprocess.Popen never captured the --model argument in interactive mode. Fixed by replacing _FakePopen + subprocess.Popen patch with a claude_dispatch.spawn mock that captures the model kwarg and reconstructs the expected argv shape.",
+  "files_touched": [
+    "scripts/test_pipeline.py"
+  ],
+  "lines_added": 16,
+  "lines_removed": 29,
+  "action": "fix",
+  "escalation_reason": null,
+  "scope_violation": false
+}

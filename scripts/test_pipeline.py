@@ -298,41 +298,28 @@ class TestShouldConvergePreserved(unittest.TestCase):
         self.assertTrue(run)
 
 
-class _FakePopen:
-    """Minimal Popen stand-in that records argv and exits cleanly."""
-
-    def __init__(self, cmd, **kwargs):
-        self.cmd = cmd
-        self.returncode = 0
-        self._waited = False
-
-    def poll(self):
-        return 0
-
-    def wait(self, timeout=None):
-        self._waited = True
-        return 0
-
-    def terminate(self):
-        pass
-
-    def kill(self):
-        pass
-
-
 def _capture_run_claude_argv(stage, model_override=None):
-    """Invoke pipeline.run_claude with mocks; return the argv list passed to Popen."""
+    """Invoke pipeline.run_claude with mocks; return a list with --model <value> if a model was passed to spawn."""
     captured = {}
 
-    def _fake_popen(cmd, **kwargs):
-        captured["cmd"] = list(cmd)
-        return _FakePopen(cmd, **kwargs)
+    mock_handle = MagicMock()
+    mock_handle.transcript_path = ""
+    mock_handle.poll.return_value = "done"
+    mock_handle.output.return_value = ""
+
+    def _fake_spawn(**kwargs):
+        argv = ["claude"]
+        if kwargs.get("model"):
+            argv.extend(["--model", kwargs["model"]])
+        captured["cmd"] = argv
+        return mock_handle
 
     with tempfile.TemporaryDirectory() as worktree:
+        os.makedirs(os.path.join(worktree, ".workflow", "stages"), exist_ok=True)
         original_override = pipeline.MODEL_OVERRIDE
         pipeline.MODEL_OVERRIDE = model_override
         try:
-            with patch("pipeline.subprocess.Popen", side_effect=_fake_popen):
+            with patch("claude_dispatch.spawn", side_effect=_fake_spawn):
                 logger = io.StringIO()
                 pipeline.run_claude(worktree, "test prompt", logger, stage,
                                     dry_run=False)

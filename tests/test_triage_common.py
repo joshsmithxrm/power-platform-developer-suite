@@ -553,7 +553,9 @@ def test_dispatch_subagent_both_modes(mode, tmp_path):
             caller="test.dispatch_subagent",
         )
     assert result == {"stdout": "ok", "stderr": "", "exit_code": 0}
-    assert captured["mode"] == mode
+    # #1122: dispatch_subagent forces headless regardless of caller-supplied mode,
+    # since single-turn sub-agents can't service interactive permission prompts.
+    assert captured["mode"] == "headless"
     assert captured["caller"] == "test.dispatch_subagent"
     assert captured["agent"] == "reviewer"
     assert captured["name"] == "reviewer"
