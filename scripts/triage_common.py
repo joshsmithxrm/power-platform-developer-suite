@@ -558,7 +558,7 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
     import claude_dispatch  # local import keeps module-load cycle clean
     if caller is None:
         caller = "triage_common.dispatch_subagent"
-    resolved_mode = claude_dispatch._resolve_mode(mode)
+    resolved_mode = "headless"
     profile_body = _read_agent_profile_body(profile_name, worktree=worktree)
     payload_json = json.dumps(payload, indent=2)
     prompt = (
