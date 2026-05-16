@@ -16,14 +16,14 @@ When `PPDS_PIPELINE=1` is set, the pipeline orchestrator invoked this skill.
 - Do NOT use `ScheduleWakeup` — pipeline monitors parent output; sleeping parent is killed.
 - Dispatch foreground agents (`run_in_background: false`) or poll background agents at ≤60 s.
 
-## §2 - Model Selection
+## §3 - Model Selection
 
 - **Opus (primary):** >3 sub-steps, complex UI (timelines, query builders, virtual scroll), cross-cutting refactors >10 files, Constitution-sensitive Dataverse changes.
 - **Sonnet (lighter):** Mechanical phases — one-liner fixes, find-and-replace, boilerplate, CSS-only, doc updates.
 
 When in doubt: use Opus. Re-dispatch cost > model cost difference.
 
-## §3 - Spec Context Block (injected into every subagent)
+## §4 - Spec Context Block (injected into every subagent)
 
 ```
 ## Constitution (MUST comply — violations are defects)
@@ -40,14 +40,14 @@ to the orchestrator — do not silently deviate.
 
 Identify relevant specs by grepping `specs/*.md` for `**Code:**` frontmatter matching touched source paths. Always include `specs/architecture.md`.
 
-## §4 - Agent Dispatch Rules
+## §5 - Agent Dispatch Rules
 
 - Maximize parallelism: 4 independent tasks → 4 simultaneous agents.
 - Every agent prompt must include: task from plan, full file paths, read-before-write instruction, build verification command, test command, spec context block, no-shell-redirections reminder, self-check gate (typecheck/lint/build before reporting done).
 - **Shared-file guard:** If multiple parallel agents modify the same file, serialize them OR designate one as file owner.
 - **Test quality:** Tests must be behavioral — call real functions, assert return values or side effects. Never `inspect.getsource()` or string-match source code. Include a negative case for boundary ACs.
 
-## §5 - Phase Gate Sequence
+## §6 - Phase Gate Sequence
 
 After each phase, in order:
 
@@ -61,7 +61,7 @@ After each phase, in order:
 8. `/review` — impartial review (reviewer sees diff + constitution + ACs only, no plan)
 9. Commit the phase
 
-## §6 - Cross-Agent Consistency Check
+## §7 - Cross-Agent Consistency Check
 
 After collecting results from parallel agents that implement the same concept across surfaces:
 - Same field names/types (e.g., `HasOverride` logic in MCP and RPC)
@@ -69,7 +69,7 @@ After collecting results from parallel agents that implement the same concept ac
 - Error codes defined in one layer used in other layers
 - Default values consistent across surfaces
 
-## §7 - Commit Format
+## §8 - Commit Format
 
 ```
 feat(scope): Phase N - concise description
@@ -81,7 +81,7 @@ Co-Authored-By: {format from system prompt}
 
 One commit per phase. Parallel streams within a phase group share one commit.
 
-## §8 - Goal Loop (Step 5.5)
+## §9 - Goal Loop (Step 5.5)
 
 After all phases committed, if spec has `**Verification:**` frontmatter:
 
@@ -95,7 +95,7 @@ Outcomes: GREEN → tail; BLOCKED_HARD → raise to operator; ITERATION_CAP/STUC
 
 See `specs/goal-driven-implement.md` for full contract (ACs 01–16).
 
-## §9 - Supervisor Inbox Protocol (Step 5 Phase Entry)
+## §10 - Supervisor Inbox Protocol (Step 5 Phase Entry)
 
 At the start of each phase (before dispatching agents), poll for supervisor directives:
 
@@ -117,7 +117,7 @@ Empty inbox → proceed with normal phase execution. The supervisor writes inbox
 python scripts/supervisor_msg.py send <worktree-abs-path> <kind> [--message "text"]
 ```
 
-## §10 - Orchestrator Rules
+## §11 - Orchestrator Rules
 
 1. YOU are the orchestrator — agents do the work, you review and coordinate.
 2. Minimize context drain — trust agent summaries; don't read output files unless there's a failure.

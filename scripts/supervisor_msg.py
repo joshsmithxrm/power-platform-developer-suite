@@ -70,8 +70,11 @@ def _resolve_worktree(path_str: str | None) -> Path:
         import subprocess
         try:
             result = subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, timeout=5,
+                ["git", "-c", "core.quotePath=off", "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
             )
             if result.returncode == 0:
                 p = Path(result.stdout.strip())
@@ -117,15 +120,23 @@ def send(worktree_path: str, kind: str, *,
 
     # Atomic write: write to a temp file in the same directory, then rename.
     # os.replace() is atomic on POSIX; on Windows it is best-effort (same volume).
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8",
-        dir=inbox, suffix=".tmp", delete=False,
-    ) as tf:
-        tmp_path = Path(tf.name)
-        json.dump(msg, tf, indent=2)
-        tf.write("\n")
-
-    os.replace(tmp_path, target)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8",
+            dir=inbox, suffix=".tmp", delete=False,
+        ) as tf:
+            tmp_path = Path(tf.name)
+            json.dump(msg, tf, indent=2)
+            tf.write("\n")
+        os.replace(tmp_path, target)
+        tmp_path = None
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
     return target
 
 
