@@ -307,6 +307,16 @@ def test_spawn_dangerous_still_works(monkeypatch, tmp_path):
     assert "--dangerously-skip-permissions" in bg_call
 
 
+def test_spawn_rejects_dangerous_and_permission_mode_together(monkeypatch, tmp_path):
+    """dangerous=True and permission_mode are mutually exclusive — passing both
+    raises DispatchError before any subprocess invocation."""
+    _patch_min_version(monkeypatch)
+    with pytest.raises(DispatchError, match="mutually exclusive"):
+        spawn(mode="interactive", prompt="x", caller="t", name="stage",
+              dangerous=True, permission_mode="bypassPermissions",
+              cwd=str(tmp_path), jobs_dir=tmp_path)
+
+
 def test_dispatch_interactive_requires_name(monkeypatch, tmp_path):
     _patch_min_version(monkeypatch)
     with pytest.raises(DispatchError):
