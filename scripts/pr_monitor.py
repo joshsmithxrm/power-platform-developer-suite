@@ -42,7 +42,7 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 900           # 15 minutes max for CI (AC-125)
+CI_MAX_WAIT = 1800          # 30 minutes max for CI (AC-125; bumped from 900 per #1089)
 CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
 CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
@@ -50,6 +50,17 @@ GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 MAX_CI_FIX_ROUNDS = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
+
+
+def _resolve_ci_timeout_sec(flag_value):
+    """Return (effective_seconds, source) with flag > env > default precedence."""
+    if flag_value is not None:
+        return flag_value, "flag"
+    env_val = os.environ.get("PPDS_PR_MONITOR_CI_TIMEOUT")
+    if env_val is not None:
+        return int(env_val), "env"
+    return CI_MAX_WAIT, "default"
+
 
 KNOWN_FLAKE_PATTERNS = [
     "connection reset by peer",
@@ -1631,7 +1642,8 @@ def _parse_github_repo(remote_url):
     return None
 
 
-def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
+def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
+                ci_timeout_source="default"):
     """Main monitor loop — state-machine orchestrator (v9.1).
 
     Args:
@@ -1663,6 +1675,7 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
     write_result(worktree, result)
 
     logger.log("monitor", "START", pr=pr_number, resume=resume, pid=os.getpid())
+    logger.log("monitor", "CI_TIMEOUT", ci_timeout_sec=CI_MAX_WAIT, source=ci_timeout_source)
 
     ci_fix_rounds_used = 0
     triage_rounds_used = 0
@@ -2302,7 +2315,14 @@ def main():
                              "Resolved from git remote if omitted.")
     parser.add_argument("--mode", choices=("interactive", "headless"), default=None,
                         help="Dispatch mode: interactive (claude --bg) or headless (claude -p). Default: PPDS_DISPATCH_MODE env or interactive.")
+    parser.add_argument("--ci-timeout-sec", type=int, default=None,
+                        help="CI polling timeout in seconds (default: 1800). "
+                             "Env: PPDS_PR_MONITOR_CI_TIMEOUT. Flag takes precedence over env.")
     args = parser.parse_args()
+
+    global CI_MAX_WAIT
+    ci_timeout_sec, ci_timeout_source = _resolve_ci_timeout_sec(args.ci_timeout_sec)
+    CI_MAX_WAIT = ci_timeout_sec
 
     worktree = str(Path(args.worktree).resolve())
 
@@ -2311,7 +2331,8 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo, mode=args.mode)
+    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo,
+                            mode=args.mode, ci_timeout_source=ci_timeout_source)
     sys.exit(exit_code)
 
 

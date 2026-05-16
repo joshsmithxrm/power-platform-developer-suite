@@ -186,6 +186,66 @@ class TestCiTimeout:
         assert result == "timeout"
 
 
+class TestCiTimeoutConfig:
+    """#1089: CI timeout is configurable via flag and env var."""
+
+    def test_default_is_1800(self):
+        """CI_MAX_WAIT default is 1800 seconds (30 min)."""
+        assert pr_monitor.CI_MAX_WAIT == 1800
+
+    def test_resolve_default_when_no_override(self):
+        """_resolve_ci_timeout_sec returns (1800, 'default') with no flag or env."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = {k: v for k, v in os.environ.items()
+                   if k != "PPDS_PR_MONITOR_CI_TIMEOUT"}
+            with patch.dict(os.environ, env, clear=True):
+                val, source = pr_monitor._resolve_ci_timeout_sec(None)
+        assert val == 1800
+        assert source == "default"
+
+    def test_resolve_env_wins_over_default(self):
+        """_resolve_ci_timeout_sec returns env value when flag is absent."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_CI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_ci_timeout_sec(None)
+        assert val == 600
+        assert source == "env"
+
+    def test_resolve_flag_wins_over_env(self):
+        """Flag value takes precedence over PPDS_PR_MONITOR_CI_TIMEOUT env var."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_CI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_ci_timeout_sec(300)
+        assert val == 300
+        assert source == "flag"
+
+    def test_long_ci_run_passes_with_default_timeout(self, tmp_path):
+        """CI run completing between 900s–1800s does not timeout with default 1800s limit."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        pending = [{"name": "slow", "state": "IN_PROGRESS", "bucket": "pending"}]
+        done = [{"name": "slow", "state": "COMPLETED", "bucket": "pass"}]
+
+        call_count = [0]
+        t0 = time.time()
+
+        def fake_time():
+            call_count[0] += 1
+            # After 2 calls, simulate 920 seconds elapsed (past old 900s limit)
+            return t0 + (920 if call_count[0] > 2 else call_count[0])
+
+        responses = [_gh_checks_json(pending), _gh_checks_json(pending),
+                     _gh_checks_json(done)]
+
+        with patch("pr_monitor.subprocess.run", side_effect=responses), \
+             patch("pr_monitor.time.time", side_effect=fake_time), \
+             patch("pr_monitor.time.sleep"), \
+             patch("pr_monitor.CI_MAX_WAIT", 1800), \
+             patch("pr_monitor.CI_POLL_INTERVAL", 0):
+            result = pr_monitor.poll_ci(wt, 5, logger)
+
+        assert result == "pass"
+
+
 class TestTerminalNotifications:
     """Monitor fires run_notify on every terminal state (success + failures)."""
 
