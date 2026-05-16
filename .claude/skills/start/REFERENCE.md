@@ -101,3 +101,36 @@ If `diff` is empty (no output for ANY of the files the branch touched), `<src>` 
 > Source branch `<src>` appears to have already shipped — `git diff <src>..origin/main` is empty across all <N> files it touched. Likely squash-merged. Re-check the launch brief before retrying — if this branch's work is done, drop it from the brief; if there is genuinely unshipped follow-up work, name it explicitly and re-invoke /start.
 
 Do not create a worktree or spawn. If the user replies that the check is wrong (e.g. the branch ref was incidental, not a "finalize this" reference), they can re-invoke /start with a brief that no longer names the shipped branch as remaining work.
+
+## §7 — Design-Gate Handoff Procedure
+
+When a worker reaches Step 3 of its workflow contract (spec + plan authored, phase=blocked):
+
+1. **Worker presents and stops** — the worker's last message in Agent View summarizes the
+   spec and plan. Workflow state is `phase=blocked`, `needs="spec ready for review"`.
+
+2. **Operator attaches** — `claude attach <short>` from any terminal, or click the session
+   row in Agent View. The worker resumes from the operator's reply.
+
+3. **Operator approval forms:**
+   - Approve: any affirmative reply ("approved", "looks good", "proceed") → worker runs
+     `python scripts/pipeline.py`
+   - Request changes: worker incorporates them, re-presents spec, waits again
+   - Abort: worker sets `phase=abandoned` and stops
+
+4. **No interruptions after approval** — pipeline.py runs unattended:
+   /implement → /gates → /verify → /qa → /review → /converge → /pr.
+   pr_monitor.py handles Gemini triage and CI-fix rounds automatically.
+
+5. **Final summary** — when pr_monitor exits, Claude Code re-engages the worker via
+   Bash run_in_background=true completion. The worker reads
+   `.workflow/pr-monitor-result.json` and produces one final message with actual PR state.
+
+**Operator touch-points per worker:** design approval (one reply) + final PR review.
+All automation runs between those two touch-points.
+
+## §8 — Prompt File Writing (Why Write Tool, Not Heredoc)
+
+Write the launch prompt to a temp file via the Write tool, not a shell heredoc. A heredoc terminator (`PROMPT_EOF`) appearing as a line inside the prompt would close the heredoc early; the Write tool is byte-exact and immune to terminator collisions.
+
+After `start-bg-spawn.py` exits 0, delete the temp file. The daemon has already read the prompt at that point — keeping it on disk leaks task content into temp.

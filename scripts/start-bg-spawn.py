@@ -158,6 +158,7 @@ def spawn(
     prompt: str,
     jobs_dir: Path | None = None,
     permission_mode: str | None = None,
+    model: str | None = None,
 ) -> SpawnResult:
     if jobs_dir is None:
         jobs_dir = JOBS_DIR
@@ -165,6 +166,8 @@ def spawn(
     cmd = ["claude"]
     if permission_mode:
         cmd.extend(["--permission-mode", permission_mode])
+    if model:
+        cmd.extend(["--model", model])
     cmd.extend(["--bg", "--name", branch, "--", prompt])
     proc = subprocess.run(
         cmd,
@@ -215,6 +218,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Pass-through to `claude --permission-mode <mode>`. Omit for default.",
     )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="Pass-through to `claude --model <name>`. Omit for ambient default.",
+    )
     args = p.parse_args(argv)
     try:
         try:
@@ -227,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             args.branch,
             prompt,
             permission_mode=args.permission_mode,
+            model=args.model,
         )
         json.dump(
             {"short": result.short, "sessionId": result.sessionId, "cwd": result.cwd},

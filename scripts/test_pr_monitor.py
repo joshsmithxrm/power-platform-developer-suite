@@ -52,11 +52,45 @@ def _capture_popen_cmd(callable_under_test):
     return captured.get("cmd", [])
 
 
-class TestMonitorUsesSonnet(unittest.TestCase):
-    """AC-155: pr_monitor spawns triage and retro with --model sonnet."""
+class _FakeHandle:
+    """Stand-in for claude_dispatch.BgHandle / HeadlessHandle."""
 
-    def test_triage_uses_sonnet(self):
+    def __init__(self, transcript_path=None):
+        self.transcript_path = transcript_path or ""
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+class TestMonitorModelRouting(unittest.TestCase):
+    """AC-04 (#1098): pr_monitor.run_triage passes model="haiku" to dispatch.
+
+    Patches claude_dispatch.spawn directly to capture the kwargs the dispatch
+    layer receives, rather than relying on subprocess interception (which
+    misses interactive-mode argv).
+    """
+
+    def test_triage_uses_haiku(self):
         import pr_monitor
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            # Write a non-empty transcript so the copy step doesn't blow up.
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
 
         with tempfile.TemporaryDirectory() as worktree:
             os.makedirs(os.path.join(worktree, ".workflow", "stages"),
@@ -64,61 +98,51 @@ class TestMonitorUsesSonnet(unittest.TestCase):
             logger = _FakeLogger()
             with patch("pr_monitor.SHAKEDOWN", False), \
                  patch("pr_monitor.build_triage_prompt", return_value="prompt"), \
-                 patch("pr_monitor.parse_triage_jsonl", return_value=[]):
-                cmd = _capture_popen_cmd(
-                    lambda: pr_monitor.run_triage(worktree, 123, [], logger)
-                )
+                 patch("pr_monitor.parse_triage_jsonl", return_value=[]), \
+                 patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                pr_monitor.run_triage(worktree, 123, [], logger)
 
-        self.assertIn("--model", cmd, "triage cmd must include --model flag")
-        idx = cmd.index("--model")
-        self.assertEqual(cmd[idx + 1], "sonnet")
-        self.assertIn("--agent", cmd)
-        self.assertIn("gemini-triage", cmd)
+        self.assertIn("kwargs", captured, "claude_dispatch.spawn was not called")
+        kwargs = captured["kwargs"]
+        self.assertEqual(
+            kwargs.get("model"), "haiku",
+            f"AC-04 (#1098): triage must dispatch with model='haiku', "
+            f"got {kwargs.get('model')!r}",
+        )
+        self.assertEqual(kwargs.get("agent"), "gemini-triage")
 
     def test_retro_uses_sonnet(self):
+        """Retro stays on sonnet — verify run_retro dispatches with sonnet."""
         import pr_monitor
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
 
         with tempfile.TemporaryDirectory() as worktree:
             os.makedirs(os.path.join(worktree, ".workflow", "stages"),
                         exist_ok=True)
             logger = _FakeLogger()
-            with patch("pr_monitor.SHAKEDOWN", False):
-                cmd = _capture_popen_cmd(
-                    lambda: pr_monitor.run_retro(worktree, logger)
-                )
+            with patch("pr_monitor.SHAKEDOWN", False), \
+                 patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                try:
+                    pr_monitor.run_retro(worktree, logger)
+                except Exception:
+                    # run_retro may attempt post-spawn work (parsing/notify)
+                    # we only care that dispatch was invoked with correct model
+                    pass
 
-        self.assertIn("--model", cmd, "retro cmd must include --model flag")
-        idx = cmd.index("--model")
-        self.assertEqual(cmd[idx + 1], "sonnet")
-
-    def test_monitor_uses_sonnet(self):
-        """AC-155: combined behavioural assertion on both triage and retro
-        cmd construction. Exercises the extracted cmd helpers so we observe
-        the real argv list rather than string-matching the source.
-        """
-        import pr_monitor
-
-        triage_cmd = pr_monitor._build_triage_cmd("any prompt")
-        self.assertIn("--model", triage_cmd)
+        self.assertIn("kwargs", captured, "claude_dispatch.spawn was not called")
         self.assertEqual(
-            triage_cmd[triage_cmd.index("--model") + 1], "sonnet",
-            "triage must run on sonnet (AC-155)",
-        )
-        # Floating alias, not pinned model id
-        self.assertNotIn(
-            "claude-",
-            triage_cmd[triage_cmd.index("--model") + 1],
-        )
-
-        retro_cmd = pr_monitor._build_retro_cmd("/retro")
-        self.assertIn("--model", retro_cmd)
-        self.assertEqual(
-            retro_cmd[retro_cmd.index("--model") + 1], "sonnet",
-            "retro must run on sonnet (AC-155)",
-        )
-        self.assertNotIn(
-            "claude-",
-            retro_cmd[retro_cmd.index("--model") + 1],
+            captured["kwargs"].get("model"), "sonnet",
+            "retro must continue using model='sonnet' (unchanged by #1098)",
         )
 
 
