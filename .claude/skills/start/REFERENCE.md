@@ -91,13 +91,13 @@ For each detected source branch `<src>`:
 
 ```bash
 git rev-parse --verify "<src>" >/dev/null 2>&1 || continue   # not a real branch, skip
-files=$(git diff main.."<src>" --name-only)
+files=$(git diff origin/main.."<src>" --name-only)
 [ -z "$files" ] && continue                                   # no touched paths -> nothing to check
-diff=$(git diff "<src>"..main -- $files)
+diff=$(git diff "<src>"..origin/main -- $files)
 ```
 
-If `diff` is empty (no output for ANY of the files the branch touched), `<src>` is fully reflected on `main`. **Abort** the /start with this message:
+If `diff` is empty (no output for ANY of the files the branch touched), `<src>` is fully reflected on `origin/main`. **Abort** the /start with this message:
 
-> Source branch `<src>` appears to have already shipped — `git diff <src>..main` is empty across all <N> files it touched. Likely squash-merged. Re-check the launch brief before retrying — if this branch's work is done, drop it from the brief; if there is genuinely unshipped follow-up work, name it explicitly and re-invoke /start.
+> Source branch `<src>` appears to have already shipped — `git diff <src>..origin/main` is empty across all <N> files it touched. Likely squash-merged. Re-check the launch brief before retrying — if this branch's work is done, drop it from the brief; if there is genuinely unshipped follow-up work, name it explicitly and re-invoke /start.
 
 Do not create a worktree or spawn. If the user replies that the check is wrong (e.g. the branch ref was incidental, not a "finalize this" reference), they can re-invoke /start with a brief that no longer names the shipped branch as remaining work.
