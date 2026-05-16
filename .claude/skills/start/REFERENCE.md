@@ -80,3 +80,24 @@ After `start-bg-spawn.py` exits 0, print:
 ```
 
 If the helper returned non-zero, surface its stderr verbatim and stop — no manual-fallback prose to print.
+
+## §6 — Shipped-Source Check
+
+When `$ARGUMENTS` references an existing branch as a source of work to finalize/resume, that source can already be on `main` (squash merge). Spawning an agent with a "remaining work" brief in that case wastes a session and risks bad rework. Detect and abort.
+
+Detection signal — kebab branch refs in `$ARGUMENTS` like `fix/<x>`, `feat/<x>`, `chore/<x>`, `bug/<x>`, etc., that are **not** the new branch being created. If none, skip the check.
+
+For each detected source branch `<src>`:
+
+```bash
+git rev-parse --verify "<src>" >/dev/null 2>&1 || continue   # not a real branch, skip
+files=$(git diff main.."<src>" --name-only)
+[ -z "$files" ] && continue                                   # no touched paths -> nothing to check
+diff=$(git diff "<src>"..main -- $files)
+```
+
+If `diff` is empty (no output for ANY of the files the branch touched), `<src>` is fully reflected on `main`. **Abort** the /start with this message:
+
+> Source branch `<src>` appears to have already shipped — `git diff <src>..main` is empty across all <N> files it touched. Likely squash-merged. Re-check the launch brief before retrying — if this branch's work is done, drop it from the brief; if there is genuinely unshipped follow-up work, name it explicitly and re-invoke /start.
+
+Do not create a worktree or spawn. If the user replies that the check is wrong (e.g. the branch ref was incidental, not a "finalize this" reference), they can re-invoke /start with a brief that no longer names the shipped branch as remaining work.

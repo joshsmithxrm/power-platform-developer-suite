@@ -27,6 +27,10 @@ From `$ARGUMENTS` extract:
 - **Name:** kebab-case from key nouns. Read REFERENCE.md §1 "Name Derivation Examples" for guidance.
 - **Issues:** `#NNN`, `issue NNN`, or bare numbers near bug/fix/issue context words.
 
+### Step 2a: Shipped-Source Check
+
+If `$ARGUMENTS` names an existing branch as work to finalize/resume (a kebab ref like `fix/<x>`, `feat/<x>`, `chore/<x>` that is **not** the new branch being created), verify that source hasn't already merged before spawning a wrong-brief agent. Read REFERENCE.md §6 "Shipped-Source Check" for the exact procedure and abort message.
+
 ### Step 2b: Work-Type Classification
 
 If issues extracted:
@@ -70,13 +74,14 @@ python scripts/worktree-create.py --name <name>
 
 Stop on non-zero and surface stderr verbatim.
 
-Initialize state (run from worktree directory):
+Initialize state. Pass `--worktree-path` with the absolute worktree path so CWD inheritance can't write to the caller's `.workflow/state.json`:
 ```bash
-python scripts/workflow-state.py init "feat/<name>"
-python scripts/workflow-state.py set phase starting
-python scripts/workflow-state.py append issues <N>   # repeat per issue
-python scripts/workflow-state.py set work_type <type>
-python scripts/workflow-state.py set launch_command "<confirmed-command>"
+WT="<absolute-worktree-path>"   # e.g. C:/.../ppds/.worktrees/<name>
+python scripts/workflow-state.py --worktree-path "$WT" init "feat/<name>"
+python scripts/workflow-state.py --worktree-path "$WT" set phase starting
+python scripts/workflow-state.py --worktree-path "$WT" append issues <N>   # repeat per issue
+python scripts/workflow-state.py --worktree-path "$WT" set work_type <type>
+python scripts/workflow-state.py --worktree-path "$WT" set launch_command "<confirmed-command>"
 ```
 
 ### Step 6: Spawn the Background Session
