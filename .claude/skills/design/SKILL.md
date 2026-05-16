@@ -93,7 +93,14 @@ When the design is approved:
 
 **A. Write the spec** to `specs/<name>.md` using the spec template. Include numbered ACs (Constitution I3). Preserve unchanged sections if updating.
 
-**B. Review the spec:** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
+**B. Review the spec (bias-isolated / design-fidelity):** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
+
+**B.2. Scope-conformance review:** see REFERENCE.md §9 for the full protocol. Short form:
+1. `python scripts/workflow-state.py get issues` — if empty or null, skip this step.
+2. `gh issue view <N> --json title,body --jq '"# " + .title + "\n\n" + .body'` — fetch issue body for each N.
+3. Spawn a reviewer agent with BOTH the issue body and the spec in context. Mandate: produce a `{issue_item, spec_coverage, status}` table where status ∈ `{covered, missing, reframed, in-non-goals}`. See REFERENCE.md §9 for the full reviewer prompt.
+4. If any items have status `missing` or `reframed`: present the table to the user, block handoff. Worker must either revise the spec to cover the item or add it to `## Non-Goals` with a rationale. Re-run B.2 only (not B) after each revision, until all items are `covered` or `in-non-goals`.
+5. `python scripts/workflow-state.py set phase design`
 
 **C. Check inbox, then present:** Run `python scripts/supervisor_msg.py read --consume` — handle each message kind per REFERENCE.md §8. Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
