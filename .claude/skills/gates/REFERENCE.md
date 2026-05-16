@@ -154,5 +154,6 @@ from a shell where `fnm env` never ran, so the per-shell PID-keyed PATH entry fo
 node/npm is absent. The self-heal is transparent: the operator sees the log line but
 no action is required.
 
-If you see `FAIL (preflight): npm missing` without a preceding self-heal attempt, it
-means `fnm` itself is not on PATH — restart from a shell where `fnm` is installed.
+If you see `FAIL (preflight): npm missing`, either `fnm` is not on PATH, or `fnm env`
+ran but could not resolve a node version (check `fnm list` and `fnm install --lts` to
+ensure a version is available). Restart from a shell where node/npm is directly reachable.

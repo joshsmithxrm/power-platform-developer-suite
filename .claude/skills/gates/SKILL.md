@@ -30,7 +30,7 @@ Before running any gate, confirm its toolchain is on PATH. A missing toolchain i
 ```bash
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL (preflight): dotnet missing"; exit 1; }  # if .NET gates scheduled
 command -v npm >/dev/null 2>&1 || {
-  command -v fnm >/dev/null 2>&1 && eval "$(fnm env --use-on-cd --shell bash)" 2>/dev/null || true
+  command -v fnm >/dev/null 2>&1 && eval "$(fnm env --shell bash)" || true
   command -v npm >/dev/null 2>&1 && echo "preflight: self-healed via fnm activation" \
     || { echo "FAIL (preflight): npm missing"; exit 1; }
 }  # if TS gates scheduled
