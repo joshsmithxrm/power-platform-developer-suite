@@ -25,6 +25,7 @@ SKILLS_DIR = REPO_ROOT / ".claude" / "skills"
 # PowerShell cmdlets that the Bash tool's shell will not resolve.
 _POWERSHELL_CMDLETS = (
     "Test-Path",
+    "Get-Item",
     "Get-ChildItem",
     "Remove-Item",
     "New-Item",
@@ -40,7 +41,7 @@ _POWERSHELL_CMDLETS = (
 # Python escape sequence (`\u`, `\w`, `\s`, etc.).
 _INLINE_PY_INVOKE_RE = re.compile(r"python\s+-c\s+[\"']")
 _NONRAW_BACKSLASH_LITERAL_RE = re.compile(
-    r"(?<![rRbB])(['\"])"   # opening quote not prefixed with r/R/b/B
+    r"(?<![rR])(?<![rR][fFbB])(?<![fFbB][rR])(['\"])"   # opening quote not part of a raw string prefix
     r"[^'\"]*?"               # any chars except matching quotes
     r"\\[A-Za-z]"            # backslash + letter -- Python escape
     r"[^'\"]*?\1"             # to matching closing quote
