@@ -232,6 +232,81 @@ def test_dispatch_interactive_without_dangerous(monkeypatch, tmp_path):
     assert "--dangerously-skip-permissions" not in bg_call
 
 
+def test_spawn_permission_mode_threaded(monkeypatch, tmp_path):
+    """AC-01, AC-02: permission_mode='bypassPermissions' is threaded into the
+    `claude --bg` argv as `--permission-mode bypassPermissions` before `--`."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          permission_mode="bypassPermissions",
+          cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    # Flag must appear and be paired with its value.
+    assert "--permission-mode" in bg_call
+    idx = bg_call.index("--permission-mode")
+    assert bg_call[idx + 1] == "bypassPermissions"
+    # Must appear before the `--` separator.
+    sep_idx = bg_call.index("--")
+    assert idx < sep_idx
+
+
+def test_spawn_permission_mode_absent_when_none(monkeypatch, tmp_path):
+    """AC-03: permission_mode=None (default) → flag absent from argv."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    assert "--permission-mode" not in bg_call
+
+
+def test_spawn_dangerous_still_works(monkeypatch, tmp_path):
+    """AC-04: existing dangerous=True keyword continues to emit
+    --dangerously-skip-permissions (backward compat)."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          dangerous=True, cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    assert "--dangerously-skip-permissions" in bg_call
+
+
 def test_dispatch_interactive_requires_name(monkeypatch, tmp_path):
     _patch_min_version(monkeypatch)
     with pytest.raises(DispatchError):

@@ -30,6 +30,30 @@ def test_step6_invokes_helper():
     )
 
 
+def test_start_skill_spawn_includes_permission_mode():
+    """AC-08 (#1067): the start-bg-spawn.py invocation in Step 6 must pass
+    --permission-mode bypassPermissions so worker sessions never strand at
+    permission prompts.
+
+    Without bypassPermissions, the very first permission prompt transitions
+    the daemon to state=blocked with no operator to respond — defeating the
+    autonomy guarantee of the /start skill.
+    """
+    step6 = _section("Step 6")
+    bash_blocks = re.findall(r"```bash\s+(.*?)```", step6, re.DOTALL)
+    spawn_block = next(
+        (b for b in bash_blocks if "python scripts/start-bg-spawn.py" in b),
+        None,
+    )
+    assert spawn_block is not None, "start-bg-spawn.py block not found in Step 6"
+    assert "--permission-mode" in spawn_block, (
+        "Step 6 start-bg-spawn.py invocation must pass --permission-mode"
+    )
+    assert "bypassPermissions" in spawn_block, (
+        "Step 6 start-bg-spawn.py invocation must pass bypassPermissions value"
+    )
+
+
 def test_step7_names_agent_view():
     """AC-09: Step 7 summary must reference Agent View."""
     step7 = _section("Step 7")
