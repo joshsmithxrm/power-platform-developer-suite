@@ -63,6 +63,9 @@ class _FakeHandle:
     def wait(self, timeout=None):
         return 0
 
+    def output(self):
+        return ""
+
     def terminate(self):
         pass
 
@@ -144,6 +147,173 @@ class TestMonitorModelRouting(unittest.TestCase):
         self.assertEqual(
             captured["kwargs"].get("model"), "sonnet",
             "retro must continue using model='sonnet' (unchanged by #1098)",
+        )
+
+    def test_triage_uses_headless_mode(self):
+        """AC-01/02/03 (#1122): run_triage dispatches with mode='headless'."""
+        import pr_monitor
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow", "stages"),
+                        exist_ok=True)
+            logger = _FakeLogger()
+            with patch("pr_monitor.SHAKEDOWN", False), \
+                 patch("pr_monitor.build_triage_prompt", return_value="prompt"), \
+                 patch("pr_monitor.parse_triage_jsonl", return_value=[{"id": 1}]), \
+                 patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                result = pr_monitor.run_triage(worktree, 123, [], logger)
+
+        self.assertIn("kwargs", captured, "claude_dispatch.spawn was not called")
+        kwargs = captured["kwargs"]
+        self.assertEqual(
+            kwargs.get("mode"), "headless",
+            f"AC-01 (#1122): run_triage must dispatch with mode='headless' "
+            f"(claude --bg daemon does not reliably transition state=done); "
+            f"got {kwargs.get('mode')!r}",
+        )
+        self.assertEqual(kwargs.get("agent"), "gemini-triage")
+        self.assertEqual(kwargs.get("model"), "haiku")
+        self.assertEqual(result, [{"id": 1}], "AC-03: parsed triage results returned")
+
+    def test_triage_timeout_returns_none(self):
+        """AC-04 (#1122): run_triage returns None when headless process times out."""
+        import pr_monitor
+        import claude_dispatch
+        import subprocess
+
+        class _TimingOutHandle(_FakeHandle):
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout)
+
+        def _fake_spawn(**kwargs):
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _TimingOutHandle(transcript_path=stage_log or "")
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow", "stages"),
+                        exist_ok=True)
+            logger = _FakeLogger()
+            with patch("pr_monitor.SHAKEDOWN", False), \
+                 patch("pr_monitor.build_triage_prompt", return_value="prompt"), \
+                 patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                result = pr_monitor.run_triage(worktree, 123, [], logger)
+
+        self.assertIsNone(result, "AC-04 (#1122): timeout must return None")
+        events = [e[0] for e in logger.entries]
+        self.assertTrue(
+            any("TIMEOUT" in str(e) for e in events),
+            "AC-04: TIMEOUT must be logged on subprocess.TimeoutExpired",
+        )
+
+    def test_retro_uses_headless_mode(self):
+        """AC-07 (#1122): run_retro dispatches with mode='headless'."""
+        import pr_monitor
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow", "stages"),
+                        exist_ok=True)
+            logger = _FakeLogger()
+            with patch("pr_monitor.SHAKEDOWN", False), \
+                 patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                try:
+                    pr_monitor.run_retro(worktree, logger)
+                except Exception:
+                    pass
+
+        self.assertIn("kwargs", captured, "claude_dispatch.spawn was not called")
+        self.assertEqual(
+            captured["kwargs"].get("mode"), "headless",
+            f"AC-07 (#1122): run_retro must dispatch with mode='headless'; "
+            f"got {captured['kwargs'].get('mode')!r}",
+        )
+
+
+class TestDispatchSubagentMode(unittest.TestCase):
+    """AC-08 (#1122): dispatch_subagent forces headless regardless of mode param."""
+
+    def test_dispatch_subagent_uses_headless_mode(self):
+        """AC-08: dispatch_subagent calls spawn(mode='headless', ...)."""
+        import triage_common
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
+
+        with tempfile.TemporaryDirectory() as worktree:
+            with patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                triage_common.dispatch_subagent(
+                    "ci-fix",
+                    {"test": True},
+                    worktree=worktree,
+                    mode=None,
+                )
+
+        self.assertIn("kwargs", captured, "claude_dispatch.spawn was not called")
+        self.assertEqual(
+            captured["kwargs"].get("mode"), "headless",
+            f"AC-08 (#1122): dispatch_subagent must force mode='headless'; "
+            f"got {captured['kwargs'].get('mode')!r}",
+        )
+
+    def test_dispatch_subagent_headless_even_when_mode_interactive(self):
+        """AC-08: interactive mode override is ignored — always headless."""
+        import triage_common
+        import claude_dispatch
+
+        captured = {}
+
+        def _fake_spawn(**kwargs):
+            captured["kwargs"] = kwargs
+            stage_log = kwargs.get("stage_log")
+            if stage_log:
+                with open(stage_log, "w", encoding="utf-8") as f:
+                    f.write("")
+            return _FakeHandle(transcript_path=stage_log or "")
+
+        with tempfile.TemporaryDirectory() as worktree:
+            with patch.object(claude_dispatch, "spawn", side_effect=_fake_spawn):
+                triage_common.dispatch_subagent(
+                    "ci-fix",
+                    {"test": True},
+                    worktree=worktree,
+                    mode="interactive",
+                )
+
+        self.assertEqual(
+            captured["kwargs"].get("mode"), "headless",
+            "dispatch_subagent must override interactive → headless",
         )
 
 

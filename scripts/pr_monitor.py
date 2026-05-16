@@ -564,7 +564,7 @@ def run_triage(worktree, pr_number, comments, logger, mode=None):
 
     try:
         handle = claude_dispatch.spawn(
-            mode=claude_dispatch._resolve_mode(mode),
+            mode="headless",
             prompt=full_prompt,
             caller="pr_monitor.run_triage",
             name="gemini-triage",
@@ -1041,7 +1041,7 @@ def run_retro(worktree, logger, mode=None):
 
     try:
         handle = claude_dispatch.spawn(
-            mode=claude_dispatch._resolve_mode(mode),
+            mode="headless",
             prompt=prompt,
             caller="pr_monitor.run_retro",
             name="retro",
