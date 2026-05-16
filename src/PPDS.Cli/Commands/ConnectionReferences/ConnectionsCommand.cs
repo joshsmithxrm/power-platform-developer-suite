@@ -103,7 +103,7 @@ public static class ConnectionsCommand
                     Console.WriteLine($"Connection Reference: {cr.DisplayName ?? cr.LogicalName}");
                     Console.WriteLine();
                     Console.WriteLine("This connection reference is not bound to a connection.");
-                    Console.WriteLine("Use the Power Apps portal or pac solution commands to bind a connection.");
+                    Console.Error.WriteLine("Use the Power Apps portal or pac solution commands to bind a connection.");
                 }
                 return ExitCodes.Success;
             }
