@@ -6,6 +6,7 @@ using PPDS.Cli.Services.Schema;
 using PPDS.Cli.Services.Schema.Models;
 using PPDS.Cli.Services.Schema.Snapshots;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Formats;
 
 namespace PPDS.Cli.Commands.Schema;
@@ -151,6 +152,7 @@ public static class CompareCommand
 
                 var targetMetadata = targetProvider.GetRequiredService<IMetadataQueryService>();
                 var targetConnInfo = targetProvider.GetRequiredService<ResolvedConnectionInfo>();
+                var targetPool = targetProvider.GetRequiredService<IDataverseConnectionPool>();
 
                 if (!globalOptions.IsJsonMode)
                 {
@@ -158,7 +160,11 @@ public static class CompareCommand
                 }
 
                 var entityFilter = sourceSnapshot.Entities.Select(e => e.LogicalName).ToList();
-                var targetLoader = new EnvironmentSnapshotLoader(targetMetadata, $"env:{targetConnInfo.EnvironmentUrl}", progress);
+                var targetLoader = new EnvironmentSnapshotLoader(
+                    targetMetadata,
+                    $"env:{targetConnInfo.EnvironmentUrl}",
+                    progress,
+                    targetPool.GetTotalRecommendedParallelism());
                 targetSnapshot = await targetLoader.LoadAsync(entityFilter, cancellationToken).ConfigureAwait(false);
                 targetExtraEntities = targetLoader.UnloadedEntities;
 
@@ -189,10 +195,12 @@ public static class CompareCommand
                 {
                     Console.Error.WriteLine($"Loading source schema from {sourceInfo.EnvironmentUrl}...");
                 }
+                var sourcePool = sourceProvider.GetRequiredService<IDataverseConnectionPool>();
                 var sourceLoader = new EnvironmentSnapshotLoader(
                     sourceProvider.GetRequiredService<IMetadataQueryService>(),
                     $"env:{sourceInfo.EnvironmentUrl}",
-                    progress);
+                    progress,
+                    sourcePool.GetTotalRecommendedParallelism());
                 sourceSnapshot = await sourceLoader.LoadAsync(null, cancellationToken).ConfigureAwait(false);
 
                 if (!globalOptions.IsJsonMode)
@@ -200,10 +208,12 @@ public static class CompareCommand
                     Console.Error.WriteLine($"Loading target schema from {targetInfo.EnvironmentUrl}...");
                 }
                 var entityFilter = sourceSnapshot.Entities.Select(e => e.LogicalName).ToList();
+                var targetPool2 = targetEnvProvider.GetRequiredService<IDataverseConnectionPool>();
                 var targetLoader = new EnvironmentSnapshotLoader(
                     targetEnvProvider.GetRequiredService<IMetadataQueryService>(),
                     $"env:{targetInfo.EnvironmentUrl}",
-                    progress);
+                    progress,
+                    targetPool2.GetTotalRecommendedParallelism());
                 targetSnapshot = await targetLoader.LoadAsync(entityFilter, cancellationToken).ConfigureAwait(false);
                 targetExtraEntities = targetLoader.UnloadedEntities;
 
