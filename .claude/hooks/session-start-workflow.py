@@ -75,10 +75,12 @@ def _get_dirty_files(project_dir):
     """Return git status --porcelain lines; always fresh, never from cached state."""
     try:
         result = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "-c", "core.quotePath=off", "status", "--porcelain", "--untracked-files=all"],
             cwd=project_dir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if result.returncode == 0:
