@@ -15,7 +15,8 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
-### Step 0: Set Phase — `python scripts/workflow-state.py set phase design`
+### Step 0: Set Phase and Check Inbox
+`python scripts/workflow-state.py set phase design` then `python scripts/supervisor_msg.py read --consume` — see REFERENCE.md §8 (abort/revise → stop before brainstorm).
 
 ### Step 1: Load Context and Search
 
@@ -94,7 +95,7 @@ When the design is approved:
 
 **B. Review the spec:** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
 
-**C. Present to user:** present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
+**C. Check inbox, then present:** Run `python scripts/supervisor_msg.py read --consume` — handle each message kind per REFERENCE.md §8. Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
 ### Step 4: Write Plan and Review
 

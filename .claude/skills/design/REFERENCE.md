@@ -77,3 +77,27 @@ For multi-file entries, list the primary file in the table cell; the full list g
 **User decline path:** if the user says no to the Step 4.D question, leave the original plan unchanged, write no sub-plans, write no `## PR Stack` section, write no JSON sidecar. Proceed to Step 5 as if 4.D never fired.
 
 **Envelope schema source of truth:** `specs/feat-1070-pr-stack-alpha.md`. Phase 2 (#1069) must extend this spec with additive fields and bump `schema_version` from `1.0` to `1.1`, not define a parallel schema.
+
+## §8 - Supervisor Inbox Protocol (Step 3.C)
+
+At Step 3.C, before presenting the spec to the user, poll the worker inbox:
+
+```bash
+python scripts/supervisor_msg.py read --consume
+```
+
+Process messages in the order returned (chronological). Message kinds:
+
+| Kind | Action |
+|------|--------|
+| `abort` | Stop immediately. Report the abort directive (and any `message` field) to the user. Do not proceed to Step 4. |
+| `revise` | Apply the feedback in the `message`/`payload` fields to the spec. Re-run spec-review (Step 3.B) if changes are substantial. Then continue to present. |
+| `approve` | Skip the "Wait for approval" pause — supervisor has already approved; proceed directly to Step 4. |
+| `note` | Surface the `message` field to the user as an informational note. Continue normally. |
+
+If the inbox is empty (`[]`), proceed with the normal user-approval flow.
+
+**Supervisor send syntax (orchestrator side):**
+```bash
+python scripts/supervisor_msg.py send <worktree-abs-path> <kind> [--message "text"] [--payload-file f.json]
+```
