@@ -268,7 +268,7 @@ public static class RelatedCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"No related traces found for correlation ID: {lookupCorrelationId}");
+                    Console.WriteLine($"No related traces found for correlation ID: {lookupCorrelationId}");
                 }
                 return ExitCodes.Success;
             }

@@ -94,7 +94,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No query history found.");
+                    Console.WriteLine("No query history found.");
                 }
                 return ExitCodes.Success;
             }

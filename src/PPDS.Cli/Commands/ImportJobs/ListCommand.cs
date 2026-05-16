@@ -90,7 +90,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No import jobs found.");
+                    Console.WriteLine("No import jobs found.");
                 }
                 return ExitCodes.Success;
             }

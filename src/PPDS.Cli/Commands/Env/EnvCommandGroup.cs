@@ -145,11 +145,11 @@ public static class EnvCommandGroup
         {
             if (!string.IsNullOrWhiteSpace(filter))
             {
-                Console.Error.WriteLine($"No environments matching '{filter}'.");
+                Console.WriteLine($"No environments matching '{filter}'.");
             }
             else
             {
-                Console.Error.WriteLine("No environments found.");
+                Console.WriteLine("No environments found.");
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("This may indicate the user has no access to any environments.");
             }
@@ -643,7 +643,7 @@ public static class EnvCommandGroup
         var config = await service.GetConfigAsync(url, ct);
         if (config == null)
         {
-            Console.Error.WriteLine($"No configuration found for: {url}");
+            Console.WriteLine($"No configuration found for: {url}");
             Console.Error.WriteLine("Use 'ppds env config <url> --label <label> --type <type> --color <color>' to configure.");
             return ExitCodes.Success;
         }
