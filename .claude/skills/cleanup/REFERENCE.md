@@ -226,6 +226,14 @@ Prefix the title with `[DRY RUN]` when no destructive command ran.
 | Tag-lineage ambiguous (no matching tag) | Recommendation = DISCUSS → AMBIGUOUS |
 | Investigator says KEEP for a branch later found shipped | Surface in report — improvement signal for next retro |
 
+## §10 — Design constraints from the retro
+
+- The permission classifier consistently denies batched cleanup ops (parallel rebase, `branch -d <list>`, `rm -rf` even on empty dirs). All destructive phases must be one-at-a-time by default. Do not retry batched.
+- Mid-rebase states from prior cancelled batches accumulate silently. Pre- and post-scan both run; both abort any found.
+- `mcp__ccd_session_mgmt__archive_session` is unavailable in unsupervised (subagent) mode. Only the main `/cleanup` session can call it — not investigators.
+- The investigator pattern (Lane A, parallel, structured return) is the only agent dispatch in this skill. The executor phase remains sequential.
+- The skill is the natural home for session archival proposals — main-session, one bulk-approval prompt, one archive call per session.
+
 ## §11 — Archive done-sessions procedure
 
 The `archive done-sessions` subcommand (SKILL.md §13) is a standalone janitor that runs without the branch/worktree cleanup pipeline. It is the automated replacement for the "operator manually archives in Claude Desktop UI" flow called out in epic #1066.
@@ -247,18 +255,20 @@ Only `state == "done" && tempo == "idle"` entries are candidates for default arc
 
 Never archive a session whose `cwd` is a currently-checked-out worktree. The set is built from `git worktree list --porcelain` (parse `worktree <path>` lines). This prevents archiving a session that is paused but whose worktree is still active in another terminal.
 
+If `git worktree list` fails (e.g., not inside a git repository), treat the active-cwd set as empty — proceed with archival but log a warning: `"warning: git worktree list unavailable; active-cwd guard skipped"`.
+
 ### Smoke-test procedure (AC-10)
 
 Verify the janitor in a real Claude Desktop session before shipping:
 
-1. **Spawn two bg sessions** — `claude --bg "sleep 999"` (long-running, will stay `running`) and `claude --bg "echo done"` (completes immediately → `state = done, tempo = idle`).
-2. **Wait 2 min** — ensures the completed session is old enough for the default 30-min threshold; use `--min-age 1` to override during testing.
+1. **Spawn two bg sessions** — `claude --bg "sleep 999"` (long-running, will stay `running`) and `claude --bg "echo done"` (completes quickly → `state = done, tempo = idle`; give it a moment to transition before proceeding).
+2. **Use `--min-age 1`** to override the default 30-min threshold during testing — no significant wait needed.
 3. **Dry-run** — `/cleanup archive done-sessions --dry-run --min-age 1`. Confirm the completed session appears as a candidate and the running one does not.
 4. **Live run** — `/cleanup archive done-sessions --min-age 1`. Confirm:
    - Completed session archived: `mcp__ccd_session_mgmt__archive_session` called with its id.
    - Running session skipped: no archive call.
    - `.workflow/janitor.log` has one entry for the completed session.
-   - Summary reports `"Archived 1 done, 0 stopped, 0 failed. Skipped 1 active."`.
+   - Summary reports `"Archived 1 done, 0 stopped, 0 failed. Skipped 1 (active: 1)."`.
 5. **Verify Claude Desktop** — open Claude Desktop session list; confirm the archived session no longer appears in the active list.
 
 ### Additional error table entries
@@ -270,21 +280,14 @@ Verify the janitor in a real Claude Desktop session before shipping:
 | `lastActivityAt` absent | Use file mtime of `state.json` as age proxy |
 | `mcp__ccd_session_mgmt__archive_session` fails | Log `"archive failed <id>: <error>"`; continue with remaining candidates |
 | Called from a subagent / bg session | Print `"archive done-sessions requires a Claude Desktop foreground session (MCP unavailable)"` and exit with non-zero |
+| `git worktree list` fails (not in a repo) | Log warning; treat active-cwd set as empty; proceed with archival |
 
 ### Caller patterns
 
 ```
-/cleanup archive done-sessions               # one-shot, done sessions ≥30 min
+/cleanup archive done-sessions               # one-shot, done sessions >30 min
 /cleanup archive done-sessions --dry-run     # preview only
-/cleanup archive done-sessions --min-age 5   # lower threshold for testing
+/cleanup archive done-sessions --min-age 5   # lower done-session threshold for testing
 /cleanup archive done-sessions --include-stopped --include-failed  # full prune
 /loop 1h /cleanup archive done-sessions      # periodic via /loop skill
 ```
-
-## §10 — Design constraints from the retro
-
-- The permission classifier consistently denies batched cleanup ops (parallel rebase, `branch -d <list>`, `rm -rf` even on empty dirs). All destructive phases must be one-at-a-time by default. Do not retry batched.
-- Mid-rebase states from prior cancelled batches accumulate silently. Pre- and post-scan both run; both abort any found.
-- `mcp__ccd_session_mgmt__archive_session` is unavailable in unsupervised (subagent) mode. Only the main `/cleanup` session can call it — not investigators.
-- The investigator pattern (Lane A, parallel, structured return) is the only agent dispatch in this skill. The executor phase remains sequential.
-- The skill is the natural home for session archival proposals — main-session, one bulk-approval prompt, one archive call per session.
