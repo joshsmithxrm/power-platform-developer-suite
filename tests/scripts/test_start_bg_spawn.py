@@ -431,6 +431,102 @@ def test_claude_not_on_path(monkeypatch):
 # Spec InvalidArg: argparse missing-required-arg → exit 1 (not argparse default 2)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# --model passthrough (issue #1098): AC-01, AC-02, AC-03
+# ---------------------------------------------------------------------------
+
+def _make_fake_jobs(tmp_path, short="abc12345"):
+    """Build a minimal fake jobs dir + state.json so spawn() can resolve."""
+    norm_cwd = str(tmp_path).replace("\\", "/")
+    fake_jobs = tmp_path / "jobs"
+    fake_jobs.mkdir()
+    sd = fake_jobs / short
+    sd.mkdir()
+    (sd / "state.json").write_text(
+        json.dumps({"sessionId": f"{short}-0000-0000-0000-000000000000", "cwd": norm_cwd}),
+        encoding="utf-8",
+    )
+    return fake_jobs
+
+
+def _fake_run_factory(calls, short="abc12345"):
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, f"backgrounded · {short}\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    return fake_run
+
+
+def test_spawn_with_model_flag_in_argv(monkeypatch, tmp_path):
+    """AC-01: spawn(model="sonnet") emits --model sonnet before --bg."""
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(calls))
+    fake_jobs = _make_fake_jobs(tmp_path)
+
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs,
+        model="sonnet",
+    )
+
+    bg = next(c for c in calls if "--bg" in c)
+    assert "--model" in bg, f"AC-01: --model missing from argv: {bg}"
+    assert bg[bg.index("--model") + 1] == "sonnet"
+    assert bg.index("--model") < bg.index("--bg"), \
+        f"AC-01: --model must precede --bg; got {bg}"
+
+
+def test_spawn_without_model_flag_in_argv(monkeypatch, tmp_path):
+    """AC-02: spawn() without model= emits no --model element."""
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(calls))
+    fake_jobs = _make_fake_jobs(tmp_path)
+
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs,
+    )
+
+    bg = next(c for c in calls if "--bg" in c)
+    assert "--model" not in bg, \
+        f"AC-02: spawn() must not emit --model unless caller opts in; got {bg}"
+
+
+def test_spawn_model_and_permission_mode_order(monkeypatch, tmp_path):
+    """AC-03: with both flags, argv order is --permission-mode < --model < --bg."""
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(calls))
+    fake_jobs = _make_fake_jobs(tmp_path)
+
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs,
+        permission_mode="bypassPermissions",
+        model="haiku",
+    )
+
+    bg = next(c for c in calls if "--bg" in c)
+    pm_idx = bg.index("--permission-mode")
+    mo_idx = bg.index("--model")
+    bg_idx = bg.index("--bg")
+    assert pm_idx < mo_idx < bg_idx, \
+        f"AC-03: expected --permission-mode < --model < --bg; got argv={bg}"
+    assert bg[mo_idx + 1] == "haiku"
+
+
+# ---------------------------------------------------------------------------
+# Spec InvalidArg: argparse missing-required-arg → exit 1 (not argparse default 2)
+# ---------------------------------------------------------------------------
+
 def test_argparse_missing_args_exits_1(capsys):
     """Spec Error Types: InvalidArg → exit 1. argparse defaults to 2; helper overrides."""
     with pytest.raises(SystemExit) as exc_info:

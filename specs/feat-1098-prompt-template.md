@@ -239,16 +239,16 @@ N/A — workflow tooling only.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `start-bg-spawn.py --model sonnet` produces argv containing `["--model", "sonnet"]` immediately before `"--bg"` | `test_start_bg_spawn.py::test_spawn_with_model_flag_in_argv` | ❌ |
-| AC-02 | `start-bg-spawn.py` with no `--model` flag produces argv without any `"--model"` element | `test_start_bg_spawn.py::test_spawn_without_model_flag_in_argv` | ❌ |
-| AC-03 | `start-bg-spawn.py` with both `--permission-mode bypassPermissions` and `--model haiku` produces argv with `--permission-mode` before `--model`, both before `"--bg"` | `test_start_bg_spawn.py::test_spawn_model_and_permission_mode_order` | ❌ |
-| AC-04 | `pr_monitor.run_triage()` calls `claude_dispatch.spawn()` with `model="haiku"` when no override is passed | `scripts/test_pr_monitor.py::TestMonitorUsesHaiku::test_triage_uses_haiku` | ❌ |
-| AC-05 | `/start` SKILL.md Step 6c invocation block shows `--model` as an optional flag | `tests/scripts/test_prompt_template.py::test_skill_step6c_shows_model_flag` | ❌ |
-| AC-06 | `/start` SKILL.md Step 6b contains a prompt appendix or workflow contract subsection | `tests/scripts/test_prompt_template.py::test_skill_step6b_prompt_appendix_subsection` | ❌ |
-| AC-07 | `/start` REFERENCE.md contains a `§7` section with heading "Design-Gate Handoff Procedure" | `tests/scripts/test_prompt_template.py::test_reference_section7_design_gate` | ❌ |
-| AC-08 | Workflow contract text includes the literal command `python scripts/workflow-state.py set phase blocked` and a `set needs` command | `tests/scripts/test_prompt_template.py::test_workflow_contract_phase_blocked_command` | ❌ |
-| AC-09 | Workflow contract text includes `run_in_background=true` for the pr_monitor launch instruction | `tests/scripts/test_prompt_template.py::test_workflow_contract_bg_launch_instruction` | ❌ |
-| AC-10 | Workflow contract text includes `.workflow/pr-monitor-result.json` and a "final summary" instruction | `tests/scripts/test_prompt_template.py::test_workflow_contract_result_json_reference` | ❌ |
+| AC-01 | `start-bg-spawn.py --model sonnet` produces argv containing `["--model", "sonnet"]` immediately before `"--bg"` | `test_start_bg_spawn.py::test_spawn_with_model_flag_in_argv` | ✅ |
+| AC-02 | `start-bg-spawn.py` with no `--model` flag produces argv without any `"--model"` element | `test_start_bg_spawn.py::test_spawn_without_model_flag_in_argv` | ✅ |
+| AC-03 | `start-bg-spawn.py` with both `--permission-mode bypassPermissions` and `--model haiku` produces argv with `--permission-mode` before `--model`, both before `"--bg"` | `test_start_bg_spawn.py::test_spawn_model_and_permission_mode_order` | ✅ |
+| AC-04 | `pr_monitor.run_triage()` calls `claude_dispatch.spawn()` with `model="haiku"` when no override is passed | `scripts/test_pr_monitor.py::TestMonitorModelRouting::test_triage_uses_haiku` | ✅ |
+| AC-05 | `/start` SKILL.md Step 6c invocation block shows `--model` as an optional flag | `tests/scripts/test_prompt_template.py::test_skill_step6c_shows_model_flag` | ✅ |
+| AC-06 | `/start` SKILL.md Step 6b contains a prompt appendix or workflow contract subsection | `tests/scripts/test_prompt_template.py::test_skill_step6b_prompt_appendix_subsection` | ✅ |
+| AC-07 | `/start` REFERENCE.md contains a `§7` section with heading "Design-Gate Handoff Procedure" | `tests/scripts/test_prompt_template.py::test_reference_section7_design_gate` | ✅ |
+| AC-08 | Workflow contract text includes the literal command `python scripts/workflow-state.py set phase blocked` and a `set needs` command | `tests/scripts/test_prompt_template.py::test_workflow_contract_phase_blocked_command` | ✅ |
+| AC-09 | Workflow contract text includes `run_in_background=true` for the pr_monitor launch instruction | `tests/scripts/test_prompt_template.py::test_workflow_contract_bg_launch_instruction` | ✅ |
+| AC-10 | Workflow contract text includes `.workflow/pr-monitor-result.json` and a "final summary" instruction | `tests/scripts/test_prompt_template.py::test_workflow_contract_result_json_reference` | ✅ |
 | AC-11 | Manual QA: worker spawned via `/start` runs `/design`, stops with spec+plan summary, `workflow-state phase == blocked` after `/design` completes | Manual — verify with `python scripts/workflow-state.py show` | 🔲 |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
