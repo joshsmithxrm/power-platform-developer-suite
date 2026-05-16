@@ -13,6 +13,36 @@ if _SCRIPTS_DIR not in sys.path:
 from claude_dispatch import derive_slug
 from _shakedown_allowlist import SHAKEDOWN_ALLOWLIST, is_allowlisted
 
+# Correction patterns: direct commands + question-form (per #1097 fix).
+# Question-form corrections often arrive as interrogatives rather than imperatives
+# ("why is the PR ready but the monitor hasn't been run?") and were previously missed.
+_CORRECTION_PATTERNS = [
+    "no,",
+    "no ",
+    "wrong",
+    "try again",
+    "that's not",
+    "thats not",
+    "not what i",
+    "why ",
+    "shouldn't ",
+    "didn't you ",
+    "weren't you supposed ",
+    "isn't this ",
+]
+
+_FRUSTRATION_PATTERNS = [
+    "wtf",
+    "ugh",
+    "dammit",
+    "come on",
+    "ffs",
+    "this is broken",
+    "this is wrong",
+    "why isn't",
+    "why can't",
+]
+
 
 def extract_transcript_signals(jsonl_path):
     """Extract structured signals from a JSONL transcript file."""
@@ -20,8 +50,10 @@ def extract_transcript_signals(jsonl_path):
         "user_corrections": [],
         "tool_failures": [],
         "repeated_commands": [],
+        "frustration_hits": [],
     }
     command_counts = {}
+    tool_call_count = 0
 
     try:
         with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
@@ -36,80 +68,73 @@ def extract_transcript_signals(jsonl_path):
 
                 event_type = event.get("type")
 
-                # User messages — correction patterns
-                if event_type == "human":
+                # User messages — correction patterns AND tool results.
+                # Claude Code transcripts use "user", not "human" (bug #1097 fix 1).
+                if event_type == "user":
                     content = event.get("message", {}).get("content", "")
+
+                    # Extract text for correction/frustration matching (text blocks only)
                     if isinstance(content, list):
-                        content = " ".join(
+                        text = " ".join(
                             b.get("text", "")
                             for b in content
-                            if b.get("type") == "text"
+                            if isinstance(b, dict) and b.get("type") == "text"
                         )
-                    content_lower = content.lower().strip()
-                    correction_patterns = [
-                        "no,",
-                        "no ",
-                        "wrong",
-                        "try again",
-                        "that's not",
-                        "thats not",
-                        "not what i",
-                    ]
-                    if any(p in content_lower for p in correction_patterns):
+                    else:
+                        text = content if isinstance(content, str) else ""
+
+                    text_lower = text.lower().strip()
+                    if any(p in text_lower for p in _CORRECTION_PATTERNS):
                         signals["user_corrections"].append(
-                            {
-                                "text": content[:200],
-                                "pattern": "correction",
-                            }
+                            {"text": text[:200], "pattern": "correction"}
+                        )
+                    if any(p in text_lower for p in _FRUSTRATION_PATTERNS):
+                        signals["frustration_hits"].append(
+                            {"text": text[:200], "pattern": "frustration"}
                         )
 
-                # Tool results — failure patterns
-                if event_type == "tool_result" or (
-                    event_type == "assistant"
-                    and isinstance(event.get("message", {}).get("content"), list)
-                    and any(b.get("type") == "tool_result" for b in event["message"]["content"] if isinstance(b, dict))
-                ):
-                    if event_type == "assistant":
-                        content = event.get("message", {}).get("content", [])
-                    else:
-                        content = event.get("content", "")
-
-                    # Normalize: wrap string content into a list for uniform processing
-                    if isinstance(content, str):
-                        result_texts = [content] if content else []
-                    elif isinstance(content, list):
-                        result_texts = []
+                    # Tool result failure detection within user messages.
+                    # Primary signal: is_error: true on the result block (bug #1097 fix 2).
+                    # Fallback: content-substring patterns for non-error blocks.
+                    if isinstance(content, list):
                         for block in content:
-                            if isinstance(block, dict) and block.get("type") == "tool_result":
-                                rt = block.get("content", "")
-                                if isinstance(rt, str):
-                                    result_texts.append(rt)
-                    else:
-                        result_texts = []
+                            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                                continue
+                            result_content = block.get("content", "")
+                            if isinstance(result_content, list):
+                                result_text = " ".join(
+                                    b.get("text", "") for b in result_content
+                                    if isinstance(b, dict) and b.get("type") == "text"
+                                )
+                            elif isinstance(result_content, str):
+                                result_text = result_content
+                            else:
+                                result_text = ""
 
-                    for result_text in result_texts:
-                        if "Exit code:" in result_text and "Exit code: 0" not in result_text:
-                            signals["tool_failures"].append(
-                                {"tool": "Bash", "error": result_text[:200]}
-                            )
-                        if "file not found" in result_text.lower() or "no such file" in result_text.lower():
-                            signals["tool_failures"].append(
-                                {"tool": "Read", "error": result_text[:200]}
-                            )
-                        if "old_string not found" in result_text.lower():
-                            signals["tool_failures"].append(
-                                {"tool": "Edit", "error": result_text[:200]}
-                            )
+                            if block.get("is_error"):
+                                signals["tool_failures"].append(
+                                    {"tool": "Bash", "error": result_text[:200]}
+                                )
+                            else:
+                                result_lower = result_text.lower()
+                                if "file not found" in result_lower or "no such file" in result_lower:
+                                    signals["tool_failures"].append(
+                                        {"tool": "Read", "error": result_text[:200]}
+                                    )
+                                if "old_string not found" in result_lower:
+                                    signals["tool_failures"].append(
+                                        {"tool": "Edit", "error": result_text[:200]}
+                                    )
 
-                # Track commands for repetition detection
+                # Track tool calls for repetition detection and suspect-session heuristic
                 if event_type == "assistant":
                     msg_content = event.get("message", {}).get("content", [])
                     if isinstance(msg_content, list):
                         for block in msg_content:
-                            if (
-                                block.get("type") == "tool_use"
-                                and block.get("name") == "Bash"
-                            ):
+                            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                                continue
+                            tool_call_count += 1
+                            if block.get("name") == "Bash":
                                 cmd = block.get("input", {}).get("command", "")
                                 if cmd:
                                     command_counts[cmd] = (
@@ -127,6 +152,17 @@ def extract_transcript_signals(jsonl_path):
                     "count": count,
                 }
             )
+
+    # Escalation flags
+    u = len(signals["user_corrections"])
+    t = len(signals["tool_failures"])
+    r = len(signals["repeated_commands"])
+    f = len(signals["frustration_hits"])
+    signals["needs_manual_review"] = bool(u > 0 or t > 2 or r > 3 or f > 0)
+    # A non-trivial session (>50 tool calls) with zero signals across all detectors
+    # is suspicious — likely indicates the extractor missed something.
+    all_zero = u == 0 and t == 0 and r == 0 and f == 0
+    signals["signal_extractor_suspect"] = bool(all_zero and tool_call_count > 50)
 
     return signals
 
@@ -147,6 +183,29 @@ def extract_enforcement_signals(state_path):
     except (json.JSONDecodeError, OSError):
         pass
     return signals
+
+
+def write_session_flags(findings_path, flags):
+    """Merge escalation *flags* into ``.workflow/retro-findings.json``.
+
+    Writes ``needs_manual_review`` and ``signal_extractor_suspect`` (and any
+    other keys in *flags*) into the findings JSON. Creates the file (and
+    parent dir) if missing. Existing keys are preserved.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(findings_path)) or ".", exist_ok=True)
+    existing = {}
+    try:
+        with open(findings_path, "r", encoding="utf-8") as f:
+            existing = json.load(f) or {}
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(flags)
+    with open(findings_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return flags
 
 
 def _encode_project_dir(path):
