@@ -73,7 +73,7 @@ Handle each message kind per REFERENCE.md §10. Empty inbox → proceed normally
 **G. Goal Verification** — per-phase fast feedback if spec has `**Verification:**` frontmatter; see REFERENCE.md §9.
 
 ### Step 5.5: Pre-Tail Goal Loop
-Full goal loop with spec's `verification_max_iterations` (default 10). See REFERENCE.md §9.
+Full goal loop with spec's `verification_max_iterations` (default 10). Driven by `scripts/goal_loop.py`. See REFERENCE.md §9.
 
 ### Step 6: Mandatory Tail — Full Verification Pipeline
 
