@@ -101,6 +101,7 @@ _AC21_ALLOWLIST = {
     # Specs and plans that describe the dispatcher contract.
     "specs/dispatch-routing.md",
     "specs/workflow-enforcement.md",
+    "specs/fix-1067-bg-spawn-autonomy.md",
     ".plans/2026-05-14-dispatch-routing.md",
 }
 
