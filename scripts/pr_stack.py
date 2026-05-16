@@ -195,7 +195,7 @@ def _detect_cycles(stack: list) -> None:
         )
 
 
-def write_envelope(envelope: dict, path) -> None:
+def write_envelope(envelope: dict, path: Union[str, Path]) -> None:
     """Validate then write JSON with 2-space indent and trailing newline.
 
     Validation happens before any file I/O — no partial file is written
@@ -210,7 +210,7 @@ def write_envelope(envelope: dict, path) -> None:
 def _cli_validate(path: str) -> int:
     try:
         envelope = json.loads(Path(path).read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
+    except OSError as exc:
         print(f"pr_stack: {exc}", file=sys.stderr)
         return 1
     except json.JSONDecodeError as exc:
@@ -225,8 +225,8 @@ def _cli_validate(path: str) -> int:
     return 0
 
 
-def main(argv: list) -> int:
-    if len(argv) >= 2 and argv[1] == "validate" and len(argv) == 3:
+def main(argv: list[str]) -> int:
+    if len(argv) == 3 and argv[1] == "validate":
         return _cli_validate(argv[2])
     print(
         "usage: python scripts/pr_stack.py validate <path>",
