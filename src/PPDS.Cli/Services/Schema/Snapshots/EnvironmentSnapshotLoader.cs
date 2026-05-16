@@ -95,6 +95,13 @@ public sealed class EnvironmentSnapshotLoader : ISnapshotLoader
                         includePrivileges: false,
                         cancellationToken: ct).ConfigureAwait(false);
 
+                    if (entity == null)
+                    {
+                        throw new PpdsException(
+                            ErrorCodes.Operation.NotFound,
+                            $"Failed to retrieve metadata for entity '{item.Summary.LogicalName}'.");
+                    }
+
                     results[item.Index] = new EntitySnapshot
                     {
                         LogicalName = entity.LogicalName,
