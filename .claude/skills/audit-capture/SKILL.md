@@ -125,6 +125,6 @@ If a manifest entry can't reach its target screen with the available step types:
 ## Related
 
 - [specs/audit-capture.md](../../../specs/audit-capture.md) — the contract
-- [@tui-verify](../tui-verify/SKILL.md) — underlying PTY harness (invokes `tui-verify render` for TUI captures)
-- [@ext-verify](../ext-verify/SKILL.md) — underlying VS Code harness
+- TUI PTY harness — see `/verify` `REFERENCE.md §tui` (invokes `tui-verify render` for TUI captures)
+- VS Code CDP harness — see `/verify` `REFERENCE.md §ext`
 - [`AUDIT-SCHEMA.md`](https://github.com/joshsmithxrm/ppds-design-system/blob/main/AUDIT-SCHEMA.md) — output format contract

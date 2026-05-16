@@ -57,7 +57,7 @@ Shakedown mode guarantees no real artifacts leak from exercise runs. Violations 
 - `.claude/hooks/protect-main-branch.py` — also logs the raw value for debugging.
 
 ### Consumed by (skills)
-- Indirectly — skills that shell into hooks inherit the normalized value. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows (see `workflow-verify/SKILL.md`).
+- Indirectly — skills that shell into hooks inherit the normalized value. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows (see `/verify` `REFERENCE.md §workflow`).
 
 ### Effect
 Portable path resolution across Windows cmd, Git Bash, and POSIX shells. In worktrees, resolves to the worktree root — hooks operating on a worktree see the worktree as the project root, not the main checkout.
@@ -97,6 +97,6 @@ Every headless invocation appends a JSONL row to `.claude/state/sdk-spend.jsonl`
 
 - `CLAUDE.md` — repo-level rules
 - `.claude/interaction-patterns.md` — agent topology and decision UX
-- `.claude/skills/workflow-verify/SKILL.md` — testing patterns for hooks and skills
+- `/verify` `REFERENCE.md §workflow` — testing patterns for hooks and skills
 - `.claude/skills/shakedown-workflow/SKILL.md` — reference implementation of `PPDS_SHAKEDOWN`
 - `.claude/skills/implement/SKILL.md` — reference implementation of `PPDS_PIPELINE` detection

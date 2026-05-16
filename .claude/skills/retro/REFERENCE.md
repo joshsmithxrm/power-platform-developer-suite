@@ -94,7 +94,36 @@ Why mechanical extraction can be a subprocess but transcript judgment cannot:
 
 The hard rule: dispatch mechanical signal extraction (Python/subprocess) only; never dispatch LLM-based transcript judgment to a subagent. Agents previously reported "zero user corrections" when the user was furious because they were asked to *judge* what they had read instead of just extracting signals.
 
-## §7 - HTML artifact spec
+## §7 - Mechanical signal detector reference
+
+### Correction pattern taxonomy
+
+`extract_transcript_signals` matches two classes of corrections in user-typed text:
+
+| Class | Examples | Why included |
+|-------|---------|--------------|
+| Direct | `"no,"`, `"no "`, `"wrong"`, `"try again"`, `"that's not"`, `"not what i"` | Imperative corrections — operator says what was wrong |
+| Question-form | `"why "`, `"shouldn't "`, `"didn't you "`, `"weren't you supposed "`, `"isn't this "` | Interrogative corrections — operator asks why the wrong thing happened. PR #1095 example: *"why is the PR ready but the monitor hasn't been run?"* — missed by old detector |
+
+Both classes increment `user_corrections` and set `needs_manual_review: true`.
+
+### Escalation flags
+
+Written to `.workflow/retro-findings.json` via `write_session_flags`:
+
+| Flag | Trigger |
+|------|---------|
+| `needs_manual_review` | `user_corrections > 0` OR `tool_failures > 2` OR `repeated_commands > 3` OR `frustration_hits > 0` |
+| `signal_extractor_suspect` | All detector counts zero AND `tool_call_count > 50` — a non-trivial session with no signals is suspicious |
+
+### Tool failure detection
+
+Primary: `is_error: true` on a `tool_result` block inside a `user` event.
+Fallback: content-substring patterns — `"old_string not found"` (Edit), `"file not found"` / `"no such file"` (Read).
+
+Note: Claude Code transcripts carry tool results in `user`-type events (not `tool_result`-type events), and failures are signalled via `is_error: true`, not `"Exit code: N"` strings.
+
+## §8 - HTML artifact spec
 
 Pipeline retros write .workflow/retro-findings.json (machine-readable JSON). Interactive retros write .retros/YYYY-MM-DD-summary.md only. HTML artifacts (.retros/*.html) are reserved for tooling that consumes them - the retro-html-guard.py hook blocks HTML writes outside PPDS_PIPELINE=1. The conversation IS the analysis in interactive mode.
 

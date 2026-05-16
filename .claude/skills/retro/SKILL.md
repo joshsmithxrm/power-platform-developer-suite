@@ -103,11 +103,20 @@ Interactive mode: write `.retros/YYYY-MM-DD-summary.md` only. Skip HTML artifact
 
 Sections: pattern narrative, top-N prioritized, decisions log, what worked, meta (if surfaced).
 
+After writing, stage it: `git add .retros/`
+
 ### Phase 9. Persist
 
 Read REFERENCE.md SS5 "Persist schemas" for the JSON shapes.
 
 Interactive mode: run 9b only (update `.retros/summary.json`). Append findings, increment `total_retros`, update rolling metrics, trim entries older than 6 months AND beyond the last 20 retros.
+
+After updating `summary.json`, commit both retro artifacts in one atomic commit:
+
+```bash
+git add .retros/
+git commit -m "retro: <branch> session summary" -m "<one-sentence executive synthesis from Phase 8>"
+```
 
 ---
 

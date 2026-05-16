@@ -37,7 +37,6 @@ Key tools and skills used throughout:
 - `/verify` and `/qa` for verification before declaring any phase done
 - `/debug` for systematic debugging when tests fail
 - `/gates` for mechanical pass/fail checks
-- `/converge` for review-fix convergence loops
 
 ## Input
 $ARGUMENTS = path to the plan file (e.g., `.plans/2026-02-08-query-engine-v3-design.md`)
@@ -290,7 +289,7 @@ For each affected surface:
 Invoke `/review` for final comprehensive impartial review across all phases.
 
 **E. Converge (if needed)**
-If `/review` finds critical or important issues, invoke `/converge` to run the fix-review loop until clean.
+If `/review` finds critical or important issues, run the convergence loop (gates -> review -> fix -> repeat until 0 findings, max 5 cycles).
 
 **F. Final State Check**
 - Verify git log shows clean commit history with one commit per phase

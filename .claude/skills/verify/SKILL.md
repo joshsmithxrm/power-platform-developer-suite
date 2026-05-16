@@ -139,4 +139,4 @@ Exception: on FAIL, fix first, rerun `/verify`, then `/pr`.
 2. Screenshots for visual changes - look at them, don't just take them.
 3. Report actual values, not just pass/fail.
 4. Prerequisites are hard gates.
-5. Don't fix during verify - report problems for `/debug` or `/converge`.
+5. Don't fix during verify - report problems for `/debug`.
