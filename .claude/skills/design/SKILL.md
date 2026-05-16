@@ -93,8 +93,8 @@ When the design is approved:
 
 **A. Write the spec** to `specs/<name>.md` using the spec template. Include numbered ACs (Constitution I3). Preserve unchanged sections if updating.
 
-**B. Review the spec:** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
-
+**B. Review the spec (bias-isolated / design-fidelity):** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
+**B.2. Scope-conformance review:** see REFERENCE.md §9 for full protocol. Get issues (`workflow-state.py get issues`; skip if absent/empty), fetch body (`gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'`), spawn reviewer with issue body + spec. Block on `missing`/`reframed` items; worker revises spec or adds to `### Non-Goals` with rationale. Re-run B.2 after each revision (and re-run B if changes are substantial), until all items `covered` or `in-non-goals`.
 **C. Check inbox, then present:** Run `python scripts/supervisor_msg.py read --consume` — handle each message kind per REFERENCE.md §8. Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
 ### Step 4: Write Plan and Review
