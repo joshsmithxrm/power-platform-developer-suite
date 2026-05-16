@@ -5,6 +5,7 @@ delegate to these pure-ish functions instead of duplicating logic.
 """
 import json
 import os
+import re
 import subprocess
 import time
 from itertools import chain
@@ -174,7 +175,18 @@ def poll_gemini_review(worktree, pr_number, pr_created_at,
     return [], "timeout"
 
 
-def get_unreplied_comments(worktree, pr_number, shakedown=False):
+class UnrepliedQueryError(Exception):
+    """Raised by get_unreplied_comments when the GitHub query fails.
+
+    Distinguishes a legitimate empty result (all bot comments replied)
+    from an error path (network, subprocess, JSON decode). Callers that
+    must avoid fail-closed silent-skips should pass raise_on_error=True
+    and handle this exception (typically fail-open).
+    """
+
+
+def get_unreplied_comments(worktree, pr_number, shakedown=False,
+                           raise_on_error=False):
     """Return Gemini + CodeQL inline comments with no threaded reply.
 
     Fetches all inline comments (pulls/comments endpoint) and identifies
@@ -182,13 +194,18 @@ def get_unreplied_comments(worktree, pr_number, shakedown=False):
     that have no reply.  A reply is any comment whose in_reply_to_id matches
     the bot comment's id.
 
-    Returns: list of unreplied comment dicts, empty list on error or no comments.
+    Returns: list of unreplied comment dicts. On error: returns [] by default,
+    or raises UnrepliedQueryError if ``raise_on_error=True``. The raising
+    mode lets callers distinguish "all replied" from "query failed" so they
+    don't fail-closed (skip all replies) when GitHub is transiently unreachable.
     """
     if shakedown:
         return []
 
     repo = get_repo_slug(worktree, shakedown=shakedown)
     if not repo:
+        if raise_on_error:
+            raise UnrepliedQueryError("get_repo_slug returned None")
         return []
 
     try:
@@ -198,10 +215,17 @@ def get_unreplied_comments(worktree, pr_number, shakedown=False):
             cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         if result.returncode != 0:
+            if raise_on_error:
+                raise UnrepliedQueryError(
+                    f"gh api exited {result.returncode}: "
+                    f"{(result.stderr or '')[:200]}")
             return []
         comments = _flatten_paginate_slurp(json.loads(result.stdout))
     except (subprocess.TimeoutExpired, FileNotFoundError,
-            json.JSONDecodeError, OSError):
+            json.JSONDecodeError, OSError) as e:
+        if raise_on_error:
+            raise UnrepliedQueryError(
+                f"{type(e).__name__}: {str(e)[:200]}") from e
         return []
 
     bot_usernames = {GEMINI_BOT_LOGIN, CODEQL_BOT_LOGIN}
@@ -403,6 +427,16 @@ def format_reply_body(item):
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
+
+    # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
+    # triage agents sometimes emit, which would produce doubled phrasing like
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (issue #1096 style nit).
+    description = re.sub(
+        r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
 
     if action == "fixed" and commit_sha:
         return f"Fixed in {commit_sha} \u2014 {description}"

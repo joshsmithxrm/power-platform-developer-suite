@@ -18,6 +18,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from pathlib import Path
 
 from triage_common import (
     GEMINI_BOT_LOGIN,
+    UnrepliedQueryError,
     build_triage_prompt,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
@@ -798,6 +800,15 @@ def _reply_body_for(item):
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
+    # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
+    # triage agents sometimes emit, which would produce doubled phrasing like
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (issue #1096 style nit).
+    description = re.sub(
+        r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
     if action == "fixed" and commit_sha:
         return f"Fixed in {commit_sha} \u2014 {description}"
     if action == "dismissed":
@@ -808,9 +819,12 @@ def _reply_body_for(item):
 def post_replies(worktree, pr_number, triage_results, logger):
     """Post threaded replies to Gemini review comments.
 
-    Applies two guards before delegating to _post_replies_common:
+    Applies three guards before delegating to _post_replies_common:
       1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
       2. Dedupe on (pr, comment_id) (meta-retro #3; PR #864 hardening).
+      3. GitHub-side check via get_unreplied_comments (issue #1096) — skip
+         any comment_id that already has a threaded reply in GitHub's state,
+         preventing duplicates across monitor restarts or parallel actors.
 
     The dedupe key is recorded only after a successful POST event so
     transient failures (network, API timeout) don't permanently block
@@ -838,6 +852,30 @@ def post_replies(worktree, pr_number, triage_results, logger):
             _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
             continue
         filtered.append(item)
+
+    if not filtered:
+        return
+
+    # Fail-open on query error: if we can't ask GitHub whether replies exist,
+    # skip the cross-process filter rather than silently dropping every POST.
+    # In-process dedupe (above) + GitHub's own idempotency on reply threads
+    # remain as safety nets.
+    try:
+        unreplied = get_unreplied_comments(
+            worktree, pr_number, shakedown=bool(SHAKEDOWN),
+            raise_on_error=True,
+        )
+        unreplied_ids = {c["id"] for c in unreplied}
+        cross_process_filtered = []
+        for item in filtered:
+            cid = item.get("id")
+            if cid not in unreplied_ids:
+                _log_fn("SKIPPED_ALREADY_REPLIED", comment_id=cid, action=item.get("action", "unknown"))
+            else:
+                cross_process_filtered.append(item)
+        filtered = cross_process_filtered
+    except UnrepliedQueryError as e:
+        _log_fn("UNREPLIED_QUERY_FAILED_FAIL_OPEN", error=str(e)[:200])
 
     if not filtered:
         return
