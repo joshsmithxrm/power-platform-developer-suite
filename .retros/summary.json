@@ -1,13 +1,18 @@
 {
   "schema_version": 1,
   "last_updated": "2026-05-16",
-  "total_retros": 19,
+  "total_retros": 21,
   "findings_by_category": {
     "external": [
       {
         "date": "2026-03-27",
         "branch": "feat/investigation-skill",
         "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F4"
       }
     ],
     "tooling": [
@@ -160,6 +165,21 @@
         "date": "2026-05-16",
         "branch": "feat/1098-prompt-template",
         "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F1"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F2"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F5"
       }
     ],
     "design": [
@@ -244,6 +264,11 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F3"
       }
     ],
     "process": [
@@ -427,5 +452,12 @@
     "last_session_status": "rough",
     "last_session_branch": "fix/1122-subagent-hang",
     "last_session_pr": null
-  }
+  },
+  "notes": [
+    {
+      "date": "2026-05-16",
+      "branch": "feat/1069-supervisor-pattern",
+      "note": "Second consecutive failure-retro for the same root cause: gates verdict PASS + state.json gates.passed land correctly, but exit=-1 from STALL_TIMEOUT causes pipeline to misclassify the stage as failed. F1/F2 still open from prior retro at 10:36."
+    }
+  ]
 }
