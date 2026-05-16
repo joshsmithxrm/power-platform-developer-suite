@@ -101,6 +101,24 @@ When the AI needs a decision:
 
 If a recommendation is rejected, return with a different recommendation — not "here are the other options." The user should not weigh unweighted options.
 
+## 5a. Pause primitives by session type <!-- since: #1137 -->
+
+When a session needs to wait on a human decision, the right primitive
+depends on whether the session is interactive or background. Picking the
+wrong one is silent — the worker thinks it asked, but no human ever sees
+the question.
+
+| Session type | Pause primitive | Why |
+|--------------|-----------------|-----|
+| **Interactive** (operator at terminal) | `AskUserQuestion` | Synchronous, in-channel. Works as documented. |
+| **Background** (`claude --bg` / daemon-spawned worker) | `/await-operator` skill | `AskUserQuestion` does NOT block in `--bg` — the daemon auto-injects an answer within ~15-60s (Recommended option or implicit "Something else"). Smoking gun: PR #1105 filed unilaterally. |
+| **Pipeline (headless `claude -p` stage)** | Don't pause — fail or default | Pipeline stages must be deterministic. If a decision is genuinely needed, exit non-zero so the orchestrator escalates. `/await-operator` works here too but stalls the pipeline. |
+
+Resume mechanism for `/await-operator`: operator runs
+`/resume-with-answer <short> <choice>` (writes `.workflow/operator-answer.json`
++ clears daemon `state=blocked`). See `.claude/skills/await-operator/SKILL.md`
+and `.claude/skills/resume-with-answer/SKILL.md` for the full round-trip.
+
 ## 6. HTML artifacts vs. chat interaction
 
 **Chat interaction** (decisions, dialogue): ASCII + markdown only. No HTML, no forms, no browser detours. Chat is synchronous text.
