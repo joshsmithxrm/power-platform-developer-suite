@@ -15,11 +15,7 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
-### Step 0: Set Phase
-
-```bash
-python scripts/workflow-state.py set phase design
-```
+### Step 0: Set Phase — `python scripts/workflow-state.py set phase design`
 
 ### Step 1: Load Context and Search
 
@@ -107,6 +103,10 @@ When the design is approved:
 **B. Review the plan:** invoke `/review` — reviewer checks plan against spec ACs for gaps. Fix findings. Restore phase: `python scripts/workflow-state.py set phase design`
 
 **C. Present to user:** present plan with summary table, show review findings. Wait for approval.
+
+**Step 4.D — PR-Stack Decomposition (optional):** see REFERENCE.md §7. After approval, if phases are independently shippable (disjoint ACs + separate primary files), ask "Decompose into a PR stack? (yes/no)". On decline: skip to Step 5, no artifacts written. On accept: proceed to Step 4.E.
+
+**Step 4.E — Emit PR-Stack Artifacts:** write sub-plans `.plans/<date>-<name>-pr<N>.md`, append `## PR Stack` section to parent plan (columns: `files`, `size_estimate`), write `.plans/<date>-<name>-stack.json`, validate via `python scripts/pr_stack.py validate <path>` until exit 0. Proceed to Step 5.
 
 ### Step 5: Commit
 
