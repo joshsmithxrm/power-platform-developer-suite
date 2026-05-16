@@ -139,22 +139,49 @@ python scripts/goal_supervisor.py spawn <stack-json-path>
 
 1. Read and validate stack.json via `pr_stack.validate_envelope`.
 2. For each stack entry:
-   a. Compute `worktree_path` (`.worktrees/<entry.branch_suffix>` relative to repo root).
-   b. Create git worktree: `git worktree add <worktree_path> -b feat/<entry.branch_suffix>`.
-   c. Call `claude_dispatch.spawn(mode="interactive", name="worker-<id>", cwd=worktree_path, permission_mode="bypassPermissions", prompt=<worker_prompt>)`.
-   d. Record `session_short`, `session_id`, `worktree_path`, `spawned_at`, `goal_state="spawned"` on the entry.
-   e. Deliver initial inbox note via `supervisor_msg.send(worktree_path, "note", message=<goal_context>)`.
+   a. Compute worktree name from `entry.branch_suffix` (e.g., `pr-1`).
+   b. Create worktree via `python scripts/worktree-create.py --name <branch_suffix> --branch feat/<branch_suffix>` (runs from repo root). This script performs: `git fetch origin main`, stale-directory detection, `git worktree add`, and a post-create sanity check. Surface stderr and abort on non-zero.
+   c. Build worker prompt from `WORKER_PROMPT_TEMPLATE` (see below), writing to a temp file (same-directory atomic write via `tempfile` + `os.replace`).
+   d. Spawn via `python scripts/start-bg-spawn.py --worktree-abs <abs-worktree-path> --branch feat/<branch_suffix> --prompt-file <temp-path> --permission-mode bypassPermissions --model sonnet`. Parse single-line stdout JSON for `short` and `sessionId`.
+   e. Record `session_short`, `session_id`, `worktree_path`, `spawned_at`, `goal_state="spawned"` on the entry.
+   f. Deliver initial inbox note via `supervisor_msg.send(worktree_path, "note", message=<goal_context>)`.
+   g. Delete the temp prompt file.
 3. Write goal-envelope.json (v1.1) to `<supervisor_worktree>/.workflow/goal-envelope.json`.
 4. Print spawn result JSON to stdout (`{"spawned": N, "envelope": "<path>", "entries": [...]}`).
 5. Write errors to stderr; exit 0 on success, exit 1 on any spawn failure (remaining entries still attempted; failed entries get `goal_state="error"`).
 
-**Worker prompt template:**
+**Worker prompt template** (`WORKER_PROMPT_TEMPLATE`):
+
+The template embeds the standard workflow contract from `/start` Step 6b (so the worker follows the same protocol as any operator-started session), preceded by a task brief, and followed by a supervisor-specific note appended after the contract block.
+
 ```
-You are a PR stack worker for entry "{id}": {title}.
-Your worktree is at {worktree_path}. Your plan is at {plan}.
-Read your inbox first (python scripts/supervisor_msg.py read --consume).
-Then invoke /implement to start. After /pr completes, your work is done.
-Do not ask clarifying questions — make reasonable decisions and proceed.
+Task brief — PR stack worker
+Entry: {id} — {title}
+Worktree: {worktree_path}
+Spec: {spec}
+Plan: {plan}
+Branch: feat/{branch_suffix}
+Issues: {issue_numbers}
+
+You are running in headless mode via the goal supervisor. Do not ask
+clarifying questions — make reasonable decisions and proceed.
+
+Workflow contract:
+1. Read CLAUDE.md, specs/CONSTITUTION.md, .claude/interaction-patterns.md.
+2. This worker has a pre-approved plan ({plan}). Skip /design.
+   Run `python scripts/pipeline.py --spec {spec} --plan {plan}` directly.
+   On failure: python scripts/pipeline.py --resume (or --from <stage>).
+3. After `python scripts/pipeline.py` exits successfully (pipeline includes
+   /pr internally): launch pr_monitor via Bash run_in_background=true:
+     python scripts/pr_monitor.py --worktree {worktree_path} --pr <PR-number>
+   Claude Code will re-engage you when pr_monitor exits.
+4. At re-engagement: read .workflow/pr-monitor-result.json and produce a final
+   summary covering actual PR state (ready / merged / escalated / error /
+   blocked). Terminate.
+
+Supervisor note (read first, before any other action):
+  python scripts/supervisor_msg.py read --consume
+Goal context: {title}. Plan at {plan}. Implement and ship — no design phase needed.
 ```
 
 #### `poll` subcommand
@@ -307,6 +334,7 @@ This spec amends [specs/feat-1070-pr-stack-alpha.md](./feat-1070-pr-stack-alpha.
 | AC-16 | `.claude/skills/orchestrate/SKILL.md` documents that workers are independent and the supervisor crash does not prevent individual PR notifications | `TestOrchestrateSkill.test_skill_documents_crash_tolerance` | ❌ |
 | AC-17 | Smoke: a goal-envelope.json with 2 entries both having `goal_state="merged"` drives `goal_supervisor.py poll` to output `{"goal_state": "all_merged"}` | `TestGoalSupervisor.test_smoke_two_entry_all_merged` | ❌ |
 | AC-18 | Smoke: a goal-envelope.json with 1 entry having `goal_state="blocked"` and `blocked_needs="fix the layout"` drives `goal_supervisor.py poll` to output `{"goal_state": "escalated"}` | `TestGoalSupervisor.test_smoke_one_blocked` | ❌ |
+| AC-19 | Worker prompt template contains all workflow contract elements: (a) skip-design note referencing the pre-approved plan, (b) `pipeline.py --spec --plan` invocation, (c) `--resume` fallback, (d) `pr_monitor.py` via Bash `run_in_background=true`, (e) re-engagement reads `.workflow/pr-monitor-result.json` and terminates | `TestGoalSupervisor.test_worker_prompt_contains_workflow_contract` | ❌ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 
