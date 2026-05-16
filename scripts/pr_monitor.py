@@ -28,6 +28,7 @@ from pathlib import Path
 
 from triage_common import (
     GEMINI_BOT_LOGIN,
+    UnrepliedQueryError,
     build_triage_prompt,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
@@ -855,15 +856,26 @@ def post_replies(worktree, pr_number, triage_results, logger):
     if not filtered:
         return
 
-    unreplied_ids = {c["id"] for c in get_unreplied_comments(worktree, pr_number, shakedown=bool(SHAKEDOWN))}
-    cross_process_filtered = []
-    for item in filtered:
-        cid = item.get("id")
-        if cid not in unreplied_ids:
-            _log_fn("SKIPPED_ALREADY_REPLIED", comment_id=cid, action=item.get("action", "unknown"))
-        else:
-            cross_process_filtered.append(item)
-    filtered = cross_process_filtered
+    # Fail-open on query error: if we can't ask GitHub whether replies exist,
+    # skip the cross-process filter rather than silently dropping every POST.
+    # In-process dedupe (above) + GitHub's own idempotency on reply threads
+    # remain as safety nets.
+    try:
+        unreplied = get_unreplied_comments(
+            worktree, pr_number, shakedown=bool(SHAKEDOWN),
+            raise_on_error=True,
+        )
+        unreplied_ids = {c["id"] for c in unreplied}
+        cross_process_filtered = []
+        for item in filtered:
+            cid = item.get("id")
+            if cid not in unreplied_ids:
+                _log_fn("SKIPPED_ALREADY_REPLIED", comment_id=cid, action=item.get("action", "unknown"))
+            else:
+                cross_process_filtered.append(item)
+        filtered = cross_process_filtered
+    except UnrepliedQueryError as e:
+        _log_fn("UNREPLIED_QUERY_FAILED_FAIL_OPEN", error=str(e)[:200])
 
     if not filtered:
         return

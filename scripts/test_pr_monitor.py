@@ -228,6 +228,26 @@ class TestPostRepliesDedup(unittest.TestCase):
         self.assertEqual(skipped[1].get("comment_id"), 3251204411)
         self.assertEqual(skipped[1].get("action"), "fixed")
 
+    def test_fail_open_when_unreplied_query_errors(self):
+        """Gemini #1121: GH query error → fail-open (still POST), don't silently skip all."""
+        import pr_monitor
+        from triage_common import UnrepliedQueryError
+
+        triage_results = [{"id": 3251204411, "action": "fixed",
+                           "description": "Fixed it", "commit": "abc123"}]
+        logger = _FakeLogger()
+
+        with patch("pr_monitor.get_unreplied_comments",
+                   side_effect=UnrepliedQueryError("gh api exited 1: boom")), \
+             patch("pr_monitor._post_replies_common") as mock_post:
+            pr_monitor.post_replies("/worktree", 1094, triage_results, logger)
+
+        mock_post.assert_called_once()
+        events = [e[0][1] for e in logger.entries]
+        self.assertIn("UNREPLIED_QUERY_FAILED_FAIL_OPEN", events)
+        self.assertNotIn("SKIPPED_ALREADY_REPLIED", events,
+                         "Must not silently drop replies on query error")
+
     def test_posts_when_comment_unreplied(self):
         """AC: comment_id X not yet replied on GitHub → POST proceeds as before."""
         import pr_monitor
