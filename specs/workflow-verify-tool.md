@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Last Updated:** 2026-03-28
-**Code:** [scripts/verify-workflow.py](../scripts/verify-workflow.py), [scripts/verify_workflow_checks.py](../scripts/verify_workflow_checks.py)
+**Code:** [scripts/verify-workflow.py](../scripts/verify-workflow.py)
 **Surfaces:** N/A
 
 ---

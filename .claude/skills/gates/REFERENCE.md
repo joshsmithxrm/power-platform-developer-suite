@@ -13,7 +13,7 @@ mechanical correctness. Run gates first; never review code that does not compile
 ## §2 - File-locking recovery (.NET)
 
 If `dotnet build PPDS.sln` fails with "used by another process" errors (common
-when the daemon is running from debug output, or when ext-verify has VS Code
+when the daemon is running from debug output, or when extension verification has VS Code
 open), retry by building only the changed projects individually:
 
 ```bash
