@@ -520,23 +520,17 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
                       stage_log=None):
     """Invoke an agent profile via the dispatch router.
 
-    Wraps ``claude_dispatch.spawn`` so both interactive (``--bg``) and headless
-    (``-p``) modes share one entry point. Mode defaults to the value of
-    ``PPDS_DISPATCH_MODE`` (or ``"interactive"`` when unset). ``caller``
-    defaults to ``"triage_common.dispatch_subagent"`` for the spend-journal
-    audit row. Constitution A2: single code path.
+    Always uses headless mode (``claude -p``). The ``claude --bg`` daemon does
+    not reliably transition ``state=done`` after a single-turn session (#1122),
+    so interactive mode is not suitable for these single-shot dispatches.
+    ``caller`` defaults to ``"triage_common.dispatch_subagent"`` for the
+    spend-journal audit row. Constitution A2: single code path.
 
     The constructed prompt has three parts so the spawned session has enough
     context to act without the operator answering questions:
-      1. A directive forbidding clarifying questions (matches the pattern that
-         ``pr_monitor.run_triage`` already uses successfully).
-      2. The agent profile body, inlined from ``.claude/agents/<name>.md``
-         because interactive mode silently drops ``--agent`` (see #1086).
+      1. A directive forbidding clarifying questions.
+      2. The agent profile body, inlined from ``.claude/agents/<name>.md``.
       3. The JSON payload under a clear ``=== PAYLOAD ===`` marker.
-
-    ``permission_mode="bypassPermissions"`` is passed to ``spawn`` because the
-    subprocess is fully automated — permission prompts here would surface as
-    ``BlockedSessionError`` with no operator to respond.
 
     Args:
         profile_name: agent profile name (matches .claude/agents/<name>.md).
@@ -545,12 +539,11 @@ def dispatch_subagent(profile_name, payload, *, model="sonnet", worktree=".",
         worktree: working directory for the subprocess; also the root used
             to resolve the agent profile file.
         timeout: seconds before the process is killed (default 30 min).
-        mode: ``"interactive"`` / ``"headless"`` / ``None``. ``None`` defers
-            to ``claude_dispatch._resolve_mode``.
+        mode: accepted for signature compatibility but ignored — always headless.
         caller: identification string written to the spend journal. Defaults
             to ``"triage_common.dispatch_subagent"``.
-        stage_log: optional headless-mode stream-json path. When mode resolves
-            to headless and this is unset, a temp file is used.
+        stage_log: optional stream-json path. When unset, a temp file is used
+            and deleted after ``output()`` reads it.
 
     Returns:
         dict with keys: ``stdout`` (str), ``stderr`` (str), ``exit_code`` (int).

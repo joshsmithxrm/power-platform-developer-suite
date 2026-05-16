@@ -3,7 +3,7 @@
 **Status:** Draft
 **Last Updated:** 2026-05-16
 **Issue:** #1122 (epic #1066, Phase 2)
-**Code:** `scripts/pr_monitor.py` | `scripts/test_pr_monitor.py`
+**Code:** `scripts/pr_monitor.py` | `scripts/triage_common.py` | `scripts/test_pr_monitor.py`
 **Surfaces:** N/A (workflow tooling)
 
 ---
