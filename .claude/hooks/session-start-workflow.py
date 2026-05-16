@@ -71,6 +71,23 @@ def _cleanup_stale_shakedown_sentinel(project_dir):
             pass
 
 
+def _get_dirty_files(project_dir):
+    """Return git status --porcelain lines; always fresh, never from cached state."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return [line for line in result.stdout.strip().splitlines() if line.strip()]
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return []
+
+
 def main():
     # Pipeline mode: skip all git/state subprocess calls for efficiency.
     # The pipeline orchestrator provides its own context via HEADLESS_PREAMBLE.
@@ -198,6 +215,17 @@ def main():
         lines.append(f"  ✓ PR created: {pr['url']}")
     else:
         lines.append("  ⚠ PR not created")
+
+    # Working tree — always a fresh git status call, never from cached state
+    dirty = _get_dirty_files(project_dir)
+    if dirty:
+        lines.append(f"  ⚠ Working tree: {len(dirty)} uncommitted file(s)")
+        for entry in dirty[:5]:
+            lines.append(f"    {entry}")
+        if len(dirty) > 5:
+            lines.append(f"    ... (+{len(dirty) - 5} more)")
+    else:
+        lines.append("  ✓ Working tree clean")
 
     # Required steps
     missing = []
