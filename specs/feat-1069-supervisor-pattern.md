@@ -316,25 +316,25 @@ This spec amends [specs/feat-1070-pr-stack-alpha.md](./feat-1070-pr-stack-alpha.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `goal_supervisor.py spawn <valid-stack-json>` creates `<supervisor_worktree>/.workflow/goal-envelope.json` with `schema_version="1.1"` and all entries `goal_state="spawned"` | `TestGoalSupervisor.test_spawn_creates_envelope` | ❌ |
-| AC-02 | `goal_supervisor.py spawn` exits 1 with stderr message when stack.json fails `validate_envelope` | `TestGoalSupervisor.test_spawn_rejects_invalid_stack` | ❌ |
-| AC-03 | `goal_supervisor.py spawn` exits 1 with stderr message when stack.json has `schema_version` major != 1 | `TestGoalSupervisor.test_spawn_rejects_wrong_major` | ❌ |
-| AC-04 | `goal_supervisor.py poll` reads `goal-envelope.json`, updates `last_polled_at` for each non-merged entry, and writes the updated file | `TestGoalSupervisor.test_poll_updates_last_polled_at` | ❌ |
-| AC-05 | `goal_supervisor.py poll` sets overall `goal_state="all_merged"` and prints `{"goal_state": "all_merged"}` JSON to stdout when all entries have `goal_state="merged"` | `TestGoalSupervisor.test_poll_all_merged` | ❌ |
-| AC-06 | `goal_supervisor.py poll` sets entry `goal_state="blocked"` and `blocked_needs=<text>` when the worker's `state.json` has `state=blocked` and non-empty `needs` | `TestGoalSupervisor.test_poll_escalation_blocked` | ❌ |
-| AC-07 | `goal_supervisor.py poll` sets entry `goal_state="merged"` and `merged_at` when `gh pr view` returns `state=MERGED` | `TestGoalSupervisor.test_poll_merged_via_gh` | ❌ |
-| AC-08 | `goal_supervisor.py poll` sets entry `goal_state="error"` when the worker's `state.json` has `state=error` | `TestGoalSupervisor.test_poll_worker_error` | ❌ |
-| AC-09 | `goal_supervisor.py poll` does NOT escalate when `state=blocked` but `needs` is empty or whitespace-only | `TestGoalSupervisor.test_poll_no_escalation_empty_needs` | ❌ |
-| AC-10 | Haiku predicate template renders valid UTF-8 text containing the context fields; parsed Haiku response `{"verdict": "...", "confidence": "...", "reason": "..."}` drives entry `goal_state` | `TestGoalSupervisor.test_haiku_predicate_parses` | ❌ |
-| AC-11 | `goal_supervisor.py` writes all progress to stderr and all result JSON to stdout (Constitution I1) | `TestGoalSupervisor.test_stdout_discipline` | ❌ |
-| AC-12 | `goal_supervisor.py` uses stdlib only — no imports outside the stdlib or existing project scripts | `TestGoalSupervisor.test_no_extra_imports` | ❌ |
-| AC-13 | `pr_stack.validate_envelope` accepts a goal-envelope.json with `schema_version="1.1"` and v1.1 runtime fields without raising | `TestGoalSupervisorCompat.test_validate_v1_1_accepted` | ❌ |
-| AC-14 | `.claude/skills/orchestrate/SKILL.md` documents: spawn step calling `goal_supervisor.py spawn`, ScheduleWakeup at 270s, escalation via PushNotification + gh comment, termination when `all_merged` | `TestOrchestrateSkill.test_skill_documents_spawn` | ❌ |
-| AC-15 | `.claude/skills/orchestrate/SKILL.md` documents the single-signal escalation rule: `state=blocked AND needs != ""` | `TestOrchestrateSkill.test_skill_documents_escalation_rule` | ❌ |
-| AC-16 | `.claude/skills/orchestrate/SKILL.md` documents that workers are independent and the supervisor crash does not prevent individual PR notifications | `TestOrchestrateSkill.test_skill_documents_crash_tolerance` | ❌ |
-| AC-17 | Smoke: a goal-envelope.json with 2 entries both having `goal_state="merged"` drives `goal_supervisor.py poll` to output `{"goal_state": "all_merged"}` | `TestGoalSupervisor.test_smoke_two_entry_all_merged` | ❌ |
-| AC-18 | Smoke: a goal-envelope.json with 1 entry having `goal_state="blocked"` and `blocked_needs="fix the layout"` drives `goal_supervisor.py poll` to output `{"goal_state": "escalated"}` | `TestGoalSupervisor.test_smoke_one_blocked` | ❌ |
-| AC-19 | Worker prompt template contains all workflow contract elements: (a) skip-design note referencing the pre-approved plan, (b) `pipeline.py --spec --plan` invocation, (c) `--resume` fallback, (d) `pr_monitor.py` via Bash `run_in_background=true`, (e) re-engagement reads `.workflow/pr-monitor-result.json` and terminates | `TestGoalSupervisor.test_worker_prompt_contains_workflow_contract` | ❌ |
+| AC-01 | `goal_supervisor.py spawn <valid-stack-json>` creates `<supervisor_worktree>/.workflow/goal-envelope.json` with `schema_version="1.1"` and all entries `goal_state="spawned"` | `test_goal_supervisor.test_spawn_creates_envelope` | ✅ |
+| AC-02 | `goal_supervisor.py spawn` exits 1 with stderr message when stack.json fails `validate_envelope` | `test_goal_supervisor.test_spawn_rejects_invalid_stack` + `test_cli_spawn_invalid_stack_exits_1` | ✅ |
+| AC-03 | `goal_supervisor.py spawn` exits 1 with stderr message when stack.json has `schema_version` major != 1 | `test_goal_supervisor.test_spawn_rejects_wrong_major` | ✅ |
+| AC-04 | `goal_supervisor.py poll` reads `goal-envelope.json`, updates `last_polled_at` for each non-merged entry, and writes the updated file | `test_goal_supervisor.test_poll_updates_last_polled_at` | ✅ |
+| AC-05 | `goal_supervisor.py poll` sets overall `goal_state="all_merged"` and prints `{"goal_state": "all_merged"}` JSON to stdout when all entries have `goal_state="merged"` | `test_goal_supervisor.test_poll_all_merged` | ✅ |
+| AC-06 | `goal_supervisor.py poll` sets entry `goal_state="blocked"` and `blocked_needs=<text>` when the worker's `state.json` has `state=blocked` and non-empty `needs` | `test_goal_supervisor.test_poll_escalation_blocked` | ✅ |
+| AC-07 | `goal_supervisor.py poll` sets entry `goal_state="merged"` and `merged_at` when `gh pr view` returns `state=MERGED` | `test_goal_supervisor.test_poll_merged_via_gh` | ✅ |
+| AC-08 | `goal_supervisor.py poll` sets entry `goal_state="error"` when the worker's `state.json` has `state=error` | `test_goal_supervisor.test_poll_worker_error` | ✅ |
+| AC-09 | `goal_supervisor.py poll` does NOT escalate when `state=blocked` but `needs` is empty or whitespace-only | `test_goal_supervisor.test_poll_no_escalation_empty_needs` | ✅ |
+| AC-10 | Haiku predicate template renders valid UTF-8 text containing the context fields; parsed Haiku response `{"verdict": "...", "confidence": "...", "reason": "..."}` drives entry `goal_state` | `test_goal_supervisor.test_haiku_predicate_parses` + `test_haiku_parse_failure_marks_error` | ✅ |
+| AC-11 | `goal_supervisor.py` writes all progress to stderr and all result JSON to stdout (Constitution I1) | `test_goal_supervisor.test_stdout_discipline` | ✅ |
+| AC-12 | `goal_supervisor.py` uses stdlib only — no imports outside the stdlib or existing project scripts | `test_goal_supervisor.test_no_extra_imports` | ✅ |
+| AC-13 | `pr_stack.validate_envelope` accepts a goal-envelope.json with `schema_version="1.1"` and v1.1 runtime fields without raising | `test_goal_supervisor.TestGoalSupervisorCompat.test_validate_v1_1_accepted` | ✅ |
+| AC-14 | `.claude/skills/orchestrate/SKILL.md` documents: spawn step calling `goal_supervisor.py spawn`, ScheduleWakeup at 270s, escalation via PushNotification + gh comment, termination when `all_merged` | `test_goal_supervisor.TestOrchestrateSkill.test_skill_documents_spawn` | ✅ |
+| AC-15 | `.claude/skills/orchestrate/SKILL.md` documents the single-signal escalation rule: `state=blocked AND needs != ""` | `test_goal_supervisor.TestOrchestrateSkill.test_skill_documents_escalation_rule` | ✅ |
+| AC-16 | `.claude/skills/orchestrate/SKILL.md` documents that workers are independent and the supervisor crash does not prevent individual PR notifications | `test_goal_supervisor.TestOrchestrateSkill.test_skill_documents_crash_tolerance` | ✅ |
+| AC-17 | Smoke: a goal-envelope.json with 2 entries both having `goal_state="merged"` drives `goal_supervisor.py poll` to output `{"goal_state": "all_merged"}` | `test_goal_supervisor.test_smoke_two_entry_all_merged` | ✅ |
+| AC-18 | Smoke: a goal-envelope.json with 1 entry having `goal_state="blocked"` and `blocked_needs="fix the layout"` drives `goal_supervisor.py poll` to output `{"goal_state": "escalated"}` | `test_goal_supervisor.test_smoke_one_blocked` | ✅ |
+| AC-19 | Worker prompt template contains all workflow contract elements: (a) skip-design note referencing the pre-approved plan, (b) `pipeline.py --spec --plan` invocation, (c) `--resume` fallback, (d) `pr_monitor.py` via Bash `run_in_background=true`, (e) re-engagement reads `.workflow/pr-monitor-result.json` and terminates | `test_goal_supervisor.test_worker_prompt_contains_workflow_contract` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 
