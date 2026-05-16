@@ -296,6 +296,31 @@ def _read_job_state(short: str, jobs_dir: Path) -> dict:
         return {}
 
 
+def _tempo_blocked_signal(job_state_data: dict) -> tuple[bool, str]:
+    """Detect the tempo=blocked / block.questions shape (#1138).
+
+    Returns ``(True, needs_text)`` when state.json indicates a bg/headless
+    worker is paused on an accidental ``AskUserQuestion`` call (state stays
+    ``working`` but ``tempo`` flips to ``blocked`` and ``block.questions``
+    is populated). ``needs_text`` is the daemon-written ``needs`` field
+    when present, else a synthesized "answer: <question> (<labels>)" line.
+    """
+    if (job_state_data.get("tempo") or "").strip() != "blocked":
+        return False, ""
+    block = job_state_data.get("block")
+    if not isinstance(block, dict):
+        return False, ""
+    questions = block.get("questions")
+    if not isinstance(questions, list) or not questions:
+        return False, ""
+    written = (job_state_data.get("needs") or "").strip()
+    if written:
+        return True, written
+    # Defer to claude_dispatch so both readers render identical text.
+    import claude_dispatch  # noqa: PLC0415  (lazy: avoids heavier init)
+    return True, claude_dispatch.synthesize_needs_from_questions(questions)
+
+
 # ---------------------------------------------------------------------------
 # spawn
 # ---------------------------------------------------------------------------
@@ -502,6 +527,17 @@ def _evaluate_entry(
     job_state_data = _read_job_state(short, jobs_dir) if short else {}
     session_state = (job_state_data.get("state") or "").strip()
     needs = (job_state_data.get("needs") or "").strip()
+
+    # Defense-in-depth (#1138): an accidental AskUserQuestion from a
+    # bg/headless worker leaves state="working" but flips tempo="blocked"
+    # with block.questions populated. The daemon auto-injects an answer
+    # in 15-60s, so promote to blocked here to escalate within one poll
+    # interval. Workers should use Skill(skill='await-operator', ...).
+    tempo_blocked, tempo_needs = _tempo_blocked_signal(job_state_data)
+    if tempo_blocked:
+        session_state = "blocked"
+        if not needs:
+            needs = tempo_needs
 
     workflow_data = workflow_state_reader(entry.get("worktree_path", "")) or {}
     pr_url = workflow_data.get("pr", {}).get("url") if isinstance(workflow_data.get("pr"), dict) else workflow_data.get("pr_url")

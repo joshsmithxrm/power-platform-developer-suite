@@ -565,6 +565,125 @@ def test_bg_handle_wait_runs_claude_stop_on_blocked(monkeypatch, tmp_path):
     assert ["claude", "stop", "abc12345"] in captured
 
 
+# ---------------------------------------------------------------------------
+# AC-PAUSE-2/3 (#1138): detect accidental AskUserQuestion via tempo=blocked.
+# Workers must use Skill(skill='await-operator', ...) (#1137); this is
+# defense in depth — supervisor catches mis-use within one polling interval
+# (before the ~15-60s daemon auto-answer window closes).
+# ---------------------------------------------------------------------------
+
+_TEMPO_BLOCK_PAYLOAD = {
+    "sessionId": "s1", "cwd": "/x", "state": "working", "tempo": "blocked",
+    "needs": "answer: Which color? (Blue (Recommended) · Red · Green)",
+    "block": {"questions": [{
+        "question": "Which color?",
+        "options": [
+            {"label": "Blue (Recommended)"},
+            {"label": "Red"},
+            {"label": "Green"},
+        ],
+    }]},
+}
+
+
+@pytest.mark.parametrize("state_value", ["working", "done"])
+def test_bg_handle_poll_tempo_blocked_with_questions(tmp_path, state_value):
+    """Defense-in-depth: tempo=blocked + block.questions promotes any
+    non-blocked top-level state to "blocked"."""
+    payload = dict(_TEMPO_BLOCK_PAYLOAD)
+    payload["state"] = state_value
+    payload["linkScanPath"] = str(tmp_path / "tr.jsonl")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    assert h.poll() == "blocked"
+
+
+def test_bg_handle_poll_ignores_tempo_block_when_questions_empty(tmp_path):
+    """tempo=blocked with empty block.questions is a transient daemon
+    flip, not an AskUserQuestion call — do not escalate."""
+    payload = {
+        "sessionId": "s1", "cwd": "/x", "state": "working", "tempo": "blocked",
+        "block": {"questions": []},
+        "linkScanPath": str(tmp_path / "tr.jsonl"),
+    }
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    assert h.poll() == "working"
+
+
+def test_bg_handle_needs_synthesizes_from_block_questions(tmp_path):
+    """When the daemon-written `needs` is empty but block.questions is
+    set, BgHandle.needs() synthesizes "answer: <question> (<labels>)"."""
+    payload = {
+        "sessionId": "s1", "cwd": "/x", "state": "working", "tempo": "blocked",
+        "block": {"questions": [{
+            "question": "Ship it?",
+            "options": [{"label": "Yes"}, {"label": "No"}],
+        }]},
+        "linkScanPath": str(tmp_path / "tr.jsonl"),
+    }
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    assert h.needs() == "answer: Ship it? (Yes · No)"
+
+
+def test_bg_handle_wait_raises_on_tempo_blocked(monkeypatch, tmp_path):
+    """AC-PAUSE-3 smoke: a tempo=blocked state.json (the shape an
+    accidental bg AskUserQuestion call produces) drives wait() to raise
+    BlockedSessionError carrying the question payload, within one poll
+    interval — before the daemon's auto-answer fires."""
+    payload = dict(_TEMPO_BLOCK_PAYLOAD)
+    payload["linkScanPath"] = str(tmp_path / "tr.jsonl")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: CompletedProcess([], 0, "", ""))
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    with pytest.raises(BlockedSessionError) as exc_info:
+        h.wait(timeout=1)
+    err = exc_info.value
+    assert err.short == "abc12345"
+    assert "Which color?" in err.needs
+    assert "Blue (Recommended)" in err.needs
+
+
+def test_bg_handle_wait_synthesizes_needs_when_daemon_field_empty(
+    monkeypatch, tmp_path
+):
+    """Even if the daemon hasn't filled in the `needs` field, the
+    synthesized text from block.questions is enough to escalate (not
+    treated as a transient flip)."""
+    payload = {
+        "sessionId": "s1", "cwd": "/x", "state": "working", "tempo": "blocked",
+        "block": {"questions": [{
+            "question": "Proceed?",
+            "options": [{"label": "Yes"}, {"label": "No"}],
+        }]},
+        "linkScanPath": str(tmp_path / "tr.jsonl"),
+    }
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: CompletedProcess([], 0, "", ""))
+    h = BgHandle(short="abc12345", session_id="s1",
+                 state_path=state_path,
+                 transcript_path=tmp_path / "tr.jsonl")
+    with pytest.raises(BlockedSessionError) as exc_info:
+        h.wait(timeout=1)
+    assert "Proceed?" in exc_info.value.needs
+
+
 def test_bg_handle_wait_returns_zero_on_done(tmp_path):
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({
