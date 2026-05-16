@@ -119,7 +119,7 @@ Result is a JSON array, e.g. `[1113]`. Skip Step 3.B.2 entirely if the output is
 For each issue N in the array:
 
 ```bash
-gh issue view <N> --json title,body --jq '"# Issue #\(.) — " + .title + "\n\n" + .body'
+gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'
 ```
 
 ### 3. Spawn the Reviewer
@@ -167,7 +167,7 @@ Do not fix anything. Do not suggest improvements. Enumerate and classify only.
 2. Block — do not proceed to Step 3.C.
 3. For each `missing` item: worker must add a spec AC that covers it.
 4. For each `reframed` item: worker must either (a) align the spec with the issue's original intent, or (b) add the item to `### Non-Goals` with a rationale explaining why the reframing is acceptable.
-5. After revisions: re-run Step 3.B.2 only (not Step 3.B) — re-read the updated spec and re-spawn the reviewer.
+5. After revisions: re-run Step 3.B.2 (and re-run Step 3.B if changes are substantial) — re-read the updated spec and re-spawn the reviewer.
 6. Repeat until all items are `covered` or `in-non-goals`.
 
 **If Missing = 0 and Reframed = 0:** all items are covered or explicitly out-of-scope. Proceed to Step 3.C.
