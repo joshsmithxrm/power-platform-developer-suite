@@ -234,7 +234,7 @@ public static class TimelineCommand
         }
         sb.Append($" ({durationStr}) {statusIcon}");
 
-        Console.WriteLine(sb.ToString());
+        Console.WriteLine(sb);
 
         // If there's an exception, show a truncated message
         if (trace.HasException)
