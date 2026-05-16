@@ -536,7 +536,7 @@ def _evaluate_entry(
                 entry["goal_state"] = "error"
                 entry["error"] = "haiku predicate parse failure"
                 return
-            if verdict in VALID_ENTRY_GOAL_STATES:
+            if verdict in ("blocked", "working", "error"):
                 entry["goal_state"] = verdict
             elif verdict == "done":
                 # Haiku said done but no PR — treat as error.
