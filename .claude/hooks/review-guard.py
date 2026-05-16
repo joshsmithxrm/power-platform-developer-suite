@@ -47,7 +47,7 @@ def main() -> None:
     if review.get("findings") and not review.get("passed"):
         print(
             "BLOCKED: You are in a review cycle. Fix the finding, don't file an issue.\n"
-            "  Use /converge to fix review findings.",
+            "  Fix review findings and re-run /review until clean.",
             file=sys.stderr,
         )
         sys.exit(2)

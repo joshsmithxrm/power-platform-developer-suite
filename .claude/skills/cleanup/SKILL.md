@@ -15,6 +15,7 @@ Phases: PARSE → PULL+PRE-SCAN → GATHER → CLASSIFY → BUCKET → APPROVE-S
 
 - `/cleanup` — all phases
 - `/cleanup --dry-run` — run reads + the bulk-approval prompt; skip destructive commands
+- `/cleanup --reset` — delete workflow state for the current branch: `python scripts/workflow-state.py delete`. Skips all other phases.
 
 ## 2. Pull main + pre-scan mid-rebase
 
