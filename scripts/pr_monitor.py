@@ -1173,20 +1173,148 @@ def _deregister_inflight(worktree, logger):
                    branch=branch, error=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Escalation visibility block (#1088)
+# ---------------------------------------------------------------------------
+
+_ESCALATION_LOG_TAIL_LINES = 25
+_ESCALATION_LABEL = "status:monitor-escalated"
+
+
+def _read_log_tail(log_path, lines=_ESCALATION_LOG_TAIL_LINES):
+    """Return the last N lines of the monitor log as a string."""
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        return "".join(all_lines[-lines:])
+    except OSError:
+        return ""
+
+
+def _post_escalation_comment(worktree, pr_number, terminal_state, log_path, logger):
+    """Post a GitHub PR comment with reason + log tail on any non-clean exit."""
+    if SHAKEDOWN:
+        logger.log("escalation", "COMMENT_SKIPPED_SHAKEDOWN")
+        return
+    log_tail = _read_log_tail(log_path)
+    body = (
+        f":warning: **pr_monitor escalated: `{terminal_state}`**\n\n"
+        f"The background PR monitor exited non-cleanly. "
+        f"Operator attention is needed.\n\n"
+        f"<details><summary>Monitor log (last {_ESCALATION_LOG_TAIL_LINES} lines)"
+        f"</summary>\n\n```\n{log_tail.strip()}\n```\n</details>\n\n"
+        f"Log file: `.workflow/pr-monitor.log`"
+    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "comment", str(pr_number), "--body", body],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        logger.log("escalation", "COMMENT_POSTED",
+                   pr=pr_number, rc=result.returncode)
+        if result.returncode != 0:
+            logger.log("escalation", "COMMENT_ERROR",
+                       stderr=result.stderr.strip()[:200])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "COMMENT_ERROR", error=str(e))
+
+
+def _add_escalation_label(worktree, pr_number, logger):
+    """Add 'status:monitor-escalated' label to the PR, creating it if needed."""
+    if SHAKEDOWN:
+        logger.log("escalation", "LABEL_SKIPPED_SHAKEDOWN")
+        return
+    # Create label if missing; --force updates it if it already exists.
+    try:
+        subprocess.run(
+            ["gh", "label", "create", _ESCALATION_LABEL,
+             "--color", "B60205",
+             "--description", "pr_monitor exited non-cleanly; operator attention needed",
+             "--force"],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "edit", str(pr_number), "--add-label", _ESCALATION_LABEL],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+        )
+        logger.log("escalation", "LABEL_ADDED",
+                   pr=pr_number, label=_ESCALATION_LABEL, rc=result.returncode)
+        if result.returncode != 0:
+            logger.log("escalation", "LABEL_ERROR",
+                       stderr=result.stderr.strip()[:200])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "LABEL_ERROR", error=str(e))
+
+
+def _set_terminal_state_marker(worktree, terminal_state, reason, logger):
+    """Write pr_monitor.terminal_state marker to .workflow/state.json."""
+    state_path = os.path.join(worktree, ".workflow", "state.json")
+    try:
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            state = {}
+        pm = state.setdefault("pr_monitor", {})
+        pm["terminal_state"] = terminal_state
+        pm["timestamp"] = _timestamp()
+        pm["reason"] = (reason or "")[:500]
+        os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.write("\n")
+        logger.log("escalation", "STATE_MARKER_SET", terminal_state=terminal_state)
+    except OSError as e:
+        logger.log("escalation", "STATE_MARKER_ERROR", error=str(e))
+
+
 def _notify_terminal(worktree, pr_number, logger, message):
-    """Best-effort notification on any terminal non-success state.
+    """Best-effort notification + escalation visibility on any non-clean exit.
 
-    Wraps ``run_notify`` in a try/except so a notify failure cannot
-    cascade into the monitor's own error path. Keeps the user informed
-    when the monitor aborts (CI fail, CI timeout, exception) — previously
-    only the clean-success path fired a notification, so crashes were
-    invisible until the user happened to check the PR.
+    Four actions (AC from #1088):
+      1. Set pr_monitor.terminal_state marker in .workflow/state.json
+      2. Post GitHub PR comment with reason + log tail
+      3. Add 'status:monitor-escalated' label to the PR
+      4. Fire platform notification (toast)
 
-    Also deregisters the worktree's branch from the in-flight registry
-    (AC-178) so terminal states clean up automatically without waiting
-    for `gh pr merge` or manual `/cleanup`.
+    All actions are fire-and-forget — failures are logged but never cascade.
+    Also deregisters the worktree's branch from the in-flight registry (AC-178).
     """
     _deregister_inflight(worktree, logger)
+
+    # Parse terminal state from message first line ("PR #N: <terminal_state>")
+    terminal_state = "error"
+    first_line = (message or "").split("\n")[0]
+    if ": " in first_line:
+        terminal_state = first_line.split(": ", 1)[-1].strip()
+
+    log_path = os.path.join(worktree, ".workflow", "pr-monitor.log")
+
+    # Action 1: state marker
+    try:
+        _set_terminal_state_marker(worktree, terminal_state, message, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 2: GitHub PR comment
+    try:
+        _post_escalation_comment(worktree, pr_number, terminal_state, log_path, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 3: PR label
+    try:
+        _add_escalation_label(worktree, pr_number, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 4: platform notification
     try:
         run_notify(worktree, pr_number, logger, message=message)
     except Exception as notify_err:  # noqa: BLE001 — best-effort

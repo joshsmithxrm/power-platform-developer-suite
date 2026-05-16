@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Unit tests for pr_monitor.py model routing.
+"""Unit tests for pr_monitor.py model routing and escalation visibility.
 
 Usage:
     python -m unittest scripts.test_pr_monitor
     python -m pytest scripts/test_pr_monitor.py
 """
 import io
+import json
 import os
 import sys
 import tempfile
@@ -294,6 +295,178 @@ class TestPostRepliesDedup(unittest.TestCase):
                 "description": "Updated the config file"}
         body = pr_monitor._reply_body_for(item)
         self.assertEqual(body, "Fixed in abc123 — Updated the config file")
+
+
+class TestEscalationVisibility(unittest.TestCase):
+    """#1088: non-clean exits must post comment + set state marker + add label + notify."""
+
+    def _make_fake_run(self, calls):
+        def _fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = ""
+            m.stderr = ""
+            return m
+        return _fake_run
+
+    def test_post_escalation_comment_calls_gh(self):
+        """_post_escalation_comment must invoke gh pr comment on non-clean exit."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            calls = []
+
+            with patch("pr_monitor.subprocess.run", side_effect=self._make_fake_run(calls)), \
+                 patch("pr_monitor.SHAKEDOWN", ""):
+                pr_monitor._post_escalation_comment(
+                    worktree, 42, "stuck-ci-fix-exhausted",
+                    os.path.join(worktree, ".workflow", "pr-monitor.log"),
+                    logger,
+                )
+
+            comment_calls = [c for c in calls if "comment" in c]
+            self.assertTrue(comment_calls,
+                            "gh pr comment must be invoked on non-clean exit")
+            self.assertTrue(
+                any("42" in c for c in comment_calls),
+                "gh pr comment must target the correct PR number"
+            )
+
+    def test_add_escalation_label_calls_gh(self):
+        """_add_escalation_label must add status:monitor-escalated label."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            calls = []
+
+            with patch("pr_monitor.subprocess.run", side_effect=self._make_fake_run(calls)), \
+                 patch("pr_monitor.SHAKEDOWN", ""):
+                pr_monitor._add_escalation_label(worktree, 42, logger)
+
+            add_label_calls = [c for c in calls if "--add-label" in c]
+            self.assertTrue(add_label_calls, "gh pr edit --add-label must be called")
+            self.assertTrue(
+                any("status:monitor-escalated" in " ".join(c) for c in add_label_calls),
+                "label 'status:monitor-escalated' must be added to the PR"
+            )
+
+    def test_set_terminal_state_marker_writes_state(self):
+        """_set_terminal_state_marker must write pr_monitor.terminal_state to state.json."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+
+            pr_monitor._set_terminal_state_marker(
+                worktree, "stuck-ci-fix-exhausted", "PR #42: stuck-ci-fix-exhausted", logger
+            )
+
+            state_path = os.path.join(worktree, ".workflow", "state.json")
+            self.assertTrue(os.path.exists(state_path), "state.json must be written")
+            with open(state_path, encoding="utf-8") as f:
+                state = json.load(f)
+            pm = state.get("pr_monitor", {})
+            self.assertEqual(pm.get("terminal_state"), "stuck-ci-fix-exhausted",
+                             "terminal_state must be recorded")
+            self.assertIn("timestamp", pm, "timestamp must be recorded")
+            self.assertIn("reason", pm, "reason must be recorded")
+
+    def test_set_terminal_state_marker_preserves_existing_state(self):
+        """_set_terminal_state_marker must not clobber existing state.json keys."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            state_path = os.path.join(worktree, ".workflow", "state.json")
+            # Write pre-existing state
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump({"branch": "feat/test", "pr": {"url": "https://x"}}, f)
+
+            pr_monitor._set_terminal_state_marker(
+                worktree, "monitor-crash", "crash msg", logger
+            )
+
+            with open(state_path, encoding="utf-8") as f:
+                state = json.load(f)
+            self.assertEqual(state.get("branch"), "feat/test",
+                             "existing keys must be preserved")
+            self.assertEqual(state["pr_monitor"]["terminal_state"], "monitor-crash")
+
+    def test_notify_terminal_all_four_actions_fire(self):
+        """_notify_terminal must invoke all 4 escalation actions in order."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            actions = []
+
+            with patch("pr_monitor._deregister_inflight",
+                       side_effect=lambda *a, **k: None), \
+                 patch("pr_monitor._set_terminal_state_marker",
+                       side_effect=lambda *a, **k: actions.append("state_marker")), \
+                 patch("pr_monitor._post_escalation_comment",
+                       side_effect=lambda *a, **k: actions.append("comment")), \
+                 patch("pr_monitor._add_escalation_label",
+                       side_effect=lambda *a, **k: actions.append("label")), \
+                 patch("pr_monitor.run_notify",
+                       side_effect=lambda *a, **k: actions.append("notify")):
+                pr_monitor._notify_terminal(
+                    worktree, 42, logger,
+                    "PR #42: stuck-ci-fix-exhausted\n  CI: fail"
+                )
+
+        self.assertIn("state_marker", actions, "Action 1: state marker must be set")
+        self.assertIn("comment", actions, "Action 2: GitHub comment must be posted")
+        self.assertIn("label", actions, "Action 3: label must be added")
+        self.assertIn("notify", actions, "Action 4: platform notification must fire")
+
+    def test_clean_exit_no_escalation_comment(self):
+        """Clean exit path (_step_notify) must not invoke _post_escalation_comment."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            escalation_called = []
+
+            with patch("pr_monitor._post_escalation_comment",
+                       side_effect=lambda *a, **k: escalation_called.append(True)), \
+                 patch("pr_monitor.run_notify",
+                       side_effect=lambda *a, **k: None):
+                pr_monitor._step_notify(worktree, 42, logger, {"status": "ready"})
+
+            self.assertFalse(escalation_called,
+                             "Clean exit must not call _post_escalation_comment")
+
+    def test_escalation_skipped_in_shakedown(self):
+        """Escalation actions must be no-ops in shakedown mode."""
+        import pr_monitor
+
+        with tempfile.TemporaryDirectory() as worktree:
+            os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+            logger = _FakeLogger()
+            calls = []
+
+            with patch("pr_monitor.subprocess.run",
+                       side_effect=self._make_fake_run(calls)), \
+                 patch("pr_monitor.SHAKEDOWN", "1"):
+                pr_monitor._post_escalation_comment(
+                    worktree, 42, "stuck-ci-fix-exhausted",
+                    os.path.join(worktree, ".workflow", "pr-monitor.log"),
+                    logger,
+                )
+                pr_monitor._add_escalation_label(worktree, 42, logger)
+
+            self.assertFalse(calls,
+                             "No gh calls must be made in shakedown mode")
 
 
 if __name__ == "__main__":
