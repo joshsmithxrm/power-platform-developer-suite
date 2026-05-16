@@ -147,6 +147,117 @@ def test_permission_mode_passthrough(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# AC-01 (#1098): --model flag in argv when set
+# ---------------------------------------------------------------------------
+
+def _make_fake_run_with_bg(state_dir, cwd_norm):
+    def fake_run(argv, **kw):
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    return fake_run
+
+
+def _prepare_jobs_fixture(tmp_path):
+    fake_jobs = tmp_path / "jobs"
+    fake_jobs.mkdir()
+    sd = fake_jobs / "abc12345"
+    sd.mkdir()
+    (sd / "state.json").write_text(
+        json.dumps({
+            "sessionId": "abc12345-0000-0000-0000-000000000000",
+            "cwd": str(tmp_path).replace("\\", "/"),
+        }),
+        encoding="utf-8",
+    )
+    return fake_jobs
+
+
+def test_spawn_with_model_flag_in_argv(monkeypatch, tmp_path):
+    """AC-01 (#1098): spawn(model='sonnet') threads ['--model', 'sonnet'] before '--bg'."""
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+
+    fake_jobs = _prepare_jobs_fixture(tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs,
+        model="sonnet",
+    )
+    bg_call = next(c for c in calls if "--bg" in c)
+    assert "--model" in bg_call
+    model_idx = bg_call.index("--model")
+    assert bg_call[model_idx + 1] == "sonnet"
+    assert model_idx < bg_call.index("--bg"), \
+        f"AC-01: --model must appear before --bg; got {bg_call}"
+
+
+def test_spawn_without_model_flag_in_argv(monkeypatch, tmp_path):
+    """AC-02 (#1098): no --model flag in argv when model arg omitted (negative case for AC-01)."""
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+
+    fake_jobs = _prepare_jobs_fixture(tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(worktree_abs=str(tmp_path), branch="feat/x", prompt="hi", jobs_dir=fake_jobs)
+    bg_call = next(c for c in calls if "--bg" in c)
+    assert "--model" not in bg_call, \
+        f"AC-02: --model must be absent when not requested; got {bg_call}"
+
+
+def test_spawn_model_and_permission_mode_order(monkeypatch, tmp_path):
+    """AC-03 (#1098): with both flags, order is --permission-mode < --model < --bg."""
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if argv == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.140 (Claude Code)\n", "")
+        if argv[0] == "claude" and "--bg" in argv:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+
+    fake_jobs = _prepare_jobs_fixture(tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(
+        worktree_abs=str(tmp_path),
+        branch="feat/x",
+        prompt="hi",
+        jobs_dir=fake_jobs,
+        permission_mode="bypassPermissions",
+        model="haiku",
+    )
+    bg_call = next(c for c in calls if "--bg" in c)
+    pm_idx = bg_call.index("--permission-mode")
+    model_idx = bg_call.index("--model")
+    bg_idx = bg_call.index("--bg")
+    assert pm_idx < model_idx < bg_idx, \
+        f"AC-03: order must be --permission-mode < --model < --bg; got {bg_call}"
+
+
+# ---------------------------------------------------------------------------
 # AC-03: banner parser, plain and ANSI
 # ---------------------------------------------------------------------------
 
