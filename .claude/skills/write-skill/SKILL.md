@@ -97,7 +97,7 @@ For reference, PPDS skills fall into these categories:
 |----------|----------|-----------------|
 | **Workflow orchestration** | /design, /implement, /pr, /gates, /qa, /review | Yes |
 | **Verification tools** | /verify, /shakedown | Yes |
-| **Surface knowledge** | /verify (Â§ext, Â§tui, Â§mcp, Â§cli in REFERENCE.md) | AI-loaded |
+| **Surface knowledge** | /verify (§ext, §tui, §mcp, §cli in REFERENCE.md) | AI-loaded |
 | **Development guides** | /ext-panels, /write-skill | AI-loaded |
 | **Analysis** | /retro, /debug, /status | Yes |
 
