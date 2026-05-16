@@ -105,6 +105,7 @@ TERMINAL_STATES = (
     "stuck-uncommitted-triage",
     "stuck-dirty-worktree-on-ready-flip",
     "ci-timeout",
+    "gemini-timeout",
     "monitor-crash",
 )
 
@@ -210,7 +211,7 @@ class _GeminiTimeoutError(Exception):
 
     Propagated up to run_monitor to trigger the #1088 escalation block and
     return exit code 1, preventing _step_notify from firing a duplicate
-    notification after _notify_terminal already ran inside _step_ready.
+    notification after _notify_terminal runs in run_monitor's exception handler.
     """
 
 
@@ -2092,7 +2093,10 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
         logger.log("monitor", "ABORT", reason="gemini_review_not_posted")
         _notify_terminal(
             worktree, pr_number, logger,
-            f"PR #{pr_number}: gemini_review_not_posted",
+            _build_terminal_notification(
+                pr_number, "gemini-timeout", result,
+                ci_fix_rounds_used, triage_rounds_used, worktree
+            )
         )
         logger.close()
         return 1
