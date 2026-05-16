@@ -402,6 +402,48 @@ class TestRunStack:
         # Dry-run exits 0 per spec §Primary Flows §Dry run step 4.
         assert rc == 0
 
+    def test_stdout_discipline_subprocess_path(self, tmp_path, monkeypatch):
+        # AC-16: even on the subprocess.run path (pipeline_runner=None), child
+        # stdout must be routed away from parent stdout. Verify the kwargs
+        # passed to subprocess.run redirect stdout off the parent's stdout
+        # stream — defends against a child that violates discipline.
+        import pipeline as pipeline_mod
+
+        _envelope, stack_path = self._setup(tmp_path, n=1)
+
+        captured_kwargs = {}
+
+        class _FakeProc:
+            returncode = 0
+
+        def fake_run(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return _FakeProc()
+
+        monkeypatch.setattr(pipeline_mod.subprocess, "run", fake_run)
+
+        creator, _ = _stub_creator_factory()
+        rebaser, _ = _stub_rebaser_factory()
+
+        # pipeline_runner=None forces the subprocess.run branch at run_stack.
+        run_stack(
+            str(stack_path), repo_root=str(tmp_path), worktree_path=str(tmp_path),
+            pipeline_runner=None,
+            gh_runner=lambda n: "MERGED",
+            worktree_creator=creator, rebaser=rebaser, merge_wait_sec=5,
+        )
+
+        # Child stdout must NOT inherit the parent's stdout (which is
+        # reserved for data per CLAUDE.md NEVER #2). Redirecting to
+        # sys.stderr or a captured pipe both satisfy the constraint;
+        # the default (None → inherit) does not.
+        assert "stdout" in captured_kwargs, \
+            "subprocess.run must explicitly redirect child stdout"
+        assert captured_kwargs["stdout"] is not None, \
+            "child stdout must not inherit parent stdout"
+        assert captured_kwargs["stdout"] is not sys.stdout, \
+            "child stdout must not write to parent stdout"
+
     def test_skips_transitive_dependents(self, tmp_path):
         # AC-17: depends_on a skipped entry → also skipped (transitive).
         envelope = _valid_envelope(n=4)

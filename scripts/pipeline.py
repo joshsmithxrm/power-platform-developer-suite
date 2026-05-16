@@ -579,6 +579,9 @@ def wait_for_merge(worktree_path, pr_number, timeout_sec=3600, *,
         gh_runner = _default_gh_runner
 
     start = time.time()
+    # Suppress repeat log lines for the same state to avoid spam on
+    # persistent network errors or long-OPEN windows. Log on transitions only.
+    last_logged_state = None
     while True:
         elapsed = time.time() - start
         if elapsed > timeout_sec:
@@ -597,8 +600,10 @@ def wait_for_merge(worktree_path, pr_number, timeout_sec=3600, *,
             print(f"[wait_for_merge] PR #{pr_number} CLOSED (not merged); abandoning",
                   file=sys.stderr)
             return False
-        print(f"[wait_for_merge] PR #{pr_number} state={state or 'UNKNOWN'}; "
-              f"sleeping {poll_interval}s", file=sys.stderr)
+        if state != last_logged_state:
+            print(f"[wait_for_merge] PR #{pr_number} state={state or 'UNKNOWN'}; "
+                  f"polling every {poll_interval}s", file=sys.stderr)
+            last_logged_state = state
         # Sleep up to poll_interval, but never past the deadline.
         remaining = timeout_sec - (time.time() - start)
         if remaining <= 0:
@@ -747,18 +752,22 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             started_at, completed_at=None,
         )
 
-        failed_ids = set()
+        # Gate set: ids in failed or skipped states (used to short-circuit
+        # downstream entries via depends_on). Name reflects both populations.
+        failed_or_skipped_ids = set()
 
         for entry in ordered:
             eid = entry["id"]
             st = entry_states[eid]
 
             # Gate: any failed/skipped dependency → skip this entry.
-            depends_failed = [d for d in entry.get("depends_on", []) if d in failed_ids]
+            depends_failed = [
+                d for d in entry.get("depends_on", []) if d in failed_or_skipped_ids
+            ]
             if depends_failed:
                 st["status"] = "skipped"
                 st["completed_at"] = timestamp()
-                failed_ids.add(eid)
+                failed_or_skipped_ids.add(eid)
                 log(logger, "stack", "SKIPPED", id=eid, depends_failed=",".join(depends_failed))
                 write_stack_result(
                     worktree_path, stack_path,
@@ -773,6 +782,14 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             entry_worktree = os.path.join(repo_root, ".worktrees", entry["branch_suffix"])
             st["branch"] = branch
             st["worktree_path"] = entry_worktree
+
+            # Flush the running transition so observers see in-progress state
+            # (spec §Requirement 7 — writes after each status change).
+            write_stack_result(
+                worktree_path, stack_path,
+                _entry_states_list(entry_states, ordered_ids),
+                _compute_stack_status(entry_states), started_at, None,
+            )
 
             log(logger, "stack", "ENTRY_START", id=eid, branch=branch,
                 worktree=entry_worktree, plan=entry["plan"])
@@ -794,7 +811,7 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             if not created:
                 st["status"] = "failed"
                 st["completed_at"] = timestamp()
-                failed_ids.add(eid)
+                failed_or_skipped_ids.add(eid)
                 log(logger, "stack", "WORKTREE_FAILED", id=eid)
                 write_stack_result(
                     worktree_path, stack_path,
@@ -807,7 +824,7 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             if not ok:
                 st["status"] = "failed"
                 st["completed_at"] = timestamp()
-                failed_ids.add(eid)
+                failed_or_skipped_ids.add(eid)
                 log(logger, "stack", "REBASE_FAILED", id=eid)
                 write_stack_result(
                     worktree_path, stack_path,
@@ -847,13 +864,16 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
                 exit_code = pipeline_runner(entry, entry_worktree)
             else:
                 log(logger, "stack", "SUBPROCESS_START", id=eid, cmd=" ".join(cmd))
-                proc = subprocess.run(cmd, cwd=repo_root)
+                # Route child stdout → parent stderr so the stack runner's own
+                # stdout stays clean even if a child violates discipline
+                # (spec §AC-16, NEVER list "CLI status to stdout").
+                proc = subprocess.run(cmd, cwd=repo_root, stdout=sys.stderr)
                 exit_code = proc.returncode
 
             if exit_code != 0:
                 st["status"] = "failed"
                 st["completed_at"] = timestamp()
-                failed_ids.add(eid)
+                failed_or_skipped_ids.add(eid)
                 log(logger, "stack", "PIPELINE_FAILED", id=eid, exit_code=exit_code)
                 write_stack_result(
                     worktree_path, stack_path,
@@ -900,7 +920,7 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             else:
                 st["status"] = "failed"
                 st["completed_at"] = timestamp()
-                failed_ids.add(eid)
+                failed_or_skipped_ids.add(eid)
                 log(logger, "stack", "MERGE_WAIT_FAILED", id=eid, pr_number=pr_number)
 
             write_stack_result(
