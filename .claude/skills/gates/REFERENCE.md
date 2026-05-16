@@ -139,3 +139,20 @@ Pattern A is preferred for gate commands because the full log is on disk
 for later inspection — `tail` is only invoked on failure to surface a
 preview. Patterns B and C are fine for ad-hoc shell work but lose the
 upstream lines on long failures.
+
+### Self-heal via fnm activation
+
+When `npm` is not on PATH the preflight tries to recover before failing:
+
+1. Check if `fnm` is reachable (`command -v fnm`).
+2. If yes: `eval "$(fnm env --use-on-cd --shell bash)"` and re-check `npm`.
+3. If npm is now reachable: log `preflight: self-healed via fnm activation` and proceed.
+4. If npm is still absent, or if `fnm` was not on PATH: loud-fail per normal behavior.
+
+This covers the bad-snapshot case (~12.5% of sessions) where Claude Code is launched
+from a shell where `fnm env` never ran, so the per-shell PID-keyed PATH entry for
+node/npm is absent. The self-heal is transparent: the operator sees the log line but
+no action is required.
+
+If you see `FAIL (preflight): npm missing` without a preceding self-heal attempt, it
+means `fnm` itself is not on PATH — restart from a shell where `fnm` is installed.
