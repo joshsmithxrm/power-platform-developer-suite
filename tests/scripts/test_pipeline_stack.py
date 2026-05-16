@@ -399,9 +399,8 @@ class TestRunStack:
         )
         captured = capsys.readouterr()
         assert captured.out == ""
-        # stderr may be empty if log() also writes only to the file logger,
-        # but log() prints a console line to stderr. Confirm at least no stdout.
-        assert rc in (0, 1)
+        # Dry-run exits 0 per spec §Primary Flows §Dry run step 4.
+        assert rc == 0
 
     def test_skips_transitive_dependents(self, tmp_path):
         # AC-17: depends_on a skipped entry → also skipped (transitive).
@@ -500,20 +499,23 @@ class TestStackCli:
 
     def test_dry_run(self, tmp_path):
         # AC-13: --dry-run logs planned invocations; entries=pending; no subprocesses.
+        # Spec §Primary Flows §Dry run step 4: "Exits 0."
         envelope = _valid_envelope(n=2)
         stack_path = tmp_path / "stack.json"
         stack_path.write_text(json.dumps(envelope), encoding="utf-8")
 
-        # Use the tmp_path as the working directory for the stack result.
         result = _pipeline_cli(
             "--stack", str(stack_path), "--dry-run", "--worktree", str(tmp_path),
         )
-        assert result.returncode in (0, 1)
+        assert result.returncode == 0
         stack_result_path = tmp_path / ".workflow" / "stack-result.json"
         assert stack_result_path.exists()
         result_data = json.loads(stack_result_path.read_text())
         for entry in result_data["entries"]:
             assert entry["status"] == "pending"
+        # Top-level status must reflect "no entries decided" — not the
+        # misleading "partial" that violates spec §Requirement 8.
+        assert result_data["status"] == "pending"
 
     def test_mutex_with_plan(self, tmp_path):
         # AC-16 / spec constraints: --stack with --plan → exit 1.

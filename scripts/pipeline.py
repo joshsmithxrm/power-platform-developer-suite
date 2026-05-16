@@ -673,8 +673,15 @@ def _entry_states_list(entry_states, ordered_ids):
 
 
 def _compute_stack_status(entry_states):
-    """Compute overall stack status from per-entry states."""
+    """Compute overall stack status from per-entry states.
+
+    Returns one of: complete, partial, failed, pending.
+    pending = no entries have reached a terminal state yet (initial
+    write, dry-run, or mid-execution before any entry completes).
+    """
     statuses = [s["status"] for s in entry_states.values()]
+    if not statuses:
+        return "pending"
     merged = sum(1 for s in statuses if s == "merged")
     failed_or_skipped = sum(1 for s in statuses if s in ("failed", "skipped"))
     if merged == len(statuses):
@@ -683,7 +690,7 @@ def _compute_stack_status(entry_states):
         return "partial"
     if merged == 0 and failed_or_skipped > 0:
         return "failed"
-    return "partial"
+    return "pending"
 
 
 def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
@@ -736,7 +743,7 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
         write_stack_result(
             worktree_path, stack_path,
             _entry_states_list(entry_states, ordered_ids),
-            "partial" if not ordered else "failed",
+            "pending",
             started_at, completed_at=None,
         )
 
@@ -909,6 +916,9 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
             overall, started_at, timestamp(),
         )
         log(logger, "stack", "DONE", status=overall)
+        # Dry-run is a successful preview; spec §Primary Flows mandates exit 0.
+        if dry_run:
+            return 0
         return 0 if overall == "complete" else 1
     finally:
         try:

@@ -112,6 +112,7 @@ run_stack()   [pipeline.py]
    - `complete` — all entries have `status=merged`
    - `partial` — ≥1 entry merged AND ≥1 entry failed or skipped
    - `failed` — 0 entries merged AND ≥1 entry failed
+   - `pending` — no entries have reached a terminal state yet (initial write, dry-run, or mid-execution before any entry completes)
 
 9. **Stdout discipline (Constitution I1).** `run_stack` writes all progress to stderr. No structured data to stdout. Stack result is written to the file only.
 
@@ -129,7 +130,7 @@ run_stack()   [pipeline.py]
   "stack_path": "<abs-path to envelope>",
   "started_at": "<ISO-8601>",
   "completed_at": "<ISO-8601 or null>",
-  "status": "complete|partial|failed",
+  "status": "complete|partial|failed|pending",
   "entries": [
     {
       "id": "pr-1",
