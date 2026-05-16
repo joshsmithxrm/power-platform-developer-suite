@@ -195,6 +195,7 @@ python scripts/goal_supervisor.py poll [--worktree <abs-path>]
    a. Read `~/.claude/jobs/<session_short>/state.json` → session state + needs.
    b. Read `<worktree_path>/.workflow/state.json` → workflow phase + pr_url + pr_number.
    c. If `session_state=blocked AND needs != ""` → set `goal_state="blocked"`, `blocked_needs=<needs>`.
+      Also escalate when `tempo=blocked AND block.questions != []` even with `state=working` (defense-in-depth, #1138 — accidental `AskUserQuestion` from a worker). Synthesize `blocked_needs` from `block.questions[].question` + options labels when `needs` is empty.
    d. If `session_state=done OR pr_url set`:
       - Run `gh pr view <pr_number> --json state --jq .state` → pr_state.
       - If MERGED → set `goal_state="merged"`, `merged_at=now`.
@@ -278,13 +279,40 @@ Read the JSON output and act:
 | Entry `goal_state=blocked` | `PushNotification(title="Supervisor: worker blocked", body="<entry_id>: <blocked_needs>")` + `gh issue comment` + continue polling |
 | Entry `goal_state=error` | `PushNotification(title="Supervisor: worker error", body="<entry_id> session failed")` + continue polling |
 
-### Escalation Rule (Single-Signal)
+### Worker Contract — Forbidden Calls
 
-Escalation fires when **both** conditions hold simultaneously:
-- `session_state == "blocked"`
-- `needs` field is non-empty after `.strip()`
+Workers MUST NOT call `AskUserQuestion`. In a `--bg` / dispatched session
+the daemon auto-injects an answer (typically the `(Recommended)` option,
+or the implicit free-form "Other") within ~15-60 seconds — a phantom gate
+that lets the worker proceed with a decision the operator never made.
+To request operator ratification, workers invoke
+`Skill(skill='await-operator', ...)` (see #1137); operator-side delivery
+is via `Skill(skill='resume-with-answer', ...)`. This restates the
+CLAUDE.md NEVER bullet on the supervisor's contract surface.
 
-Empty `needs` (transient daemon flip) does NOT escalate. This mirrors the existing `BgHandle.wait()` semantics in `claude_dispatch.py`.
+The supervisor still catches accidental `AskUserQuestion` calls (see
+escalation rule below — defense in depth per #1138) but should never
+need to in practice.
+
+### Escalation Rule
+
+Escalation fires when **either** signal is observed on a worker:
+
+1. **Explicit block:** `session_state == "blocked"` and `needs` is
+   non-empty after `.strip()`. This is the legitimate "stage asked
+   a question" path used by skills that intentionally pause.
+2. **Tempo-blocked (defense-in-depth, #1138):** `tempo == "blocked"`
+   and `block.questions` is a non-empty list, regardless of the
+   top-level `state` field. This catches workers that called
+   `AskUserQuestion` against the contract above. The supervisor
+   synthesizes a `needs`-shaped line from the question text plus
+   `block.questions[].options` labels (or uses the daemon-written
+   `needs` when present), then escalates via the same path as #1 —
+   surfacing the question + options + session pointer to the operator.
+
+Empty `needs` AND no tempo-block (transient daemon flip) does NOT
+escalate. The supervisor never programmatically injects an answer
+back into a worker — that is the `/await-operator` skill's job.
 
 ### Supervisor Crash Tolerance
 
@@ -335,6 +363,9 @@ This spec amends [specs/feat-1070-pr-stack-alpha.md](./feat-1070-pr-stack-alpha.
 | AC-17 | Smoke: a goal-envelope.json with 2 entries both having `goal_state="merged"` drives `goal_supervisor.py poll` to output `{"goal_state": "all_merged"}` | `test_goal_supervisor.test_smoke_two_entry_all_merged` | ✅ |
 | AC-18 | Smoke: a goal-envelope.json with 1 entry having `goal_state="blocked"` and `blocked_needs="fix the layout"` drives `goal_supervisor.py poll` to output `{"goal_state": "escalated"}` | `test_goal_supervisor.test_smoke_one_blocked` | ✅ |
 | AC-19 | Worker prompt template contains all workflow contract elements: (a) skip-design note referencing the pre-approved plan, (b) `pipeline.py --spec --plan` invocation, (c) `--resume` fallback, (d) `pr_monitor.py` via Bash `run_in_background=true`, (e) re-engagement reads `.workflow/pr-monitor-result.json` and terminates | `test_goal_supervisor.test_worker_prompt_contains_workflow_contract` | ✅ |
+| AC-PAUSE-1 | Spec documents the worker contract: workers MUST NOT call `AskUserQuestion`; use `Skill(skill='await-operator', ...)` instead (#1137). Restates the CLAUDE.md NEVER rule on the supervisor's contract surface | Read §Worker Contract — Forbidden Calls in this spec | ✅ |
+| AC-PAUSE-2 | `BgHandle.poll()` (`scripts/claude_dispatch.py`) returns `"blocked"` when state.json has `tempo == "blocked"` AND `block.questions` is a non-empty list, regardless of the top-level `state` field; `BgHandle.needs()` synthesizes a `needs` line from `block.questions[].question` + options labels when the daemon-written `needs` is empty. `goal_supervisor._evaluate_entry` applies the same rule | `test_claude_dispatch.test_bg_handle_poll_tempo_blocked_with_questions` + `test_goal_supervisor.test_poll_escalation_tempo_blocked` | ✅ |
+| AC-PAUSE-3 | Smoke: state.json shaped `{state: "working", tempo: "blocked", block.questions: [...]}` drives `BgHandle.poll()` to `"blocked"` and `BgHandle.wait(timeout=1)` to raise `BlockedSessionError` carrying the question text + options within one polling interval (before the daemon's ~15-60s auto-answer window closes) | `test_claude_dispatch.test_bg_handle_wait_raises_on_tempo_blocked` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 

@@ -307,6 +307,97 @@ def test_poll_no_escalation_empty_needs(tmp_path):  # AC-09
     assert verdict["goal_state"] != "escalated"
 
 
+# ---------- AC-PAUSE-2 (#1138) — tempo=blocked + block.questions escalates ----------
+
+def test_poll_escalation_tempo_blocked(tmp_path):
+    """Defense-in-depth: when a bg worker accidentally invokes
+    AskUserQuestion, state.json has state='working' but tempo='blocked'
+    with block.questions populated. Supervisor must escalate inside
+    one polling interval to beat the ~15-60s daemon auto-answer."""
+    sw = _make_envelope_v11(tmp_path, [
+        {"goal_state": "working", "session_short": "phnt"},
+    ])
+    jobs = tmp_path / "jobs"
+    _write_job_state(jobs, "phnt", {
+        "state": "working",
+        "tempo": "blocked",
+        "needs": "answer: Which color? (Blue (Recommended) · Red · Green)",
+        "block": {"questions": [{
+            "question": "Which color?",
+            "options": [
+                {"label": "Blue (Recommended)"},
+                {"label": "Red"},
+                {"label": "Green"},
+            ],
+        }]},
+    })
+    verdict = gs.poll(
+        supervisor_worktree=str(sw),
+        jobs_dir=jobs,
+        workflow_state_reader=lambda wt: {},
+        gh_runner=lambda n: None,
+        haiku_runner=lambda p: "",
+    )
+    entry = verdict["entries"][0]
+    assert entry["goal_state"] == "blocked"
+    assert "Which color?" in entry["blocked_needs"]
+    assert verdict["goal_state"] == "escalated"
+
+
+def test_poll_tempo_blocked_synthesizes_needs_when_daemon_field_empty(tmp_path):
+    """If the daemon-written `needs` is empty, supervisor synthesizes the
+    escalation text from block.questions (question + option labels) so the
+    operator still sees what was asked."""
+    sw = _make_envelope_v11(tmp_path, [
+        {"goal_state": "working", "session_short": "phn2"},
+    ])
+    jobs = tmp_path / "jobs"
+    _write_job_state(jobs, "phn2", {
+        "state": "working",
+        "tempo": "blocked",
+        "block": {"questions": [{
+            "question": "Proceed?",
+            "options": [{"label": "Yes"}, {"label": "No"}],
+        }]},
+    })
+    verdict = gs.poll(
+        supervisor_worktree=str(sw),
+        jobs_dir=jobs,
+        workflow_state_reader=lambda wt: {},
+        gh_runner=lambda n: None,
+        haiku_runner=lambda p: "",
+    )
+    entry = verdict["entries"][0]
+    assert entry["goal_state"] == "blocked"
+    assert "Proceed?" in entry["blocked_needs"]
+    assert "Yes" in entry["blocked_needs"]
+    assert verdict["goal_state"] == "escalated"
+
+
+def test_poll_no_escalation_when_tempo_block_questions_empty(tmp_path):
+    """tempo=blocked but block.questions empty (transient daemon flip) —
+    do NOT escalate."""
+    sw = _make_envelope_v11(tmp_path, [
+        {"goal_state": "working", "session_short": "flux"},
+    ])
+    jobs = tmp_path / "jobs"
+    _write_job_state(jobs, "flux", {
+        "state": "working",
+        "tempo": "blocked",
+        "block": {"questions": []},
+    })
+    verdict = gs.poll(
+        supervisor_worktree=str(sw),
+        jobs_dir=jobs,
+        workflow_state_reader=lambda wt: {},
+        gh_runner=lambda n: None,
+        haiku_runner=lambda p: "",
+    )
+    entry = verdict["entries"][0]
+    assert entry["goal_state"] != "blocked"
+    assert verdict["goal_state"] != "escalated"
+
+
 # ---------- AC-10 — Haiku predicate template renders + parses ----------
 
 def test_haiku_predicate_parses(tmp_path):  # AC-10
