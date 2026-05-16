@@ -192,6 +192,7 @@ class TestToolFailureFix(unittest.TestCase):
         sigs = _run_on_events([_PR1094_TOOL_FAILURE_IS_ERROR])
         self.assertEqual(len(sigs["tool_failures"]), 1)
         self.assertIn("38784", sigs["tool_failures"][0]["error"])
+        self.assertEqual(sigs["tool_failures"][0]["tool"], "unknown")
 
     def test_is_error_false_clean_result_not_flagged(self):
         """tool_result with is_error: false and clean content is not flagged."""
@@ -313,6 +314,16 @@ class TestEscalationFlags(unittest.TestCase):
             events.extend([_cmd(cmd)] * 3)
         sigs = _run_on_events(events)
         self.assertTrue(sigs["needs_manual_review"])
+
+    def test_frustration_hits_content_captured(self):
+        """frustration_hits list contains the matched text when a frustration pattern fires."""
+        event = {
+            "type": "user",
+            "message": {"role": "user", "content": "wtf why isn't this working"},
+        }
+        sigs = _run_on_events([event])
+        self.assertGreaterEqual(len(sigs["frustration_hits"]), 1)
+        self.assertIn("wtf", sigs["frustration_hits"][0]["text"])
 
     def test_needs_manual_review_false_on_clean_session(self):
         """needs_manual_review is False when all signals are empty."""

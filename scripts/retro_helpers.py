@@ -68,12 +68,10 @@ def extract_transcript_signals(jsonl_path):
 
                 event_type = event.get("type")
 
-                # User messages — correction patterns AND tool results.
                 # Claude Code transcripts use "user", not "human" (bug #1097 fix 1).
                 if event_type == "user":
                     content = event.get("message", {}).get("content", "")
 
-                    # Extract text for correction/frustration matching (text blocks only)
                     if isinstance(content, list):
                         text = " ".join(
                             b.get("text", "")
@@ -93,9 +91,8 @@ def extract_transcript_signals(jsonl_path):
                             {"text": text[:200], "pattern": "frustration"}
                         )
 
-                    # Tool result failure detection within user messages.
-                    # Primary signal: is_error: true on the result block (bug #1097 fix 2).
-                    # Fallback: content-substring patterns for non-error blocks.
+                    # is_error: true is the primary tool-failure signal (bug #1097 fix 2).
+                    # tool_result blocks live inside user events, not tool_result-type events.
                     if isinstance(content, list):
                         for block in content:
                             if not isinstance(block, dict) or block.get("type") != "tool_result":
@@ -113,7 +110,7 @@ def extract_transcript_signals(jsonl_path):
 
                             if block.get("is_error"):
                                 signals["tool_failures"].append(
-                                    {"tool": "Bash", "error": result_text[:200]}
+                                    {"tool": "unknown", "error": result_text[:200]}
                                 )
                             else:
                                 result_lower = result_text.lower()
@@ -126,7 +123,6 @@ def extract_transcript_signals(jsonl_path):
                                         {"tool": "Edit", "error": result_text[:200]}
                                     )
 
-                # Track tool calls for repetition detection and suspect-session heuristic
                 if event_type == "assistant":
                     msg_content = event.get("message", {}).get("content", [])
                     if isinstance(msg_content, list):
@@ -143,7 +139,6 @@ def extract_transcript_signals(jsonl_path):
     except OSError:
         pass
 
-    # Find repeated commands (3+)
     for cmd, count in command_counts.items():
         if count >= 3:
             signals["repeated_commands"].append(
@@ -153,7 +148,6 @@ def extract_transcript_signals(jsonl_path):
                 }
             )
 
-    # Escalation flags
     u = len(signals["user_corrections"])
     t = len(signals["tool_failures"])
     r = len(signals["repeated_commands"])
@@ -192,6 +186,8 @@ def write_session_flags(findings_path, flags):
     other keys in *flags*) into the findings JSON. Creates the file (and
     parent dir) if missing. Existing keys are preserved.
     """
+    if not flags:
+        return flags
     os.makedirs(os.path.dirname(os.path.abspath(findings_path)) or ".", exist_ok=True)
     existing = {}
     try:
