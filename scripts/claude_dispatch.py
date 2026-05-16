@@ -272,14 +272,21 @@ def _tempo_block_questions(data: dict) -> list:
     return questions
 
 
-def _synthesize_needs_from_questions(questions: list) -> str:
-    """Format block.questions into a ``needs``-shaped escalation line."""
+def synthesize_needs_from_questions(questions: list) -> str:
+    """Format block.questions into a ``needs``-shaped escalation line.
+
+    Shared with ``goal_supervisor._tempo_blocked_signal`` so both readers
+    of the daemon state.json render identical escalation text for the
+    same payload.
+    """
     parts = []
     for q in questions:
         if not isinstance(q, dict):
             continue
         qtext = (q.get("question") or "").strip()
-        options = q.get("options") or []
+        options = q.get("options")
+        if not isinstance(options, list):
+            options = []
         labels = " · ".join(
             (opt.get("label") or "").strip()
             for opt in options
@@ -333,7 +340,7 @@ class BgHandle(DispatchHandle):
             return text
         questions = _tempo_block_questions(data)
         if questions:
-            return _synthesize_needs_from_questions(questions)
+            return synthesize_needs_from_questions(questions)
         return ""
 
     def terminate(self) -> None:

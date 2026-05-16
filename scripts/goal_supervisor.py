@@ -316,22 +316,9 @@ def _tempo_blocked_signal(job_state_data: dict) -> tuple[bool, str]:
     written = (job_state_data.get("needs") or "").strip()
     if written:
         return True, written
-    parts = []
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        qtext = (q.get("question") or "").strip()
-        options = q.get("options") or []
-        labels = " · ".join(
-            (opt.get("label") or "").strip()
-            for opt in options
-            if isinstance(opt, dict) and (opt.get("label") or "").strip()
-        )
-        if qtext and labels:
-            parts.append(f"answer: {qtext} ({labels})")
-        elif qtext:
-            parts.append(f"answer: {qtext}")
-    return True, " | ".join(parts)
+    # Defer to claude_dispatch so both readers render identical text.
+    import claude_dispatch  # noqa: PLC0415  (lazy: avoids heavier init)
+    return True, claude_dispatch.synthesize_needs_from_questions(questions)
 
 
 # ---------------------------------------------------------------------------
