@@ -232,6 +232,91 @@ def test_dispatch_interactive_without_dangerous(monkeypatch, tmp_path):
     assert "--dangerously-skip-permissions" not in bg_call
 
 
+def test_spawn_permission_mode_threaded(monkeypatch, tmp_path):
+    """AC-01, AC-02: permission_mode='bypassPermissions' is threaded into the
+    `claude --bg` argv as `--permission-mode bypassPermissions` before `--`."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          permission_mode="bypassPermissions",
+          cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    # Flag must appear and be paired with its value.
+    assert "--permission-mode" in bg_call
+    idx = bg_call.index("--permission-mode")
+    assert bg_call[idx + 1] == "bypassPermissions"
+    # Must appear before the `--` separator.
+    sep_idx = bg_call.index("--")
+    assert idx < sep_idx
+
+
+def test_spawn_permission_mode_absent_when_none(monkeypatch, tmp_path):
+    """AC-03: permission_mode=None (default) → flag absent from argv."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    assert "--permission-mode" not in bg_call
+
+
+def test_spawn_dangerous_still_works(monkeypatch, tmp_path):
+    """AC-04: existing dangerous=True keyword continues to emit
+    --dangerously-skip-permissions (backward compat)."""
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _seed_state(jobs_dir, "abc12345", cwd=str(tmp_path))
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(list(argv))
+        if argv[:2] == ["claude", "--version"]:
+            return CompletedProcess(argv, 0, "2.1.141\n", "")
+        if argv[:2] == ["claude", "--bg"]:
+            return CompletedProcess(argv, 0, "backgrounded · abc12345\n", "")
+        return CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    spawn(mode="interactive", prompt="x", caller="test", name="stage",
+          dangerous=True, cwd=str(tmp_path), jobs_dir=jobs_dir)
+    bg_call = [c for c in captured if c[:2] == ["claude", "--bg"]][0]
+    assert "--dangerously-skip-permissions" in bg_call
+
+
+def test_spawn_rejects_dangerous_and_permission_mode_together(monkeypatch, tmp_path):
+    """dangerous=True and permission_mode are mutually exclusive — passing both
+    raises DispatchError before any subprocess invocation."""
+    _patch_min_version(monkeypatch)
+    with pytest.raises(DispatchError, match="mutually exclusive"):
+        spawn(mode="interactive", prompt="x", caller="t", name="stage",
+              dangerous=True, permission_mode="bypassPermissions",
+              cwd=str(tmp_path), jobs_dir=tmp_path)
+
+
 def test_dispatch_interactive_requires_name(monkeypatch, tmp_path):
     _patch_min_version(monkeypatch)
     with pytest.raises(DispatchError):
@@ -283,6 +368,25 @@ def test_dispatch_headless_argv(monkeypatch, tmp_path):
     assert captured[0]["shell"] is False
     assert isinstance(handle, HeadlessHandle)
     assert handle.transcript_path == stage_log
+
+
+def test_dispatch_headless_drops_permission_mode(monkeypatch, tmp_path):
+    """Headless (claude -p) has no permission dialog — permission_mode must be
+    silently dropped from the argv even when callers pass it (covers the
+    "Ignored in headless mode" docstring contract; #1067)."""
+    captured = []
+    _patch_headless(monkeypatch, captured)
+    spawn(
+        mode="headless",
+        prompt="hi",
+        caller="t",
+        permission_mode="bypassPermissions",
+        stage_log=tmp_path / "log.jsonl",
+        spend_log_path=tmp_path / "spend.jsonl",
+    )
+    argv = captured[0]["argv"]
+    assert "--permission-mode" not in argv
+    assert "bypassPermissions" not in argv
 
 
 def test_dispatch_headless_no_model_no_agent(monkeypatch, tmp_path):

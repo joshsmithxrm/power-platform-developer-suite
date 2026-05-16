@@ -134,6 +134,40 @@ import pytest
     ("/home/j/ppds/.worktrees/toolbar-search-consistency", {"PPDS_PR_GATE_HUMAN": "1"}, False),
     # Non-agent .claude/worktrees/ (not just agent-* prefix)
     ("/home/j/ppds/.claude/worktrees/review-1234", {}, True),
+    # AC-09 (#1067): CLAUDE_PROJECT_DIR contains /.claude/worktrees/ and cwd
+    # is the main repo root (foreground worktree, P-3b pattern).
+    pytest.param(
+        "/home/j/ppds",
+        {"CLAUDE_PROJECT_DIR": "/home/j/ppds/.claude/worktrees/session-name"},
+        True,
+        id="project_dir_claude_worktrees",
+    ),
+    # AC-10 (#1067): CLAUDE_PROJECT_DIR contains /.worktrees/ and cwd is the
+    # main repo root (P-3a/P-3b shared root cause).
+    pytest.param(
+        "/home/j/ppds",
+        {"CLAUDE_PROJECT_DIR": "/home/j/ppds/.worktrees/feat-x"},
+        True,
+        id="project_dir_worktrees",
+    ),
+    # AC-11 (#1067): nested bg-worktree path
+    # .worktrees/<outer>/worktree-<inner> in CLAUDE_PROJECT_DIR while cwd is
+    # the main repo root (P-3a primary scope).
+    pytest.param(
+        "/home/j/ppds",
+        {"CLAUDE_PROJECT_DIR": "/home/j/ppds/.worktrees/feat-x/worktree-sub"},
+        True,
+        id="nested_bg_worktree",
+    ),
+    # AC-13 (#1067): PPDS_PR_GATE_HUMAN=1 override beats CLAUDE_PROJECT_DIR
+    # worktree signal.
+    pytest.param(
+        "/home/j/ppds",
+        {"CLAUDE_PROJECT_DIR": "/home/j/ppds/.worktrees/feat-x",
+         "PPDS_PR_GATE_HUMAN": "1"},
+        False,
+        id="human_override_beats_project_dir",
+    ),
 ])
 def test_is_agent_context(cwd, env, expected):
     assert hook._is_agent_context(cwd=cwd, env=env) is expected
@@ -254,6 +288,53 @@ class TestHumanUnaffected:
             env_extra={"PPDS_PR_GATE_HUMAN": "1"},
         )
         assert r.returncode == 0, r.stderr
+
+
+class TestForegroundWorktreeViaProjectDir:
+    """AC-12, AC-13 (#1067): hook subprocess CWD = main repo root,
+    CLAUDE_PROJECT_DIR = worktree. Without the CLAUDE_PROJECT_DIR check,
+    _is_agent_context() returns False and a foreground worktree session can
+    bypass `/pr` via raw `gh pr create`.
+    """
+
+    def test_foreground_worktree_via_project_dir_blocked(self, tmp_path):
+        """AC-12: CWD=main-root + CLAUDE_PROJECT_DIR=worktree + no /pr marker
+        → blocked with the agent-bypass message."""
+        main_path = tmp_path / "main"
+        main_path.mkdir()
+        _init_repo(main_path)
+        worktree = main_path / ".claude" / "worktrees" / "session-name"
+        worktree.mkdir(parents=True)
+
+        env = _clean_env()
+        env["CLAUDE_PROJECT_DIR"] = str(worktree)
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "gh pr create --draft"}}
+        r = _run([sys.executable, str(HOOK_PATH)], cwd=str(main_path),
+                 env=env, input_str=json.dumps(payload))
+        assert r.returncode == 2, r.stderr
+        assert "must go through the `/pr` skill" in r.stderr, r.stderr
+
+    def test_human_override_beats_project_dir(self, tmp_path):
+        """AC-13: PPDS_PR_GATE_HUMAN=1 forces human context even when
+        CLAUDE_PROJECT_DIR is a worktree path. The block message switches
+        to the generic 'No workflow state found' rather than agent bypass."""
+        main_path = tmp_path / "main"
+        main_path.mkdir()
+        _init_repo(main_path)
+        worktree = main_path / ".claude" / "worktrees" / "session-name"
+        worktree.mkdir(parents=True)
+
+        env = _clean_env()
+        env["CLAUDE_PROJECT_DIR"] = str(worktree)
+        env["PPDS_PR_GATE_HUMAN"] = "1"
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "gh pr create --draft"}}
+        r = _run([sys.executable, str(HOOK_PATH)], cwd=str(main_path),
+                 env=env, input_str=json.dumps(payload))
+        assert r.returncode == 2, r.stderr
+        assert "must go through the `/pr` skill" not in r.stderr, r.stderr
+        assert "No workflow state found" in r.stderr, r.stderr
 
 
 def test_non_pr_create_from_agent_passes(tmp_path):

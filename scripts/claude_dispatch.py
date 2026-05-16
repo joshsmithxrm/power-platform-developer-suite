@@ -444,6 +444,7 @@ def spawn(
     model: Optional[str] = None,
     cwd: Union[str, Path] = ".",
     dangerous: bool = False,
+    permission_mode: Optional[str] = None,
     stage_log: Optional[Union[str, Path]] = None,
     env: Optional[Mapping[str, str]] = None,
     jobs_dir: Optional[Path] = None,
@@ -460,7 +461,15 @@ def spawn(
         agent: Optional --agent value (headless mode).
         model: Optional --model value (headless mode).
         cwd: Working directory for the subprocess.
-        dangerous: If True, adds --dangerously-skip-permissions (unattended only).
+        dangerous: If True, adds --dangerously-skip-permissions to the
+            interactive ``claude --bg`` invocation (unattended daemons only).
+            Ignored in headless mode — ``claude -p`` has no permission dialog.
+            Mutually exclusive with ``permission_mode``.
+        permission_mode: Optional value passed as ``--permission-mode <value>``
+            to the interactive ``claude --bg`` invocation (e.g.
+            ``"bypassPermissions"``). Ignored in headless mode — ``claude -p``
+            has no permission dialog. When None, the flag is omitted.
+            Mutually exclusive with ``dangerous``.
         stage_log: Required for mode=headless. Streamed stdout path; also
             read back by output().
         env: Optional env mapping (defaults to os.environ).
@@ -472,6 +481,11 @@ def spawn(
         raise DispatchError(f"invalid mode: {mode!r}")
     if not caller:
         raise DispatchError("spawn() requires a non-empty caller string")
+    if dangerous and permission_mode:
+        raise DispatchError(
+            "spawn() received both dangerous=True and permission_mode="
+            f"{permission_mode!r} — these are mutually exclusive"
+        )
     require_min_version()
     cwd_str = str(Path(cwd).resolve()) if cwd else str(Path(".").resolve())
 
@@ -512,6 +526,8 @@ def spawn(
     if not NAME_RE.match(name):
         raise DispatchError(f"invalid --name value: {name!r}")
     argv = ["claude", "--bg", "--name", name]
+    if permission_mode:
+        argv.extend(["--permission-mode", permission_mode])
     if dangerous:
         argv.append("--dangerously-skip-permissions")
     argv.extend(["--", prompt])

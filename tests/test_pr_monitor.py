@@ -3131,9 +3131,16 @@ class TestPrMonitorLoudFailure:
                 assert "exited 7" in str(exc.value)
 
 
-class TestPrMonitorDangerousFlag:
-    def test_pr_monitor_passes_dangerous_true(self, tmp_path):
-        """AC-17 partial: run_triage passes dangerous=True to spawn."""
+class TestPrMonitorBypassPermissions:
+    """AC-05, AC-06 (#1067): pr_monitor must spawn with
+    permission_mode='bypassPermissions' instead of legacy dangerous=True.
+
+    Unattended bg sessions need bypassPermissions so permission prompts do not
+    transition the daemon to state=blocked with no operator to respond.
+    """
+
+    def test_run_triage_uses_bypassPermissions(self, tmp_path):
+        """AC-05: run_triage passes permission_mode='bypassPermissions'."""
         import pr_monitor
         import claude_dispatch
         from unittest.mock import patch, MagicMock
@@ -3160,11 +3167,13 @@ class TestPrMonitorDangerousFlag:
                                           [{"id": 1, "body": "x"}],
                                           logger, mode="interactive")
 
-        assert captured.get("dangerous") is True, \
-            "pr_monitor must pass dangerous=True (unattended daemon)"
+        assert captured.get("permission_mode") == "bypassPermissions", \
+            "run_triage must spawn with permission_mode='bypassPermissions'"
+        assert "dangerous" not in captured or not captured.get("dangerous"), \
+            "run_triage must not pass legacy dangerous=True"
 
-    def test_pr_monitor_retro_passes_dangerous_true(self, tmp_path):
-        """AC-17 partial: run_retro passes dangerous=True to spawn."""
+    def test_run_retro_uses_bypassPermissions(self, tmp_path):
+        """AC-06: run_retro passes permission_mode='bypassPermissions'."""
         import pr_monitor
         import claude_dispatch
         from unittest.mock import patch, MagicMock
@@ -3187,4 +3196,7 @@ class TestPrMonitorDangerousFlag:
             logger = MagicMock()
             pr_monitor.run_retro(str(tmp_path), logger, mode="interactive")
 
-        assert captured.get("dangerous") is True
+        assert captured.get("permission_mode") == "bypassPermissions", \
+            "run_retro must spawn with permission_mode='bypassPermissions'"
+        assert "dangerous" not in captured or not captured.get("dangerous"), \
+            "run_retro must not pass legacy dangerous=True"
