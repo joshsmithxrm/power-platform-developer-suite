@@ -41,8 +41,6 @@ public class MetadataStatusReasonCommandTests
     [Fact]
     public void AddStatusReason_StateOption_AcceptsActiveAndInactive()
     {
-        var stateOpt = _addStatusReasonCmd.Options.First(o => o.Name == "--state");
-
         var resultActive = _addStatusReasonCmd.Parse(
             "--entity account --label Foo --state Active --solution MySol");
         Assert.Empty(resultActive.Errors);

@@ -23,8 +23,8 @@ public class DeprecationWarningTests
         var savedStdout = Console.Out;
         var savedStderr = Console.Error;
 
-        var stdoutCapture = new StringWriter();
-        var stderrCapture = new StringWriter();
+        using var stdoutCapture = new StringWriter();
+        using var stderrCapture = new StringWriter();
 
         Console.SetOut(stdoutCapture);
         Console.SetError(stderrCapture);
@@ -48,7 +48,7 @@ public class DeprecationWarningTests
     [Fact]
     public void Write_MentionsDeprecatedAndCanonicalCommand()
     {
-        var stderrCapture = new StringWriter();
+        using var stderrCapture = new StringWriter();
         var saved = Console.Error;
         Console.SetError(stderrCapture);
 
