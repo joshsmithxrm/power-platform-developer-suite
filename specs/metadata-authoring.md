@@ -1,6 +1,6 @@
 # Metadata Authoring
 
-**Status:** Implemented (extending — #1159/#1160/#1161 in progress; AC-37–AC-58 reach ✅ as their tests land)
+**Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land)
 **Last Updated:** 2026-05-29
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
@@ -797,22 +797,20 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 **Consequences:** Positive — one vocabulary, SDK-aligned, discoverable. Negative — three deprecation shims to carry until a future removal; a one-time sweep of internal consumers.
 
-### Why verb-first subcommands and `--entity` flag for status reasons, not `entity <name> add-statusreason`? (#1160) — ⚠ PENDING OWNER RATIFICATION
+### Why verb-first subcommands and `--entity` flag for status reasons, not `entity <name> add-statusreason`? (#1160) — DECIDED: Form A (owner-ratified 2026-05-29)
 
-**Context:** Both issue bodies (#1159, #1160) and the owner brief sketch `entity <name> add-statusreason` — a noun that takes a positional name *and then* hosts a verb. System.CommandLine (2.x, the new `Subcommands`/`SetAction` API this CLI uses) resolves a subcommand token *before* binding the parent's positional argument, so the literal `entity <name> <verb>` ordering (name first, verb second) is not natively parseable; only `entity <verb> …` is. The owner noted this is "doable… design it deliberately" — so this is an explicit, deliberate decision surfaced for ratification rather than assumed.
+**Context:** Both issue bodies (#1159, #1160) and the owner brief sketch `entity <name> add-statusreason` — a noun that takes a positional name *and then* hosts a verb. System.CommandLine (2.x, the new `Subcommands`/`SetAction` API this CLI uses) resolves a subcommand token *before* binding the parent's positional argument, so the literal `entity <name> <verb>` ordering (name first, verb second) is not natively parseable; only `entity <verb> …` is.
 
-**Decision (proposed):** Status-reason verbs are verb-first subcommands of `entity` (`entity add-statusreason`, `entity list-statusreasons`, …) that identify the entity with the `--entity <name>` flag. The bare `entity <name>` read lookup is preserved via the parent command's positional argument + default action; a recognized verb routes to the subcommand, a bare token routes to the lookup.
+**Decision:** **Form A** — status-reason verbs are verb-first subcommands of `entity` (`entity add-statusreason`, `entity list-statusreasons`, …) that identify the entity with the `--entity <name>` flag. The bare `entity <name>` read lookup is preserved via the parent command's positional argument + default action; a recognized verb routes to the subcommand, a bare token routes to the lookup.
 
-**Three forms for the owner to choose among:**
+**Forms considered (owner ratified A on 2026-05-29):**
 | Form | Example | Parseable | Trade-off |
 |------|---------|-----------|-----------|
-| **A (proposed)** | `entity add-statusreason --entity hsl_appt --label …` | yes | Consistent with `entity update/delete`, `attribute`, `key` (all use `--entity`). Verbose. |
-| **B** | `entity add-statusreason hsl_appt --label …` | yes | Entity as positional on the verb; closest readable to the issue without a flag; reads slightly oddly next to other positionals. |
+| **A — CHOSEN** | `entity add-statusreason --entity hsl_appt --label …` | yes | Consistent with `entity update/delete`, `attribute`, `key` (all use `--entity`). Verbose. |
+| **B** | `entity add-statusreason hsl_appt --label …` | yes | Entity as positional on the verb; reads slightly oddly next to other positionals. |
 | **C (issue literal)** | `entity hsl_appt add-statusreason --label …` | **not** natively in System.CommandLine | Requires a custom positional-then-dispatch parser on `entity`, sacrificing per-verb `--help`/validation. |
 
-**Recommendation:** Form A. If the owner wants B or C, it is a localized change to the `entity` command wiring (no service-layer impact). This is the single decision blocking ratification.
-
-**Falsification:** owner selects B or C, or a future System.CommandLine version supports positional-then-subcommand cleanly.
+**Falsification:** a future System.CommandLine version supports positional-then-subcommand cleanly, or operator usage data shows Form A's `--entity` flag is a friction point.
 
 ### Why explicit `IsGlobal = false` for local choice columns? (#1161)
 
