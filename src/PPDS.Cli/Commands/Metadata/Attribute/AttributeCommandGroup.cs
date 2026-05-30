@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
@@ -24,6 +25,9 @@ public static class AttributeCommandGroup
         command.Subcommands.Add(CreateCreateCommand());
         command.Subcommands.Add(CreateUpdateCommand());
         command.Subcommands.Add(CreateDeleteCommand());
+        command.Subcommands.Add(CreateAddOptionCommand());
+        command.Subcommands.Add(CreateUpdateOptionCommand());
+        command.Subcommands.Add(CreateRemoveOptionCommand());
 
         return command;
     }
@@ -102,12 +106,28 @@ public static class AttributeCommandGroup
 
         var optionSetNameOption = new Option<string?>("--option-set-name")
         {
-            Description = "Name of an existing global option set for Choice/Choices columns"
+            Description = "[Deprecated alias for --choice] Name of an existing global option set",
+            Hidden = true
+        };
+
+        var choiceOption = new Option<string?>("--choice")
+        {
+            Description = "Attach the Choice/Choices column to an existing GLOBAL option set by name (mutually exclusive with --option/--options/--options-file)"
         };
 
         var optionsOption = new Option<string?>("--options")
         {
-            Description = "Option definitions for Choice/Choices columns: \"Label1=1,Label2=2\""
+            Description = "[Legacy] Local Choice options as CSV: \"Label1=1,Label2=2\""
+        };
+
+        var optionOption = new Option<string[]?>("--option")
+        {
+            Description = "Local Choice option \"Label[:Value][:#Color]\" — repeatable; value derived from --solution when omitted"
+        };
+
+        var optionsFileOption = new Option<string?>("--options-file")
+        {
+            Description = "Path to a JSON file of local Choice options: [{\"label\":\"..\",\"value\":1,\"color\":\"#RRGGBB\"}]"
         };
 
         var defaultValueOption = new Option<int?>("--default-value")
@@ -136,6 +156,12 @@ public static class AttributeCommandGroup
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after the attribute is created",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("create", "Create a new attribute on a Dataverse table")
         {
             solutionOption,
@@ -152,12 +178,16 @@ public static class AttributeCommandGroup
             formatOption,
             dateTimeBehaviorOption,
             optionSetNameOption,
+            choiceOption,
             optionsOption,
+            optionOption,
+            optionsFileOption,
             defaultValueOption,
             trueLabelOption,
             falseLabelOption,
             maxSizeInKBOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -180,23 +210,54 @@ public static class AttributeCommandGroup
             var format = parseResult.GetValue(formatOption);
             var dateTimeBehavior = parseResult.GetValue(dateTimeBehaviorOption);
             var optionSetName = parseResult.GetValue(optionSetNameOption);
+            var choice = parseResult.GetValue(choiceOption);
             var optionsRaw = parseResult.GetValue(optionsOption);
+            var optionArgs = parseResult.GetValue(optionOption);
+            var optionsFile = parseResult.GetValue(optionsFileOption);
             var defaultValue = parseResult.GetValue(defaultValueOption);
             var trueLabel = parseResult.GetValue(trueLabelOption);
             var falseLabel = parseResult.GetValue(falseLabelOption);
             var maxSizeInKB = parseResult.GetValue(maxSizeInKBOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profileVal = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            var options = ParseOptionDefinitions(optionsRaw);
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            // --choice (or legacy --option-set-name) attaches a GLOBAL option set; it is mutually
+            // exclusive with the local-option inputs (--option/--options/--options-file). (#1161, AC-53)
+            var resolvedChoice = !string.IsNullOrWhiteSpace(choice) ? choice : optionSetName;
+            var hasGlobal = !string.IsNullOrWhiteSpace(resolvedChoice);
+            var hasLocal = (optionArgs is { Length: > 0 })
+                           || !string.IsNullOrWhiteSpace(optionsFile)
+                           || !string.IsNullOrWhiteSpace(optionsRaw);
+
+            if (hasGlobal && hasLocal)
+            {
+                writer.WriteError(StructuredError.Create(
+                    "INVALID_CONSTRAINT",
+                    "--choice attaches an existing global option set and cannot be combined with --option/--options/--options-file (which define a local option set)."));
+                return ExitCodes.ValidationError;
+            }
+
+            OptionDefinition[]? options;
+            try
+            {
+                options = ParseOptionSpecs(optionArgs, optionsFile, optionsRaw);
+            }
+            catch (Exception ex)
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", ex.Message));
+                return ExitCodes.ValidationError;
+            }
 
             return await ExecuteCreateAsync(
                 solution, entity, name, displayName, type, description,
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
-                dateTimeBehavior, optionSetName, options, defaultValue,
-                trueLabel, falseLabel, maxSizeInKB, dryRun,
+                dateTimeBehavior, resolvedChoice, options, defaultValue,
+                trueLabel, falseLabel, maxSizeInKB, dryRun, publish,
                 profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
@@ -223,6 +284,79 @@ public static class AttributeCommandGroup
         return result.Count > 0 ? result.ToArray() : null;
     }
 
+    /// <summary>
+    /// Parses local Choice option definitions from repeatable --option specs ("Label[:Value][:#Color]"),
+    /// a JSON --options-file, or the legacy --options CSV. Returns null when none are supplied.
+    /// Throws <see cref="FormatException"/> / <see cref="FileNotFoundException"/> on malformed input.
+    /// </summary>
+    internal static OptionDefinition[]? ParseOptionSpecs(string[]? optionArgs, string? optionsFile, string? legacyCsv)
+    {
+        if (optionArgs is { Length: > 0 })
+        {
+            var list = optionArgs
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(ParseOptionSpec)
+                .ToList();
+            return list.Count > 0 ? list.ToArray() : null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(optionsFile))
+            return ParseOptionsFile(optionsFile);
+
+        return ParseOptionDefinitions(legacyCsv);
+    }
+
+    /// <summary>Parses a single "Label[:Value][:#Color]" option spec.</summary>
+    internal static OptionDefinition ParseOptionSpec(string spec)
+    {
+        var parts = spec.Split(':');
+        var label = parts[0].Trim();
+        if (label.Length == 0)
+            throw new FormatException($"Invalid --option '{spec}': a label is required.");
+
+        var def = new OptionDefinition { Label = label };
+        for (var i = 1; i < parts.Length; i++)
+        {
+            var token = parts[i].Trim();
+            if (token.Length == 0)
+                continue;
+            if (token.StartsWith('#'))
+                def.Color = token;
+            else if (int.TryParse(token, out var v))
+                def.Value = v;
+            else
+                throw new FormatException($"Invalid --option '{spec}': '{token}' is neither an integer value nor a #color.");
+        }
+        return def;
+    }
+
+    private static OptionDefinition[]? ParseOptionsFile(string path)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"--options-file not found: {path}");
+
+        using var stream = File.OpenRead(path);
+        var entries = JsonSerializer.Deserialize<List<OptionFileEntry>>(
+            stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (entries == null || entries.Count == 0)
+            return null;
+
+        return entries.Select(e => new OptionDefinition
+        {
+            Label = e.Label ?? "",
+            Value = e.Value ?? 0,
+            Color = e.Color
+        }).ToArray();
+    }
+
+    private sealed class OptionFileEntry
+    {
+        public string? Label { get; set; }
+        public int? Value { get; set; }
+        public string? Color { get; set; }
+    }
+
     internal static async Task<int> ExecuteCreateAsync(
         string solution,
         string entity,
@@ -244,6 +378,7 @@ public static class AttributeCommandGroup
         string? falseLabel,
         int? maxSizeInKB,
         bool dryRun,
+        bool publish,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -290,7 +425,8 @@ public static class AttributeCommandGroup
                 TrueLabel = trueLabel,
                 FalseLabel = falseLabel,
                 MaxSizeInKB = maxSizeInKB,
-                DryRun = dryRun
+                DryRun = dryRun,
+                Publish = publish
             };
 
             var result = await authoringService.CreateColumnAsync(request, ct: cancellationToken);
@@ -692,5 +828,319 @@ public static class AttributeCommandGroup
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Local (column-scoped) option management (#1161)
+    // -------------------------------------------------------------------------
+
+    private static (string label, int? value, string? color) ParseOptionSpecNullable(string spec)
+    {
+        var parts = spec.Split(':');
+        var label = parts[0].Trim();
+        int? value = null;
+        string? color = null;
+        for (var i = 1; i < parts.Length; i++)
+        {
+            var token = parts[i].Trim();
+            if (token.Length == 0) continue;
+            if (token.StartsWith('#')) color = token;
+            else if (int.TryParse(token, out var v)) value = v;
+            else throw new FormatException($"Invalid --option '{spec}': '{token}' is neither an integer value nor a #color.");
+        }
+        return (label, value, color);
+    }
+
+    internal static Command CreateAddOptionCommand()
+    {
+        var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name (required for value derivation when --option has no explicit value)" };
+        var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
+        var columnOption = new Option<string>("--column", "-c") { Description = "Logical name of the Choice/Choices column", Required = true };
+        var optionOption = new Option<string>("--option") { Description = "Option to add: \"Label[:Value][:#Color]\"", Required = true };
+        var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
+
+        var command = new Command("add-option", "Add an option to a column's local option set")
+        {
+            solutionOption, entityOption, columnOption, optionOption, publishOption,
+            MetadataCommandGroup.ProfileOption, MetadataCommandGroup.EnvironmentOption
+        };
+        GlobalOptions.AddToCommand(command);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var solution = parseResult.GetValue(solutionOption);
+            var entity = parseResult.GetValue(entityOption)!;
+            var column = parseResult.GetValue(columnOption)!;
+            var spec = parseResult.GetValue(optionOption)!;
+            var publish = parseResult.GetValue(publishOption);
+            var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            string label; int? value; string? color;
+            try { (label, value, color) = ParseOptionSpecNullable(spec); }
+            catch (Exception ex) { writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", ex.Message)); return ExitCodes.ValidationError; }
+
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--option requires a non-empty label."));
+                return ExitCodes.ValidationError;
+            }
+            if (!value.HasValue && string.IsNullOrWhiteSpace(solution))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Provide an explicit value (Label:Value) or --solution to derive the option value."));
+                return ExitCodes.ValidationError;
+            }
+
+            try
+            {
+                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile, environment, globalOptions.Verbose, globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+                if (!globalOptions.IsJsonMode)
+                {
+                    ConsoleHeader.WriteConnectedAs(serviceProvider.GetRequiredService<ResolvedConnectionInfo>());
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"Adding option '{label}' to '{entity}.{column}'...");
+                }
+
+                var assigned = await authoringService.AddColumnOptionAsync(new AddColumnOptionRequest
+                {
+                    EntityLogicalName = entity,
+                    ColumnLogicalName = column,
+                    Label = label,
+                    Value = value,
+                    Color = color,
+                    SolutionUniqueName = solution,
+                    Publish = publish
+                }, cancellationToken);
+
+                if (globalOptions.IsJsonMode)
+                    writer.WriteSuccess(new { entity, column, label, value = assigned });
+                else
+                    Console.Error.WriteLine($"Option '{label}' added to '{entity}.{column}' with value {assigned}.");
+
+                return ExitCodes.Success;
+            }
+            catch (MetadataValidationException ex)
+            {
+                writer.WriteError(StructuredError.Create(ex.ErrorCode, ex.Message));
+                return ExitCodes.ValidationError;
+            }
+            catch (Exception ex)
+            {
+                writer.WriteError(ExceptionMapper.Map(ex, context: "adding option", debug: globalOptions.Debug));
+                return ExceptionMapper.ToExitCode(ex);
+            }
+        });
+
+        return command;
+    }
+
+    internal static Command CreateUpdateOptionCommand()
+    {
+        var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name" };
+        var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
+        var columnOption = new Option<string>("--column", "-c") { Description = "Logical name of the Choice/Choices column", Required = true };
+        var valueOption = new Option<int?>("--value") { Description = "Target option by value (mutually exclusive with --label)" };
+        var labelOption = new Option<string?>("--label") { Description = "Target option by current label (mutually exclusive with --value)" };
+        var newLabelOption = new Option<string?>("--new-label") { Description = "New label to apply" };
+        var colorOption = new Option<string?>("--color") { Description = "New hex color (e.g. #FF0000)" };
+        var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
+
+        var command = new Command("update-option", "Update an option (label/color) on a column's local option set")
+        {
+            solutionOption, entityOption, columnOption, valueOption, labelOption, newLabelOption, colorOption, publishOption,
+            MetadataCommandGroup.ProfileOption, MetadataCommandGroup.EnvironmentOption
+        };
+        GlobalOptions.AddToCommand(command);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var solution = parseResult.GetValue(solutionOption);
+            var entity = parseResult.GetValue(entityOption)!;
+            var column = parseResult.GetValue(columnOption)!;
+            var value = parseResult.GetValue(valueOption);
+            var label = parseResult.GetValue(labelOption);
+            var newLabel = parseResult.GetValue(newLabelOption);
+            var color = parseResult.GetValue(colorOption);
+            var publish = parseResult.GetValue(publishOption);
+            var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
+            try
+            {
+                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile, environment, globalOptions.Verbose, globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+                if (!globalOptions.IsJsonMode)
+                {
+                    ConsoleHeader.WriteConnectedAs(serviceProvider.GetRequiredService<ResolvedConnectionInfo>());
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"Updating option on '{entity}.{column}'...");
+                }
+
+                await authoringService.UpdateColumnOptionAsync(new UpdateColumnOptionRequest
+                {
+                    EntityLogicalName = entity,
+                    ColumnLogicalName = column,
+                    Value = value,
+                    Label = label,
+                    NewLabel = newLabel,
+                    Color = color,
+                    SolutionUniqueName = solution,
+                    Publish = publish
+                }, cancellationToken);
+
+                if (globalOptions.IsJsonMode)
+                    writer.WriteSuccess(new { entity, column, updated = true });
+                else
+                    Console.Error.WriteLine($"Option on '{entity}.{column}' updated successfully.");
+
+                return ExitCodes.Success;
+            }
+            catch (MetadataValidationException ex)
+            {
+                writer.WriteError(StructuredError.Create(ex.ErrorCode, ex.Message));
+                return ExitCodes.ValidationError;
+            }
+            catch (Exception ex)
+            {
+                writer.WriteError(ExceptionMapper.Map(ex, context: "updating option", debug: globalOptions.Debug));
+                return ExceptionMapper.ToExitCode(ex);
+            }
+        });
+
+        return command;
+    }
+
+    internal static Command CreateRemoveOptionCommand()
+    {
+        var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name" };
+        var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
+        var columnOption = new Option<string>("--column", "-c") { Description = "Logical name of the Choice/Choices column", Required = true };
+        var valueOption = new Option<int?>("--value") { Description = "Target option by value (mutually exclusive with --label)" };
+        var labelOption = new Option<string?>("--label") { Description = "Target option by label (mutually exclusive with --value)" };
+        var forceOption = new Option<bool>("--force") { Description = "Skip confirmation prompt", DefaultValueFactory = _ => false };
+        var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
+
+        var command = new Command("remove-option", "Remove an option from a column's local option set")
+        {
+            solutionOption, entityOption, columnOption, valueOption, labelOption, forceOption, publishOption,
+            MetadataCommandGroup.ProfileOption, MetadataCommandGroup.EnvironmentOption
+        };
+        GlobalOptions.AddToCommand(command);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var solution = parseResult.GetValue(solutionOption);
+            var entity = parseResult.GetValue(entityOption)!;
+            var column = parseResult.GetValue(columnOption)!;
+            var value = parseResult.GetValue(valueOption);
+            var label = parseResult.GetValue(labelOption);
+            var force = parseResult.GetValue(forceOption);
+            var publish = parseResult.GetValue(publishOption);
+            var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
+            var target = value.HasValue ? $"value {value}" : $"label '{label}'";
+
+            if (!force)
+            {
+                if (!Console.IsInputRedirected)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.Error.WriteLine($"WARNING: This will remove the option ({target}) from '{entity}.{column}'.");
+                    Console.Error.WriteLine("         Records using this value will lose their selection.");
+                    Console.ResetColor();
+                    Console.Error.Write("Continue? (y/N): ");
+                    if (!string.Equals(Console.ReadLine(), "y", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.Error.WriteLine("Cancelled.");
+                        return ExitCodes.Success;
+                    }
+                }
+                else
+                {
+                    writer.WriteError(StructuredError.Create("CONFIRMATION_REQUIRED", "Use --force to skip confirmation in non-interactive mode"));
+                    return ExitCodes.ConfirmationRequired;
+                }
+            }
+
+            try
+            {
+                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile, environment, globalOptions.Verbose, globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
+
+                if (!globalOptions.IsJsonMode)
+                {
+                    ConsoleHeader.WriteConnectedAs(serviceProvider.GetRequiredService<ResolvedConnectionInfo>());
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"Removing option ({target}) from '{entity}.{column}'...");
+                }
+
+                await authoringService.RemoveColumnOptionAsync(new RemoveColumnOptionRequest
+                {
+                    EntityLogicalName = entity,
+                    ColumnLogicalName = column,
+                    Value = value,
+                    Label = label,
+                    SolutionUniqueName = solution,
+                    Publish = publish
+                }, cancellationToken);
+
+                if (globalOptions.IsJsonMode)
+                    writer.WriteSuccess(new { entity, column, removed = true });
+                else
+                    Console.Error.WriteLine($"Option ({target}) removed from '{entity}.{column}'.");
+
+                return ExitCodes.Success;
+            }
+            catch (MetadataValidationException ex)
+            {
+                writer.WriteError(StructuredError.Create(ex.ErrorCode, ex.Message));
+                return ExitCodes.ValidationError;
+            }
+            catch (Exception ex)
+            {
+                writer.WriteError(ExceptionMapper.Map(ex, context: "removing option", debug: globalOptions.Debug));
+                return ExceptionMapper.ToExitCode(ex);
+            }
+        });
+
+        return command;
     }
 }

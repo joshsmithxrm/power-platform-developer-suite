@@ -114,16 +114,19 @@ public class ColumnCommandDeprecationTests
     }
 
     [Fact]
-    public void ColumnCreate_ParsesCorrectly_SameOptionsAsAttributeCreate()
+    public void ColumnCreate_LegacyOptions_AreSubsetOfAttributeCreate()
     {
         var columnCreate = ColumnCommandGroup.CreateCreateCommand();
         var attributeCreate = AttributeCommandGroup.CreateCreateCommand();
 
-        var columnOptions = columnCreate.Options.Select(o => o.Name).OrderBy(x => x).ToList();
-        var attrOptions = attributeCreate.Options.Select(o => o.Name).OrderBy(x => x).ToList();
+        var columnOptions = columnCreate.Options.Select(o => o.Name).ToHashSet();
+        var attrOptions = attributeCreate.Options.Select(o => o.Name).ToHashSet();
 
-        columnOptions.Should().BeEquivalentTo(attrOptions,
-            "deprecated column create must expose the same options as canonical attribute create");
+        // The deprecated column shim keeps its legacy options; canonical attribute create is a
+        // superset (it adds #1161 flags --choice/--option/--options-file/--publish). Every legacy
+        // column option must still exist on attribute so migrated scripts map cleanly.
+        columnOptions.Should().BeSubsetOf(attrOptions,
+            "every deprecated column create option must still exist on canonical attribute create");
     }
 }
 

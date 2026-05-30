@@ -291,6 +291,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Creating column", request.SchemaName);
 
+        // #1161: derive values for local Choice options supplied as label-only (no explicit value).
+        await DeriveLocalOptionValuesAsync(request, ct).ConfigureAwait(false);
+
         var attribute = BuildAttributeMetadata(request);
 
         var sdkRequest = new CreateAttributeRequest
@@ -304,6 +307,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
 
         reporter?.ReportInfo($"Column '{request.SchemaName}' created on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Created column {SchemaName} on {Entity} with MetadataId {MetadataId}",
@@ -1366,6 +1372,221 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
     #endregion
 
+    #region Local Column Options (#1161)
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+    {
+        _validator.ValidateRequiredString(entityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(columnLogicalName, "ColumnLogicalName");
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+
+        var retrieveRequest = new RetrieveAttributeRequest
+        {
+            EntityLogicalName = entityLogicalName,
+            LogicalName = columnLogicalName
+        };
+
+        OrganizationResponse retrieveResponse;
+        try
+        {
+            retrieveResponse = await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound,
+                $"Could not retrieve attribute '{columnLogicalName}' on '{entityLogicalName}': {ex.Message}", ex);
+        }
+
+        var optionSet = (retrieveResponse as RetrieveAttributeResponse)?.AttributeMetadata switch
+        {
+            PicklistAttributeMetadata p => p.OptionSet,
+            MultiSelectPicklistAttributeMetadata m => m.OptionSet,
+            _ => null
+        };
+
+        if (optionSet?.Options == null)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Attribute '{columnLogicalName}' on '{entityLogicalName}' is not a Choice/Choices column with a local option set.",
+                "ColumnLogicalName");
+
+        var result = new List<ColumnOptionInfo>();
+        foreach (var opt in optionSet.Options)
+        {
+            result.Add(new ColumnOptionInfo
+            {
+                Value = opt.Value ?? 0,
+                Label = opt.Label?.UserLocalizedLabel?.Label
+                    ?? opt.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                    ?? "",
+                Color = opt.Color
+            });
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> AddColumnOptionAsync(AddColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.add");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+        _validator.ValidateRequiredString(request.Label, "Label");
+
+        if (!request.Value.HasValue && string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide an explicit value or --solution to derive the option value.", "Value");
+
+        var existing = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var existingValues = existing.Select(o => o.Value).ToList();
+
+        int? optionPrefix = null;
+        if (!string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            optionPrefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
+
+        var value = OptionValueDeriver.Derive(request.Value, optionPrefix, existingValues);
+
+        var sdkRequest = new InsertOptionValueRequest
+        {
+            Label = new Label(request.Label, 1033),
+            Value = value,
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        InsertOptionValueResponse response;
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Added local option {Value} to {Entity}.{Column}", response.NewOptionValue, request.EntityLogicalName, request.ColumnLogicalName);
+        return response.NewOptionValue;
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.update");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+
+        var sdkRequest = new SdkUpdateOptionValueRequest
+        {
+            Value = target.Value,
+            Label = new Label(request.NewLabel ?? target.Label, 1033),
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Updated local option {Value} on {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveColumnOptionAsync(RemoveColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.remove");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+
+        var sdkRequest = new SdkDeleteOptionValueRequest
+        {
+            Value = target.Value,
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Removed local option {Value} from {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+    }
+
+    private static ColumnOptionInfo ResolveColumnOption(IReadOnlyList<ColumnOptionInfo> options, int? value, string? label, string entity, string column)
+    {
+        var match = value.HasValue
+            ? options.FirstOrDefault(o => o.Value == value.Value)
+            : options.FirstOrDefault(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase));
+
+        if (match == null)
+            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                value.HasValue
+                    ? $"Option with value {value.Value} not found on '{entity}.{column}'."
+                    : $"Option with label '{label}' not found on '{entity}.{column}'.",
+                value.HasValue ? "Value" : "Label");
+
+        return match;
+    }
+
+    #endregion
+
     #region Private Helpers
 
     private async Task<string> ResolvePublisherPrefixAsync(string solutionUniqueName, CancellationToken ct)
@@ -1541,19 +1762,65 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else if (request.Options != null && request.Options.Length > 0)
         {
-            // Create local option set
-            var optionSet = new OptionSetMetadata();
-            foreach (var opt in request.Options)
-            {
-                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
-            }
-            attr.OptionSet = optionSet;
+            attr.OptionSet = BuildLocalOptionSet(request.Options);
         }
 
         if (request.DefaultValue.HasValue)
             attr.DefaultFormValue = request.DefaultValue;
 
         return attr;
+    }
+
+    /// <summary>
+    /// Derives values for local Choice options supplied label-only (Value == 0) using the publisher
+    /// option-value prefix (#1161). No-op for global/option-set-name columns or when all values are explicit.
+    /// </summary>
+    private async Task DeriveLocalOptionValuesAsync(CreateColumnRequest request, CancellationToken ct)
+    {
+        if ((request.ColumnType != SchemaColumnType.Choice && request.ColumnType != SchemaColumnType.Choices)
+            || request.Options is not { Length: > 0 }
+            || !string.IsNullOrEmpty(request.OptionSetName))
+            return;
+
+        if (!request.Options.Any(o => o.Value == 0))
+            return; // all explicit
+
+        if (string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            throw new MetadataValidationException(
+                MetadataErrorCodes.MissingRequiredField,
+                "Local Choice options supplied as label-only require --solution to derive option values.",
+                "Options");
+
+        var prefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
+        var assigned = request.Options.Where(o => o.Value != 0).Select(o => o.Value).ToList();
+        foreach (var opt in request.Options)
+        {
+            if (opt.Value != 0) continue;
+            var v = OptionValueDeriver.Derive(null, prefix, assigned);
+            opt.Value = v;
+            assigned.Add(v);
+        }
+    }
+
+    /// <summary>
+    /// Builds an inline (column-scoped) option set. IsGlobal MUST be explicitly false and
+    /// OptionSetType set, or Dataverse rejects column creation with "IsGlobal is not specified" (#1161).
+    /// </summary>
+    private static OptionSetMetadata BuildLocalOptionSet(OptionDefinition[] options)
+    {
+        var optionSet = new OptionSetMetadata
+        {
+            IsGlobal = false,
+            OptionSetType = OptionSetType.Picklist
+        };
+        foreach (var opt in options)
+        {
+            var om = new OptionMetadata(new Label(opt.Label, 1033), opt.Value);
+            if (!string.IsNullOrEmpty(opt.Color))
+                om.Color = opt.Color;
+            optionSet.Options.Add(om);
+        }
+        return optionSet;
     }
 
     private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request)
@@ -1566,12 +1833,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else if (request.Options != null && request.Options.Length > 0)
         {
-            var optionSet = new OptionSetMetadata();
-            foreach (var opt in request.Options)
-            {
-                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
-            }
-            attr.OptionSet = optionSet;
+            attr.OptionSet = BuildLocalOptionSet(request.Options);
         }
 
         if (request.DefaultValue.HasValue)

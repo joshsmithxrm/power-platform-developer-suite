@@ -194,7 +194,7 @@ public static class ColumnCommandGroup
                 solution, entity, name, displayName, type, description,
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
                 dateTimeBehavior, optionSetName, options, defaultValue,
-                trueLabel, falseLabel, maxSizeInKB, dryRun,
+                trueLabel, falseLabel, maxSizeInKB, dryRun, publish: false,
                 profileVal, environmentVal, globalOptions, cancellationToken);
         });
 

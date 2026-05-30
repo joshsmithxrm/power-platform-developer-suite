@@ -97,4 +97,18 @@ public interface IMetadataAuthoringService
 
     /// <summary>Removes a status reason from an entity's statuscode attribute.</summary>
     Task RemoveStatusReasonAsync(RemoveStatusReasonRequest request, CancellationToken ct = default);
+
+    // Local (column-scoped) options (#1161)
+
+    /// <summary>Lists the options on a column's local option set.</summary>
+    Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default);
+
+    /// <summary>Adds an option to a column's local option set, deriving the value when not explicit.</summary>
+    Task<int> AddColumnOptionAsync(AddColumnOptionRequest request, CancellationToken ct = default);
+
+    /// <summary>Updates an option (label and/or color) on a column's local option set.</summary>
+    Task UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default);
+
+    /// <summary>Removes an option from a column's local option set.</summary>
+    Task RemoveColumnOptionAsync(RemoveColumnOptionRequest request, CancellationToken ct = default);
 }

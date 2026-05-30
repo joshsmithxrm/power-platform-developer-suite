@@ -42,9 +42,14 @@ public class MetadataAttributeCommandTests
     }
 
     [Fact]
-    public void Create_HasExactlyThreeSubcommands()
+    public void Create_HasLocalOptionSubcommands()
     {
-        Assert.Equal(3, _command.Subcommands.Count);
+        // #1161: attribute hosts create/update/delete plus local-option add/update/remove.
+        var names = _command.Subcommands.Select(c => c.Name).ToList();
+        Assert.Contains("add-option", names);
+        Assert.Contains("update-option", names);
+        Assert.Contains("remove-option", names);
+        Assert.Equal(6, _command.Subcommands.Count);
     }
 }
 
