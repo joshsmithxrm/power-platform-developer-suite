@@ -826,9 +826,18 @@ public static class EntityCommand
                 return ExitCodes.ValidationError;
             }
 
+            // --state-code, when supplied directly, must be a valid state code (0 or 1).
+            if (hasStateCode && stateCode!.Value != 0 && stateCode.Value != 1)
+            {
+                writer.WriteError(StructuredError.Create(
+                    "INVALID_CONSTRAINT",
+                    "--state-code must be 0 (Active) or 1 (Inactive)."));
+                return ExitCodes.ValidationError;
+            }
+
             // Exactly one of --value / --solution required
             var hasValue = value.HasValue;
-            var hasSolution = solution != null;
+            var hasSolution = !string.IsNullOrWhiteSpace(solution);
 
             if (!hasValue && !hasSolution)
             {
