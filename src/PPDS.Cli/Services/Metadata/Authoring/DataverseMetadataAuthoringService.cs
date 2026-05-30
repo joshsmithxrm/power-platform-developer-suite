@@ -1183,6 +1183,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             retrieveResponse = await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate, not be masked as a not-found error
+        }
         catch (Exception ex)
         {
             throw new PpdsException(MetadataErrorCodes.EntityNotFound, $"Could not retrieve statuscode attribute for '{entityLogicalName}': {ex.Message}", ex);
@@ -1801,9 +1805,14 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             var publisherResult = await client.RetrieveMultipleAsync(publisherQuery, ct).ConfigureAwait(false);
             if (publisherResult.Entities.Count == 0)
                 throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound, $"Publisher for solution '{solutionUniqueName}' not found.", "SolutionUniqueName");
-            var prefix = publisherResult.Entities[0].GetAttributeValue<int>("customizationoptionvalueprefix");
-            _publisherOptionValuePrefixCache[solutionUniqueName] = prefix;
-            return prefix;
+            var prefix = publisherResult.Entities[0].GetAttributeValue<int?>("customizationoptionvalueprefix");
+            if (!prefix.HasValue)
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.MissingRequiredField,
+                    $"Publisher for solution '{solutionUniqueName}' has no option value prefix configured; pass --value to assign the option value explicitly.",
+                    "SolutionUniqueName");
+            _publisherOptionValuePrefixCache[solutionUniqueName] = prefix.Value;
+            return prefix.Value;
         }
     }
 
