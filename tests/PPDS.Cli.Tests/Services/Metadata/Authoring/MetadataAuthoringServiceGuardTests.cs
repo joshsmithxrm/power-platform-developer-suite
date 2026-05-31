@@ -43,6 +43,9 @@ public class MetadataAuthoringServiceGuardTests
     [InlineData("CreateKeyAsync")]
     [InlineData("DeleteKeyAsync")]
     [InlineData("ReactivateKeyAsync")]
+    [InlineData("AddStatusReasonAsync")]
+    [InlineData("UpdateStatusReasonAsync")]
+    [InlineData("RemoveStatusReasonAsync")]
     public async Task EveryMutationMethod_Blocks(string methodName)
     {
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict).Object;
@@ -74,6 +77,9 @@ public class MetadataAuthoringServiceGuardTests
             "CreateKeyAsync" => () => service.CreateKeyAsync(new CreateKeyRequest()),
             "DeleteKeyAsync" => () => service.DeleteKeyAsync(new DeleteKeyRequest()),
             "ReactivateKeyAsync" => () => service.ReactivateKeyAsync(new ReactivateKeyRequest()),
+            "AddStatusReasonAsync" => () => service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = "account", Label = "Test", StateCode = 0, Value = 1 }),
+            "UpdateStatusReasonAsync" => () => service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "account", Value = 1, NewLabel = "Test" }),
+            "RemoveStatusReasonAsync" => () => service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "account", Value = 1 }),
             _ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, "Unknown method — update the switch when adding new mutation methods.")
         };
 

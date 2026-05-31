@@ -932,9 +932,9 @@ class TestMetadataMutations:
         assert not is_mut, f"argv={argv}: should not be a mutation"
 
     @pytest.mark.parametrize("cmd", [
-        "ppds metadata table create --solution s --name t",
-        "ppds metadata column delete --solution s --entity t --name c",
-        "ppds metadata choice update --solution s --name c",
+        "ppds metadata entity create --solution s --name t",
+        "ppds metadata attribute delete --solution s --entity t --column c",
+        "ppds metadata optionset update --solution s --name c",
     ])
     def test_metadata_mutations_blocked_during_shakedown(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")

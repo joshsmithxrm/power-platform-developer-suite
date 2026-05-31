@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Commands.Metadata.Choice;
 using Xunit;
 
@@ -119,7 +120,7 @@ public class ChoiceOptionParsingTests
     [Fact]
     public void ParseOptionDefinitions_ValidInput_ReturnsOptions()
     {
-        var result = ChoiceCommandGroup.ParseOptionDefinitions("Active=1,Inactive=2,Pending=3");
+        var result = OptionSetCommand.ParseOptionDefinitions("Active=1,Inactive=2,Pending=3");
 
         Assert.Equal(3, result.Length);
         Assert.Equal("Active", result[0].Label);
@@ -133,7 +134,7 @@ public class ChoiceOptionParsingTests
     [Fact]
     public void ParseOptionDefinitions_WithSpaces_TrimsCorrectly()
     {
-        var result = ChoiceCommandGroup.ParseOptionDefinitions(" Active = 1 , Inactive = 2 ");
+        var result = OptionSetCommand.ParseOptionDefinitions(" Active = 1 , Inactive = 2 ");
 
         Assert.Equal(2, result.Length);
         Assert.Equal("Active", result[0].Label);
@@ -143,7 +144,7 @@ public class ChoiceOptionParsingTests
     [Fact]
     public void ParseOptionDefinitions_InvalidPairs_SkipsInvalid()
     {
-        var result = ChoiceCommandGroup.ParseOptionDefinitions("Active=1,BadEntry,Inactive=2");
+        var result = OptionSetCommand.ParseOptionDefinitions("Active=1,BadEntry,Inactive=2");
 
         Assert.Equal(2, result.Length);
         Assert.Equal("Active", result[0].Label);
@@ -153,7 +154,7 @@ public class ChoiceOptionParsingTests
     [Fact]
     public void ParseOrder_ValidInput_ReturnsInts()
     {
-        var result = ChoiceCommandGroup.ParseOrder("1,3,2,4");
+        var result = OptionSetCommand.ParseOrder("1,3,2,4");
 
         Assert.Equal(4, result.Length);
         Assert.Equal(1, result[0]);
@@ -165,7 +166,7 @@ public class ChoiceOptionParsingTests
     [Fact]
     public void ParseOrder_WithSpaces_TrimsCorrectly()
     {
-        var result = ChoiceCommandGroup.ParseOrder(" 1 , 3 , 2 ");
+        var result = OptionSetCommand.ParseOrder(" 1 , 3 , 2 ");
 
         Assert.Equal(3, result.Length);
         Assert.Equal(1, result[0]);

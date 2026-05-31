@@ -82,4 +82,7 @@ public sealed class CreateColumnRequest
 
     /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted).</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>Gets or sets whether to publish the entity after the column is created (#1161).</summary>
+    public bool Publish { get; set; }
 }
