@@ -133,8 +133,19 @@ public class ViewService : IViewService
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
         var fetchXml = entity.GetAttributeValue<string>("fetchxml") ?? "<fetch><entity /></fetch>";
 
-        var columns = ParseLayoutXml(layoutXml);
-        var (sorts, filter) = ParseFetchXml(fetchXml);
+        IReadOnlyList<ViewColumn> columns;
+        IReadOnlyList<ViewSortOrder> sorts;
+        ViewFilter? filter;
+        try
+        {
+            columns = ParseLayoutXml(layoutXml);
+            (sorts, filter) = ParseFetchXml(fetchXml);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException)
+        {
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                $"View '{viewName}' contains malformed XML in layoutxml or fetchxml.", ex);
+        }
 
         return new ViewDetail(
             id,
@@ -174,7 +185,8 @@ public class ViewService : IViewService
         if (isRelated)
         {
             var rels = await _cachedMetadata.GetRelationshipsAsync(entityLogicalName, cancellationToken);
-            var rel = rels.ManyToOne.FirstOrDefault(r => r.ReferencingAttribute == viaRelationship);
+            var rel = rels.ManyToOne.FirstOrDefault(r =>
+                string.Equals(r.ReferencingAttribute, viaRelationship, StringComparison.OrdinalIgnoreCase));
             if (rel == null)
                 throw new PpdsException(ErrorCodes.View.RelationshipNotFound,
                     $"Relationship attribute '{viaRelationship}' not found in metadata for entity '{entityLogicalName}'.");
@@ -507,7 +519,7 @@ public class ViewService : IViewService
     private async Task<int> ResolveObjectTypeCodeAsync(string entityLogicalName, CancellationToken ct)
     {
         var entities = await _cachedMetadata.GetEntitiesAsync(ct);
-        var meta = entities.FirstOrDefault(e => e.LogicalName == entityLogicalName);
+        var meta = entities.FirstOrDefault(e => string.Equals(e.LogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
         if (meta == null)
             throw new PpdsException(ErrorCodes.View.NotFound,
                 $"Entity '{entityLogicalName}' not found in metadata.");
@@ -745,7 +757,7 @@ public class ViewService : IViewService
     {
         var row = layout.Descendants("row").FirstOrDefault();
         var cell = row?.Elements("cell")
-            .FirstOrDefault(c => (string?)c.Attribute("name") == attributeName);
+            .FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), attributeName, StringComparison.OrdinalIgnoreCase));
         if (cell == null)
             throw new PpdsException(ErrorCodes.View.ColumnNotFound,
                 $"Column '{attributeName}' not found in view layout.");

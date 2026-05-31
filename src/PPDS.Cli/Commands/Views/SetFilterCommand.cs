@@ -143,8 +143,13 @@ public static class SetFilterCommand
                     return ExitCodes.InvalidArguments;
                 }
 
-                filterXmlFragment =
-                    $"""<filter type="and"><condition attribute="{parts[0]}" operator="{parts[1]}" value="{parts[2]}" /></filter>""";
+                filterXmlFragment = new XElement("filter",
+                    new XAttribute("type", "and"),
+                    new XElement("condition",
+                        new XAttribute("attribute", parts[0]),
+                        new XAttribute("operator", parts[1]),
+                        new XAttribute("value", parts[2])))
+                    .ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
             }
 
             try
