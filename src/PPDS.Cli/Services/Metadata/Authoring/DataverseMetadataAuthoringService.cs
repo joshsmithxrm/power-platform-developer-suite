@@ -1621,7 +1621,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 "SolutionUniqueName");
         }
 
-        var publisherId = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid").Id;
+        var publisherRef = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
+            ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
+                $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName");
+        var publisherId = publisherRef.Id;
 
         // Query publisher for customization prefix
         var publisherQuery = new QueryExpression("publisher")
@@ -2054,7 +2057,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             var solutionResult = await client.RetrieveMultipleAsync(solutionQuery, ct).ConfigureAwait(false);
             if (solutionResult.Entities.Count == 0)
                 throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound, $"Solution '{solutionUniqueName}' not found.", "SolutionUniqueName");
-            publisherId = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid").Id;
+            publisherId = (solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
+                ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
+                    $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName")).Id;
         }
 
         {
