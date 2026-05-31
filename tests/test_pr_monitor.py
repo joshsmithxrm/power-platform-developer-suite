@@ -186,6 +186,97 @@ class TestCiTimeout:
         assert result == "timeout"
 
 
+class TestCiTimeoutConfig:
+    """#1089: CI timeout is configurable via flag and env var."""
+
+    def test_default_is_1800(self):
+        """CI_MAX_WAIT default is 1800 seconds (30 min)."""
+        assert pr_monitor.CI_MAX_WAIT == 1800
+
+    def test_resolve_default_when_no_override(self):
+        """_resolve_ci_timeout_sec returns (1800, 'default') with no flag or env."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = {k: v for k, v in os.environ.items()
+                   if k != "PPDS_PR_MONITOR_CI_TIMEOUT"}
+            with patch.dict(os.environ, env, clear=True):
+                val, source = pr_monitor._resolve_ci_timeout_sec(None)
+        assert val == 1800
+        assert source == "default"
+
+    def test_resolve_env_wins_over_default(self):
+        """_resolve_ci_timeout_sec returns env value when flag is absent."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_CI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_ci_timeout_sec(None)
+        assert val == 600
+        assert source == "env"
+
+    def test_resolve_flag_wins_over_env(self):
+        """Flag value takes precedence over PPDS_PR_MONITOR_CI_TIMEOUT env var."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_CI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_ci_timeout_sec(300)
+        assert val == 300
+        assert source == "flag"
+
+    def test_long_ci_run_passes_with_default_timeout(self, tmp_path):
+        """CI run completing between 900s–1800s does not timeout with default 1800s limit."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        pending = [{"name": "slow", "state": "IN_PROGRESS", "bucket": "pending"}]
+        done = [{"name": "slow", "state": "COMPLETED", "bucket": "pass"}]
+
+        call_count = [0]
+        t0 = time.time()
+
+        def fake_time():
+            call_count[0] += 1
+            # After 2 calls, simulate 920 seconds elapsed (past old 900s limit)
+            return t0 + (920 if call_count[0] > 2 else call_count[0])
+
+        responses = [_gh_checks_json(pending), _gh_checks_json(pending),
+                     _gh_checks_json(done)]
+
+        with patch("pr_monitor.subprocess.run", side_effect=responses), \
+             patch("pr_monitor.time.time", side_effect=fake_time), \
+             patch("pr_monitor.time.sleep"), \
+             patch("pr_monitor.CI_MAX_WAIT", 1800), \
+             patch("pr_monitor.CI_POLL_INTERVAL", 0):
+            result = pr_monitor.poll_ci(wt, 5, logger)
+
+        assert result == "pass"
+
+
+class TestGeminiTimeoutConfig:
+    """#1127: Gemini timeout is configurable via flag and env var."""
+
+    def test_default_is_1800(self):
+        """GEMINI_MAX_WAIT default is 1800 seconds (30 min)."""
+        assert pr_monitor.GEMINI_MAX_WAIT == 1800
+
+    def test_resolve_default_when_no_override(self):
+        """_resolve_gemini_timeout_sec returns (1800, 'default') with no flag or env."""
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_MONITOR_GEMINI_TIMEOUT"}
+        with patch.dict(os.environ, env, clear=True):
+            val, source = pr_monitor._resolve_gemini_timeout_sec(None)
+        assert val == 1800
+        assert source == "default"
+
+    def test_resolve_env_wins_over_default(self):
+        """_resolve_gemini_timeout_sec returns env value when flag is absent."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_GEMINI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_gemini_timeout_sec(None)
+        assert val == 600
+        assert source == "env"
+
+    def test_resolve_flag_wins_over_env(self):
+        """Flag value takes precedence over PPDS_PR_MONITOR_GEMINI_TIMEOUT env var."""
+        with patch.dict(os.environ, {"PPDS_PR_MONITOR_GEMINI_TIMEOUT": "600"}):
+            val, source = pr_monitor._resolve_gemini_timeout_sec(300)
+        assert val == 300
+        assert source == "flag"
+
+
 class TestTerminalNotifications:
     """Monitor fires run_notify on every terminal state (success + failures)."""
 
@@ -419,6 +510,7 @@ class TestRepollCi:
              patch("pr_monitor.run_triage", return_value=[
                  {"id": 1, "action": "fixed", "description": "done", "commit": "abc"}
              ]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -536,6 +628,7 @@ class TestResultJsonSchema:
 
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -557,6 +650,7 @@ class TestResultJsonSchema:
 
         with patch("pr_monitor.poll_ci", return_value="pass"), \
              patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
              patch("pr_monitor.mark_pr_ready", return_value=True), \
              patch("pr_monitor.run_retro", return_value="done"), \
              patch("pr_monitor.run_notify"):
@@ -570,7 +664,7 @@ class TestResultJsonSchema:
 
 
 class TestGeminiTimeout:
-    """AC-126: Gemini polling stops after GEMINI_MAX_WAIT (5 min).
+    """AC-126: Gemini polling stops after GEMINI_MAX_WAIT (30 min, bumped from 5 per #1127).
 
     Updated for v1-prelaunch retro item #3: poll_gemini_comments now
     delegates to triage_common.poll_gemini_review which polls 3 endpoints.
@@ -838,7 +932,9 @@ class TestEmptyBodyReplyGuard:
              "description": "real fix"},  # real body
         ]
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        with patch("pr_monitor._post_replies_common") as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 102}]):
             pr_monitor.post_replies(wt, 42, items, logger)
 
         # _post_replies_common was called exactly once, with only the
@@ -862,7 +958,8 @@ class TestEmptyBodyReplyGuard:
             {"id": 202, "action": "noop", "description": "\t\n  "},
         ]
 
-        with patch("pr_monitor._post_replies_common") as mock_common:
+        with patch("pr_monitor._post_replies_common") as mock_common, \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]):
             pr_monitor.post_replies(wt, 42, items, logger)
 
         # All items had whitespace-only bodies — common POSTer never invoked.
@@ -915,7 +1012,7 @@ class TestReadyFlipGates:
         assert result["steps_completed"]["ready"]["status"] == "skipped"
 
     def test_ready_flip_skipped_when_no_gemini_review(self, tmp_path):
-        """No Gemini review means no flip."""
+        """No Gemini review raises _GeminiTimeoutError for escalation (#1127)."""
         wt = _make_worktree(tmp_path)
         logger = _make_logger(tmp_path)
         result = self._base_result(gemini_review_posted=False)
@@ -923,11 +1020,14 @@ class TestReadyFlipGates:
         with patch("pr_monitor.get_unreplied_comments", return_value=[]), \
              patch("pr_monitor._rebase_source_branch") as mock_rebase, \
              patch("pr_monitor.mark_pr_ready") as mock_ready, \
-             patch("pr_monitor.run_notify"):
-            pr_monitor._step_ready(wt, 42, logger, result)
+             patch("pr_monitor.run_notify") as mock_notify:
+            with pytest.raises(pr_monitor._GeminiTimeoutError):
+                pr_monitor._step_ready(wt, 42, logger, result)
 
         mock_rebase.assert_not_called()
         mock_ready.assert_not_called()
+        mock_notify.assert_not_called()
+        # State is written before the raise.
         assert result["steps_completed"]["ready"]["status"] == "skipped"
         assert "gemini_review_not_posted" in result["ready_skip_reasons"]
 
@@ -1202,7 +1302,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fake_common) as mock_common:
+                   side_effect=fake_common) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 777}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             pr_monitor.post_replies(wt, 42, [item], logger)
 
@@ -1235,7 +1337,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fake_common) as mock_common:
+                   side_effect=fake_common) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 500}]):
             pr_monitor.post_replies(wt, 42, [item_fixed], logger)
             pr_monitor.post_replies(wt, 42, [item_dismissed], logger)
 
@@ -1270,7 +1374,9 @@ class TestReplyDedupe:
                 log_fn("POSTED", comment_id=i["id"], action=i["action"])
 
         with patch("pr_monitor._post_replies_common",
-                   side_effect=fail_once) as mock_common:
+                   side_effect=fail_once) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 999}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             # First call failed; key must not be in the dedupe set.
             assert (42, 999) not in pr_monitor._POSTED_REPLY_KEYS
@@ -1278,7 +1384,9 @@ class TestReplyDedupe:
 
         # Retry succeeds — common is invoked again, then key lands in the set.
         with patch("pr_monitor._post_replies_common",
-                   side_effect=succeed) as mock_common:
+                   side_effect=succeed) as mock_common, \
+             patch("pr_monitor.get_unreplied_comments",
+                   return_value=[{"id": 999}]):
             pr_monitor.post_replies(wt, 42, [item], logger)
             assert mock_common.call_count == 1
             assert (42, 999) in pr_monitor._POSTED_REPLY_KEYS
@@ -2157,7 +2265,7 @@ class TestTerminalStateEnum:
     """AC-194: TERMINAL_STATES tuple contains exactly the specified values."""
 
     def test_terminal_state_enum(self):
-        """TERMINAL_STATES is a tuple with exactly the 8 required terminal state names."""
+        """TERMINAL_STATES is a tuple with exactly the 9 required terminal state names."""
         states = pr_monitor.TERMINAL_STATES
         assert isinstance(states, tuple), "TERMINAL_STATES must be a tuple"
         required = {
@@ -2168,6 +2276,7 @@ class TestTerminalStateEnum:
             "stuck-uncommitted-triage",
             "stuck-dirty-worktree-on-ready-flip",
             "ci-timeout",
+            "gemini-timeout",
             "monitor-crash",
         }
         assert set(states) == required, (
@@ -2175,7 +2284,7 @@ class TestTerminalStateEnum:
             f"Expected: {sorted(required)}\n"
             f"Got:      {sorted(states)}"
         )
-        assert len(states) == 8, "TERMINAL_STATES must have exactly 8 entries (no duplicates)"
+        assert len(states) == 9, "TERMINAL_STATES must have exactly 9 entries (no duplicates)"
 
 
 # ---------------------------------------------------------------------------
@@ -3131,9 +3240,16 @@ class TestPrMonitorLoudFailure:
                 assert "exited 7" in str(exc.value)
 
 
-class TestPrMonitorDangerousFlag:
-    def test_pr_monitor_passes_dangerous_true(self, tmp_path):
-        """AC-17 partial: run_triage passes dangerous=True to spawn."""
+class TestPrMonitorBypassPermissions:
+    """AC-05, AC-06 (#1067): pr_monitor must spawn with
+    permission_mode='bypassPermissions' instead of legacy dangerous=True.
+
+    Unattended bg sessions need bypassPermissions so permission prompts do not
+    transition the daemon to state=blocked with no operator to respond.
+    """
+
+    def test_run_triage_uses_bypassPermissions(self, tmp_path):
+        """AC-05: run_triage passes permission_mode='bypassPermissions'."""
         import pr_monitor
         import claude_dispatch
         from unittest.mock import patch, MagicMock
@@ -3160,11 +3276,13 @@ class TestPrMonitorDangerousFlag:
                                           [{"id": 1, "body": "x"}],
                                           logger, mode="interactive")
 
-        assert captured.get("dangerous") is True, \
-            "pr_monitor must pass dangerous=True (unattended daemon)"
+        assert captured.get("permission_mode") == "bypassPermissions", \
+            "run_triage must spawn with permission_mode='bypassPermissions'"
+        assert "dangerous" not in captured or not captured.get("dangerous"), \
+            "run_triage must not pass legacy dangerous=True"
 
-    def test_pr_monitor_retro_passes_dangerous_true(self, tmp_path):
-        """AC-17 partial: run_retro passes dangerous=True to spawn."""
+    def test_run_retro_uses_bypassPermissions(self, tmp_path):
+        """AC-06: run_retro passes permission_mode='bypassPermissions'."""
         import pr_monitor
         import claude_dispatch
         from unittest.mock import patch, MagicMock
@@ -3187,4 +3305,7 @@ class TestPrMonitorDangerousFlag:
             logger = MagicMock()
             pr_monitor.run_retro(str(tmp_path), logger, mode="interactive")
 
-        assert captured.get("dangerous") is True
+        assert captured.get("permission_mode") == "bypassPermissions", \
+            "run_retro must spawn with permission_mode='bypassPermissions'"
+        assert "dangerous" not in captured or not captured.get("dangerous"), \
+            "run_retro must not pass legacy dangerous=True"

@@ -15,17 +15,17 @@ Any request implying new work in a fresh worktree: "start a worktree", "create a
 
 ### Step 1: Determine Repo Root
 
-```bash
-git rev-parse --abbrev-ref HEAD
-```
-
-If on main/master: proceed. If on a feature branch or worktree: resolve root via `git worktree list --porcelain` (first entry's `worktree` line). Run all creation commands from that root.
+`git rev-parse --abbrev-ref HEAD`. If on main/master, proceed. Otherwise resolve root via `git worktree list --porcelain` (first entry's `worktree` line). Run all creation commands from that root.
 
 ### Step 2: Parse Input
 
 From `$ARGUMENTS` extract:
 - **Name:** kebab-case from key nouns. Read REFERENCE.md §1 "Name Derivation Examples" for guidance.
 - **Issues:** `#NNN`, `issue NNN`, or bare numbers near bug/fix/issue context words.
+
+### Step 2a: Shipped-Source Check
+
+If `$ARGUMENTS` names an existing branch as work to finalize/resume (a kebab ref like `fix/<x>`, `feat/<x>`, `chore/<x>` that is **not** the new branch being created), verify that source hasn't already merged before spawning a wrong-brief agent. Read REFERENCE.md §6 "Shipped-Source Check" for the exact procedure and abort message.
 
 ### Step 2b: Work-Type Classification
 
@@ -43,45 +43,29 @@ Present name/branch/issues/work-type/launch-command. Read REFERENCE.md §2 "Conf
 
 ### Step 4: Check for Existing Worktree
 
-```bash
-ls -d .worktrees/<name> 2>/dev/null
-```
-
-If exists: show current branch (`git -C .worktrees/<name> rev-parse --abbrev-ref HEAD`), ask "Resume or create with different name?"
-- If resume: skip creation, proceed to Step 6 (spawn background session)
-- If new: ask for alternative name, loop back to Step 4
+`ls -d .worktrees/<name>` — if exists, show current branch (`git -C .worktrees/<name> rev-parse --abbrev-ref HEAD`) and ask "Resume or create with different name?" Resume → skip to Step 6; new → ask for alternative, loop.
 
 ### Step 4b: Check for In-Flight Conflicts
 
-```bash
-python scripts/inflight-check.py --issue <N>   # repeat per issue
-python scripts/inflight-check.py --area <area>
-```
-
-Exit code 1 → show conflicting session (id, branch, intent, started), ask continue/coordinate/abort. Do not silently proceed.
+`python scripts/inflight-check.py --issue <N>` (per issue) and `--area <area>`. Exit 1 → show conflicting session (id, branch, intent, started), ask continue/coordinate/abort.
 
 ### Step 5: Create Worktree and Initialize State
 
-Use `worktree-create.py` — do NOT open-code `git worktree add`. Read REFERENCE.md §3 "worktree-create.py Rationale" for safety properties and exit code detail.
+Use `python scripts/worktree-create.py --name <name>` — do NOT open-code `git worktree add` (see REFERENCE.md §3). Stop on non-zero and surface stderr verbatim.
 
+Initialize state, passing `--worktree-path` with the absolute path so CWD inheritance can't write to the caller's `.workflow/state.json`:
 ```bash
-python scripts/worktree-create.py --name <name>
-```
-
-Stop on non-zero and surface stderr verbatim.
-
-Initialize state (run from worktree directory):
-```bash
-python scripts/workflow-state.py init "feat/<name>"
-python scripts/workflow-state.py set phase starting
-python scripts/workflow-state.py append issues <N>   # repeat per issue
-python scripts/workflow-state.py set work_type <type>
-python scripts/workflow-state.py set launch_command "<confirmed-command>"
+WT="<absolute-worktree-path>"   # e.g. C:/.../ppds/.worktrees/<name>
+python scripts/workflow-state.py --worktree-path "$WT" init "feat/<name>"
+python scripts/workflow-state.py --worktree-path "$WT" set phase starting
+python scripts/workflow-state.py --worktree-path "$WT" append issues <N>   # per issue
+python scripts/workflow-state.py --worktree-path "$WT" set work_type <type>
+python scripts/workflow-state.py --worktree-path "$WT" set launch_command "<confirmed-command>"
 ```
 
 ### Step 6: Spawn the Background Session
 
-Gather context (6a), build prompt (6b), spawn (6c), register (6d). Registration happens **after** spawn so the daemon short ID is recorded on first write — no re-invocation.
+Gather context (6a), build prompt (6b), spawn (6c), register (6d). Registration after spawn so the daemon short ID is recorded on first write.
 
 #### 6a: Gather context
 
@@ -91,24 +75,51 @@ For each issue: `gh issue view <N> --json title,body`. Capture `/investigate` fi
 
 Read REFERENCE.md §4 "Launch Prompt Structure" for the field set. Target 1–5K chars; hard cap 30K. Rules: relative paths; critical overrides inline; no PowerShell escaping needed (argv delivery).
 
+#### Prompt appendix — workflow contract
+
+After all task brief fields, append the following workflow contract verbatim.
+Fill placeholders before writing to the temp file:
+- `<branch-name>` → branch name with slashes replaced by hyphens (e.g. `feat-my-feature`)
+- `<worktree-path>` → absolute worktree path from Step 5
+
+```
+Workflow contract:
+1. Read CLAUDE.md, specs/CONSTITUTION.md, .claude/interaction-patterns.md, and any
+   skills referenced in the task brief above.
+2. Run /design. Author spec at specs/<branch-name>.md and plan at .plans/<branch-name>.md.
+   Use the branch name with slashes replaced by hyphens as the filename
+   (e.g. branch feat/my-feature → specs/feat-my-feature.md).
+   Spec must cover all acceptance criteria from the issue. Plan must cover all spec ACs.
+3. Present spec + plan summary in your final message of this turn. STOP after /design.
+   Set workflow-state:
+     python scripts/workflow-state.py set phase blocked
+     python scripts/workflow-state.py set needs "spec ready for review"
+   The operator will attach via Claude Desktop, review, and approve via a reply.
+4. After operator approval: run `python scripts/pipeline.py` (invoked from the worktree
+   after /design commits the spec; pipeline resolves the spec path automatically).
+   On failure: python scripts/pipeline.py --resume (or --from <stage>).
+5. After `python scripts/pipeline.py` exits successfully (pipeline includes /pr
+   internally): launch pr_monitor via Bash run_in_background=true:
+     python scripts/pr_monitor.py --worktree <worktree-path> --pr <PR-number>
+   Claude Code will re-engage you when pr_monitor exits.
+6. At re-engagement: read .workflow/pr-monitor-result.json and produce a final summary
+   covering actual PR state (ready / merged / escalated / error / blocked). Terminate.
+```
+
 #### 6c: Spawn
 
-Write the prompt to a temp file using the **Write tool** — never a shell heredoc. A heredoc terminator (`PROMPT_EOF`) appearing as a line inside the prompt would close the heredoc early; writing via the Write tool is byte-exact and immune to terminator collisions.
-
-1. Choose a temp path: `$env:TEMP/start-prompt-<8-hex>.txt` on Windows, `/tmp/start-prompt-<8-hex>.txt` elsewhere.
-2. Use the Write tool to write the prompt verbatim to that path.
-3. Invoke the helper:
+Write the prompt to a temp file using the **Write tool** — never a shell heredoc (see REFERENCE.md §8). Temp path: `$env:TEMP/start-prompt-<8-hex>.txt` on Windows, `/tmp/start-prompt-<8-hex>.txt` elsewhere. Invoke:
 
 ```bash
 python scripts/start-bg-spawn.py \
   --worktree-abs "<worktree-absolute-path>" \
   --branch "<branch>" \
-  --prompt-file "<temp-path>"
+  --prompt-file "<temp-path>" \
+  [--permission-mode bypassPermissions|acceptEdits|auto|default|dontAsk|plan] \
+  [--model sonnet|opus|haiku|<full-model-id>]
 ```
 
-4. Parse the single-line stdout JSON to extract `short`, then delete the temp file.
-
-Exit: `0`=spawned (`{short,sessionId,cwd}`); `1`=caller error (version/PATH/arg/prompt); `2`=daemon error. Surface stderr verbatim and stop on non-zero.
+Parse single-line stdout JSON for `short`, then delete the temp file. Exit: `0`=spawned (`{short,sessionId,cwd}`); `1`=caller error; `2`=daemon error. Surface stderr verbatim and stop on non-zero.
 
 #### 6d: Register as In-Flight
 
@@ -119,20 +130,18 @@ python scripts/inflight-register.py \
   --issue <N> --area <area> --intent "<short description>"
 ```
 
-Run from main repo root. Repeat `--issue`/`--area` as needed. The register script is idempotent on `--branch` (it replaces any existing entry for the same branch), so re-running is safe but unnecessary here. Deregistration handled by `/cleanup`.
+Run from main repo root. Idempotent on `--branch`. Deregistration handled by `/cleanup`.
 
 ### Step 7: Return Control to User
 
-Summarize and return control. The new session is visible in Agent View on every Claude Code surface. Read REFERENCE.md §5 "Return Summary Template" for the exact format. On non-zero from the helper: surface stderr verbatim and stop — no manual fallback.
+Summarize and return control per REFERENCE.md §5 — the new session is visible in Agent View on every Claude Code surface. On non-zero from the helper: surface stderr verbatim and stop.
 
 ## Rules
 
-1. **Works from any branch** — resolve main repo root automatically.
-2. **Always confirm** — name, issues, work type, launch command; wait for approval.
-3. **No duplicate worktrees** — check before creating, offer resume.
-4. **Platform detection** — use `uname -s`, not hardcoded assumptions.
-5. **Workflow state** — always initialize in the new worktree.
-6. **Freeform input** — never require structured flags.
-7. **Labels are hints** — work-type pre-selection is a convenience; user confirms.
-8. **Inline prompt handoff via `claude --bg`.** New session receives task via positional prompt argument. Do not write `.plans/context.md` or any handoff file.
-9. **Return control after launch** — do not continue the work once the session spawns.
+1. Works from any branch — resolve main repo root automatically.
+2. Always confirm name/issues/work-type/launch-command; wait for approval.
+3. No duplicate worktrees — check before creating, offer resume.
+4. Workflow state — always initialize in the new worktree.
+5. Freeform input — never require structured flags.
+6. Inline prompt handoff via `claude --bg` — no handoff file.
+7. Return control after launch — do not continue the work once the session spawns.

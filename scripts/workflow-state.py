@@ -16,6 +16,11 @@ Usage:
   python scripts/workflow-state.py show
   python scripts/workflow-state.py delete
   python scripts/workflow-state.py bump routing_gates.backlog.fired_count
+  python scripts/workflow-state.py --worktree-path /abs/path init feat/x
+
+The optional --worktree-path <abs-path> flag forces state to live at
+<abs-path>/.workflow/state.json regardless of CWD. Without it, behavior is
+unchanged (state lands in the git toplevel of CWD).
 
 Magic values for 'set':
   now   → current UTC ISO 8601 timestamp
@@ -31,6 +36,36 @@ import sys
 from datetime import datetime, timezone
 
 
+_WORKTREE_PATH_OVERRIDE = None
+
+
+def _extract_worktree_path_flag(argv):
+    """Extract --worktree-path <path> from argv, returning (new_argv, path_or_None).
+
+    The flag may appear anywhere after argv[0] (the script name). Stripping it
+    early lets each command's positional-arg parsing stay unchanged.
+    """
+    out = []
+    path = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--worktree-path":
+            if i + 1 >= len(argv):
+                print("ERROR: --worktree-path requires a value", file=sys.stderr)
+                sys.exit(1)
+            path = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("--worktree-path="):
+            path = a.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return out, path
+
+
 def _get_worktree_root():
     """Return the git toplevel for the current working tree.
 
@@ -38,8 +73,13 @@ def _get_worktree_root():
     the repo root.  We use this instead of CLAUDE_PROJECT_DIR so that
     workflow state lands in the worktree, not the main repo.
 
+    If --worktree-path was passed on the command line, that overrides
+    git detection so state lands at the explicit path regardless of CWD.
+
     Set WORKFLOW_STATE_TEST_SKIP_GIT=1 to skip the git subprocess (tests).
     """
+    if _WORKTREE_PATH_OVERRIDE:
+        return _WORKTREE_PATH_OVERRIDE
     if os.environ.get("WORKFLOW_STATE_TEST_SKIP_GIT"):
         return os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     try:
@@ -57,14 +97,20 @@ def _get_worktree_root():
 def _is_main_branch():
     """Return True if the current branch is main/master.
 
+    When --worktree-path is set, HEAD is checked inside that worktree
+    rather than CWD, so a caller running from main can still init state
+    for an explicit worktree.
+
     Set WORKFLOW_STATE_TEST_SKIP_GIT=1 to skip the git subprocess (tests).
     """
     if os.environ.get("WORKFLOW_STATE_TEST_SKIP_GIT"):
         return False
+    cmd = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+    cwd = _WORKTREE_PATH_OVERRIDE if _WORKTREE_PATH_OVERRIDE else None
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            cmd,
+            capture_output=True, text=True, timeout=5, cwd=cwd,
         )
         if result.returncode == 0:
             return result.stdout.strip() in ("main", "master")
@@ -171,14 +217,21 @@ def bump_nested(state, key):
 
 
 def main():
-    if len(sys.argv) < 2:
+    global _WORKTREE_PATH_OVERRIDE
+    argv, worktree_path = _extract_worktree_path_flag(sys.argv[1:])
+    if worktree_path:
+        _WORKTREE_PATH_OVERRIDE = os.path.abspath(worktree_path)
+
+    if not argv:
         print(
-            "Usage: workflow-state.py <command> [args...]\n"
+            "Usage: workflow-state.py [--worktree-path <abs-path>] <command> [args...]\n"
             "Commands: set <key> <value>, set-null <key>, init <branch>, show, delete, bump <key>",
             file=sys.stderr,
         )
         sys.exit(1)
 
+    # Re-shape sys.argv so the rest of main() can read sys.argv[1:] as before.
+    sys.argv = [sys.argv[0]] + argv
     command = sys.argv[1]
 
     # Read-only commands are fine anywhere; writes are blocked on main

@@ -22,7 +22,7 @@ The name should describe what the skill does, not the technology it uses.
 | `pr` | `create-pull-request` | Short is better when the action is obvious |
 | `debug` | `systematic-debugging` | Verb, not adjective-noun |
 
-**Qualifiers:** Only add when needed to disambiguate. `/verify` is the orchestrator. `/ext-verify` and `/tui-verify` are surface-specific because there are multiple surfaces.
+**Qualifiers:** Only add when needed to disambiguate. `/verify` is the orchestrator; surface-specific guides are in `/verify` `REFERENCE.md` sections.
 
 ## Directory Structure
 
@@ -59,7 +59,7 @@ description: One sentence describing when to use this skill. Write for AI discov
 
 Skills that represent workflow steps should write to `.workflow/state.json` on completion.
 
-**When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Supporting knowledge skills (ext-verify, tui-verify, cli-verify, mcp-verify) do NOT write state — the orchestrator skill that invokes them does.
+**When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Surface-specific reference sections (e.g., `/verify` `REFERENCE.md §tui/§ext/§cli`) do NOT write state — the orchestrating skill that invokes them does.
 
 **How to write state:** Use the utility script — never write JSON by hand:
 
@@ -86,8 +86,8 @@ python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
 | `/implement` | `set branch {name}` + `set spec {path}` + `set plan {path}` + `set started now` |
 | `/pr` | `set pr.url {url}` + `set pr.created now` |
 
-| `/converge` | `set-null gates.passed` + `set-null gates.commit_ref` |
-| `/reset` | `delete` (removes state file) |
+| convergence loop (in `/implement` Step 6E) | `set-null gates.passed` + `set-null gates.commit_ref` |
+| `/cleanup --reset` | `delete` (removes state file) |
 
 ## Skill Categories
 
@@ -95,9 +95,9 @@ For reference, PPDS skills fall into these categories:
 
 | Category | Examples | User-invocable? |
 |----------|----------|-----------------|
-| **Workflow orchestration** | /design, /implement, /pr, /gates, /qa, /review, /converge | Yes |
+| **Workflow orchestration** | /design, /implement, /pr, /gates, /qa, /review | Yes |
 | **Verification tools** | /verify, /shakedown | Yes |
-| **Surface knowledge** | /ext-verify, /tui-verify, /mcp-verify, /cli-verify | AI-loaded |
+| **Surface knowledge** | /verify (§ext, §tui, §mcp, §cli in REFERENCE.md) | AI-loaded |
 | **Development guides** | /ext-panels, /write-skill | AI-loaded |
 | **Analysis** | /retro, /debug, /status | Yes |
 

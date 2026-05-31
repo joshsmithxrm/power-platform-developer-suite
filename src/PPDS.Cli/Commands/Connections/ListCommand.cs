@@ -92,12 +92,12 @@ public static class ListCommand
             {
                 if (connections.Count == 0)
                 {
-                    Console.Error.WriteLine("No connections found.");
+                    Console.WriteLine("No connections found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {connections.Count} connection(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {connections.Count} connection(s):");
+                    Console.WriteLine();
 
                     foreach (var c in connections)
                     {

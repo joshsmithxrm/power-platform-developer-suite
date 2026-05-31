@@ -160,7 +160,7 @@ public static class TimelineCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"No traces found for correlation ID: {lookupCorrelationId}");
+                    Console.WriteLine($"No traces found for correlation ID: {lookupCorrelationId}");
                 }
                 return ExitCodes.Success;
             }
@@ -185,9 +185,9 @@ public static class TimelineCommand
             {
                 // Display header
                 var firstTrace = timeline.First().Trace;
-                Console.Error.WriteLine($"Request: {lookupCorrelationId}  ({firstTrace.CreatedOn:G})");
-                Console.Error.WriteLine($"Total Duration: {totalDuration}ms  |  {totalNodes} plugin executions");
-                Console.Error.WriteLine();
+                Console.WriteLine($"Request: {lookupCorrelationId}  ({firstTrace.CreatedOn:G})");
+                Console.WriteLine($"Total Duration: {totalDuration}ms  |  {totalNodes} plugin executions");
+                Console.WriteLine();
 
                 // Draw tree
                 foreach (var node in timeline)
@@ -234,13 +234,13 @@ public static class TimelineCommand
         }
         sb.Append($" ({durationStr}) {statusIcon}");
 
-        Console.Error.WriteLine(sb.ToString());
+        Console.WriteLine(sb);
 
         // If there's an exception, show a truncated message
         if (trace.HasException)
         {
             var exceptionPrefix = prefix + (isLast ? "    " : "\u2502   "); // "│   " or "    "
-            Console.Error.WriteLine($"{exceptionPrefix}Exception: (use 'get {trace.Id}' for details)");
+            Console.WriteLine($"{exceptionPrefix}Exception: (use 'get {trace.Id}' for details)");
         }
 
         // Draw children

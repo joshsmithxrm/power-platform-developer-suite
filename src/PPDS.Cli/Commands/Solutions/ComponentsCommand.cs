@@ -101,7 +101,7 @@ public static class ComponentsCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"No components found in solution '{uniqueName}'.");
+                    Console.WriteLine($"No components found in solution '{uniqueName}'.");
                 }
                 return ExitCodes.Success;
             }
@@ -129,11 +129,11 @@ public static class ComponentsCommand
 
                 foreach (var group in grouped)
                 {
-                    Console.Error.WriteLine($"{group.Key}: {group.Count()}");
+                    Console.WriteLine($"{group.Key}: {group.Count()}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {components.Count} component(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {components.Count} component(s)");
             }
 
             return ExitCodes.Success;

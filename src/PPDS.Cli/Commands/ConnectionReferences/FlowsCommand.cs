@@ -105,17 +105,17 @@ public static class FlowsCommand
             }
             else
             {
-                Console.Error.WriteLine($"Connection Reference: {cr.DisplayName ?? cr.LogicalName}");
-                Console.Error.WriteLine();
+                Console.WriteLine($"Connection Reference: {cr.DisplayName ?? cr.LogicalName}");
+                Console.WriteLine();
 
                 if (flows.Count == 0)
                 {
-                    Console.Error.WriteLine("No flows use this connection reference.");
+                    Console.WriteLine("No flows use this connection reference.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Flows using this connection reference ({flows.Count}):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Flows using this connection reference ({flows.Count}):");
+                    Console.WriteLine();
 
                     foreach (var f in flows)
                     {

@@ -489,7 +489,7 @@ public static class GetCommand
         foreach (var kvp in properties)
         {
             var key = kvp.Key.PadRight(maxKeyLength);
-            Console.Error.WriteLine($"  {key}  {kvp.Value}");
+            Console.WriteLine($"  {key}  {kvp.Value}");
         }
     }
 

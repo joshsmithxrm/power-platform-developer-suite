@@ -238,20 +238,20 @@ public static class FetchCommand
 
     private static void WriteTableOutput(QueryResult result)
     {
-        Console.Error.WriteLine();
+        Console.WriteLine();
 
         if (result.Count == 0)
         {
-            Console.Error.WriteLine("No records found.");
+            Console.WriteLine("No records found.");
             return;
         }
 
-        Console.Error.WriteLine($"Entity: {result.EntityLogicalName}");
-        Console.Error.WriteLine($"Records: {result.Count}");
+        Console.WriteLine($"Entity: {result.EntityLogicalName}");
+        Console.WriteLine($"Records: {result.Count}");
 
         if (result.TotalCount.HasValue)
         {
-            Console.Error.WriteLine($"Total Count: {result.TotalCount}");
+            Console.WriteLine($"Total Count: {result.TotalCount}");
         }
 
         if (result.MoreRecords)
@@ -259,8 +259,8 @@ public static class FetchCommand
             Console.Error.WriteLine("More records available (use --page or --paging-cookie for continuation)");
         }
 
-        Console.Error.WriteLine($"Execution Time: {result.ExecutionTimeMs}ms");
-        Console.Error.WriteLine();
+        Console.WriteLine($"Execution Time: {result.ExecutionTimeMs}ms");
+        Console.WriteLine();
 
         // Print table header
         var columns = result.Columns;
@@ -302,9 +302,9 @@ public static class FetchCommand
 
         if (result.MoreRecords && !string.IsNullOrEmpty(result.PagingCookie))
         {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Paging cookie (for continuation):");
-            Console.Error.WriteLine(result.PagingCookie);
+            Console.WriteLine();
+            Console.WriteLine($"Paging cookie (for continuation):");
+            Console.WriteLine(result.PagingCookie);
         }
     }
 

@@ -18,6 +18,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from pathlib import Path
 
 from triage_common import (
     GEMINI_BOT_LOGIN,
+    UnrepliedQueryError,
     build_triage_prompt,
     get_repo_slug as _get_repo_slug,
     get_unreplied_comments,
@@ -40,14 +42,41 @@ from triage_common import (
 # ---------------------------------------------------------------------------
 
 CI_POLL_INTERVAL = 30       # seconds between CI status checks
-CI_MAX_WAIT = 900           # 15 minutes max for CI (AC-125)
+CI_MAX_WAIT = 1800          # 30 minutes max for CI (AC-125; bumped from 900 per #1089)
 CI_ESCALATION_THRESHOLD = 3       # consecutive no-check polls before escalation
 CI_ESCALATION_MIN_ELAPSED = 120   # seconds since first error before escalation
 GEMINI_POLL_INTERVAL = 30   # seconds between Gemini comment polls
-GEMINI_MAX_WAIT = 300       # 5 minutes max for Gemini
+GEMINI_MAX_WAIT = 1800      # 30 minutes max for Gemini (bumped from 300 per #1127)
 MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 MAX_CI_FIX_ROUNDS = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
+
+
+def _resolve_ci_timeout_sec(flag_value):
+    """Return (effective_seconds, source) with flag > env > default precedence."""
+    if flag_value is not None:
+        return flag_value, "flag"
+    env_val = os.environ.get("PPDS_PR_MONITOR_CI_TIMEOUT")
+    if env_val:
+        try:
+            return int(env_val), "env"
+        except ValueError:
+            pass
+    return CI_MAX_WAIT, "default"
+
+
+def _resolve_gemini_timeout_sec(flag_value):
+    """Return (effective_seconds, source) with flag > env > default precedence."""
+    if flag_value is not None:
+        return flag_value, "flag"
+    env_val = os.environ.get("PPDS_PR_MONITOR_GEMINI_TIMEOUT")
+    if env_val:
+        try:
+            return int(env_val), "env"
+        except ValueError:
+            pass
+    return GEMINI_MAX_WAIT, "default"
+
 
 KNOWN_FLAKE_PATTERNS = [
     "connection reset by peer",
@@ -76,6 +105,7 @@ TERMINAL_STATES = (
     "stuck-uncommitted-triage",
     "stuck-dirty-worktree-on-ready-flip",
     "ci-timeout",
+    "gemini-timeout",
     "monitor-crash",
 )
 
@@ -173,6 +203,15 @@ class _DirtyWorktreeOnReadyFlipError(Exception):
     Belt-and-suspenders guard for the case where Bug 1 (_UncommittedTriageError)
     somehow did not fire (e.g. the monitor resumed, or a user manually ran with
     dirty state).
+    """
+
+
+class _GeminiTimeoutError(Exception):
+    """Raised by _step_ready when Gemini never posted within GEMINI_MAX_WAIT.
+
+    Propagated up to run_monitor to trigger the #1088 escalation block and
+    return exit code 1, preventing _step_notify from firing a duplicate
+    notification after _notify_terminal runs in run_monitor's exception handler.
     """
 
 
@@ -548,14 +587,14 @@ def run_triage(worktree, pr_number, comments, logger, mode=None):
 
     try:
         handle = claude_dispatch.spawn(
-            mode=claude_dispatch._resolve_mode(mode),
+            mode="headless",
             prompt=full_prompt,
             caller="pr_monitor.run_triage",
             name="gemini-triage",
             agent="gemini-triage",
-            model="sonnet",
+            model="haiku",
             cwd=worktree,
-            dangerous=True,
+            permission_mode="bypassPermissions",
             stage_log=stage_jsonl_path,
             env=env,
         )
@@ -798,6 +837,15 @@ def _reply_body_for(item):
     action = item.get("action", "unknown")
     description = item.get("description", "")
     commit_sha = item.get("commit")
+    # Strip "Already fixed/dismissed/addressed in commit <sha> \u2014 " prefix that
+    # triage agents sometimes emit, which would produce doubled phrasing like
+    # "Fixed in X \u2014 Already fixed in commit X \u2014 \u2026" (issue #1096 style nit).
+    description = re.sub(
+        r"^Already (?:fixed|dismissed|addressed) in commit \S+\s*\u2014\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
     if action == "fixed" and commit_sha:
         return f"Fixed in {commit_sha} \u2014 {description}"
     if action == "dismissed":
@@ -808,9 +856,12 @@ def _reply_body_for(item):
 def post_replies(worktree, pr_number, triage_results, logger):
     """Post threaded replies to Gemini review comments.
 
-    Applies two guards before delegating to _post_replies_common:
+    Applies three guards before delegating to _post_replies_common:
       1. Empty-body guard (meta-retro #1) — skip whitespace-only bodies.
       2. Dedupe on (pr, comment_id) (meta-retro #3; PR #864 hardening).
+      3. GitHub-side check via get_unreplied_comments (issue #1096) — skip
+         any comment_id that already has a threaded reply in GitHub's state,
+         preventing duplicates across monitor restarts or parallel actors.
 
     The dedupe key is recorded only after a successful POST event so
     transient failures (network, API timeout) don't permanently block
@@ -838,6 +889,30 @@ def post_replies(worktree, pr_number, triage_results, logger):
             _log_fn("SKIPPED_DUPLICATE", comment_id=comment_id, action=action)
             continue
         filtered.append(item)
+
+    if not filtered:
+        return
+
+    # Fail-open on query error: if we can't ask GitHub whether replies exist,
+    # skip the cross-process filter rather than silently dropping every POST.
+    # In-process dedupe (above) + GitHub's own idempotency on reply threads
+    # remain as safety nets.
+    try:
+        unreplied = get_unreplied_comments(
+            worktree, pr_number, shakedown=bool(SHAKEDOWN),
+            raise_on_error=True,
+        )
+        unreplied_ids = {c["id"] for c in unreplied}
+        cross_process_filtered = []
+        for item in filtered:
+            cid = item.get("id")
+            if cid not in unreplied_ids:
+                _log_fn("SKIPPED_ALREADY_REPLIED", comment_id=cid, action=item.get("action", "unknown"))
+            else:
+                cross_process_filtered.append(item)
+        filtered = cross_process_filtered
+    except UnrepliedQueryError as e:
+        _log_fn("UNREPLIED_QUERY_FAILED_FAIL_OPEN", error=str(e)[:200])
 
     if not filtered:
         return
@@ -989,13 +1064,13 @@ def run_retro(worktree, logger, mode=None):
 
     try:
         handle = claude_dispatch.spawn(
-            mode=claude_dispatch._resolve_mode(mode),
+            mode="headless",
             prompt=prompt,
             caller="pr_monitor.run_retro",
             name="retro",
             model="sonnet",
             cwd=worktree,
-            dangerous=True,
+            permission_mode="bypassPermissions",
             stage_log=stage_jsonl_path,
             env=env,
         )
@@ -1135,20 +1210,151 @@ def _deregister_inflight(worktree, logger):
                    branch=branch, error=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Escalation visibility block (#1088)
+# ---------------------------------------------------------------------------
+
+_ESCALATION_LOG_TAIL_LINES = 25
+_ESCALATION_LABEL = "status:monitor-escalated"
+
+
+def _read_log_tail(log_path, lines=_ESCALATION_LOG_TAIL_LINES):
+    """Return the last N lines of the monitor log as a string."""
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        return "".join(all_lines[-lines:])
+    except OSError:
+        return ""
+
+
+def _post_escalation_comment(worktree, pr_number, terminal_state, log_path, logger):
+    """Post a GitHub PR comment with reason + log tail on any non-clean exit."""
+    if SHAKEDOWN:
+        logger.log("escalation", "COMMENT_SKIPPED_SHAKEDOWN")
+        return
+    log_tail = _read_log_tail(log_path)
+    body = (
+        f":warning: **pr_monitor escalated: `{terminal_state}`**\n\n"
+        f"The background PR monitor exited non-cleanly. "
+        f"Operator attention is needed.\n\n"
+        f"<details><summary>Monitor log (last {_ESCALATION_LOG_TAIL_LINES} lines)"
+        f"</summary>\n\n```\n{log_tail.strip()}\n```\n</details>\n\n"
+        f"Log file: `.workflow/pr-monitor.log`"
+    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "comment", str(pr_number), "--body", body],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        logger.log("escalation", "COMMENT_POSTED",
+                   pr=pr_number, rc=result.returncode)
+        if result.returncode != 0:
+            logger.log("escalation", "COMMENT_ERROR",
+                       stderr=result.stderr.strip()[:200])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "COMMENT_ERROR", error=str(e))
+
+
+def _add_escalation_label(worktree, pr_number, logger):
+    """Add 'status:monitor-escalated' label to the PR, creating it if needed."""
+    if SHAKEDOWN:
+        logger.log("escalation", "LABEL_SKIPPED_SHAKEDOWN")
+        return
+    # Create label if missing; --force updates it if it already exists.
+    try:
+        subprocess.run(
+            ["gh", "label", "create", _ESCALATION_LABEL,
+             "--color", "B60205",
+             "--description", "pr_monitor exited non-cleanly; operator attention needed",
+             "--force"],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "LABEL_CREATE_ERROR", error=str(e))
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "edit", str(pr_number), "--add-label", _ESCALATION_LABEL],
+            cwd=worktree, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+        )
+        logger.log("escalation", "LABEL_ADDED",
+                   pr=pr_number, label=_ESCALATION_LABEL, rc=result.returncode)
+        if result.returncode != 0:
+            logger.log("escalation", "LABEL_ERROR",
+                       stderr=result.stderr.strip()[:200])
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.log("escalation", "LABEL_ERROR", error=str(e))
+
+
+def _set_terminal_state_marker(worktree, terminal_state, reason, logger):
+    """Write pr_monitor.terminal_state marker to .workflow/state.json."""
+    state_path = os.path.join(worktree, ".workflow", "state.json")
+    try:
+        os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            state = {}
+        pm = state.setdefault("pr_monitor", {})
+        pm["terminal_state"] = terminal_state
+        pm["timestamp"] = _timestamp()
+        pm["reason"] = (reason or "")[:500]
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.write("\n")
+        logger.log("escalation", "STATE_MARKER_SET", terminal_state=terminal_state)
+    except OSError as e:
+        logger.log("escalation", "STATE_MARKER_ERROR", error=str(e))
+
+
 def _notify_terminal(worktree, pr_number, logger, message):
-    """Best-effort notification on any terminal non-success state.
+    """Best-effort notification + escalation visibility on any non-clean exit.
 
-    Wraps ``run_notify`` in a try/except so a notify failure cannot
-    cascade into the monitor's own error path. Keeps the user informed
-    when the monitor aborts (CI fail, CI timeout, exception) — previously
-    only the clean-success path fired a notification, so crashes were
-    invisible until the user happened to check the PR.
+    Four actions (AC from #1088):
+      1. Set pr_monitor.terminal_state marker in .workflow/state.json
+      2. Post GitHub PR comment with reason + log tail
+      3. Add 'status:monitor-escalated' label to the PR
+      4. Fire platform notification (toast)
 
-    Also deregisters the worktree's branch from the in-flight registry
-    (AC-178) so terminal states clean up automatically without waiting
-    for `gh pr merge` or manual `/cleanup`.
+    All actions are fire-and-forget — failures are logged but never cascade.
+    Also deregisters the worktree's branch from the in-flight registry (AC-178).
+
+    Clean-exit path uses _step_notify → run_notify directly and never reaches
+    this function, so no guard against clean-exit is needed here.
     """
     _deregister_inflight(worktree, logger)
+
+    # Parse terminal state from message first line ("PR #N: <terminal_state>")
+    terminal_state = "error"
+    first_line = (message or "").split("\n")[0]
+    if ": " in first_line:
+        terminal_state = first_line.split(": ", 1)[-1].strip()
+
+    log_path = os.path.join(worktree, ".workflow", "pr-monitor.log")
+
+    # Action 1: state marker
+    try:
+        _set_terminal_state_marker(worktree, terminal_state, message, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 2: GitHub PR comment
+    try:
+        _post_escalation_comment(worktree, pr_number, terminal_state, log_path, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 3: PR label
+    try:
+        _add_escalation_label(worktree, pr_number, logger)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Action 4: platform notification
     try:
         run_notify(worktree, pr_number, logger, message=message)
     except Exception as notify_err:  # noqa: BLE001 — best-effort
@@ -1462,7 +1668,8 @@ def _parse_github_repo(remote_url):
     return None
 
 
-def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
+def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
+                ci_timeout_source="default", gemini_timeout_source="default"):
     """Main monitor loop — state-machine orchestrator (v9.1).
 
     Args:
@@ -1494,6 +1701,8 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
     write_result(worktree, result)
 
     logger.log("monitor", "START", pr=pr_number, resume=resume, pid=os.getpid())
+    logger.log("monitor", "CI_TIMEOUT", ci_timeout_sec=CI_MAX_WAIT, source=ci_timeout_source)
+    logger.log("monitor", "GEMINI_TIMEOUT", gemini_timeout_sec=GEMINI_MAX_WAIT, source=gemini_timeout_source)
 
     ci_fix_rounds_used = 0
     triage_rounds_used = 0
@@ -1878,6 +2087,20 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None):
         logger.close()
         return 1
 
+    except _GeminiTimeoutError:
+        result["status"] = "gemini-timeout"
+        write_result(worktree, result)
+        logger.log("monitor", "ABORT", reason="gemini_review_not_posted")
+        _notify_terminal(
+            worktree, pr_number, logger,
+            _build_terminal_notification(
+                pr_number, "gemini-timeout", result,
+                ci_fix_rounds_used, triage_rounds_used, worktree
+            )
+        )
+        logger.close()
+        return 1
+
     except KeyboardInterrupt:
         result["status"] = "interrupted"
         write_result(worktree, result)
@@ -2022,14 +2245,21 @@ def _step_ready(worktree, pr_number, logger, result):
             mark_step(result, "ready", "skipped")
             result["ready_skip_reasons"] = reasons
             write_result(worktree, result)
-            # Notify the user so they know the PR is still in draft.
-            # (Gemini review #3107696760 — use a message that explains why.)
-            msg = (f"PR #{pr_number} still in draft: "
-                   + ", ".join(reasons))
-            try:
-                run_notify(worktree, pr_number, logger, message=msg)
-            except Exception as e:  # noqa: BLE001
-                logger.log("ready", "NOTIFY_ERROR", error=str(e))
+            if "gemini_review_not_posted" in reasons:
+                # Raise so run_monitor's except block fires the #1088 escalation
+                # block and returns exit 1 — prevents _step_notify from issuing
+                # a duplicate notification after _notify_terminal runs (#1127).
+                raise _GeminiTimeoutError("gemini_review_not_posted")
+            else:
+                # Other gate failures (CI not green, unreplied comments) — basic
+                # toast only; no escalation label since the monitor can still
+                # recover those on a resume run.
+                msg = (f"PR #{pr_number} still in draft: "
+                       + ", ".join(reasons))
+                try:
+                    run_notify(worktree, pr_number, logger, message=msg)
+                except Exception as e:  # noqa: BLE001
+                    logger.log("ready", "NOTIFY_ERROR", error=str(e))
             return
 
         # Bug 4 / belt-and-suspenders: refuse rebase+ready-flip if the worktree
@@ -2079,7 +2309,7 @@ def _step_ready(worktree, pr_number, logger, result):
         success = mark_pr_ready(worktree, pr_number, logger)
         mark_step(result, "ready", "done" if success else "error")
         write_result(worktree, result)
-    except (_DirtyWorktreeOnReadyFlipError, _UncommittedTriageError):
+    except (_DirtyWorktreeOnReadyFlipError, _UncommittedTriageError, _GeminiTimeoutError):
         raise  # propagate terminal-state errors to run_monitor
     except Exception as e:
         logger.log("ready", "EXCEPTION", error=str(e))
@@ -2133,7 +2363,21 @@ def main():
                              "Resolved from git remote if omitted.")
     parser.add_argument("--mode", choices=("interactive", "headless"), default=None,
                         help="Dispatch mode: interactive (claude --bg) or headless (claude -p). Default: PPDS_DISPATCH_MODE env or interactive.")
+    parser.add_argument("--ci-timeout-sec", type=int, default=None,
+                        help="CI polling timeout in seconds (default: 1800). "
+                             "Env: PPDS_PR_MONITOR_CI_TIMEOUT. Flag takes precedence over env.")
+    parser.add_argument("--gemini-timeout-sec", type=int, default=None,
+                        help="Gemini review polling timeout in seconds (default: 1800). "
+                             "Env: PPDS_PR_MONITOR_GEMINI_TIMEOUT. Flag takes precedence over env.")
     args = parser.parse_args()
+
+    global CI_MAX_WAIT
+    ci_timeout_sec, ci_timeout_source = _resolve_ci_timeout_sec(args.ci_timeout_sec)
+    CI_MAX_WAIT = ci_timeout_sec
+
+    global GEMINI_MAX_WAIT
+    gemini_timeout_sec, gemini_timeout_source = _resolve_gemini_timeout_sec(args.gemini_timeout_sec)
+    GEMINI_MAX_WAIT = gemini_timeout_sec
 
     worktree = str(Path(args.worktree).resolve())
 
@@ -2142,7 +2386,9 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo, mode=args.mode)
+    exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo,
+                            mode=args.mode, ci_timeout_source=ci_timeout_source,
+                            gemini_timeout_source=gemini_timeout_source)
     sys.exit(exit_code)
 
 

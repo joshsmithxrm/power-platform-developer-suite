@@ -185,7 +185,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No plugin assemblies or packages found.");
+                    Console.WriteLine("No plugin assemblies or packages found.");
                 }
                 return ExitCodes.Success;
             }
@@ -199,18 +199,18 @@ public static class ListCommand
                 // Print assemblies
                 foreach (var assembly in output.Assemblies)
                 {
-                    Console.Error.WriteLine($"Assembly: {assembly.Name} (v{assembly.Version})");
+                    Console.WriteLine($"Assembly: {assembly.Name} (v{assembly.Version})");
                     PrintTypes(assembly.Types);
-                    Console.Error.WriteLine();
+                    Console.WriteLine();
                 }
 
                 // Print packages
                 foreach (var package in output.Packages)
                 {
                     var uniqueName = package.UniqueName != package.Name ? $" [{package.UniqueName}]" : "";
-                    Console.Error.WriteLine($"Package: {package.Name}{uniqueName} (v{package.Version})");
+                    Console.WriteLine($"Package: {package.Name}{uniqueName} (v{package.Version})");
                     PrintPackageAssemblies(package.Assemblies);
-                    Console.Error.WriteLine();
+                    Console.WriteLine();
                 }
 
                 var totalPackageAssemblies = output.Packages.Sum(p => p.Assemblies.Count);
@@ -238,7 +238,7 @@ public static class ListCommand
                     summaryParts.Add(Pluralize(totalImages, "image", "images"));
                 }
 
-                Console.Error.WriteLine($"Total: {string.Join(", ", summaryParts)}");
+                Console.WriteLine($"Total: {string.Join(", ", summaryParts)}");
             }
 
             return ExitCodes.Success;
@@ -311,13 +311,13 @@ public static class ListCommand
     {
         foreach (var type in types)
         {
-            Console.Error.WriteLine($"{indent}Type: {type.TypeName}");
+            Console.WriteLine($"{indent}Type: {type.TypeName}");
 
             foreach (var step in type.Steps)
             {
                 var status = step.IsEnabled ? "" : " [DISABLED]";
-                Console.Error.WriteLine($"{indent}  Step: {step.Name}{status}");
-                Console.Error.WriteLine($"{indent}    {step.Message} on {step.Entity} ({step.Stage}, {step.Mode})");
+                Console.WriteLine($"{indent}  Step: {step.Name}{status}");
+                Console.WriteLine($"{indent}    {step.Message} on {step.Entity} ({step.Stage}, {step.Mode})");
 
                 // Show non-default deployment/user/async settings on one line if any are set
                 var stepOptions = new List<string>();
@@ -335,23 +335,23 @@ public static class ListCommand
                 }
                 if (stepOptions.Count > 0)
                 {
-                    Console.Error.WriteLine($"{indent}    {string.Join(" | ", stepOptions)}");
+                    Console.WriteLine($"{indent}    {string.Join(" | ", stepOptions)}");
                 }
 
                 if (!string.IsNullOrEmpty(step.FilteringAttributes))
                 {
-                    Console.Error.WriteLine($"{indent}    Filtering: {step.FilteringAttributes}");
+                    Console.WriteLine($"{indent}    Filtering: {step.FilteringAttributes}");
                 }
 
                 if (!string.IsNullOrEmpty(step.Description))
                 {
-                    Console.Error.WriteLine($"{indent}    Description: {step.Description}");
+                    Console.WriteLine($"{indent}    Description: {step.Description}");
                 }
 
                 foreach (var image in step.Images)
                 {
                     var attrs = string.IsNullOrEmpty(image.Attributes) ? "all" : image.Attributes;
-                    Console.Error.WriteLine($"{indent}    Image: {image.Name} ({image.ImageType}) - {attrs}");
+                    Console.WriteLine($"{indent}    Image: {image.Name} ({image.ImageType}) - {attrs}");
                 }
             }
         }
@@ -361,7 +361,7 @@ public static class ListCommand
     {
         foreach (var assembly in assemblies)
         {
-            Console.Error.WriteLine($"  Assembly: {assembly.Name} (v{assembly.Version})");
+            Console.WriteLine($"  Assembly: {assembly.Name} (v{assembly.Version})");
             PrintTypes(assembly.Types, "    ");
         }
     }

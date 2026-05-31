@@ -141,69 +141,69 @@ public static class GetCommand
 
     private static void WriteTextOutput(PluginTraceDetail trace)
     {
-        Console.Error.WriteLine($"Plugin Trace: {trace.Id}");
-        Console.Error.WriteLine(new string('=', 60));
-        Console.Error.WriteLine();
+        Console.WriteLine($"Plugin Trace: {trace.Id}");
+        Console.WriteLine(new string('=', 60));
+        Console.WriteLine();
 
         // Basic info
-        Console.Error.WriteLine($"  Type:          {trace.TypeName}");
-        Console.Error.WriteLine($"  Message:       {trace.MessageName ?? "-"}");
-        Console.Error.WriteLine($"  Entity:        {trace.PrimaryEntity ?? "-"}");
-        Console.Error.WriteLine($"  Mode:          {trace.Mode}");
-        Console.Error.WriteLine($"  Operation:     {trace.OperationType}");
-        Console.Error.WriteLine($"  Depth:         {trace.Depth}");
-        Console.Error.WriteLine();
+        Console.WriteLine($"  Type:          {trace.TypeName}");
+        Console.WriteLine($"  Message:       {trace.MessageName ?? "-"}");
+        Console.WriteLine($"  Entity:        {trace.PrimaryEntity ?? "-"}");
+        Console.WriteLine($"  Mode:          {trace.Mode}");
+        Console.WriteLine($"  Operation:     {trace.OperationType}");
+        Console.WriteLine($"  Depth:         {trace.Depth}");
+        Console.WriteLine();
 
         // Timing
-        Console.Error.WriteLine("Timing:");
-        Console.Error.WriteLine($"  Created:              {trace.CreatedOn:G}");
+        Console.WriteLine("Timing:");
+        Console.WriteLine($"  Created:              {trace.CreatedOn:G}");
         if (trace.ExecutionStartTime.HasValue)
         {
-            Console.Error.WriteLine($"  Execution Start:      {trace.ExecutionStartTime:G}");
+            Console.WriteLine($"  Execution Start:      {trace.ExecutionStartTime:G}");
         }
         if (trace.ConstructorStartTime.HasValue)
         {
-            Console.Error.WriteLine($"  Constructor Start:    {trace.ConstructorStartTime:G}");
+            Console.WriteLine($"  Constructor Start:    {trace.ConstructorStartTime:G}");
         }
-        Console.Error.WriteLine($"  Execution Duration:   {trace.DurationMs?.ToString() ?? "-"} ms");
-        Console.Error.WriteLine($"  Constructor Duration: {trace.ConstructorDurationMs?.ToString() ?? "-"} ms");
-        Console.Error.WriteLine();
+        Console.WriteLine($"  Execution Duration:   {trace.DurationMs?.ToString() ?? "-"} ms");
+        Console.WriteLine($"  Constructor Duration: {trace.ConstructorDurationMs?.ToString() ?? "-"} ms");
+        Console.WriteLine();
 
         // Correlation
-        Console.Error.WriteLine("Correlation:");
-        Console.Error.WriteLine($"  Correlation ID: {trace.CorrelationId?.ToString() ?? "-"}");
-        Console.Error.WriteLine($"  Request ID:     {trace.RequestId?.ToString() ?? "-"}");
-        Console.Error.WriteLine($"  Plugin Step ID: {trace.PluginStepId?.ToString() ?? "-"}");
-        Console.Error.WriteLine();
+        Console.WriteLine("Correlation:");
+        Console.WriteLine($"  Correlation ID: {trace.CorrelationId?.ToString() ?? "-"}");
+        Console.WriteLine($"  Request ID:     {trace.RequestId?.ToString() ?? "-"}");
+        Console.WriteLine($"  Plugin Step ID: {trace.PluginStepId?.ToString() ?? "-"}");
+        Console.WriteLine();
 
         // Exception details
         if (trace.HasException && !string.IsNullOrEmpty(trace.ExceptionDetails))
         {
-            Console.Error.WriteLine("Exception:");
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine(trace.ExceptionDetails);
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine();
+            Console.WriteLine("Exception:");
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine(trace.ExceptionDetails);
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine();
         }
 
         // Message block (trace output)
         if (!string.IsNullOrEmpty(trace.MessageBlock))
         {
-            Console.Error.WriteLine("Trace Output:");
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine(trace.MessageBlock);
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine();
+            Console.WriteLine("Trace Output:");
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine(trace.MessageBlock);
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine();
         }
 
         // Configuration
         if (!string.IsNullOrEmpty(trace.Configuration))
         {
-            Console.Error.WriteLine("Configuration:");
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine(trace.Configuration);
-            Console.Error.WriteLine(new string('-', 60));
-            Console.Error.WriteLine();
+            Console.WriteLine("Configuration:");
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine(trace.Configuration);
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine();
         }
     }
 

@@ -201,6 +201,30 @@ class TestFormatReplyBody:
         })
         assert body == "patched"
 
+    def test_strips_already_fixed_prefix(self):
+        """issue #1096: avoid 'Fixed in X — Already fixed in commit X — …' doubling."""
+        body = format_reply_body({
+            "action": "fixed", "commit": "eb19a01e6",
+            "description": "Already fixed in commit eb19a01e6 — REFERENCE.md line 120",
+        })
+        assert body == "Fixed in eb19a01e6 — REFERENCE.md line 120"
+        assert "Already fixed" not in body
+
+    def test_strips_already_dismissed_prefix(self):
+        body = format_reply_body({
+            "action": "dismissed",
+            "description": "Already dismissed in commit abc123 — not applicable here",
+        })
+        assert body == "Not applicable — not applicable here"
+        assert "Already dismissed" not in body
+
+    def test_normal_description_unchanged(self):
+        body = format_reply_body({
+            "action": "fixed", "commit": "abc",
+            "description": "Updated the config file",
+        })
+        assert body == "Fixed in abc — Updated the config file"
+
 
 # ---------------------------------------------------------------------------
 # get_unreplied_comments (AC-139)
@@ -529,12 +553,15 @@ def test_dispatch_subagent_both_modes(mode, tmp_path):
             caller="test.dispatch_subagent",
         )
     assert result == {"stdout": "ok", "stderr": "", "exit_code": 0}
-    assert captured["mode"] == mode
+    # #1122: dispatch_subagent forces headless regardless of caller-supplied mode,
+    # since single-turn sub-agents can't service interactive permission prompts.
+    assert captured["mode"] == "headless"
     assert captured["caller"] == "test.dispatch_subagent"
     assert captured["agent"] == "reviewer"
     assert captured["name"] == "reviewer"
-    # dangerous=True is required so permission prompts don't strand the session.
-    assert captured["dangerous"] is True
+    # permission_mode='bypassPermissions' is required (#1067) so permission
+    # prompts don't strand the unattended session as state=blocked.
+    assert captured["permission_mode"] == "bypassPermissions"
     # Prompt is wrapped: directive + profile section + payload section,
     # with the payload embedded as pretty-printed JSON.
     prompt = captured["prompt"]
@@ -619,6 +646,22 @@ def test_dispatch_subagent_dispatch_error_returns_error_shape(tmp_path):
                                    worktree=str(tmp_path), mode="interactive")
     assert result["exit_code"] == 2
     assert "nope" in result["stderr"]
+
+
+def test_dispatch_subagent_uses_bypassPermissions(tmp_path):
+    """AC-07 (#1067): dispatch_subagent spawns with
+    permission_mode='bypassPermissions' and not legacy dangerous=True."""
+    from triage_common import dispatch_subagent
+    import claude_dispatch
+    captured = {}
+    def fake_spawn(**kw):
+        captured.update(kw)
+        return _FakeHandle()
+    with patch.object(claude_dispatch, "spawn", fake_spawn):
+        dispatch_subagent(profile_name="p", payload={}, worktree=str(tmp_path),
+                          mode="interactive")
+    assert captured.get("permission_mode") == "bypassPermissions"
+    assert "dangerous" not in captured or not captured.get("dangerous")
 
 
 def test_dispatch_subagent_blocked_returns_loud_shape(tmp_path):

@@ -123,10 +123,10 @@ Before testing begins, create an explicit test matrix:
 
 Test each surface using the appropriate verification tool:
 
-- **Extension:** Use `/ext-verify` — open panels, click buttons, type queries, take screenshots
-- **TUI:** Use `/tui-verify` — launch, navigate, read text, send keystrokes
-- **MCP:** Use `/mcp-verify` — invoke tools, validate responses
-- **CLI:** Use `/cli-verify` — run commands, check stdout/stderr
+- **Extension:** Use `/verify extension` — open panels, click buttons, type queries, take screenshots (see `REFERENCE.md §ext`)
+- **TUI:** Use `/verify tui` — launch, navigate, read text, send keystrokes (see `REFERENCE.md §tui`)
+- **MCP:** Use `/verify mcp` — invoke tools, validate responses (see `REFERENCE.md §mcp`)
+- **CLI:** Use `/verify cli` — run commands, check stdout/stderr (see `REFERENCE.md §cli`)
 
 For each feature in the matrix:
 1. Exercise it in each applicable surface

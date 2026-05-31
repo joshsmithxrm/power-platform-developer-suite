@@ -159,7 +159,7 @@ public static class RelatedCommand
                     }
                     else
                     {
-                        Console.Error.WriteLine($"No traces found for entity: {recordEntity}");
+                        Console.WriteLine($"No traces found for entity: {recordEntity}");
                     }
                     return ExitCodes.Success;
                 }
@@ -186,10 +186,10 @@ public static class RelatedCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Traces for entity: {recordEntity}");
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"{"#",-3} {"Depth",-5} {"Type",-35} {"Message",-12} {"Duration",-10} {"Status",-6}");
-                    Console.Error.WriteLine(new string('-', 75));
+                    Console.WriteLine($"Traces for entity: {recordEntity}");
+                    Console.WriteLine();
+                    Console.WriteLine($"{"#",-3} {"Depth",-5} {"Type",-35} {"Message",-12} {"Duration",-10} {"Status",-6}");
+                    Console.WriteLine(new string('-', 75));
 
                     int idx = 1;
                     foreach (var trace in traces)
@@ -199,12 +199,12 @@ public static class RelatedCommand
                         var duration = trace.DurationMs.HasValue ? $"{trace.DurationMs}ms" : "-";
                         var status = trace.HasException ? "Error" : "OK";
 
-                        Console.Error.WriteLine($"{idx,-3} {trace.Depth,-5} {type,-35} {message,-12} {duration,-10} {status,-6}");
+                        Console.WriteLine($"{idx,-3} {trace.Depth,-5} {type,-35} {message,-12} {duration,-10} {status,-6}");
                         idx++;
                     }
 
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"Total: {traces.Count} trace(s)");
+                    Console.WriteLine();
+                    Console.WriteLine($"Total: {traces.Count} trace(s)");
                 }
 
                 return ExitCodes.Success;
@@ -268,7 +268,7 @@ public static class RelatedCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"No related traces found for correlation ID: {lookupCorrelationId}");
+                    Console.WriteLine($"No related traces found for correlation ID: {lookupCorrelationId}");
                 }
                 return ExitCodes.Success;
             }
@@ -295,10 +295,10 @@ public static class RelatedCommand
             }
             else
             {
-                Console.Error.WriteLine($"Related traces for correlation ID: {lookupCorrelationId}");
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"{"#",-3} {"Depth",-5} {"Type",-35} {"Message",-12} {"Duration",-10} {"Status",-6}");
-                Console.Error.WriteLine(new string('-', 75));
+                Console.WriteLine($"Related traces for correlation ID: {lookupCorrelationId}");
+                Console.WriteLine();
+                Console.WriteLine($"{"#",-3} {"Depth",-5} {"Type",-35} {"Message",-12} {"Duration",-10} {"Status",-6}");
+                Console.WriteLine(new string('-', 75));
 
                 int idx = 1;
                 foreach (var trace in traces)
@@ -308,12 +308,12 @@ public static class RelatedCommand
                     var duration = trace.DurationMs.HasValue ? $"{trace.DurationMs}ms" : "-";
                     var status = trace.HasException ? "Error" : "OK";
 
-                    Console.Error.WriteLine($"{idx,-3} {trace.Depth,-5} {type,-35} {message,-12} {duration,-10} {status,-6}");
+                    Console.WriteLine($"{idx,-3} {trace.Depth,-5} {type,-35} {message,-12} {duration,-10} {status,-6}");
                     idx++;
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {traces.Count} related trace(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {traces.Count} related trace(s)");
             }
 
             return ExitCodes.Success;

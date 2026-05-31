@@ -155,7 +155,7 @@ From VS Code debug panel:
 | Run Extension (Open Folder) | Testing with a specific project folder |
 | Run Extension Tests | Run VS Code extension integration tests |
 
-**For AI self-verification:** Use `/verify extension` to exercise commands, inspect state, and verify webview rendering. See @ext-verify skill for the CDP tool reference.
+**For AI self-verification:** Use `/verify extension` to exercise commands, inspect state, and verify webview rendering. See the CDP tool reference in `/verify` `REFERENCE.md §ext`.
 
 ## MCP Mode
 

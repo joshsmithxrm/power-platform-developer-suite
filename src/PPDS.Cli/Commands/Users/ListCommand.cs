@@ -110,12 +110,12 @@ public static class ListCommand
             {
                 if (users.Count == 0)
                 {
-                    Console.Error.WriteLine("No users found.");
+                    Console.WriteLine("No users found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {users.Count} user(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {users.Count} user(s):");
+                    Console.WriteLine();
 
                     foreach (var u in users)
                     {

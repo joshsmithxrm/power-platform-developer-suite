@@ -103,7 +103,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No data providers found.");
+                    Console.WriteLine("No data providers found.");
                 }
                 return ExitCodes.Success;
             }
@@ -132,23 +132,23 @@ public static class ListCommand
                 foreach (var provider in providers)
                 {
                     var managed = provider.IsManaged ? " [managed]" : "";
-                    Console.Error.WriteLine($"Data Provider: {provider.Name}{managed}");
+                    Console.WriteLine($"Data Provider: {provider.Name}{managed}");
                     if (!string.IsNullOrEmpty(provider.DataSourceName))
-                        Console.Error.WriteLine($"  Data Source: {provider.DataSourceName}");
+                        Console.WriteLine($"  Data Source: {provider.DataSourceName}");
                     if (provider.RetrievePlugin.HasValue)
-                        Console.Error.WriteLine($"  Retrieve: {provider.RetrievePlugin}");
+                        Console.WriteLine($"  Retrieve: {provider.RetrievePlugin}");
                     if (provider.RetrieveMultiplePlugin.HasValue)
-                        Console.Error.WriteLine($"  RetrieveMultiple: {provider.RetrieveMultiplePlugin}");
+                        Console.WriteLine($"  RetrieveMultiple: {provider.RetrieveMultiplePlugin}");
                     if (provider.CreatePlugin.HasValue)
-                        Console.Error.WriteLine($"  Create: {provider.CreatePlugin}");
+                        Console.WriteLine($"  Create: {provider.CreatePlugin}");
                     if (provider.UpdatePlugin.HasValue)
-                        Console.Error.WriteLine($"  Update: {provider.UpdatePlugin}");
+                        Console.WriteLine($"  Update: {provider.UpdatePlugin}");
                     if (provider.DeletePlugin.HasValue)
-                        Console.Error.WriteLine($"  Delete: {provider.DeletePlugin}");
+                        Console.WriteLine($"  Delete: {provider.DeletePlugin}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {providers.Count} data provider(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {providers.Count} data provider(s)");
             }
 
             return ExitCodes.Success;

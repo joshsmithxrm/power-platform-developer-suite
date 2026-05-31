@@ -100,9 +100,9 @@ public static class ConnectionsCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Connection Reference: {cr.DisplayName ?? cr.LogicalName}");
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine("This connection reference is not bound to a connection.");
+                    Console.WriteLine($"Connection Reference: {cr.DisplayName ?? cr.LogicalName}");
+                    Console.WriteLine();
+                    Console.WriteLine("This connection reference is not bound to a connection.");
                     Console.Error.WriteLine("Use the Power Apps portal or pac solution commands to bind a connection.");
                 }
                 return ExitCodes.Success;

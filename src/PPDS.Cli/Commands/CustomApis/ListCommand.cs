@@ -84,7 +84,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No Custom APIs found.");
+                    Console.WriteLine("No Custom APIs found.");
                 }
                 return ExitCodes.Success;
             }
@@ -120,17 +120,17 @@ public static class ListCommand
                     if (api.IsFunction) flags.Add("function");
                     if (api.IsPrivate) flags.Add("private");
                     var flagStr = flags.Count > 0 ? $" ({string.Join(", ", flags)})" : "";
-                    Console.Error.WriteLine($"{api.UniqueName}{managed}{flagStr}");
-                    Console.Error.WriteLine($"  Display: {api.DisplayName}");
-                    Console.Error.WriteLine($"  Binding: {api.BindingType}");
+                    Console.WriteLine($"{api.UniqueName}{managed}{flagStr}");
+                    Console.WriteLine($"  Display: {api.DisplayName}");
+                    Console.WriteLine($"  Binding: {api.BindingType}");
                     if (!string.IsNullOrEmpty(api.BoundEntity))
-                        Console.Error.WriteLine($"  Entity: {api.BoundEntity}");
+                        Console.WriteLine($"  Entity: {api.BoundEntity}");
                     if (!string.IsNullOrEmpty(api.PluginTypeName))
-                        Console.Error.WriteLine($"  Plugin: {api.PluginTypeName}");
+                        Console.WriteLine($"  Plugin: {api.PluginTypeName}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {apis.Count} Custom API(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {apis.Count} Custom API(s)");
             }
 
             return ExitCodes.Success;

@@ -96,12 +96,12 @@ public static class ListCommand
             {
                 if (connectionRefs.Count == 0)
                 {
-                    Console.Error.WriteLine("No connection references found.");
+                    Console.WriteLine("No connection references found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {connectionRefs.Count} connection reference(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {connectionRefs.Count} connection reference(s):");
+                    Console.WriteLine();
 
                     foreach (var cr in connectionRefs)
                     {

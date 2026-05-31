@@ -112,20 +112,20 @@ public static class GetCommand
 
     private static void WriteTextOutput(QueryHistoryEntry entry)
     {
-        Console.Error.WriteLine($"ID:           {entry.Id}");
-        Console.Error.WriteLine($"Executed At:  {entry.ExecutedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
-        Console.Error.WriteLine($"Row Count:    {entry.RowCount?.ToString() ?? "-"}");
-        Console.Error.WriteLine($"Duration:     {(entry.ExecutionTimeMs.HasValue ? $"{entry.ExecutionTimeMs}ms" : "-")}");
-        Console.Error.WriteLine($"Success:      {entry.Success}");
+        Console.WriteLine($"ID:           {entry.Id}");
+        Console.WriteLine($"Executed At:  {entry.ExecutedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+        Console.WriteLine($"Row Count:    {entry.RowCount?.ToString() ?? "-"}");
+        Console.WriteLine($"Duration:     {(entry.ExecutionTimeMs.HasValue ? $"{entry.ExecutionTimeMs}ms" : "-")}");
+        Console.WriteLine($"Success:      {entry.Success}");
 
         if (!string.IsNullOrEmpty(entry.ErrorMessage))
         {
-            Console.Error.WriteLine($"Error:        {entry.ErrorMessage}");
+            Console.WriteLine($"Error:        {entry.ErrorMessage}");
         }
 
-        Console.Error.WriteLine();
-        Console.Error.WriteLine("SQL:");
-        Console.Error.WriteLine(new string('-', 40));
+        Console.WriteLine();
+        Console.WriteLine("SQL:");
+        Console.WriteLine(new string('-', 40));
         Console.WriteLine(entry.Sql);
     }
 

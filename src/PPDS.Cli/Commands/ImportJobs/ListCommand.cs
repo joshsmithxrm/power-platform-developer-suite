@@ -90,7 +90,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No import jobs found.");
+                    Console.WriteLine("No import jobs found.");
                 }
                 return ExitCodes.Success;
             }
@@ -114,8 +114,8 @@ public static class ListCommand
             }
             else
             {
-                Console.Error.WriteLine($"{"Solution",-30} {"Progress",-10} {"Status",-12} {"Started",-20} {"Completed",-20}");
-                Console.Error.WriteLine(new string('-', 95));
+                Console.WriteLine($"{"Solution",-30} {"Progress",-10} {"Status",-12} {"Started",-20} {"Completed",-20}");
+                Console.WriteLine(new string('-', 95));
 
                 foreach (var job in jobs)
                 {
@@ -125,11 +125,11 @@ public static class ListCommand
                     var started = job.StartedOn?.ToString("g") ?? "-";
                     var completed = job.CompletedOn?.ToString("g") ?? "-";
 
-                    Console.Error.WriteLine($"{solution,-30} {progress,-10} {status,-12} {started,-20} {completed,-20}");
+                    Console.WriteLine($"{solution,-30} {progress,-10} {status,-12} {started,-20} {completed,-20}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {jobs.Count} import job(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {jobs.Count} import job(s)");
             }
 
             return ExitCodes.Success;

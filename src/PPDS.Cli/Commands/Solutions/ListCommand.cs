@@ -90,7 +90,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No solutions found.");
+                    Console.WriteLine("No solutions found.");
                 }
                 return ExitCodes.Success;
             }
@@ -115,8 +115,8 @@ public static class ListCommand
             else
             {
                 // Table output
-                Console.Error.WriteLine($"{"Name",-40} {"Unique Name",-30} {"Version",-12} {"Publisher",-20} {"Managed"}");
-                Console.Error.WriteLine(new string('-', 120));
+                Console.WriteLine($"{"Name",-40} {"Unique Name",-30} {"Version",-12} {"Publisher",-20} {"Managed"}");
+                Console.WriteLine(new string('-', 120));
 
                 foreach (var solution in solutions)
                 {
@@ -126,11 +126,11 @@ public static class ListCommand
                     var publisher = Truncate(solution.PublisherName ?? "-", 20);
                     var managed = solution.IsManaged ? "Yes" : "No";
 
-                    Console.Error.WriteLine($"{name,-40} {uniqueName,-30} {version,-12} {publisher,-20} {managed}");
+                    Console.WriteLine($"{name,-40} {uniqueName,-30} {version,-12} {publisher,-20} {managed}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {solutions.Count} solution(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {solutions.Count} solution(s)");
             }
 
             return ExitCodes.Success;

@@ -233,3 +233,61 @@ Prefix the title with `[DRY RUN]` when no destructive command ran.
 - `mcp__ccd_session_mgmt__archive_session` is unavailable in unsupervised (subagent) mode. Only the main `/cleanup` session can call it — not investigators.
 - The investigator pattern (Lane A, parallel, structured return) is the only agent dispatch in this skill. The executor phase remains sequential.
 - The skill is the natural home for session archival proposals — main-session, one bulk-approval prompt, one archive call per session.
+
+## §11 — Archive done-sessions procedure
+
+The `archive done-sessions` subcommand (SKILL.md §13) is a standalone janitor that runs without the branch/worktree cleanup pipeline. It is the automated replacement for the "operator manually archives in Claude Desktop UI" flow called out in epic #1066.
+
+### state.json schema
+
+Each job directory `~/.claude/jobs/<id>/` contains a `state.json` file. Relevant fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | string | `"done"` \| `"stopped"` \| `"failed"` \| `"running"` |
+| `tempo` | string | `"idle"` \| `"active"` — `"idle"` signals the session is not processing |
+| `cwd` | string | Absolute path where the session was working |
+| `lastActivityAt` | string (ISO 8601) or absent | Last activity timestamp; fall back to file mtime |
+
+Only `state == "done" && tempo == "idle"` entries are candidates for default archival. `stopped` and `failed` require opt-in flags.
+
+### Active-worktree guard
+
+Never archive a session whose `cwd` is a currently-checked-out worktree. Check **per session**: for each candidate, run `git -C <cwd> worktree list --porcelain` and look for a `worktree <path>` line whose path matches the session's `cwd`. This protects sessions across all repositories — not just the repo the janitor was started in.
+
+If `git -C <cwd>` fails (cwd missing, or not inside a git repository), the guard does not apply to that session — proceed with archival. A non-repo cwd cannot belong to an active worktree.
+
+### Smoke-test procedure (AC-10)
+
+Verify the janitor in a real Claude Desktop session before shipping:
+
+1. **Spawn two bg sessions** — `claude --bg "sleep 999"` (long-running, will stay `running`) and `claude --bg "echo done"` (completes quickly → `state = done, tempo = idle`; give it a moment to transition before proceeding).
+2. **Use `--min-age 1`** to override the default 30-min threshold during testing — no significant wait needed.
+3. **Dry-run** — `/cleanup archive done-sessions --dry-run --min-age 1`. Confirm the completed session appears as a candidate and the running one does not.
+4. **Live run** — `/cleanup archive done-sessions --min-age 1`. Confirm:
+   - Completed session archived: `mcp__ccd_session_mgmt__archive_session` called with its id.
+   - Running session skipped: no archive call.
+   - `~/.claude/janitor.log` has one entry for the completed session.
+   - Summary reports `"Archived 1 done, 0 stopped, 0 failed. Skipped 1 (active: 1)."`.
+5. **Verify Claude Desktop** — open Claude Desktop session list; confirm the archived session no longer appears in the active list.
+
+### Additional error table entries
+
+| Error | Recovery |
+|-------|----------|
+| `~/.claude/jobs/` absent or empty | Report "No jobs directory found — nothing to archive"; exit cleanly |
+| `state.json` missing or unparseable | Skip that entry; log `"skipped <id>: unreadable state.json"` |
+| `lastActivityAt` absent | Use file mtime of `state.json` as age proxy |
+| `mcp__ccd_session_mgmt__archive_session` fails | Log `"archive failed <id>: <error>"`; continue with remaining candidates |
+| Called from a subagent / bg session | Print `"archive done-sessions requires a Claude Desktop foreground session (MCP unavailable)"` and exit with non-zero |
+| `git -C <cwd> worktree list` fails for a candidate (cwd missing or not a repo) | Guard does not apply to that session; proceed with archival |
+
+### Caller patterns
+
+```
+/cleanup archive done-sessions               # one-shot, done sessions >30 min
+/cleanup archive done-sessions --dry-run     # preview only
+/cleanup archive done-sessions --min-age 5   # lower done-session threshold for testing
+/cleanup archive done-sessions --include-stopped --include-failed  # full prune
+/loop 1h /cleanup archive done-sessions      # periodic via /loop skill
+```

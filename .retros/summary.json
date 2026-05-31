@@ -1,13 +1,18 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-15T21:58:37.002779Z",
-  "total_retros": 16,
+  "last_updated": "2026-05-16T18:55:30Z",
+  "total_retros": 24,
   "findings_by_category": {
     "external": [
       {
         "date": "2026-03-27",
         "branch": "feat/investigation-skill",
         "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F4"
       }
     ],
     "tooling": [
@@ -130,6 +135,101 @@
         "date": "2026-04-26",
         "branch": "feat/monitor-autonomy",
         "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1098-prompt-template",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1098-prompt-template",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1098-prompt-template",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F1"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F2"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F5"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-05"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1070-pr-stack-beta",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1070-pr-stack-beta",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1070-pr-stack-beta",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "perf/1082-snapshot-parallel",
+        "finding_id": "F1"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "perf/1082-snapshot-parallel",
+        "finding_id": "F2"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "perf/1082-snapshot-parallel",
+        "finding_id": "F3"
       }
     ],
     "design": [
@@ -214,6 +314,11 @@
         "date": "2026-04-26",
         "branch": "feat/workflow-skill-redesign",
         "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1069-supervisor-pattern",
+        "finding_id": "F3"
       }
     ],
     "process": [
@@ -311,6 +416,21 @@
         "date": "2026-04-26",
         "branch": "feat/monitor-autonomy",
         "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "feat/1098-prompt-template",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "refactor/1071-retro-phase5-6",
+        "finding_id": "R-03"
       }
     ],
     "setup": [
@@ -335,16 +455,74 @@
         "date": "2026-04-26",
         "branch": "feat/monitor-autonomy",
         "finding_id": "R-05"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1067-bg-spawn-autonomy",
+        "finding_id": "R-05"
+      }
+    ],
+    "workflow": [
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1122-subagent-hang",
+        "finding_id": "R-01",
+        "issue": 1126
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "fix/1122-subagent-hang",
+        "finding_id": "R-02",
+        "issue": 1125
+      }
+    ],
+    "uncategorized": [
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-01"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-02"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-03"
+      },
+      {
+        "date": "2026-05-16",
+        "branch": "1098-prompt-template",
+        "finding_id": "R-04"
       }
     ]
   },
   "metrics": {
-    "avg_fix_ratio": 0.724,
-    "pipeline_success_rate": 0.388,
-    "avg_convergence_rounds": 2.281,
-    "last_session_findings": 0,
+    "avg_fix_ratio": 0.7054,
+    "pipeline_success_rate": 0.4376,
+    "avg_convergence_rounds": 2.206,
+    "last_session_findings": 3,
     "last_session_status": "shipped_clean",
-    "last_session_branch": "feat/cleanup-overhaul",
-    "last_session_pr": 1090
-  }
+    "last_session_branch": "perf/1082-snapshot-parallel",
+    "last_session_pr": 1139
+  },
+  "notes": [
+    {
+      "date": "2026-05-16",
+      "branch": "feat/1069-supervisor-pattern",
+      "note": "Second consecutive failure-retro for the same root cause: gates verdict PASS + state.json gates.passed land correctly, but exit=-1 from STALL_TIMEOUT causes pipeline to misclassify the stage as failed. F1/F2 still open from prior retro at 10:36."
+    },
+    {
+      "date": "2026-05-16",
+      "branch": "refactor/1071-retro-phase5-6",
+      "note": "Pipeline retro for /retro Phase 5/6 refactor work. Stop-hook fired 3x; pipeline-result misclassified gates as failed despite verdict PASS (third consecutive occurrence \u2014 see prior notes). 5 mechanical observations; no judgment in pipeline mode."
+    },
+    {
+      "date": "2026-05-16",
+      "branch": "perf/1082-snapshot-parallel",
+      "note": "Pipeline retro for #1082 EnvironmentSnapshotLoader parallelization. PR #1139 created. 13 tool failures clustered on shell-mismatch (PowerShell $null syntax leaking to bash, eval quote escaping, /c/ paths on Windows). No frustration spikes; no stop-hook events; mechanical-only findings."
+    }
+  ]
 }

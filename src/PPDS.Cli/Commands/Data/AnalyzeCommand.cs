@@ -172,50 +172,50 @@ public static class AnalyzeCommand
 
     private static void WriteTextOutput(SchemaAnalysis analysis, string schemaPath)
     {
-        Console.Error.WriteLine("[Schema Analysis]");
-        Console.Error.WriteLine();
-        Console.Error.WriteLine($"Schema: {schemaPath}");
-        Console.Error.WriteLine();
+        Console.WriteLine("[Schema Analysis]");
+        Console.WriteLine();
+        Console.WriteLine($"Schema: {schemaPath}");
+        Console.WriteLine();
 
         if (analysis.EntityCount == 0)
         {
-            Console.Error.WriteLine("No entities found in schema.");
+            Console.WriteLine("No entities found in schema.");
             return;
         }
 
-        Console.Error.WriteLine($"Entities: {analysis.EntityCount}");
-        Console.Error.WriteLine($"Dependencies: {analysis.DependencyCount}");
-        Console.Error.WriteLine($"Circular References: {analysis.CircularReferenceCount}");
-        Console.Error.WriteLine();
+        Console.WriteLine($"Entities: {analysis.EntityCount}");
+        Console.WriteLine($"Dependencies: {analysis.DependencyCount}");
+        Console.WriteLine($"Circular References: {analysis.CircularReferenceCount}");
+        Console.WriteLine();
 
-        Console.Error.WriteLine("Import Tiers:");
+        Console.WriteLine("Import Tiers:");
         foreach (var tier in analysis.Tiers)
         {
             var entities = string.Join(", ", tier.Entities);
             var suffix = tier.HasCircular ? " (circular)" : "";
-            Console.Error.WriteLine($"  Tier {tier.Tier}: {entities}{suffix}");
+            Console.WriteLine($"  Tier {tier.Tier}: {entities}{suffix}");
         }
-        Console.Error.WriteLine();
+        Console.WriteLine();
 
         if (analysis.DeferredFields.Count > 0)
         {
-            Console.Error.WriteLine("Deferred Fields:");
+            Console.WriteLine("Deferred Fields:");
             foreach (var (entity, fields) in analysis.DeferredFields)
             {
                 foreach (var field in fields)
                 {
-                    Console.Error.WriteLine($"  {entity}.{field}");
+                    Console.WriteLine($"  {entity}.{field}");
                 }
             }
-            Console.Error.WriteLine();
+            Console.WriteLine();
         }
 
         if (analysis.ManyToManyRelationships.Length > 0)
         {
-            Console.Error.WriteLine("Many-to-Many Relationships:");
+            Console.WriteLine("Many-to-Many Relationships:");
             foreach (var relationship in analysis.ManyToManyRelationships)
             {
-                Console.Error.WriteLine($"  {relationship}");
+                Console.WriteLine($"  {relationship}");
             }
         }
     }

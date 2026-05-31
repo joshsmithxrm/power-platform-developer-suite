@@ -72,7 +72,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No data sources found.");
+                    Console.WriteLine("No data sources found.");
                 }
                 return ExitCodes.Success;
             }
@@ -93,11 +93,11 @@ public static class ListCommand
             {
                 foreach (var ds in dataSources)
                 {
-                    Console.Error.WriteLine($"Data Source: {ds.Name}");
+                    Console.WriteLine($"Data Source: {ds.Name}");
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Total: {dataSources.Count} data source(s)");
+                Console.WriteLine();
+                Console.WriteLine($"Total: {dataSources.Count} data source(s)");
             }
 
             return ExitCodes.Success;

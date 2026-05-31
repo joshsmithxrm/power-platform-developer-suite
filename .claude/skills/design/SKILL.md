@@ -15,11 +15,8 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
-### Step 0: Set Phase
-
-```bash
-python scripts/workflow-state.py set phase design
-```
+### Step 0: Set Phase and Check Inbox
+`python scripts/workflow-state.py set phase design` then `python scripts/supervisor_msg.py read --consume` — see REFERENCE.md §8 (abort/revise → stop before brainstorm).
 
 ### Step 1: Load Context and Search
 
@@ -96,9 +93,9 @@ When the design is approved:
 
 **A. Write the spec** to `specs/<name>.md` using the spec template. Include numbered ACs (Constitution I3). Preserve unchanged sections if updating.
 
-**B. Review the spec:** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
-
-**C. Present to user:** present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
+**B. Review the spec (bias-isolated / design-fidelity):** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
+**B.2. Scope-conformance review:** see REFERENCE.md §9 for full protocol. Get issues (`workflow-state.py get issues`; skip if absent/empty), fetch body (`gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'`), spawn reviewer with issue body + spec. Block on `missing`/`reframed` items; worker revises spec or adds to `### Non-Goals` with rationale. Re-run B.2 after each revision (and re-run B if changes are substantial), until all items `covered` or `in-non-goals`.
+**C. Check inbox, then present:** Run `python scripts/supervisor_msg.py read --consume` — handle each message kind per REFERENCE.md §8. Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
 ### Step 4: Write Plan and Review
 
@@ -107,6 +104,10 @@ When the design is approved:
 **B. Review the plan:** invoke `/review` — reviewer checks plan against spec ACs for gaps. Fix findings. Restore phase: `python scripts/workflow-state.py set phase design`
 
 **C. Present to user:** present plan with summary table, show review findings. Wait for approval.
+
+**Step 4.D — PR-Stack Decomposition (optional):** see REFERENCE.md §7. After approval, if phases are independently shippable (disjoint ACs + separate primary files), ask "Decompose into a PR stack? (yes/no)". On decline: skip to Step 5, no artifacts written. On accept: proceed to Step 4.E.
+
+**Step 4.E — Emit PR-Stack Artifacts:** write sub-plans `.plans/<date>-<name>-pr<N>.md`, append `## PR Stack` section to parent plan (columns: `files`, `size_estimate`), write `.plans/<date>-<name>-stack.json`, validate via `python scripts/pr_stack.py validate <path>` until exit 0. Proceed to Step 5.
 
 ### Step 5: Commit
 

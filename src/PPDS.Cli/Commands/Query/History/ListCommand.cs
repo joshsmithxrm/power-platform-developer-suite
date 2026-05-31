@@ -94,7 +94,7 @@ public static class ListCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine("No query history found.");
+                    Console.WriteLine("No query history found.");
                 }
                 return ExitCodes.Success;
             }
@@ -133,8 +133,8 @@ public static class ListCommand
 
     private static void WriteTextOutput(IReadOnlyList<QueryHistoryEntry> entries)
     {
-        Console.Error.WriteLine($"{"ID",-14} {"Executed",-18} {"Rows",-8} {"Time",-10} {"Query Preview",-40}");
-        Console.Error.WriteLine(new string('-', 95));
+        Console.WriteLine($"{"ID",-14} {"Executed",-18} {"Rows",-8} {"Time",-10} {"Query Preview",-40}");
+        Console.WriteLine(new string('-', 95));
 
         foreach (var entry in entries)
         {
@@ -144,11 +144,11 @@ public static class ListCommand
             var time = entry.ExecutionTimeMs.HasValue ? $"{entry.ExecutionTimeMs}ms" : "-";
             var preview = GetQueryPreview(entry.Sql, 40);
 
-            Console.Error.WriteLine($"{id,-14} {executed,-18} {rows,-8} {time,-10} {preview,-40}");
+            Console.WriteLine($"{id,-14} {executed,-18} {rows,-8} {time,-10} {preview,-40}");
         }
 
-        Console.Error.WriteLine();
-        Console.Error.WriteLine($"Total: {entries.Count} entries");
+        Console.WriteLine();
+        Console.WriteLine($"Total: {entries.Count} entries");
     }
 
     private static string GetQueryPreview(string sql, int maxLength)

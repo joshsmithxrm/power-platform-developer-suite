@@ -168,6 +168,115 @@ class TestDiscoverTranscripts:
             assert not any("old.jsonl" in t for t in transcripts)
 
 
+class TestDiscoverTranscriptsDesktop:
+    def test_discover_transcripts_desktop_manifest(self, monkeypatch, tmp_path):
+        """Desktop local_*.json manifest -> CLI transcript lookup."""
+        import retro_helpers
+
+        fake_home = str(tmp_path)
+        worktree = os.path.join(fake_home, "my", "project")
+        os.makedirs(worktree)
+
+        cli_session_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+        encoded = retro_helpers._encode_project_dir(worktree)
+        cli_dir = os.path.join(fake_home, ".claude", "projects", encoded)
+        os.makedirs(cli_dir)
+        cli_transcript = os.path.join(cli_dir, cli_session_id + ".jsonl")
+        with open(cli_transcript, "w") as f:
+            f.write('{"type": "user"}\n')
+
+        appdata = os.path.join(fake_home, "AppData", "Roaming")
+        ccd_dir = os.path.join(appdata, "Claude", "claude-code-sessions", "uid1", "mid1")
+        os.makedirs(ccd_dir)
+        manifest = {
+            "sessionId": "local_abc",
+            "cliSessionId": cli_session_id,
+            "cwd": worktree,
+            "worktreePath": worktree,
+        }
+        with open(os.path.join(ccd_dir, "local_abc.json"), "w") as f:
+            json.dump(manifest, f)
+
+        monkeypatch.setenv("APPDATA", appdata)
+        monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", fake_home))
+
+        transcripts = retro_helpers.discover_transcripts(worktree)
+        assert any(cli_session_id in t for t in transcripts), (
+            f"Desktop manifest transcript not found; got {transcripts!r}"
+        )
+
+    def test_discover_transcripts_desktop_mtime_filter(self, monkeypatch, tmp_path):
+        """mtime filter excludes Desktop-manifest transcripts older than since."""
+        import retro_helpers
+
+        fake_home = str(tmp_path)
+        worktree = os.path.join(fake_home, "my", "project")
+        os.makedirs(worktree)
+
+        cli_session_id = "bbbbcccc-dddd-eeee-ffff-aaaaaaaaaaaa"
+        encoded = retro_helpers._encode_project_dir(worktree)
+        cli_dir = os.path.join(fake_home, ".claude", "projects", encoded)
+        os.makedirs(cli_dir)
+        cli_transcript = os.path.join(cli_dir, cli_session_id + ".jsonl")
+        with open(cli_transcript, "w") as f:
+            f.write('{"type": "user"}\n')
+        os.utime(cli_transcript, (1_000_000, 1_000_000))
+
+        appdata = os.path.join(fake_home, "AppData", "Roaming")
+        ccd_dir = os.path.join(appdata, "Claude", "claude-code-sessions", "uid1", "mid1")
+        os.makedirs(ccd_dir)
+        manifest = {
+            "sessionId": "local_old",
+            "cliSessionId": cli_session_id,
+            "cwd": worktree,
+            "worktreePath": worktree,
+        }
+        with open(os.path.join(ccd_dir, "local_old.json"), "w") as f:
+            json.dump(manifest, f)
+
+        monkeypatch.setenv("APPDATA", appdata)
+        monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", fake_home))
+
+        transcripts = retro_helpers.discover_transcripts(worktree, since=1_500_000)
+        assert not any(cli_session_id in t for t in transcripts), (
+            "Old Desktop transcript should be excluded by mtime filter"
+        )
+
+    def test_discover_transcripts_desktop_no_duplicate(self, monkeypatch, tmp_path):
+        """Desktop manifest transcript already found by CLI scan is not duplicated."""
+        import retro_helpers
+
+        fake_home = str(tmp_path)
+        worktree = os.path.join(fake_home, "my", "project")
+        os.makedirs(worktree)
+
+        cli_session_id = "ccccdddd-eeee-ffff-aaaa-bbbbbbbbbbbb"
+        encoded = retro_helpers._encode_project_dir(worktree)
+        cli_dir = os.path.join(fake_home, ".claude", "projects", encoded)
+        os.makedirs(cli_dir)
+        with open(os.path.join(cli_dir, cli_session_id + ".jsonl"), "w") as f:
+            f.write('{"type": "user"}\n')
+
+        appdata = os.path.join(fake_home, "AppData", "Roaming")
+        ccd_dir = os.path.join(appdata, "Claude", "claude-code-sessions", "uid1", "mid1")
+        os.makedirs(ccd_dir)
+        manifest = {
+            "sessionId": "local_dup",
+            "cliSessionId": cli_session_id,
+            "cwd": worktree,
+            "worktreePath": worktree,
+        }
+        with open(os.path.join(ccd_dir, "local_dup.json"), "w") as f:
+            json.dump(manifest, f)
+
+        monkeypatch.setenv("APPDATA", appdata)
+        monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", fake_home))
+
+        transcripts = retro_helpers.discover_transcripts(worktree)
+        matching = [t for t in transcripts if cli_session_id in t]
+        assert len(matching) == 1, f"Expected exactly 1 match, got {matching!r}"
+
+
 class TestAllowlistDriftDetector:
     def _init_repo(self, tmpdir):
         import subprocess

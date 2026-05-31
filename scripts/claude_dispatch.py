@@ -251,6 +251,54 @@ _STATE_MAP = {
 }
 
 
+def _tempo_block_questions(data: dict) -> list:
+    """Return block.questions when state.json signals tempo-blocked.
+
+    During an accidental ``AskUserQuestion`` call from a bg/headless
+    worker the daemon writes ``state="working"`` but ``tempo="blocked"``
+    with ``block.questions`` populated; ~15-60s later it auto-injects an
+    answer and clears both fields (#1138). Returns the questions list
+    when that shape is present, else an empty list. Workers must use
+    ``Skill(skill='await-operator', ...)`` instead (#1137).
+    """
+    if (data.get("tempo") or "").strip() != "blocked":
+        return []
+    block = data.get("block")
+    if not isinstance(block, dict):
+        return []
+    questions = block.get("questions")
+    if not isinstance(questions, list) or not questions:
+        return []
+    return questions
+
+
+def synthesize_needs_from_questions(questions: list) -> str:
+    """Format block.questions into a ``needs``-shaped escalation line.
+
+    Shared with ``goal_supervisor._tempo_blocked_signal`` so both readers
+    of the daemon state.json render identical escalation text for the
+    same payload.
+    """
+    parts = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        qtext = (q.get("question") or "").strip()
+        options = q.get("options")
+        if not isinstance(options, list):
+            options = []
+        labels = " · ".join(
+            (opt.get("label") or "").strip()
+            for opt in options
+            if isinstance(opt, dict) and (opt.get("label") or "").strip()
+        )
+        if qtext and labels:
+            parts.append(f"answer: {qtext} ({labels})")
+        elif qtext:
+            parts.append(f"answer: {qtext}")
+    return " | ".join(parts)
+
+
 @dataclass
 class BgHandle(DispatchHandle):
     """Wraps a claude --bg session via its state.json file."""
@@ -278,11 +326,22 @@ class BgHandle(DispatchHandle):
                 f"WARN unknown state.json state for {self.short}: {raw!r}\n"
             )
             return "error"
+        # Defense-in-depth (#1138): catch accidental AskUserQuestion from a
+        # bg/headless worker before the daemon's 15-60s auto-answer window
+        # closes. state stays "working" but tempo flips to "blocked".
+        if mapped != "blocked" and _tempo_block_questions(data):
+            return "blocked"
         return mapped  # type: ignore[return-value]
 
     def needs(self) -> str:
         data = self._last_state if self._last_state is not None else self._read_state()
-        return data.get("needs", "") or ""
+        text = data.get("needs", "") or ""
+        if text:
+            return text
+        questions = _tempo_block_questions(data)
+        if questions:
+            return synthesize_needs_from_questions(questions)
+        return ""
 
     def terminate(self) -> None:
         subprocess.run(
@@ -444,6 +503,7 @@ def spawn(
     model: Optional[str] = None,
     cwd: Union[str, Path] = ".",
     dangerous: bool = False,
+    permission_mode: Optional[str] = None,
     stage_log: Optional[Union[str, Path]] = None,
     env: Optional[Mapping[str, str]] = None,
     jobs_dir: Optional[Path] = None,
@@ -460,7 +520,15 @@ def spawn(
         agent: Optional --agent value (headless mode).
         model: Optional --model value (headless mode).
         cwd: Working directory for the subprocess.
-        dangerous: If True, adds --dangerously-skip-permissions (unattended only).
+        dangerous: If True, adds --dangerously-skip-permissions to the
+            interactive ``claude --bg`` invocation (unattended daemons only).
+            Ignored in headless mode — ``claude -p`` has no permission dialog.
+            Mutually exclusive with ``permission_mode``.
+        permission_mode: Optional value passed as ``--permission-mode <value>``
+            to the interactive ``claude --bg`` invocation (e.g.
+            ``"bypassPermissions"``). Ignored in headless mode — ``claude -p``
+            has no permission dialog. When None, the flag is omitted.
+            Mutually exclusive with ``dangerous``.
         stage_log: Required for mode=headless. Streamed stdout path; also
             read back by output().
         env: Optional env mapping (defaults to os.environ).
@@ -472,6 +540,11 @@ def spawn(
         raise DispatchError(f"invalid mode: {mode!r}")
     if not caller:
         raise DispatchError("spawn() requires a non-empty caller string")
+    if dangerous and permission_mode:
+        raise DispatchError(
+            "spawn() received both dangerous=True and permission_mode="
+            f"{permission_mode!r} — these are mutually exclusive"
+        )
     require_min_version()
     cwd_str = str(Path(cwd).resolve()) if cwd else str(Path(".").resolve())
 
@@ -512,6 +585,8 @@ def spawn(
     if not NAME_RE.match(name):
         raise DispatchError(f"invalid --name value: {name!r}")
     argv = ["claude", "--bg", "--name", name]
+    if permission_mode:
+        argv.extend(["--permission-mode", permission_mode])
     if dangerous:
         argv.append("--dangerously-skip-permissions")
     argv.extend(["--", prompt])

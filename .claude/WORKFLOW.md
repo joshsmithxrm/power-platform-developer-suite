@@ -57,7 +57,7 @@ Shakedown mode guarantees no real artifacts leak from exercise runs. Violations 
 - `.claude/hooks/protect-main-branch.py` — also logs the raw value for debugging.
 
 ### Consumed by (skills)
-- Indirectly — skills that shell into hooks inherit the normalized value. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows (see `workflow-verify/SKILL.md`).
+- Indirectly — skills that shell into hooks inherit the normalized value. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows (see `/verify` `REFERENCE.md §workflow`).
 
 ### Effect
 Portable path resolution across Windows cmd, Git Bash, and POSIX shells. In worktrees, resolves to the worktree root — hooks operating on a worktree see the worktree as the project root, not the main checkout.
@@ -93,10 +93,55 @@ Every headless invocation appends a JSONL row to `.claude/state/sdk-spend.jsonl`
 (gitignored). Tail it for live visibility:
 `tail -f .claude/state/sdk-spend.jsonl`.
 
+## Bash Tool Portability
+
+The Bash tool runs commands through Git Bash / MSYS, not PowerShell. Two
+runtime anti-patterns recur from prior retros (R-01 #1130, R-02 #1131):
+
+### Anti-pattern 1: PowerShell cmdlets via Bash tool
+
+PowerShell cmdlets (`Test-Path`, `Get-Item`, `Remove-Item`, etc.) fail with
+exit 127 — the Bash tool's shell does not resolve them. Use POSIX
+equivalents or shell out to Python:
+
+| Instead of | Use |
+|------------|-----|
+| `Test-Path .workflow/state.json` | `[ -e .workflow/state.json ] && echo exists \|\| echo missing` |
+| `Test-Path .workflow/state.json` | `python -c "import os; print(os.path.exists('.workflow/state.json'))"` |
+| `Get-ChildItem .retros` | `ls .retros` |
+| `Remove-Item -Recurse .workflow/tmp` | `rm -rf .workflow/tmp` |
+
+PowerShell-native scripts (`scripts/*.ps1`) are exempt — they run under
+`pwsh.exe`, not the Bash tool's shell.
+
+### Anti-pattern 2: Windows backslash paths in inline Python literals
+
+Inline `python -c "..."` and heredoc snippets passed via the Bash tool
+treat the payload as Python source code. Backslashes in regular string
+literals become escape sequences — `'.workflow\state.json'` becomes
+`.workflow<TAB>tate.json` (a literal tab + truncated path), and
+`'C:\Users\foo'` is a `SyntaxError: (unicode error) ...`.
+
+Fix the path literal at write time, not the file system at read time:
+
+| Instead of | Use |
+|------------|-----|
+| `python -c "open('.workflow\state.json')"` | `python -c "open('.workflow/state.json')"` (forward slashes) |
+| `python -c "open('C:\Users\foo')"` | `python -c "open(r'C:\Users\foo')"` (raw string) |
+| Inline heredoc + Windows path | Save to a `.py` file and run it — escapes go away |
+
+POSIX paths work on Windows Python — `open('.workflow/state.json')` opens
+the same file as `open('.workflow\\state.json')`. Forward slashes are the
+correct default for cross-platform inline Python.
+
+Regression test: `tests/test_skill_bash_portability.py` scans every
+`.claude/skills/**/*.md` for these patterns. Edits that reintroduce them
+fail in `/gates`.
+
 ## Related Docs
 
 - `CLAUDE.md` — repo-level rules
 - `.claude/interaction-patterns.md` — agent topology and decision UX
-- `.claude/skills/workflow-verify/SKILL.md` — testing patterns for hooks and skills
+- `/verify` `REFERENCE.md §workflow` — testing patterns for hooks and skills
 - `.claude/skills/shakedown-workflow/SKILL.md` — reference implementation of `PPDS_SHAKEDOWN`
 - `.claude/skills/implement/SKILL.md` — reference implementation of `PPDS_PIPELINE` detection

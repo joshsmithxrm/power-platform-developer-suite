@@ -98,22 +98,22 @@ public static class EntityCommand
             }
             else
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Entity: {metadata.LogicalName}");
-                Console.Error.WriteLine($"  Display Name:     {metadata.DisplayName}");
-                Console.Error.WriteLine($"  Schema Name:      {metadata.SchemaName}");
-                Console.Error.WriteLine($"  Entity Set Name:  {metadata.EntitySetName}");
-                Console.Error.WriteLine($"  Primary ID:       {metadata.PrimaryIdAttribute}");
-                Console.Error.WriteLine($"  Primary Name:     {metadata.PrimaryNameAttribute}");
-                Console.Error.WriteLine($"  Object Type Code: {metadata.ObjectTypeCode}");
-                Console.Error.WriteLine($"  Ownership Type:   {metadata.OwnershipType}");
-                Console.Error.WriteLine($"  Custom Entity:    {metadata.IsCustomEntity}");
-                Console.Error.WriteLine($"  Managed:          {metadata.IsManaged}");
+                Console.WriteLine();
+                Console.WriteLine($"Entity: {metadata.LogicalName}");
+                Console.WriteLine($"  Display Name:     {metadata.DisplayName}");
+                Console.WriteLine($"  Schema Name:      {metadata.SchemaName}");
+                Console.WriteLine($"  Entity Set Name:  {metadata.EntitySetName}");
+                Console.WriteLine($"  Primary ID:       {metadata.PrimaryIdAttribute}");
+                Console.WriteLine($"  Primary Name:     {metadata.PrimaryNameAttribute}");
+                Console.WriteLine($"  Object Type Code: {metadata.ObjectTypeCode}");
+                Console.WriteLine($"  Ownership Type:   {metadata.OwnershipType}");
+                Console.WriteLine($"  Custom Entity:    {metadata.IsCustomEntity}");
+                Console.WriteLine($"  Managed:          {metadata.IsManaged}");
 
                 if (metadata.Attributes.Count > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"Attributes ({metadata.Attributes.Count}):");
+                    Console.WriteLine();
+                    Console.WriteLine($"Attributes ({metadata.Attributes.Count}):");
                     foreach (var attr in metadata.Attributes.Take(20))
                     {
                         var markers = new List<string>();
@@ -122,12 +122,12 @@ public static class EntityCommand
                         if (attr.IsCustomAttribute) markers.Add("custom");
 
                         var markerText = markers.Count > 0 ? $" [{string.Join(", ", markers)}]" : "";
-                        Console.Error.WriteLine($"  {attr.LogicalName,-35} {attr.AttributeType,-15} {attr.DisplayName}{markerText}");
+                        Console.WriteLine($"  {attr.LogicalName,-35} {attr.AttributeType,-15} {attr.DisplayName}{markerText}");
                     }
 
                     if (metadata.Attributes.Count > 20)
                     {
-                        Console.Error.WriteLine($"  ... and {metadata.Attributes.Count - 20} more attributes");
+                        Console.WriteLine($"  ... and {metadata.Attributes.Count - 20} more attributes");
                     }
                 }
 
@@ -137,30 +137,30 @@ public static class EntityCommand
 
                 if (totalRels > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"Relationships ({totalRels}):");
-                    Console.Error.WriteLine($"  1:N: {metadata.OneToManyRelationships.Count}");
-                    Console.Error.WriteLine($"  N:1: {metadata.ManyToOneRelationships.Count}");
-                    Console.Error.WriteLine($"  N:N: {metadata.ManyToManyRelationships.Count}");
+                    Console.WriteLine();
+                    Console.WriteLine($"Relationships ({totalRels}):");
+                    Console.WriteLine($"  1:N: {metadata.OneToManyRelationships.Count}");
+                    Console.WriteLine($"  N:1: {metadata.ManyToOneRelationships.Count}");
+                    Console.WriteLine($"  N:N: {metadata.ManyToManyRelationships.Count}");
                 }
 
                 if (metadata.Keys.Count > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"Alternate Keys ({metadata.Keys.Count}):");
+                    Console.WriteLine();
+                    Console.WriteLine($"Alternate Keys ({metadata.Keys.Count}):");
                     foreach (var key in metadata.Keys)
                     {
-                        Console.Error.WriteLine($"  {key.LogicalName}: {string.Join(", ", key.KeyAttributes)}");
+                        Console.WriteLine($"  {key.LogicalName}: {string.Join(", ", key.KeyAttributes)}");
                     }
                 }
 
                 if (metadata.Privileges.Count > 0)
                 {
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine($"Privileges ({metadata.Privileges.Count}):");
+                    Console.WriteLine();
+                    Console.WriteLine($"Privileges ({metadata.Privileges.Count}):");
                     foreach (var priv in metadata.Privileges)
                     {
-                        Console.Error.WriteLine($"  {priv.PrivilegeType}: {priv.Name}");
+                        Console.WriteLine($"  {priv.PrivilegeType}: {priv.Name}");
                     }
                 }
             }

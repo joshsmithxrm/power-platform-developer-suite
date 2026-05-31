@@ -66,6 +66,30 @@ When presenting N findings or decisions to the user, the AI:
 
 **Rationale**: Cowan 4±1 working-memory capacity; Hick's Law on choice overload; smart-default approval-workflow pattern; Terraform plan/apply idiom; Anthropic guidance on surfacing uncertainty.
 
+## 4a. One-at-a-time variant (retro Phase 5 only) <!-- since: #1071 — PR #1051 retro disproved bulk-plan for retro -->
+
+Applies to `/retro` Phase 5 only. Evidence: PR #1051 retro (2026-05-14) — operator demanded per-finding explanation before approval: *"go back through one by one you explain to me the thing you found what you suggest and i will tell you do it"* and *"why didn't you make a recommendation and provide rationale and then ask for my opinion and decision?"*
+
+**Pattern (repeated F1–FN):**
+
+```
+## F<N> — <title>
+
+**What I found:** ...
+**My recommendation:** <verb> — <lean>
+**Rationale:**
+- ...
+**Your call?**
+```
+
+One finding per turn. AI lean stated. Rationale as bullets. Operator responds: go / change / drop / defer. If redirected, return with a different recommendation — not a menu of options. For sub-questions inside a finding, apply §5 per sub-question.
+
+After all findings are decided, one confirmation turn restating the final plan. Then ask "Want the meta now, or done?" before surfacing meta-observations.
+
+**Falsification:** a retro session where the operator explicitly prefers bulk approval → revert.
+
+**Consumers that retain §4 (bulk plan):** `/backlog` triage, `/pr` Gemini comment triage, `/dependabot-triage`, `/review` suggestion acceptance — these involve larger N with simpler per-item decisions and have not been disproven.
+
 ## 5. Communication style for AI-asked questions
 
 When the AI needs a decision:
@@ -76,6 +100,24 @@ When the AI needs a decision:
 4. **Agree or redirect?** — one question. Not a menu of options.
 
 If a recommendation is rejected, return with a different recommendation — not "here are the other options." The user should not weigh unweighted options.
+
+## 5a. Pause primitives by session type <!-- since: #1137 -->
+
+When a session needs to wait on a human decision, the right primitive
+depends on whether the session is interactive or background. Picking the
+wrong one is silent — the worker thinks it asked, but no human ever sees
+the question.
+
+| Session type | Pause primitive | Why |
+|--------------|-----------------|-----|
+| **Interactive** (operator at terminal) | `AskUserQuestion` | Synchronous, in-channel. Works as documented. |
+| **Background** (`claude --bg` / daemon-spawned worker) | `/await-operator` skill | `AskUserQuestion` does NOT block in `--bg` — the daemon auto-injects an answer within ~15-60s (Recommended option or implicit "Something else"). Smoking gun: PR #1105 filed unilaterally. |
+| **Pipeline (headless `claude -p` stage)** | Don't pause — fail or default | Pipeline stages must be deterministic. If a decision is genuinely needed, exit non-zero so the orchestrator escalates. `/await-operator` works here too but stalls the pipeline. |
+
+Resume mechanism for `/await-operator`: operator runs
+`/resume-with-answer <short> <choice>` (writes `.workflow/operator-answer.json`
++ clears daemon `state=blocked`). See `.claude/skills/await-operator/SKILL.md`
+and `.claude/skills/resume-with-answer/SKILL.md` for the full round-trip.
 
 ## 6. HTML artifacts vs. chat interaction
 

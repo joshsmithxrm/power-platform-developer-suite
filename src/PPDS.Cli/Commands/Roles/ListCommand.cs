@@ -91,12 +91,12 @@ public static class ListCommand
             {
                 if (roles.Count == 0)
                 {
-                    Console.Error.WriteLine("No roles found.");
+                    Console.WriteLine("No roles found.");
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Found {roles.Count} role(s):");
-                    Console.Error.WriteLine();
+                    Console.WriteLine($"Found {roles.Count} role(s):");
+                    Console.WriteLine();
 
                     foreach (var role in roles)
                     {
