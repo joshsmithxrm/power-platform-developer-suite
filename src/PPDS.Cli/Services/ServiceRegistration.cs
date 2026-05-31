@@ -25,6 +25,7 @@ using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Services.Users;
+using PPDS.Cli.Services.Views;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.BulkOperations;
@@ -264,6 +265,12 @@ public static class ServiceRegistration
         services.AddTransient<IDataQueryService>(sp => new DataQueryService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ILogger<DataQueryService>>()));
+
+        services.AddTransient<IViewService>(sp => new ViewService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<ViewService>>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();
