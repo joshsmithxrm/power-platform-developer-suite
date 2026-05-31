@@ -174,8 +174,7 @@ public class ViewService : IViewService
         if (isRelated)
         {
             var rels = await _cachedMetadata.GetRelationshipsAsync(entityLogicalName, cancellationToken);
-            var rel = rels.ManyToOne.FirstOrDefault(r => r.ReferencingAttribute == viaRelationship)
-                ?? rels.OneToMany.FirstOrDefault(r => r.ReferencingAttribute == viaRelationship);
+            var rel = rels.ManyToOne.FirstOrDefault(r => r.ReferencingAttribute == viaRelationship);
             if (rel == null)
                 throw new PpdsException(ErrorCodes.View.RelationshipNotFound,
                     $"Relationship attribute '{viaRelationship}' not found in metadata for entity '{entityLogicalName}'.");
@@ -187,7 +186,7 @@ public class ViewService : IViewService
         }
 
         var layoutDoc = XDocument.Parse(layoutXml);
-        var layoutChanged = AddCellsWithWarnings(layoutDoc, columns, isRelated, relName, relEntity, relPkName, relAlias);
+        var layoutChanged = AddCellsWithWarnings(layoutDoc, columns, isRelated, relName, relEntity, relPkName, relAlias, progressReporter);
 
         bool fetchChanged = false;
         var fetchDoc = XDocument.Parse(fetchXml);
@@ -612,7 +611,8 @@ public class ViewService : IViewService
         string? relName,
         string? relEntity,
         string? relPkName,
-        string? relAlias)
+        string? relAlias,
+        IProgressReporter? progressReporter = null)
     {
         var row = layout.Descendants("row").FirstOrDefault();
         if (row == null) return false;
@@ -624,7 +624,7 @@ public class ViewService : IViewService
                 .FirstOrDefault(c => (string?)c.Attribute("name") == col.AttributeName);
             if (existing != null)
             {
-                Console.Error.WriteLine($"Warning: column '{col.AttributeName}' already exists in view — skipping (idempotent).");
+                progressReporter?.ReportWarning($"Column '{col.AttributeName}' already exists in view — skipping (idempotent).");
                 continue;
             }
 
