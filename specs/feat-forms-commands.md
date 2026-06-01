@@ -71,8 +71,8 @@
 ### Dependencies
 
 - Depends on: [connection-pooling.md](./connection-pooling.md) — pooled Dataverse clients (D1, D2)
-- Depends on: [metadata-browser.md](./metadata-browser.md) — `IMetadataQueryService` for column type lookup in `add-field`
-- Depends on: [publish.md](./publish.md) — `IDataverseClient.PublishXmlAsync` for `--publish` flag
+- Depends on: [metadata-browser.md](./metadata-browser.md) — `IMetadataQueryService.GetAttributesAsync` for column type lookup in `add-field`
+- Depends on: [publish.md](./publish.md) — `IPooledClient.PublishXmlAsync` (pooled-client extension) for `--publish` flag
 - Depends on: [solutions.md](./solutions.md) — `ISolutionService` for `--solution` flag (AddSolutionComponentRequest, component type 60)
 - Uses patterns from: [CONSTITUTION.md](./CONSTITUTION.md) — A1, A2, A3, D1, D2, D4, I1, R2
 
@@ -127,9 +127,9 @@ All create/update operations follow this pipeline:
    - Schema validation against bundled Dataverse customization XSD
    - GUID format validation: all `id` and `labelid` attributes must use brace format `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`
    - GUID uniqueness: no duplicate `id` or `labelid` values within the document
-4. **PATCH** `systemforms` record via Web API (`/api/data/v9.2/systemforms(<id>)`)
-5. **Optionally** add form to solution (`AddSolutionComponentRequest`, component type 60)
-6. **Optionally** publish entity (`PublishXmlAsync`)
+4. **Update** the `systemform` record through the pooled SDK client: `IPooledClient.UpdateAsync(new Entity("systemform", formId) { ["formxml"] = xml })`. There is no generated early-bound `systemform` entity — use a late-bound `Entity`. (PPDS uses the SDK through `IDataverseConnectionPool`, not raw Web API HTTP; D1/D2.)
+5. **Optionally** add form to solution (`AddSolutionComponentRequest`, component type 60 = `componenttype.SystemForm`). This request is **not** idempotent — re-adding a component already in the solution throws `FaultException<OrganizationServiceFault>` with `ErrorCode == -2147159998` ("Component already exists in the solution"). `FormService` catches that specific fault and treats it as a no-op, mirroring `PluginRegistrationService.AddToSolutionAsync`.
+6. **Optionally** publish entity via the pooled-client extension `IPooledClient.PublishXmlAsync(parameterXml, environmentKey, ct)` with `<importexportxml><entities><entity>{logicalName}</entity></entities></importexportxml>`
 
 `ppds forms set-xml` skips step 2 — it validates and writes user-provided XML directly.
 
@@ -143,21 +143,21 @@ Validation failure produces a `PpdsValidationException` with `FormErrorCodes.Inv
 
 ### classid Resolution for add-field
 
-`FormService` resolves classid by calling `IMetadataQueryService.GetAttributeAsync(entityLogicalName, columnLogicalName)` to obtain the `AttributeTypeCode`. The mapping is:
+`FormService` resolves classid by calling `IMetadataQueryService.GetAttributesAsync(entityLogicalName)`, locating the attribute whose `LogicalName` matches the requested column, and reading its `AttributeType` (a `string`, e.g. `"String"`, `"Picklist"`). `AttributeMetadataDto.AttributeType` is a string — there is no `AttributeTypeCode` enum on the DTO — so `ClassIdResolver` keys off the string value. The mapping is:
 
-| AttributeTypeCode | classid |
-|-------------------|---------|
-| `String` (nvarchar) | `{4273EDBD-AC1D-40d3-9FB2-095C621B552D}` |
-| `Money` (currency) | `{533B9108-5A8B-42cb-BD37-52D1B8E7C741}` |
-| `Picklist` (choice) | `{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}` |
-| `Lookup` | `{270BD3DB-D9AF-4782-9025-509E298DEC0A}` |
-| `DateTime` | `{5B773807-9FB2-42db-97C3-7A91EFF8ADFF}` |
-| `Integer` (whole number) | `{C6D124CA-7EDA-4a60-AEA9-7FB8D318B68F}` |
-| `Decimal` | `{C3EFE0C3-0EC6-42be-8349-CBD9079C5A6F}` |
-| `Boolean` (toggle) | `{67FAC785-CD58-4f9f-ABB3-4B7DDC6ED5ED}` |
-| `Memo` (multiline text) | `{E0DECE4B-6FC8-4a8f-A065-082708572369}` |
+| `AttributeType` value | Column type | classid |
+|-----------------------|-------------|---------|
+| `String` | Text (nvarchar) | `{4273EDBD-AC1D-40d3-9FB2-095C621B552D}` |
+| `Money` | Currency | `{533B9108-5A8B-42cb-BD37-52D1B8E7C741}` |
+| `Picklist` | Choice | `{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}` |
+| `Lookup` | Lookup | `{270BD3DB-D9AF-4782-9025-509E298DEC0A}` |
+| `DateTime` | Date/Time | `{5B773807-9FB2-42db-97C3-7A91EFF8ADFF}` |
+| `Integer` | Whole Number | `{C6D124CA-7EDA-4a60-AEA9-7FB8D318B68F}` |
+| `Decimal` | Decimal | `{C3EFE0C3-0EC6-42be-8349-CBD9079C5A6F}` |
+| `Boolean` | Toggle | `{67FAC785-CD58-4f9f-ABB3-4B7DDC6ED5ED}` |
+| `Memo` | Multiline Text | `{E0DECE4B-6FC8-4a8f-A065-082708572369}` |
 
-`classid` is never user-supplied. If the column's `AttributeTypeCode` is not in the table, the operation fails with `FormErrorCodes.UnsupportedColumnType` and a message listing the type name and the supported types.
+`classid` is never user-supplied. If the column's `AttributeType` is not in the table (e.g. `BigInt`, `Double`, `Customer`, `State`), the operation fails with `FormErrorCodes.UnsupportedColumnType` and a message listing the type name and the supported types.
 
 For `add-subgrid`, classid is always `{E7A81278-8635-4d9e-8D4D-59480B391C5B}` — hardcoded, no lookup required.
 
@@ -286,7 +286,7 @@ All commands share `--profile` / `--environment` global options plus `--json` ou
 
 Modification commands (`add-*`, `update-*`, `remove-*`, `reorder-*`, `set-xml`) accept:
 - `--publish` — publish entity after operation
-- `--solution <name>` — add form to solution after write (component type 60); `AddSolutionComponentRequest` is idempotent in Dataverse — the form is added if not already present, no-op if already in the solution
+- `--solution <name>` — add form to solution after write (component type 60). `AddSolutionComponentRequest` throws if the form is already in the solution (`OrganizationServiceFault.ErrorCode == -2147159998`); `FormService` catches that specific fault and treats it as a no-op, so re-running with `--solution` is safe
 
 Status messages go to stderr (Constitution I1). Structured output goes to stdout.
 
@@ -414,7 +414,7 @@ ppds forms remove-subgrid --entity <e> --form "<f>" --label "<l>"
 | AC-24 | `--max-rows` values outside 2–250 are rejected with `InvalidMaxRows` error | `FormServiceTests.AddSubgrid_MaxRowsOutOfRange_ThrowsInvalidMaxRows` | 🔲 |
 | AC-25 | `ppds forms remove-subgrid` removes the sub-grid control matching the label from formxml | `FormXmlEditorTests.RemoveSubgrid_ExistingLabel_RemovesControl` | 🔲 |
 | AC-26 | `--publish` flag publishes the entity after a successful modification via `PublishXmlAsync` | `FormServiceTests.SetFormXml_WithPublish_CallsPublishXmlAsync` | 🔲 |
-| AC-27 | `--solution <name>` adds the form to the named solution using `AddSolutionComponentRequest` with component type 60 after a successful write | `FormServiceTests.SetFormXml_WithSolution_AddsSolutionComponent` | 🔲 |
+| AC-27 | `--solution <name>` adds the form to the named solution using `AddSolutionComponentRequest` with component type 60 after a successful write; a `-2147159998` fault (already present) is caught and treated as success | `FormServiceTests.SetFormXml_WithSolution_AddsSolutionComponent`, `FormServiceTests.SetFormXml_FormAlreadyInSolution_Swallows­Fault` | 🔲 |
 | AC-28 | `ppds forms --help` lists all subcommands | `FormsCommandGroupTests.Create_HasAllSubcommands` | 🔲 |
 | AC-29 | Each subcommand's `--help` text is present, non-empty, and describes its purpose | `FormsCommandGroupTests.AllSubcommands_HaveDescriptions` | 🔲 |
 | AC-30 | `ppds forms set-xml --help` text explicitly documents schema validation, brace-format GUID requirement, and GUID uniqueness check | `SetFormXmlCommandTests.Command_HelpTextDescribesValidation` | 🔲 |
@@ -441,6 +441,7 @@ ppds forms remove-subgrid --entity <e> --form "<f>" --label "<l>"
 | add-field on already-present field | Field already exists in section | Field is added a second time (Dataverse allows duplicate controls) |
 | reorder-fields with empty list | `--fields ""` | `PpdsValidationException`: at least one field required |
 | Solution name not found | `--solution nonexistent` | `PpdsException` with `Solution.NotFound` |
+| Form already in solution | `--solution X` where form is already a component | No-op — fault `-2147159998` caught and swallowed; operation succeeds |
 
 ---
 
@@ -489,8 +490,9 @@ internal static class FormXmlValidator
 ```csharp
 internal static class ClassIdResolver
 {
-    // Throws PpdsException(FormErrorCodes.UnsupportedColumnType) for unknown types
-    internal static string ResolveForField(AttributeTypeCode typeCode);
+    // attributeType is AttributeMetadataDto.AttributeType (a string, e.g. "String", "Picklist").
+    // Throws PpdsException(FormErrorCodes.UnsupportedColumnType) for unmapped types.
+    internal static string ResolveForField(string attributeType);
 
     public const string SubgridClassId = "{E7A81278-8635-4d9e-8D4D-59480B391C5B}";
 }
@@ -598,3 +600,4 @@ public static class FormErrorCodes
 | Date | Change |
 |------|--------|
 | 2026-06-01 | Initial spec |
+| 2026-06-01 | Opus review corrections: SDK late-bound update (not Web API PATCH); `AddSolutionComponentRequest` non-idempotent fault catch; `GetAttributesAsync` (plural); `ClassIdResolver` keys off `AttributeType` string |
