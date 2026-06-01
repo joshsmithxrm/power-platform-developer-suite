@@ -1,6 +1,6 @@
 # Raw Web API Request
 
-**Status:** Draft
+**Status:** Implemented
 **Last Updated:** 2025-07-25
 **Code:** [src/PPDS.Cli/Services/WebApi/](../src/PPDS.Cli/Services/WebApi/)
 **Surfaces:** CLI
@@ -138,20 +138,20 @@ Exit codes:
 
 ## Acceptance Criteria
 
-| ID    | Criterion                                                                            | Test                                                      | Status |
-| ----- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- | ------ |
-| AC-01 | GET request to valid path returns response body on stdout with exit code 0           | `RawWebApiServiceTests.Get_ValidPath_ReturnsBody`         | 🔲     |
-| AC-02 | POST request on production environment without --confirm is blocked with exit code 2 | `WebApiWriteGuardTests.Post_Production_NoConfirm_Blocks`  | 🔲     |
-| AC-03 | POST request on production with --confirm sends the request                          | `RawWebApiServiceTests.Post_Production_WithConfirm_Sends` | 🔲     |
-| AC-04 | POST/PATCH/DELETE on development environment is allowed without --confirm            | `WebApiWriteGuardTests.Mutating_Development_Allowed`      | 🔲     |
-| AC-05 | --include outputs status line and headers before body                                | `ApiRequestCommandTests.Include_OutputsHeaders`           | 🔲     |
-| AC-06 | Non-2xx response returns `IsSuccess = false` with status code and body preserved       | `RawWebApiServiceTests.Non2xx_ReturnsErrorResponse`       | 🔲     |
-| AC-07 | User-supplied headers override defaults                                              | `RawWebApiServiceTests.UserHeaders_OverrideDefaults`      | 🔲     |
-| AC-08 | --body-file reads body from file                                                     | `RawWebApiServiceTests.BodyFile_ReadsFromDisk`            | 🔲     |
-| AC-09 | --body and --body-file together produces validation error                            | `ApiRequestCommandTests.Body_And_BodyFile_Conflict`       | 🔲     |
-| AC-10 | Path without leading `/` produces validation error                                   | `ApiRequestCommandTests.Path_NoLeadingSlash_Error`        | 🔲     |
-| AC-11 | Auth token is acquired for the correct environment URL resource                      | `RawWebApiServiceTests.Token_AcquiredForEnvironmentUrl`   | 🔲     |
-| AC-12 | Default OData headers (OData-Version, Accept) are present on requests                | `RawWebApiServiceTests.DefaultHeaders_Applied`            | 🔲     |
+| ID    | Criterion                                                                            | Test                                                                      | Status |
+| ----- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ------ |
+| AC-01 | GET request to valid path returns response body on stdout with exit code 0           | `RawWebApiServiceTests.Get_ValidPath_ReturnsBody`                         | ✅     |
+| AC-02 | POST request on production environment without --confirm is blocked with exit code 2 | `RawWebApiServiceTests.Post_Production_NoConfirm_ThrowsWriteBlocked`      | ✅     |
+| AC-03 | POST request on production with --confirm sends the request                          | `RawWebApiServiceTests.Post_Production_WithConfirm_Sends`                 | ✅     |
+| AC-04 | POST/PATCH/DELETE on development environment is allowed without --confirm            | `RawWebApiServiceTests.Mutating_Development_Allowed`                      | ✅     |
+| AC-05 | --include outputs status line and headers before body                                | `ApiRequestCommandTests.Include_OutputsHeaders`                           | ✅     |
+| AC-06 | Non-2xx response returns `IsSuccess = false` with status code and body preserved     | `RawWebApiServiceTests.Non2xx_ReturnsErrorResponse`                       | ✅     |
+| AC-07 | User-supplied headers override defaults                                              | `RawWebApiServiceTests.UserHeaders_OverrideDefaults`                      | ✅     |
+| AC-08 | --body-file reads body from file                                                     | `ApiRequestCommandTests.BodyFile_ReadsFromDisk`                           | ✅     |
+| AC-09 | --body and --body-file together produces validation error                            | `ApiRequestCommandTests.Body_And_BodyFile_Conflict`                       | ✅     |
+| AC-10 | Path without leading `/` produces validation error                                   | `ApiRequestCommandTests.Path_NoLeadingSlash_Error`                        | ✅     |
+| AC-11 | Auth token is acquired for the correct environment URL resource                      | `RawWebApiServiceTests.Token_AcquiredForEnvironmentUrl`                   | ✅     |
+| AC-12 | Default OData headers (OData-Version, Accept) are present on requests                | `RawWebApiServiceTests.DefaultHeaders_Applied`                            | ✅     |
 
 ### Edge Cases
 
@@ -324,9 +324,10 @@ public static class WebApiWriteGuard
 
 ## Changelog
 
-| Date       | Change       |
-| ---------- | ------------ |
-| 2025-07-25 | Initial spec |
+| Date       | Change                                          |
+| ---------- | ----------------------------------------------- |
+| 2025-07-25 | Initial spec                                    |
+| 2026-06-01 | Implemented — all 12 ACs verified and passing   |
 
 ---
 

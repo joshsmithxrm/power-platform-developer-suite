@@ -190,13 +190,8 @@ public static class ApiRequestCommand
 
             var response = await apiService.SendAsync(request, cancellationToken: cancellationToken);
 
-            if (include)
-            {
-                Console.WriteLine($"HTTP/1.1 {response.StatusCode} {response.ReasonPhrase}");
-                foreach (var (key, value) in response.Headers)
-                    Console.WriteLine($"{key}: {value}");
-                Console.WriteLine();
-            }
+            foreach (var line in FormatResponsePreamble(response, include))
+                Console.WriteLine(line);
 
             if (response.IsSuccess)
             {
@@ -220,5 +215,20 @@ public static class ApiRequestCommand
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 3; // auth/connectivity failure per spec
         }
+    }
+
+    /// <summary>
+    /// Returns lines for the HTTP status line and response headers when --include is set.
+    /// Exposed internal for unit testing of AC-05.
+    /// </summary>
+    internal static IEnumerable<string> FormatResponsePreamble(RawWebApiResponse response, bool include)
+    {
+        if (!include)
+            yield break;
+
+        yield return $"HTTP/1.1 {response.StatusCode} {response.ReasonPhrase}";
+        foreach (var (key, value) in response.Headers)
+            yield return $"{key}: {value}";
+        yield return string.Empty;
     }
 }

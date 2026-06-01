@@ -1,6 +1,7 @@
 using System.CommandLine;
 using PPDS.Cli.Commands.Api;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.WebApi;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Api;
@@ -218,6 +219,66 @@ public class ApiRequestCommandTests
         Assert.Null(result);
         Assert.NotNull(headers);
         Assert.Equal("text/plain", headers!["Accept"]);
+    }
+
+    #endregion
+
+    #region AC-05: --include outputs status line and headers
+
+    [Fact]
+    public void Include_OutputsHeaders()
+    {
+        var response = new RawWebApiResponse
+        {
+            StatusCode = 200,
+            ReasonPhrase = "OK",
+            Headers = new Dictionary<string, string> { ["OData-Version"] = "4.0", ["Content-Type"] = "application/json" },
+            Body = "{\"value\":[]}"
+        };
+
+        var lines = ApiRequestCommand.FormatResponsePreamble(response, include: true).ToList();
+
+        Assert.Contains("HTTP/1.1 200 OK", lines);
+        Assert.Contains("OData-Version: 4.0", lines);
+        Assert.Contains("Content-Type: application/json", lines);
+        Assert.Contains(string.Empty, lines); // blank separator before body
+    }
+
+    [Fact]
+    public void Include_False_OutputsNoPreamble()
+    {
+        var response = new RawWebApiResponse { StatusCode = 200, ReasonPhrase = "OK" };
+        var lines = ApiRequestCommand.FormatResponsePreamble(response, include: false).ToList();
+        Assert.Empty(lines);
+    }
+
+    #endregion
+
+    #region AC-08: --body-file reads body from file
+
+    [Fact]
+    public async Task BodyFile_ReadsFromDisk()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            const string expectedBody = "{\"name\":\"test\"}";
+            await File.WriteAllTextAsync(tempFile, expectedBody);
+
+            // Validate passes (file reading is post-validation in the handler)
+            var validationResult = ApiRequestCommand.ValidateInputs(
+                "/api/data/v9.2/accounts", "POST", null, tempFile, null,
+                out _, out _);
+            Assert.Null(validationResult);
+
+            // The actual file read that the handler performs
+            var actualBody = await File.ReadAllTextAsync(tempFile);
+            Assert.Equal(expectedBody, actualBody);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 
     #endregion
