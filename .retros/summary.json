@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-31T15:30:00Z",
-  "total_retros": 25,
+  "last_updated": "2026-05-31",
+  "total_retros": 26,
   "findings_by_category": {
     "external": [
       {
@@ -401,6 +401,41 @@
         "date": "2026-05-16",
         "branch": "1098-prompt-template",
         "finding_id": "R-04"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F1"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F2"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F3"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F4"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F5"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F6"
+      },
+      {
+        "date": "2026-05-31",
+        "branch": "views-management",
+        "finding_id": "F7"
       }
     ]
   },
