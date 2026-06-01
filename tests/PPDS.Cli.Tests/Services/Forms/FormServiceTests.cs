@@ -194,19 +194,11 @@ public class FormServiceTests
         var service = CreateService(poolMock.Object);
 
         // Act
-        Exception? caught = null;
-        try
-        {
-            await service.ListAsync("account", cts.Token);
-        }
-        catch (Exception ex)
-        {
-            caught = ex;
-        }
+        Func<Task> act = () => service.ListAsync("account", cts.Token);
 
         // Assert — either OperationCanceledException propagates directly or is wrapped in PpdsException
-        caught.Should().NotBeNull();
-        caught!.Should().Match<Exception>(e => e is OperationCanceledException || e is PpdsException);
+        (await act.Should().ThrowAsync<Exception>())
+            .Which.Should().Match<Exception>(e => e is OperationCanceledException || e is PpdsException);
     }
 
     // ── AC-33: Progress reporter ──────────────────────────────────────────
