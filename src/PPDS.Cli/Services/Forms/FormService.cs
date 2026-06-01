@@ -124,14 +124,17 @@ public sealed class FormService : IFormService
             FormXmlValidator.Validate(doc);
 
             reporter?.ReportPhase("Writing", "Updating systemform record");
-            await using var writeClient = await _pool.GetClientAsync(cancellationToken: ct);
-            var entity = new Entity("systemform", formId)
+            // D2: acquire, use, release — one client per operation
+            await using (var writeClient = await _pool.GetClientAsync(cancellationToken: ct))
             {
-                ["formxml"] = request.FormXml
-            };
-            await writeClient.UpdateAsync(entity, ct);
+                var entity = new Entity("systemform", formId)
+                {
+                    ["formxml"] = request.FormXml
+                };
+                await writeClient.UpdateAsync(entity, ct);
+            }
 
-            await ApplySideEffectsAsync(writeClient, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
+            await ApplySideEffectsAsync(formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
@@ -147,6 +150,7 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
@@ -156,6 +160,7 @@ public sealed class FormService : IFormService
             var newTabId = doc.Descendants("tab").Last()
                 .Attribute("id")?.Value ?? string.Empty;
 
+            reporter?.ReportPhase("Writing", $"Adding tab '{request.Label}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
 
             return new TabResult(Guid.TryParse(newTabId.Trim('{', '}'), out var g) ? g : Guid.Empty, request.Label);
@@ -163,7 +168,7 @@ public sealed class FormService : IFormService
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to add tab to form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -172,18 +177,20 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.UpdateTab(doc, request);
 
+            reporter?.ReportPhase("Writing", $"Updating tab '{request.TabLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to update tab '{request.TabLabel}' on form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -192,18 +199,20 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveTab(doc, request.TabLabel);
 
+            reporter?.ReportPhase("Writing", $"Removing tab '{request.TabLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to remove tab '{request.TabLabel}' from form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -245,6 +254,7 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
@@ -255,6 +265,7 @@ public sealed class FormService : IFormService
             var sectionIdStr = (string?)newSection.Attribute("id") ?? string.Empty;
             Guid.TryParse(sectionIdStr.Trim('{', '}'), out var sectionId);
 
+            reporter?.ReportPhase("Writing", $"Adding section '{request.Label}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
 
             return new SectionResult(sectionId, request.Label, request.TabLabel);
@@ -262,7 +273,7 @@ public sealed class FormService : IFormService
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to add section to form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -271,18 +282,20 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.UpdateSection(doc, request);
 
+            reporter?.ReportPhase("Writing", $"Updating section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to update section '{request.SectionLabel}' on form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -291,18 +304,20 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveSection(doc, request.SectionLabel);
 
+            reporter?.ReportPhase("Writing", $"Removing section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to remove section '{request.SectionLabel}' from form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -354,6 +369,7 @@ public sealed class FormService : IFormService
 
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
@@ -372,12 +388,13 @@ public sealed class FormService : IFormService
                 FormXmlEditor.AddField(doc, request.SectionLabel, field, classId, attr.DisplayName);
             }
 
+            reporter?.ReportPhase("Writing", $"Adding {request.FieldLogicalNames.Length} field(s) to section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to add fields to form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -386,18 +403,20 @@ public sealed class FormService : IFormService
     {
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveField(doc, request.FieldLogicalName);
 
+            reporter?.ReportPhase("Writing", $"Removing field '{request.FieldLogicalName}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to remove field '{request.FieldLogicalName}' from form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -409,6 +428,7 @@ public sealed class FormService : IFormService
 
         try
         {
+            reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
@@ -420,12 +440,13 @@ public sealed class FormService : IFormService
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, classIdsByField);
 
+            reporter?.ReportPhase("Writing", $"Reordering fields in section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(FormErrorCodes.FormNotFound,
+            throw new PpdsException(FormErrorCodes.InvalidFormXml,
                 $"Failed to reorder fields on form '{request.FormName}': {ex.Message}", ex);
         }
     }
@@ -537,17 +558,20 @@ public sealed class FormService : IFormService
         var xml = doc.ToString(SaveOptions.DisableFormatting);
         FormXmlValidator.Validate(XDocument.Parse(xml));
 
-        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var entity = new Entity("systemform", formId)
+        // D2: acquire, use, release — one client per operation
+        await using (var client = await _pool.GetClientAsync(cancellationToken: ct))
         {
-            ["formxml"] = xml
-        };
-        await client.UpdateAsync(entity, ct);
-        await ApplySideEffectsAsync(client, formId, entityLogicalName, solutionUniqueName, publish, ct);
+            var entity = new Entity("systemform", formId)
+            {
+                ["formxml"] = xml
+            };
+            await client.UpdateAsync(entity, ct);
+        }
+
+        await ApplySideEffectsAsync(formId, entityLogicalName, solutionUniqueName, publish, ct);
     }
 
     private async Task ApplySideEffectsAsync(
-        IPooledClient client,
         Guid formId,
         string entityLogicalName,
         string? solutionUniqueName,
@@ -566,11 +590,13 @@ public sealed class FormService : IFormService
 
             try
             {
-                await client.ExecuteAsync(request, ct);
+                // D2: acquire, use, release — own client per operation
+                await using var solutionClient = await _pool.GetClientAsync(cancellationToken: ct);
+                await solutionClient.ExecuteAsync(request, ct);
             }
             catch (FaultException<OrganizationServiceFault> ex) when (ex.Detail?.ErrorCode == -2147159998)
             {
-                // Component already in solution — treat as no-op
+                // Component already in solution — treat as no-op (mirrors PluginRegistrationService.AddToSolutionAsync)
                 _logger.LogDebug(
                     "Form {FormId} already exists in solution {SolutionName}, skipping",
                     formId, solutionUniqueName);
@@ -579,10 +605,12 @@ public sealed class FormService : IFormService
 
         if (publish)
         {
+            // D2: acquire, use, release — own client per operation
+            await using var publishClient = await _pool.GetClientAsync(cancellationToken: ct);
             var entityXml = $"<entity>{System.Security.SecurityElement.Escape(entityLogicalName)}</entity>";
             var parameterXml = $"<importexportxml><entities>{entityXml}</entities></importexportxml>";
-            var environmentKey = client.ConnectedOrgUniqueName ?? "default";
-            await client.PublishXmlAsync(parameterXml, environmentKey, ct);
+            var environmentKey = publishClient.ConnectedOrgUniqueName ?? "default";
+            await publishClient.PublishXmlAsync(parameterXml, environmentKey, ct);
         }
     }
 
