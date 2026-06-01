@@ -68,13 +68,12 @@ public class FormXmlEditorTests
         var result = FormXmlEditor.UpdateTab(formXml, request);
 
         // Assert
-        var labelAttr = result.Descendants("tab")
+        var label = (string?)result.Descendants("tab")
             .Single()
             .Element("labels")?.Element("label")
             ?.Attribute("description");
 
-        labelAttr.Should().NotBeNull();
-        labelAttr!.Value.Should().Be("Renamed Tab");
+        label.Should().Be("Renamed Tab");
     }
 
     [Fact]
@@ -114,13 +113,12 @@ public class FormXmlEditorTests
         var result = FormXmlEditor.UpdateSection(formXml, request);
 
         // Assert
-        var labelAttr = result.Descendants("section")
+        var label = (string?)result.Descendants("section")
             .Single()
             .Element("labels")?.Element("label")
             ?.Attribute("description");
 
-        labelAttr.Should().NotBeNull();
-        labelAttr!.Value.Should().Be("Renamed Section");
+        label.Should().Be("Renamed Section");
     }
 
     [Fact]
@@ -294,5 +292,144 @@ public class FormXmlEditorTests
         result.Descendants("control")
             .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
             .Should().BeEmpty();
+    }
+
+    // ── Data-loss regression tests (Gemini review #1174) ───────────────────────
+
+    /// <summary>
+    /// Builds a section ("Details") whose single row contains two field cells,
+    /// modelling a multi-column section layout that set-xml or a pre-existing
+    /// form can produce.
+    /// </summary>
+    private static XDocument BuildFormWithTwoCellRow()
+    {
+        const string classId = "{4273EDBD-AC1D-40d3-9FB2-095C621B552D}";
+        var doc = BuildFormXml(sectionLabel: "Details");
+        var rows = doc.Descendants("section").Single().Element("rows")!;
+        rows.Add(new XElement("row",
+            new XElement("cell",
+                new XAttribute("id", NewBraceGuid()),
+                new XElement("control",
+                    new XAttribute("id", "field_a"),
+                    new XAttribute("classid", classId),
+                    new XAttribute("datafieldname", "field_a"))),
+            new XElement("cell",
+                new XAttribute("id", NewBraceGuid()),
+                new XElement("control",
+                    new XAttribute("id", "field_b"),
+                    new XAttribute("classid", classId),
+                    new XAttribute("datafieldname", "field_b")))));
+        return doc;
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void RemoveField_MultiCellRow_PreservesSiblingCell()
+    {
+        // AC-19 regression: removing one field from a two-cell row must keep the sibling.
+        var formXml = BuildFormWithTwoCellRow();
+
+        var result = FormXmlEditor.RemoveField(formXml, "field_a");
+
+        var remaining = result.Descendants("control")
+            .Select(c => (string?)c.Attribute("datafieldname"))
+            .Where(n => n is not null)
+            .ToList();
+        remaining.Should().ContainSingle().Which.Should().Be("field_b");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void RemoveSubgrid_MultiCellRow_PreservesSiblingField()
+    {
+        // AC-25 regression: a subgrid sharing a row with a field cell must not take
+        // the field down with it.
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var rows = formXml.Descendants("section").Single().Element("rows")!;
+        rows.Add(new XElement("row",
+            new XElement("cell",
+                new XAttribute("id", NewBraceGuid()),
+                new XElement("control",
+                    new XAttribute("id", "name"),
+                    new XAttribute("classid", "{4273EDBD-AC1D-40d3-9FB2-095C621B552D}"),
+                    new XAttribute("datafieldname", "name"))),
+            new XElement("cell",
+                new XAttribute("id", NewBraceGuid()),
+                new XElement("labels", new XElement("label",
+                    new XAttribute("description", "Grid"), new XAttribute("languagecode", "1033"))),
+                new XElement("control",
+                    new XAttribute("id", NewBraceGuid()),
+                    new XAttribute("classid", ClassIdResolver.SubgridClassId)))));
+
+        var result = FormXmlEditor.RemoveSubgrid(formXml, "Grid");
+
+        result.Descendants("control")
+            .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
+            .Should().BeEmpty("the subgrid is removed");
+        result.Descendants("control")
+            .Where(c => (string?)c.Attribute("datafieldname") == "name")
+            .Should().ContainSingle("the sibling field cell is preserved");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void UpdateTab_ColumnChange_PreservesSectionsFromAllColumns()
+    {
+        // AC-09 regression: increasing/decreasing tab columns must not drop sections
+        // authored in columns 2 or 3.
+        var formXml = BuildFormXml(tabLabel: "Main");
+        var columns = formXml.Descendants("tab").Single().Element("columns")!;
+        // Add a second column holding its own section.
+        columns.Add(new XElement("column",
+            new XAttribute("width", "50%"),
+            new XElement("sections",
+                new XElement("section",
+                    new XAttribute("id", NewBraceGuid()),
+                    new XAttribute("name", "col2section"),
+                    new XElement("labels", new XElement("label",
+                        new XAttribute("description", "Second Column Section"),
+                        new XAttribute("languagecode", "1033"))),
+                    new XElement("rows")))));
+
+        var request = new UpdateTabRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            TabLabel: "Main",
+            Columns: 1);
+
+        var result = FormXmlEditor.UpdateTab(formXml, request);
+
+        var sectionLabels = result.Descendants("section")
+            .Select(s => (string?)s.Element("labels")?.Element("label")?.Attribute("description"))
+            .ToList();
+        sectionLabels.Should().Contain("Second Column Section",
+            "sections in non-first columns must survive a column-count change");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ReorderFields_PreservesNonFieldCells()
+    {
+        // AC-20 regression: reordering bound fields must not drop sub-grids or other
+        // non-field controls in the section.
+        var formXml = BuildFormXml(sectionLabel: "Details");
+        const string classId = "{4273EDBD-AC1D-40d3-9FB2-095C621B552D}";
+        FormXmlEditor.AddField(formXml, "Details", "field_a", classId, "A");
+        FormXmlEditor.AddField(formXml, "Details", "field_b", classId, "B");
+        FormXmlEditor.AddSubgrid(formXml, new AddSubgridRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            SectionLabel: "Details",
+            Label: "Grid",
+            TargetEntity: "contact",
+            DefaultViewId: Guid.NewGuid()));
+
+        var result = FormXmlEditor.ReorderFields(formXml, "Details",
+            new List<string> { "field_b", "field_a" },
+            new Dictionary<string, string> { ["field_a"] = classId, ["field_b"] = classId });
+
+        result.Descendants("control")
+            .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
+            .Should().ContainSingle("the sub-grid must survive a field reorder");
     }
 }

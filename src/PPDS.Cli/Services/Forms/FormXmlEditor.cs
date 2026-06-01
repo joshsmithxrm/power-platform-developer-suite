@@ -68,20 +68,19 @@ internal static class FormXmlEditor
             tab.SetAttributeValue("availableforphone", Bool(request.AvailableOnPhone.Value));
         if (request.Columns.HasValue)
         {
-            // Re-balance column widths while preserving existing sections in the
-            // first column (Dataverse stores all sections under one column unless
-            // a multi-column layout was authored).
+            // Re-balance column widths while preserving every existing section.
+            // Collect sections from ALL current columns (not just the first) and
+            // move them into the first column of the new layout — otherwise a tab
+            // that already had sections in columns 2/3 would silently lose them.
             var columns = tab.Element("columns");
             if (columns is not null)
             {
-                var preservedSections = columns.Element("column")?.Element("sections");
+                var preserved = columns.Descendants("section")
+                    .Select(s => new XElement(s))
+                    .ToList();
                 var newColumns = BuildColumns(request.Columns.Value);
-                if (preservedSections is not null)
-                {
-                    var firstColumn = newColumns.Element("column")!;
-                    firstColumn.Element("sections")?.Remove();
-                    firstColumn.Add(new XElement(preservedSections));
-                }
+                if (preserved.Count > 0)
+                    newColumns.Element("column")!.Element("sections")!.Add(preserved);
                 columns.ReplaceWith(newColumns);
             }
         }
@@ -175,8 +174,9 @@ internal static class FormXmlEditor
                 (string?)c.Attribute("datafieldname"), fieldLogicalName,
                 StringComparison.OrdinalIgnoreCase));
 
-        // Remove the enclosing <row> (cell -> row) to avoid leaving empty rows.
-        control?.Parent?.Parent?.Remove();
+        // Remove only the target cell; drop the row only if it becomes empty.
+        // Removing the whole row would delete sibling cells in multi-column layouts.
+        RemoveCellAndPruneRow(control?.Parent);
         return formXml;
     }
 
@@ -187,13 +187,23 @@ internal static class FormXmlEditor
         if (rows is null) return formXml;
 
         // Index existing field cells by logical name so we can preserve their
-        // generated GUIDs and any authored attributes when reordering.
+        // generated GUIDs and any authored attributes when reordering. Cells that
+        // are not bound fields (sub-grids, web resources, notes, spacers) are kept
+        // and re-appended after the ordered fields — reordering must not drop them.
         var existingCells = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
+        var nonFieldCells = new List<XElement>();
         foreach (var cell in rows.Descendants("cell"))
         {
             var dfn = (string?)cell.Element("control")?.Attribute("datafieldname");
-            if (!string.IsNullOrEmpty(dfn) && !existingCells.ContainsKey(dfn))
-                existingCells[dfn] = cell;
+            if (!string.IsNullOrEmpty(dfn))
+            {
+                if (!existingCells.ContainsKey(dfn))
+                    existingCells[dfn] = cell;
+            }
+            else
+            {
+                nonFieldCells.Add(cell);
+            }
         }
 
         rows.RemoveAll();
@@ -209,6 +219,9 @@ internal static class FormXmlEditor
 
             rows.Add(new XElement("row", cell));
         }
+
+        foreach (var cell in nonFieldCells)
+            rows.Add(new XElement("row", cell));
 
         return formXml;
     }
@@ -267,7 +280,9 @@ internal static class FormXmlEditor
             var cellLabel = (string?)cell.Element("labels")?.Element("label")?.Attribute("description");
             if (string.Equals(cellLabel, label, StringComparison.OrdinalIgnoreCase))
             {
-                cell.Parent?.Remove(); // remove enclosing <row>
+                // Remove only this cell; drop the row only if it becomes empty so
+                // sibling cells in a multi-column row are preserved.
+                RemoveCellAndPruneRow(cell);
                 return formXml;
             }
         }
@@ -296,7 +311,39 @@ internal static class FormXmlEditor
     }
 
     private static void SetLabel(XElement element, string label)
-        => element.Element("labels")?.Element("label")?.SetAttributeValue("description", label);
+    {
+        // Create the labels/label structure if absent so a rename never silently
+        // no-ops on a tab/section that lacks an authored label.
+        var labels = element.Element("labels");
+        if (labels is null)
+        {
+            labels = new XElement("labels");
+            element.AddFirst(labels);
+        }
+
+        var labelElement = labels.Element("label");
+        if (labelElement is null)
+        {
+            labelElement = new XElement("label", new XAttribute("languagecode", DefaultLanguageCode));
+            labels.Add(labelElement);
+        }
+
+        labelElement.SetAttributeValue("description", label);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="cell"/> from its parent row, then removes the row
+    /// itself only if it has no remaining cells. Preserves sibling cells in
+    /// multi-column rows.
+    /// </summary>
+    private static void RemoveCellAndPruneRow(XElement? cell)
+    {
+        if (cell is null) return;
+        var row = cell.Parent;
+        cell.Remove();
+        if (row is not null && !row.HasElements)
+            row.Remove();
+    }
 
     private static XElement EnsureRows(XElement section)
     {

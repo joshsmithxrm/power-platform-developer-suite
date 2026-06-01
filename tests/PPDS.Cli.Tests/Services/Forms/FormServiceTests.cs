@@ -77,7 +77,7 @@ public class FormServiceTests
             ["type"] = new OptionSetValue(formType),
             ["ismanaged"] = false,
             ["formxml"] = formXml,
-            ["description"] = (string?)null
+            ["description"] = null
         };
 
     private static FormService CreateService(IDataverseConnectionPool pool, IMetadataQueryService? metadata = null)
@@ -183,7 +183,7 @@ public class FormServiceTests
     public async Task ListAsync_CancelledToken_ThrowsOperationCanceled()
     {
         // Arrange — pre-cancelled token
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var (poolMock, clientMock) = CreateMocks();
@@ -205,8 +205,7 @@ public class FormServiceTests
         }
 
         // Assert — either OperationCanceledException propagates directly or is wrapped in PpdsException
-        caught.Should().NotBeNull();
-        (caught is OperationCanceledException || caught is PpdsException).Should().BeTrue();
+        caught.Should().Match(e => e is OperationCanceledException || e is PpdsException);
     }
 
     // ── AC-33: Progress reporter ──────────────────────────────────────────
