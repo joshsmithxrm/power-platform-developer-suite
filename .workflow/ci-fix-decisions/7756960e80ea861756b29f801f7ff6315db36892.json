@@ -1,0 +1,12 @@
+{
+  "round": 1,
+  "timestamp": "2026-05-31T15:13:21Z",
+  "pr": 1173,
+  "failure_summary": "No CI failure provided (failure_summary empty). Observed CS0117/CS1002 compilation errors from stale obj/bin artifacts during a concurrent parallel-agent session. That agent committed fixes at 9c1a3d39: XML injection fix in SetFilterCommand, OrdinalIgnoreCase lookups and malformed-XML guard in ViewService, plus reversion of Option<T>.IsRequired (not available in System.CommandLine 2.0.5). All 3670 unit tests pass across all three target frameworks.",
+  "files_touched": [],
+  "lines_added": 0,
+  "lines_removed": 0,
+  "action": "fix",
+  "escalation_reason": null,
+  "scope_violation": false
+}
