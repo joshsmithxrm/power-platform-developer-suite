@@ -36,7 +36,8 @@ public sealed class RawWebApiService : IRawWebApiService, IDisposable
         }
 
         var baseUrl = request.EnvironmentUrl.TrimEnd('/');
-        var url = baseUrl + request.Path;
+        var path = request.Path.StartsWith('/') ? request.Path : "/" + request.Path;
+        var url = baseUrl + path;
 
         PowerPlatformToken token;
         try
@@ -81,20 +82,28 @@ public sealed class RawWebApiService : IRawWebApiService, IDisposable
         {
             if (key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
                 continue;
-            httpRequest.Headers.TryAddWithoutValidation(key, value);
+            // Try request headers first; fall back to content headers for content-specific ones
+            // (e.g., Content-Encoding, Content-Language) that TryAddWithoutValidation rejects.
+            if (!httpRequest.Headers.TryAddWithoutValidation(key, value))
+                httpRequest.Content?.Headers.TryAddWithoutValidation(key, value);
         }
 
         progress?.ReportPhase("Sending request");
         _logger.LogDebug("Sending {Method} {Url}", request.Method, url);
 
         var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var body = response.Content != null
+            ? await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false)
+            : string.Empty;
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in response.Headers)
             headers[header.Key] = string.Join(", ", header.Value);
-        foreach (var header in response.Content.Headers)
-            headers[header.Key] = string.Join(", ", header.Value);
+        if (response.Content != null)
+        {
+            foreach (var header in response.Content.Headers)
+                headers[header.Key] = string.Join(", ", header.Value);
+        }
 
         return new RawWebApiResponse
         {
