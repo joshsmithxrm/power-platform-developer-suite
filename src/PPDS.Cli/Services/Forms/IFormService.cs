@@ -159,6 +159,9 @@ public sealed record FindTabRequest(
     string FormName,
     string TabLabel);
 
+// Note: sections have no "expanded" attribute in the Dataverse form schema
+// (only tabs do — see FormXml.xsd). The issue's section property list mirrored
+// the tab list; the schema is authoritative, so section expand state is omitted.
 public sealed record AddSectionRequest(
     string EntityLogicalName,
     string FormName,
@@ -166,7 +169,6 @@ public sealed record AddSectionRequest(
     string Label,
     bool ShowLabel = true,
     int Columns = 1,
-    bool Expanded = true,
     bool Visible = true,
     bool AvailableOnPhone = true,
     string? SolutionUniqueName = null,
@@ -179,7 +181,6 @@ public sealed record UpdateSectionRequest(
     string? NewLabel = null,
     bool? ShowLabel = null,
     int? Columns = null,
-    bool? Expanded = null,
     bool? Visible = null,
     bool? AvailableOnPhone = null,
     string? SolutionUniqueName = null,

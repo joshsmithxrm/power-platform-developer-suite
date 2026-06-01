@@ -49,11 +49,6 @@ public static class AddSectionCommand
             Description = "Number of columns (1 or 2)"
         };
 
-        var expandedOption = new Option<bool?>("--expanded")
-        {
-            Description = "Whether the section is expanded by default"
-        };
-
         var visibleOption = new Option<bool?>("--visible")
         {
             Description = "Whether the section is visible"
@@ -83,7 +78,6 @@ public static class AddSectionCommand
             labelOption,
             showLabelOption,
             columnsOption,
-            expandedOption,
             visibleOption,
             availableOnPhoneOption,
             publishOption,
@@ -102,7 +96,6 @@ public static class AddSectionCommand
             var label = parseResult.GetValue(labelOption)!;
             var showLabel = parseResult.GetValue(showLabelOption);
             var columns = parseResult.GetValue(columnsOption);
-            var expanded = parseResult.GetValue(expandedOption);
             var visible = parseResult.GetValue(visibleOption);
             var availableOnPhone = parseResult.GetValue(availableOnPhoneOption);
             var publish = parseResult.GetValue(publishOption);
@@ -111,7 +104,7 @@ public static class AddSectionCommand
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, tab, label, showLabel, columns, expanded, visible,
+            return await ExecuteAsync(entity, form, tab, label, showLabel, columns, visible,
                 availableOnPhone, publish, solution, profile, environment, globalOptions, cancellationToken);
         });
 
@@ -125,7 +118,6 @@ public static class AddSectionCommand
         string label,
         bool? showLabel,
         int? columns,
-        bool? expanded,
         bool? visible,
         bool? availableOnPhone,
         bool publish,
@@ -163,7 +155,6 @@ public static class AddSectionCommand
                 Label: label,
                 ShowLabel: showLabel ?? true,
                 Columns: columns ?? 1,
-                Expanded: expanded ?? true,
                 Visible: visible ?? true,
                 AvailableOnPhone: availableOnPhone ?? true,
                 SolutionUniqueName: solution,

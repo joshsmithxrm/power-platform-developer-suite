@@ -33,16 +33,13 @@ public class FormXmlEditorTests
 
         return XDocument.Parse($@"<form>
   <tabs>
-    <tab name=""{tabId}"" id=""{tabId}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" expanded=""1"" visible=""1"" availableForPhone=""1"">
+    <tab name=""{tabId}"" id=""{tabId}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" expanded=""1"" visible=""1"" availableforphone=""1"" labelid=""{tabLabelId}"">
       <labels><label description=""{tabLabel}"" languagecode=""1033"" /></labels>
-      <labelid>{tabLabelId}</labelid>
-      <displayconditionxml/>
       <columns>
-        <column factoryType=""STANDARD"" width=""1fr"">
+        <column width=""100%"">
           <sections>
-            <section name=""{sectionId}"" id=""{sectionId}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" visible=""1"" expanded=""1"" availableForPhone=""1"" columns=""1"">
+            <section name=""{sectionId}"" id=""{sectionId}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" visible=""1"" availableforphone=""1"" columns=""1"" labelid=""{sectionLabelId}"">
               <labels><label description=""{sectionLabel}"" languagecode=""1033"" /></labels>
-              <labelid>{sectionLabelId}</labelid>
               <rows />
             </section>
           </sections>
@@ -240,7 +237,7 @@ public class FormXmlEditorTests
     public void AddSubgrid_DefaultProperties_GeneratesCorrectXml()
     {
         // Arrange — AC-21: AddSubgrid with defaults produces a cell with the correct classid,
-        // MaxRowsCount=5, and EnableViewPicker=false.
+        // RecordsPerPage=5 (max-rows default), and EnableViewPicker=false.
         var formXml = BuildFormXml(sectionLabel: "Related");
         var viewId = new Guid("00000000-0000-0000-0000-000000000001");
 
@@ -263,7 +260,7 @@ public class FormXmlEditorTests
 
         var parameters = control.Element("parameters");
         parameters.Should().NotBeNull();
-        ((string?)parameters!.Element("MaxRowsCount")).Should().Be("5");
+        ((string?)parameters!.Element("RecordsPerPage")).Should().Be("5");
         ((string?)parameters.Element("EnableViewPicker")).Should().Be("false");
     }
 

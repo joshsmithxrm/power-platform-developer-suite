@@ -27,31 +27,33 @@ internal static class FormXmlValidator
 
     private static void ValidateSchema(XDocument formXml)
     {
+        // Schema validation is mandatory. A load/compile failure indicates a
+        // packaging defect and must surface — never silently fall back to
+        // GUID-only checks (that would let invalid form XML through).
         XmlSchemaSet schemaSet;
         try
         {
             schemaSet = FormSchemaResources.GetSchemaSet();
         }
-        catch
+        catch (Exception ex)
         {
-            // If schema loading fails (e.g., no XSDs embedded), skip XSD validation
-            // and rely only on GUID checks. This keeps the feature functional even
-            // when the schema bundle is not yet populated.
-            return;
+            throw new PpdsException(
+                ErrorCodes.Operation.Internal,
+                "Failed to load the bundled Dataverse form schema for validation. " +
+                "This is a packaging defect, not a problem with the form XML.",
+                ex);
         }
-
-        if (schemaSet.Count == 0)
-            return;
 
         string? errorMessage = null;
         formXml.Validate(schemaSet, (_, e) =>
         {
-            if (errorMessage is null && e.Severity == XmlSeverityType.Error)
-            {
-                var element = e.Exception?.Message ?? "unknown element";
-                var line = e.Exception?.LineNumber ?? 0;
-                errorMessage = $"Form XML schema validation failed at line {line}: {element}";
-            }
+            if (errorMessage is not null || e.Severity != XmlSeverityType.Error)
+                return;
+
+            var line = e.Exception?.LineNumber ?? 0;
+            var position = e.Exception?.LinePosition ?? 0;
+            errorMessage =
+                $"Form XML schema validation failed at line {line}, position {position}: {e.Message}";
         });
 
         if (errorMessage is not null)
@@ -62,16 +64,28 @@ internal static class FormXmlValidator
     }
 
     /// <summary>
-    /// Validates that all id and labelid attributes use brace format and are unique.
+    /// Validates that structural <c>id</c> and <c>labelid</c> attributes use brace
+    /// format and are unique within the document.
     /// </summary>
+    /// <remarks>
+    /// The <c>id</c> on a <c>&lt;control&gt;</c> is the column logical name
+    /// (<c>xs:string</c> per the schema), not a GUID, so it is excluded from the
+    /// brace-format and uniqueness checks. Its <c>labelid</c>, when present, is a
+    /// GUID and is still checked.
+    /// </remarks>
     internal static void ValidateGuids(XDocument formXml)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var element in formXml.Descendants())
         {
+            var isControl = element.Name.LocalName == "control";
+
             foreach (var attrName in new[] { "id", "labelid" })
             {
+                // A control's id is a logical name, not a GUID — skip it.
+                if (isControl && attrName == "id") continue;
+
                 var attr = element.Attribute(attrName);
                 if (attr is null) continue;
 

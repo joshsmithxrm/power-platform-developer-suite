@@ -29,20 +29,18 @@ public class FormServiceTests
     private static readonly Guid TestSectionId = new("44444444-4444-4444-4444-444444444444");
     private static readonly Guid TestSectionLabelId = new("55555555-5555-5555-5555-555555555555");
 
-    // A minimal form XML with one tab ("My Tab") and one section ("General").
-    // All GUIDs use brace format as required by the validator.
+    // A minimal, schema-valid form XML with one tab ("My Tab") and one section
+    // ("General"). All GUIDs use brace format as required by the validator and
+    // the structure conforms to the bundled FormXml.xsd.
     private static readonly string SimpleTabFormXml = $@"<form>
   <tabs>
-    <tab name=""{{{TestTabId}}}"" id=""{{{TestTabId}}}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" expanded=""1"" visible=""1"" availableForPhone=""1"">
+    <tab name=""{{{TestTabId}}}"" id=""{{{TestTabId}}}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" expanded=""1"" visible=""1"" availableforphone=""1"" labelid=""{{{TestTabLabelId}}}"">
       <labels><label description=""My Tab"" languagecode=""1033"" /></labels>
-      <labelid>{{{TestTabLabelId}}}</labelid>
-      <displayconditionxml/>
       <columns>
-        <column factoryType=""STANDARD"" width=""1fr"">
+        <column width=""100%"">
           <sections>
-            <section name=""{{{TestSectionId}}}"" id=""{{{TestSectionId}}}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" visible=""1"" expanded=""1"" availableForPhone=""1"" columns=""1"">
+            <section name=""{{{TestSectionId}}}"" id=""{{{TestSectionId}}}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" visible=""1"" availableforphone=""1"" columns=""1"" labelid=""{{{TestSectionLabelId}}}"">
               <labels><label description=""General"" languagecode=""1033"" /></labels>
-              <labelid>{{{TestSectionLabelId}}}</labelid>
               <rows />
             </section>
           </sections>

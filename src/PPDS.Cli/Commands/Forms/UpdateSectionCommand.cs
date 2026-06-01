@@ -48,11 +48,6 @@ public static class UpdateSectionCommand
             Description = "Number of columns"
         };
 
-        var expandedOption = new Option<bool?>("--expanded")
-        {
-            Description = "Whether the section is expanded by default"
-        };
-
         var visibleOption = new Option<bool?>("--visible")
         {
             Description = "Whether the section is visible"
@@ -82,7 +77,6 @@ public static class UpdateSectionCommand
             labelOption,
             showLabelOption,
             columnsOption,
-            expandedOption,
             visibleOption,
             availableOnPhoneOption,
             publishOption,
@@ -101,7 +95,6 @@ public static class UpdateSectionCommand
             var label = parseResult.GetValue(labelOption);
             var showLabel = parseResult.GetValue(showLabelOption);
             var columns = parseResult.GetValue(columnsOption);
-            var expanded = parseResult.GetValue(expandedOption);
             var visible = parseResult.GetValue(visibleOption);
             var availableOnPhone = parseResult.GetValue(availableOnPhoneOption);
             var publish = parseResult.GetValue(publishOption);
@@ -110,7 +103,7 @@ public static class UpdateSectionCommand
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, section, label, showLabel, columns, expanded, visible,
+            return await ExecuteAsync(entity, form, section, label, showLabel, columns, visible,
                 availableOnPhone, publish, solution, profile, environment, globalOptions, cancellationToken);
         });
 
@@ -124,7 +117,6 @@ public static class UpdateSectionCommand
         string? label,
         bool? showLabel,
         int? columns,
-        bool? expanded,
         bool? visible,
         bool? availableOnPhone,
         bool publish,
@@ -162,7 +154,6 @@ public static class UpdateSectionCommand
                 NewLabel: label,
                 ShowLabel: showLabel,
                 Columns: columns,
-                Expanded: expanded,
                 Visible: visible,
                 AvailableOnPhone: availableOnPhone,
                 SolutionUniqueName: solution,
