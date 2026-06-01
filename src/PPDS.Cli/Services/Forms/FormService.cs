@@ -464,18 +464,22 @@ public sealed class FormService : IFormService
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
-            // Validate the view GUID corresponds to an existing savedqueries record
-            await using var viewClient = await _pool.GetClientAsync(cancellationToken: ct);
-            var viewQuery = new QueryExpression("savedquery")
+            // Validate the view GUID corresponds to an existing savedqueries record.
+            // Scope the pooled client to this lookup only — do not hold it across the
+            // subsequent write/publish operations (Constitution D2).
+            await using (var viewClient = await _pool.GetClientAsync(cancellationToken: ct))
             {
-                ColumnSet = new ColumnSet("savedqueryid"),
-                TopCount = 1
-            };
-            viewQuery.Criteria.AddCondition("savedqueryid", ConditionOperator.Equal, request.DefaultViewId);
-            var viewResult = await viewClient.RetrieveMultipleAsync(viewQuery, ct);
-            if (viewResult.Entities.Count == 0)
-                throw new PpdsException(FormErrorCodes.ViewNotFound,
-                    $"Saved query (view) with ID '{request.DefaultViewId}' not found.");
+                var viewQuery = new QueryExpression("savedquery")
+                {
+                    ColumnSet = new ColumnSet("savedqueryid"),
+                    TopCount = 1
+                };
+                viewQuery.Criteria.AddCondition("savedqueryid", ConditionOperator.Equal, request.DefaultViewId);
+                var viewResult = await viewClient.RetrieveMultipleAsync(viewQuery, ct);
+                if (viewResult.Entities.Count == 0)
+                    throw new PpdsException(FormErrorCodes.ViewNotFound,
+                        $"Saved query (view) with ID '{request.DefaultViewId}' not found.");
+            }
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.AddSubgrid(doc, request);
