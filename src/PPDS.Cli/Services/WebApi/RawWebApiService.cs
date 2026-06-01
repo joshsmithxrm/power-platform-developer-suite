@@ -7,7 +7,7 @@ using PPDS.Cli.Infrastructure.Progress;
 
 namespace PPDS.Cli.Services.WebApi;
 
-public sealed class RawWebApiService : IRawWebApiService
+public sealed class RawWebApiService : IRawWebApiService, IDisposable
 {
     private readonly IPowerPlatformTokenProvider _tokenProvider;
     private readonly HttpClient _httpClient;
@@ -103,5 +103,11 @@ public sealed class RawWebApiService : IRawWebApiService
             Headers = headers,
             Body = body
         };
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        _tokenProvider.Dispose();
     }
 }

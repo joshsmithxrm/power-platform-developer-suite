@@ -254,6 +254,18 @@ public class ApiRequestCommandTests
 
     #endregion
 
+    #region AC-02: write-blocked exit code is exactly 2
+
+    [Fact]
+    public void WriteBlocked_ExitCode_IsExactly2()
+    {
+        // ExitCodes.Failure must equal 2 so callers can distinguish write-blocked (2)
+        // from non-2xx HTTP response (1). This guards against accidental renumbering.
+        Assert.Equal(2, ExitCodes.Failure);
+    }
+
+    #endregion
+
     #region AC-08: --body-file reads body from file
 
     [Fact]

@@ -190,17 +190,20 @@ public static class ApiRequestCommand
 
             var response = await apiService.SendAsync(request, cancellationToken: cancellationToken);
 
-            foreach (var line in FormatResponsePreamble(response, include))
-                Console.WriteLine(line);
-
             if (response.IsSuccess)
             {
+                foreach (var line in FormatResponsePreamble(response, include))
+                    Console.WriteLine(line);
                 if (!string.IsNullOrEmpty(response.Body))
                     Console.WriteLine(response.Body);
                 return ExitCodes.Success;
             }
             else
             {
+                // Non-2xx: route entire response (preamble + body) to stderr so the
+                // stream is consistent and piping to tools like jq works on success only.
+                foreach (var line in FormatResponsePreamble(response, include))
+                    Console.Error.WriteLine(line);
                 Console.Error.WriteLine(response.Body);
                 return 1; // non-2xx per spec
             }
