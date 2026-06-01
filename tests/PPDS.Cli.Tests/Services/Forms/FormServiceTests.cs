@@ -205,7 +205,8 @@ public class FormServiceTests
         }
 
         // Assert — either OperationCanceledException propagates directly or is wrapped in PpdsException
-        caught.Should().Match(e => e is OperationCanceledException || e is PpdsException);
+        caught.Should().NotBeNull();
+        caught!.Should().Match<Exception>(e => e is OperationCanceledException || e is PpdsException);
     }
 
     // ── AC-33: Progress reporter ──────────────────────────────────────────
