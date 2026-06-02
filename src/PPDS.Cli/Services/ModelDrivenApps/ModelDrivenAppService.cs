@@ -96,7 +96,16 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         publisherLink.EntityAlias = "pub";
         publisherLink.Columns.AddColumn("friendlyname");
 
-        var appResult = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection appResult;
+        try
+        {
+            appResult = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve details for app '{appName}'.", ex);
+        }
+
         var appEntity = appResult.Entities.FirstOrDefault()
             ?? throw new PpdsException(ModelDrivenAppErrorCodes.AppNotFound, $"App '{appName}' not found.");
 
@@ -217,6 +226,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             .Where(e => e != null)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var isFirst = true;
         foreach (var entityName in entities)
         {
             progress?.ReportInfo($"Adding {entityName}");
@@ -233,7 +243,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
                     $"Table '{entityName}' is already in app '{appName}'.");
             }
 
-            var title = !string.IsNullOrEmpty(options.Title) ? options.Title : entitySummary.DisplayName;
+            // --title applies to first entity only; subsequent entities use their DisplayName.
+            var title = (isFirst && !string.IsNullOrEmpty(options.Title)) ? options.Title : entitySummary.DisplayName;
+            isFirst = false;
             var subAreaId = $"subarea_{Guid.NewGuid():N}";
 
             var subAreaEl = new XElement("SubArea",
@@ -425,11 +437,17 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         IPooledClient client,
         CancellationToken ct)
     {
+        // Filter server-side to avoid over-fetching all apps (no TopCount cap).
         var query = new QueryExpression("appmodule")
         {
             ColumnSet = new ColumnSet("appmoduleid", "uniquename", "name"),
-            TopCount = 50
+            TopCount = 1
         };
+
+        var nameFilter = new FilterExpression(LogicalOperator.Or);
+        nameFilter.AddCondition("name", ConditionOperator.Equal, appName);
+        nameFilter.AddCondition("uniquename", ConditionOperator.Equal, appName);
+        query.Criteria.AddFilter(nameFilter);
 
         EntityCollection result;
         try
@@ -441,17 +459,12 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to resolve app '{appName}'.", ex);
         }
 
-        var match = result.Entities.FirstOrDefault(e =>
-            string.Equals(e.GetAttributeValue<string>("name"), appName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(e.GetAttributeValue<string>("uniquename"), appName, StringComparison.OrdinalIgnoreCase));
+        var match = result.Entities.FirstOrDefault();
 
         if (match == null)
         {
-            var available = string.Join(", ", result.Entities
-                .Select(e => e.GetAttributeValue<string>("name") ?? e.GetAttributeValue<string>("uniquename"))
-                .Where(n => n != null));
             throw new PpdsException(ModelDrivenAppErrorCodes.AppNotFound,
-                $"Model-driven app '{appName}' not found. Available apps: {available}");
+                $"Model-driven app '{appName}' not found. Run 'ppds model-driven-app list' to see available apps.");
         }
 
         return (
@@ -473,7 +486,16 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
         appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to retrieve sitemap component.", ex);
+        }
+
         var sitemapId = result.Entities.FirstOrDefault()?.GetAttributeValue<Guid>("objectid");
 
         if (sitemapId == null || sitemapId == Guid.Empty)
@@ -492,7 +514,16 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
     private async Task<string> FetchSitemapXmlByIdAsync(IPooledClient client, Guid sitemapId, CancellationToken ct)
     {
-        var sitemap = await client.RetrieveAsync("sitemap", sitemapId, new ColumnSet("sitemapxml"), ct);
+        Entity sitemap;
+        try
+        {
+            sitemap = await client.RetrieveAsync("sitemap", sitemapId, new ColumnSet("sitemapxml"), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to retrieve sitemap XML.", ex);
+        }
+
         return sitemap.GetAttributeValue<string>("sitemapxml") ?? "<SiteMap />";
     }
 
@@ -546,9 +577,11 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     {
         try
         {
+            // Escape uniqueName to prevent malformed XML if the app name contains special characters.
+            var escapedName = System.Security.SecurityElement.Escape(uniqueName) ?? uniqueName;
             var request = new PublishXmlRequest
             {
-                ParameterXml = $"<importexportxml><appmodules><appmodule>{uniqueName}</appmodule></appmodules></importexportxml>"
+                ParameterXml = $"<importexportxml><appmodules><appmodule>{escapedName}</appmodule></appmodules></importexportxml>"
             };
             await client.ExecuteAsync(request, ct);
         }
@@ -584,7 +617,15 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var appIdArray = appModuleIds.Select(id => (object)id).ToArray();
         appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.In, appIdArray);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.ListFailed, "Failed to retrieve component counts for apps.", ex);
+        }
 
         var counts = new Dictionary<Guid, Dictionary<int, int>>();
         foreach (var e in result.Entities)
@@ -621,7 +662,15 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
         appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to retrieve component counts.", ex);
+        }
 
         return result.Entities
             .GroupBy(e => e.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0)
@@ -712,7 +761,16 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         componentLink.EntityAlias = "comp";
         componentLink.LinkCriteria.AddCondition(entityTypeField, ConditionOperator.Equal, entityLogicalName);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve {componentEntityName} components.", ex);
+        }
+
         return result.Entities
             .Select(e => new EntityReference(componentEntityName, e.GetAttributeValue<Guid>("objectid")))
             .ToList();
@@ -724,6 +782,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         string entity,
         CancellationToken ct)
     {
+        // Remove explicit forms, views, and charts (AC-19)
         var formRefs = await GetExplicitEntityComponentsAsync(
             client, appModuleId, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
         var viewRefs = await GetExplicitEntityComponentsAsync(
@@ -731,10 +790,21 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var chartRefs = await GetExplicitEntityComponentsAsync(
             client, appModuleId, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
 
-        var allRefs = formRefs.Concat(viewRefs).Concat(chartRefs).ToList();
-        if (allRefs.Count > 0)
+        var componentRefs = formRefs.Concat(viewRefs).Concat(chartRefs).ToList();
+        if (componentRefs.Count > 0)
         {
-            await RemoveAppComponentsAsync(client, appModuleId, allRefs, ct);
+            await RemoveAppComponentsAsync(client, appModuleId, componentRefs, ct);
+        }
+
+        // Remove entity component (type 1) via metadata ID (AC-20)
+        var entitySummaries = await _metadata.GetEntitiesAsync(ct);
+        var entityMeta = entitySummaries.FirstOrDefault(
+            e => string.Equals(e.LogicalName, entity, StringComparison.OrdinalIgnoreCase));
+
+        if (entityMeta != null && entityMeta.MetadataId != Guid.Empty)
+        {
+            var entityRef = new EntityReference("entity", entityMeta.MetadataId);
+            await RemoveAppComponentsAsync(client, appModuleId, [entityRef], ct);
         }
     }
 
@@ -805,7 +875,13 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         };
         query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, entity);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try { result = await client.RetrieveMultipleAsync(query, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve forms for entity '{entity}'.", ex);
+        }
+
         var available = result.Entities.ToDictionary(
             e => e.GetAttributeValue<string>("name") ?? string.Empty,
             e => e.GetAttributeValue<Guid>("formid"),
@@ -826,7 +902,13 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         };
         query.Criteria.AddCondition("returnedtypecode", ConditionOperator.Equal, entity);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try { result = await client.RetrieveMultipleAsync(query, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve views for entity '{entity}'.", ex);
+        }
+
         var available = result.Entities.ToDictionary(
             e => e.GetAttributeValue<string>("name") ?? string.Empty,
             e => e.GetAttributeValue<Guid>("savedqueryid"),
@@ -847,7 +929,13 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         };
         query.Criteria.AddCondition("primaryentitytypecode", ConditionOperator.Equal, entity);
 
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        try { result = await client.RetrieveMultipleAsync(query, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve charts for entity '{entity}'.", ex);
+        }
+
         var available = result.Entities.ToDictionary(
             e => e.GetAttributeValue<string>("name") ?? string.Empty,
             e => e.GetAttributeValue<Guid>("savedqueryvisualizationid"),
