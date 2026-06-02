@@ -5,7 +5,6 @@ namespace PPDS.Cli.Services.ModelDrivenApps;
 /// </summary>
 public sealed record ModelDrivenAppDetails(
     Guid AppModuleId,
-    Guid AppModuleIdUnique,
     string DisplayName,
     string UniqueName,
     string? Description,

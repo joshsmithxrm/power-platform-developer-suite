@@ -49,7 +49,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         var query = new QueryExpression("appmodule")
         {
-            ColumnSet = new ColumnSet("appmoduleid", "appmoduleidunique", "name", "uniquename"),
+            ColumnSet = new ColumnSet("appmoduleid", "name", "uniquename"),
             Orders = { new OrderExpression("name", OrderType.Ascending) }
         };
 
@@ -63,20 +63,15 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.ListFailed, "Failed to list model-driven apps.", ex);
         }
 
-        var appIds = result.Entities
-            .Select(e => e.GetAttributeValue<Guid>("appmoduleidunique"))
-            .ToList();
-
-        var componentCounts = await GetComponentCountsAsync(client, appIds, ct);
+        var appIds = result.Entities.Select(e => e.GetAttributeValue<Guid>("appmoduleid")).ToList();
+        var componentCounts = await GetComponentCountsByAppIdAsync(client, appIds, ct);
 
         return result.Entities.Select(e =>
         {
-            var unique = e.GetAttributeValue<Guid>("appmoduleidunique");
-            var total = componentCounts.TryGetValue(unique, out var counts)
-                ? counts.Values.Sum()
-                : 0;
+            var appId = e.GetAttributeValue<Guid>("appmoduleid");
+            var total = componentCounts.TryGetValue(appId, out var counts) ? counts.Values.Sum() : 0;
             return new ModelDrivenAppSummary(
-                e.GetAttributeValue<Guid>("appmoduleid"),
+                appId,
                 e.GetAttributeValue<string>("name") ?? string.Empty,
                 e.GetAttributeValue<string>("uniquename") ?? string.Empty,
                 total);
@@ -88,11 +83,11 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
 
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
 
         var query = new QueryExpression("appmodule")
         {
-            ColumnSet = new ColumnSet("appmoduleid", "appmoduleidunique", "name", "uniquename", "description", "publisherid"),
+            ColumnSet = new ColumnSet("appmoduleid", "name", "uniquename", "description", "publisherid"),
             TopCount = 1
         };
         query.Criteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
@@ -108,11 +103,10 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var publisherName = appEntity.GetAttributeValue<AliasedValue>("pub.friendlyname")?.Value as string;
         var description = appEntity.GetAttributeValue<string>("description");
 
-        var counts = await GetComponentCountsForAppAsync(client, appModuleIdUnique, ct);
+        var counts = await GetComponentCountsForAppAsync(client, appModuleId, ct);
 
         return new ModelDrivenAppDetails(
             appModuleId,
-            appModuleIdUnique,
             appEntity.GetAttributeValue<string>("name") ?? string.Empty,
             appEntity.GetAttributeValue<string>("uniquename") ?? string.Empty,
             string.IsNullOrWhiteSpace(description) ? null : description,
@@ -129,8 +123,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
 
-        var (_, appModuleIdUnique, _) = await ResolveAppAsync(appName, client, ct);
-        var xml = await FetchSitemapXmlAsync(client, appModuleIdUnique, ct);
+        var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
+        var xml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct);
 
         return ParseSitemapStructure(xml);
     }
@@ -156,14 +150,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         progress?.ReportPhase("Updating sitemap", appName);
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
-        var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
 
         await PatchSitemapAsync(client, sitemapId, xml, ct);
 
         if (options.Solution != null)
         {
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -181,8 +175,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var entityLookup = entitySummaries.ToDictionary(e => e.LogicalName, StringComparer.OrdinalIgnoreCase);
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
-        var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
         var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
 
         var doc = XDocument.Parse(sitemapXml);
@@ -218,7 +212,6 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
                 ?? CreateAndAppendGroup(areaEl, "Group1", string.Empty);
         }
 
-        // Collect all entities already in sitemap for duplicate detection
         var existingEntities = siteMapEl.Descendants("SubArea")
             .Select(s => s.Attribute("Entity")?.Value)
             .Where(e => e != null)
@@ -260,7 +253,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Solution != null)
         {
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -275,8 +268,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         progress?.ReportPhase("Loading app", appName);
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
-        var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
         var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
 
         var doc = XDocument.Parse(sitemapXml);
@@ -292,9 +285,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         subAreaEl.Remove();
 
         progress?.ReportPhase("Removing components");
-
-        // Remove all explicit forms/views/charts for the entity
-        await RemoveExplicitComponentsForEntityAsync(client, appModuleId, appModuleIdUnique, entity, ct);
+        await RemoveExplicitComponentsForEntityAsync(client, appModuleId, entity, ct);
 
         var updatedXml = doc.ToString(SaveOptions.DisableFormatting);
         _validator.Validate(XDocument.Parse(updatedXml));
@@ -304,7 +295,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Solution != null)
         {
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -319,15 +310,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         ValidateComponentOptions(options, "--form");
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
 
-        await EnsureEntityInSitemapAsync(client, appModuleIdUnique, entity, appName, ct);
+        await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
         progress?.ReportPhase("Updating forms", entity);
 
-        // Always reset explicit forms first
         var existingFormRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
+            client, appModuleId, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
 
         if (existingFormRefs.Count > 0)
         {
@@ -342,8 +332,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Solution != null)
         {
-            var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -358,14 +348,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         ValidateComponentOptions(options, "--view");
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
 
-        await EnsureEntityInSitemapAsync(client, appModuleIdUnique, entity, appName, ct);
+        await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
         progress?.ReportPhase("Updating views", entity);
 
         var existingViewRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeView, "savedquery", "savedqueryid", "returnedtypecode", entity, ct);
+            client, appModuleId, ComponentTypeView, "savedquery", "savedqueryid", "returnedtypecode", entity, ct);
 
         if (existingViewRefs.Count > 0)
         {
@@ -380,8 +370,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Solution != null)
         {
-            var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -396,14 +386,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         ValidateComponentOptions(options, "--chart");
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appModuleIdUnique, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
 
-        await EnsureEntityInSitemapAsync(client, appModuleIdUnique, entity, appName, ct);
+        await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
         progress?.ReportPhase("Updating charts", entity);
 
         var existingChartRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
+            client, appModuleId, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
 
         if (existingChartRefs.Count > 0)
         {
@@ -418,8 +408,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Solution != null)
         {
-            var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
-            await AddToSolutionAsync(client, options.Solution, appModuleIdUnique, sitemapId, ct);
+            var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
+            await AddToSolutionAsync(client, options.Solution, appModuleId, sitemapId, ct);
         }
 
         if (options.Publish)
@@ -430,14 +420,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
     // ── Private helpers ────────────────────────────────────────────────────────
 
-    private async Task<(Guid AppModuleId, Guid AppModuleIdUnique, string UniqueName)> ResolveAppAsync(
+    private async Task<(Guid AppModuleId, string UniqueName)> ResolveAppAsync(
         string appName,
         IPooledClient client,
         CancellationToken ct)
     {
         var query = new QueryExpression("appmodule")
         {
-            ColumnSet = new ColumnSet("appmoduleid", "appmoduleidunique", "uniquename", "name"),
+            ColumnSet = new ColumnSet("appmoduleid", "uniquename", "name"),
             TopCount = 50
         };
 
@@ -466,19 +456,22 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         return (
             match.GetAttributeValue<Guid>("appmoduleid"),
-            match.GetAttributeValue<Guid>("appmoduleidunique"),
             match.GetAttributeValue<string>("uniquename") ?? string.Empty);
     }
 
-    private async Task<Guid> GetSitemapIdAsync(IPooledClient client, Guid appModuleIdUnique, CancellationToken ct)
+    // Queries appmodulecomponent joined to appmodule via appmoduleidunique relationship,
+    // filtering by appmodule.appmoduleid to avoid EntityReference cast issues.
+    private async Task<Guid> GetSitemapIdAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
     {
         var query = new QueryExpression("appmodulecomponent")
         {
             ColumnSet = new ColumnSet("objectid"),
             TopCount = 1
         };
-        query.Criteria.AddCondition("appmoduleidunique", ConditionOperator.Equal, appModuleIdUnique);
         query.Criteria.AddCondition("componenttype", ConditionOperator.Equal, ComponentTypeSitemap);
+
+        var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
+        appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
 
         var result = await client.RetrieveMultipleAsync(query, ct);
         var sitemapId = result.Entities.FirstOrDefault()?.GetAttributeValue<Guid>("objectid");
@@ -491,9 +484,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         return sitemapId.Value;
     }
 
-    private async Task<string> FetchSitemapXmlAsync(IPooledClient client, Guid appModuleIdUnique, CancellationToken ct)
+    private async Task<string> FetchSitemapXmlForAppAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
     {
-        var sitemapId = await GetSitemapIdAsync(client, appModuleIdUnique, ct);
+        var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
         return await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
     }
 
@@ -519,14 +512,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
     }
 
-    private async Task AddToSolutionAsync(IPooledClient client, string solutionName, Guid appModuleIdUnique, Guid sitemapId, CancellationToken ct)
+    private async Task AddToSolutionAsync(IPooledClient client, string solutionName, Guid appModuleId, Guid sitemapId, CancellationToken ct)
     {
         try
         {
             var addApp = new AddSolutionComponentRequest
             {
                 SolutionUniqueName = solutionName,
-                ComponentId = appModuleIdUnique,
+                ComponentId = appModuleId,
                 ComponentType = ComponentTypeApp,
                 AddRequiredComponents = false
             };
@@ -567,30 +560,40 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
     }
 
-    private async Task<Dictionary<Guid, Dictionary<int, int>>> GetComponentCountsAsync(
+    // Uses link-entity to avoid EntityReference cast issues with appmoduleidunique on appmodulecomponent.
+    // Groups by appmoduleid from the joined appmodule entity.
+    private async Task<Dictionary<Guid, Dictionary<int, int>>> GetComponentCountsByAppIdAsync(
         IPooledClient client,
-        List<Guid> appModuleUniqueIds,
+        List<Guid> appModuleIds,
         CancellationToken ct)
     {
-        if (appModuleUniqueIds.Count == 0)
+        if (appModuleIds.Count == 0)
         {
-            return new Dictionary<Guid, Dictionary<int, int>>();
+            return [];
         }
 
         var query = new QueryExpression("appmodulecomponent")
         {
-            ColumnSet = new ColumnSet("appmoduleidunique", "componenttype")
+            ColumnSet = new ColumnSet("componenttype")
         };
 
-        var appIds = appModuleUniqueIds.Select(id => (object)id).ToArray();
-        query.Criteria.AddCondition("appmoduleidunique", ConditionOperator.In, appIds);
+        var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
+        appLink.EntityAlias = "am";
+        appLink.Columns.AddColumn("appmoduleid");
+
+        var appIdArray = appModuleIds.Select(id => (object)id).ToArray();
+        appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.In, appIdArray);
 
         var result = await client.RetrieveMultipleAsync(query, ct);
 
         var counts = new Dictionary<Guid, Dictionary<int, int>>();
         foreach (var e in result.Entities)
         {
-            var appId = e.GetAttributeValue<Guid>("appmoduleidunique");
+            if (e.GetAttributeValue<AliasedValue>("am.appmoduleid")?.Value is not Guid appId)
+            {
+                continue;
+            }
+
             var compType = e.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0;
 
             if (!counts.TryGetValue(appId, out var typeCounts))
@@ -607,14 +610,16 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
     private async Task<Dictionary<int, int>> GetComponentCountsForAppAsync(
         IPooledClient client,
-        Guid appModuleIdUnique,
+        Guid appModuleId,
         CancellationToken ct)
     {
         var query = new QueryExpression("appmodulecomponent")
         {
             ColumnSet = new ColumnSet("componenttype")
         };
-        query.Criteria.AddCondition("appmoduleidunique", ConditionOperator.Equal, appModuleIdUnique);
+
+        var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
+        appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
 
         var result = await client.RetrieveMultipleAsync(query, ct);
 
@@ -667,12 +672,12 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
     private async Task EnsureEntityInSitemapAsync(
         IPooledClient client,
-        Guid appModuleIdUnique,
+        Guid appModuleId,
         string entity,
         string appName,
         CancellationToken ct)
     {
-        var sitemapXml = await FetchSitemapXmlAsync(client, appModuleIdUnique, ct);
+        var sitemapXml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct);
         var doc = XDocument.Parse(sitemapXml);
         var found = doc.Descendants("SubArea")
             .Any(s => string.Equals(s.Attribute("Entity")?.Value, entity, StringComparison.OrdinalIgnoreCase));
@@ -686,7 +691,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
     private async Task<List<EntityReference>> GetExplicitEntityComponentsAsync(
         IPooledClient client,
-        Guid appModuleIdUnique,
+        Guid appModuleId,
         int componentType,
         string componentEntityName,
         string componentPrimaryKey,
@@ -698,8 +703,10 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         {
             ColumnSet = new ColumnSet("objectid")
         };
-        query.Criteria.AddCondition("appmoduleidunique", ConditionOperator.Equal, appModuleIdUnique);
         query.Criteria.AddCondition("componenttype", ConditionOperator.Equal, componentType);
+
+        var appLink = query.AddLink("appmodule", "appmoduleidunique", "appmoduleidunique", JoinOperator.Inner);
+        appLink.LinkCriteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
 
         var componentLink = query.AddLink(componentEntityName, "objectid", componentPrimaryKey);
         componentLink.EntityAlias = "comp";
@@ -714,16 +721,15 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     private async Task RemoveExplicitComponentsForEntityAsync(
         IPooledClient client,
         Guid appModuleId,
-        Guid appModuleIdUnique,
         string entity,
         CancellationToken ct)
     {
         var formRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
+            client, appModuleId, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
         var viewRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeView, "savedquery", "savedqueryid", "returnedtypecode", entity, ct);
+            client, appModuleId, ComponentTypeView, "savedquery", "savedqueryid", "returnedtypecode", entity, ct);
         var chartRefs = await GetExplicitEntityComponentsAsync(
-            client, appModuleIdUnique, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
+            client, appModuleId, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
 
         var allRefs = formRefs.Concat(viewRefs).Concat(chartRefs).ToList();
         if (allRefs.Count > 0)
