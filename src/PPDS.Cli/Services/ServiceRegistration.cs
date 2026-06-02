@@ -22,6 +22,7 @@ using PPDS.Cli.Services.Query;
 using PPDS.Cli.Services.Roles;
 using PPDS.Cli.Services.Schema;
 using PPDS.Cli.Services.SolutionComponents;
+using PPDS.Cli.Services.ModelDrivenApps;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Services.Users;
@@ -264,6 +265,16 @@ public static class ServiceRegistration
         services.AddTransient<IDataQueryService>(sp => new DataQueryService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ILogger<DataQueryService>>()));
+
+        // Model-driven app service — manages app navigation, sitemap XML, and component visibility.
+        services.AddSingleton<SitemapSchemaResources>();
+        services.AddSingleton<SitemapXmlValidator>(sp =>
+            new SitemapXmlValidator(sp.GetRequiredService<SitemapSchemaResources>()));
+        services.AddTransient<IModelDrivenAppService>(sp => new ModelDrivenAppService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<SitemapXmlValidator>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModelDrivenAppService>>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();

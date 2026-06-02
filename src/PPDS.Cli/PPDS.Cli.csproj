@@ -46,6 +46,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\Schemas\SiteMap.xsd" />
+    <EmbeddedResource Include="Resources\Schemas\SiteMapType.xsd" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Cli.Tests" />
     <InternalsVisibleTo Include="PPDS.Cli.DaemonTests" />
   </ItemGroup>
