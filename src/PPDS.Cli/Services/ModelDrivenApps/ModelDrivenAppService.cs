@@ -179,7 +179,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -194,7 +194,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
-        var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
+        var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished: true);
 
         var doc = XDocument.Parse(sitemapXml);
         var siteMapEl = doc.Root!;
@@ -298,7 +298,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -310,7 +310,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
-        var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
+        var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished: true);
 
         var doc = XDocument.Parse(sitemapXml);
         var subAreaEl = doc.Descendants("SubArea")
@@ -340,7 +340,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -378,7 +378,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -416,7 +416,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -454,7 +454,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (options.Publish)
         {
-            await PublishAppAsync(client, uniqueName, ct);
+            await PublishAppAsync(client, appModuleId, uniqueName, ct);
         }
     }
 
@@ -534,18 +534,36 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         return sitemapId.Value;
     }
 
-    private async Task<string> FetchSitemapXmlForAppAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
+    private async Task<string> FetchSitemapXmlForAppAsync(IPooledClient client, Guid appModuleId, CancellationToken ct, bool unpublished = false)
     {
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
-        return await FetchSitemapXmlByIdAsync(client, sitemapId, ct);
+        return await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished);
     }
 
-    private async Task<string> FetchSitemapXmlByIdAsync(IPooledClient client, Guid sitemapId, CancellationToken ct)
+    private async Task<string> FetchSitemapXmlByIdAsync(IPooledClient client, Guid sitemapId, CancellationToken ct, bool unpublished = false)
     {
         Entity sitemap;
         try
         {
-            sitemap = await client.RetrieveAsync("sitemap", sitemapId, new ColumnSet("sitemapxml"), ct);
+            if (unpublished)
+            {
+                // RetrieveUnpublished is not supported for sitemap entities; use RetrieveUnpublishedMultiple instead.
+                var query = new QueryExpression("sitemap")
+                {
+                    ColumnSet = new ColumnSet("sitemapxml"),
+                    TopCount = 1
+                };
+                query.Criteria.AddCondition("sitemapid", ConditionOperator.Equal, sitemapId);
+
+                var multipleRequest = new RetrieveUnpublishedMultipleRequest { Query = query };
+                var multipleResponse = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(multipleRequest, ct);
+                sitemap = multipleResponse.EntityCollection.Entities.FirstOrDefault()
+                    ?? throw new InvalidOperationException($"Sitemap record {sitemapId} not found.");
+            }
+            else
+            {
+                sitemap = await client.RetrieveAsync("sitemap", sitemapId, new ColumnSet("sitemapxml"), ct);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -601,15 +619,13 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
     }
 
-    private async Task PublishAppAsync(IPooledClient client, string uniqueName, CancellationToken ct)
+    private async Task PublishAppAsync(IPooledClient client, Guid appModuleId, string uniqueName, CancellationToken ct)
     {
         try
         {
-            // Escape uniqueName to prevent malformed XML if the app name contains special characters.
-            var escapedName = System.Security.SecurityElement.Escape(uniqueName) ?? uniqueName;
             var request = new PublishXmlRequest
             {
-                ParameterXml = $"<importexportxml><appmodules><appmodule>{escapedName}</appmodule></appmodules></importexportxml>"
+                ParameterXml = $"<importexportxml><appmodules><appmodule>{appModuleId:D}</appmodule></appmodules></importexportxml>"
             };
             await client.ExecuteAsync(request, ct);
         }
@@ -754,7 +770,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         string appName,
         CancellationToken ct)
     {
-        var sitemapXml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct);
+        var sitemapXml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct, unpublished: true);
         var doc = XDocument.Parse(sitemapXml);
         var found = doc.Descendants("SubArea")
             .Any(s => string.Equals(s.Attribute("Entity")?.Value, entity, StringComparison.OrdinalIgnoreCase));
@@ -848,7 +864,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
 
         var request = new OrganizationRequest("RemoveAppComponents");
-        request["AppId"] = new EntityReference("appmodule", appModuleId);
+        request["AppId"] = appModuleId;
         request["Components"] = new EntityReferenceCollection(components);
 
         try
