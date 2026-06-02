@@ -26,11 +26,11 @@ public class SitemapSchemaResourcesTests
     }
 
     [Fact]
-    public void LoadSchemaSet_CalledTwice_ReturnsTwoIndependentSets()
+    public void LoadSchemaSet_CalledTwice_ReturnsCachedInstance()
     {
         var set1 = _resources.LoadSchemaSet();
         var set2 = _resources.LoadSchemaSet();
 
-        Assert.NotSame(set1, set2);
+        Assert.Same(set1, set2);
     }
 }

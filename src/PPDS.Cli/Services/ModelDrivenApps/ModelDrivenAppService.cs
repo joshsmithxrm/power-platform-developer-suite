@@ -83,7 +83,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
 
-        var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
 
         var query = new QueryExpression("appmodule")
         {
@@ -141,6 +141,14 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     /// <inheritdoc />
     public async Task SetSitemapXmlAsync(string appName, string xml, SetSitemapOptions options, IProgressReporter? progress, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            throw new PpdsValidationException("xml", "Sitemap XML cannot be empty.")
+            {
+                ErrorCode = ModelDrivenAppErrorCodes.InvalidSitemapXml
+            };
+        }
+
         XDocument doc;
         try
         {
@@ -195,10 +203,20 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         XElement areaEl;
         if (!string.IsNullOrEmpty(options.Area))
         {
-            areaEl = siteMapEl.Elements("Area")
+            var existingArea = siteMapEl.Elements("Area")
                 .FirstOrDefault(a => string.Equals(a.Attribute("Id")?.Value, options.Area, StringComparison.OrdinalIgnoreCase)
-                                  || string.Equals(a.Attribute("Title")?.Value, options.Area, StringComparison.OrdinalIgnoreCase))
-                ?? CreateAndAppendArea(siteMapEl, options.Area, options.Area);
+                                  || string.Equals(a.Attribute("Title")?.Value, options.Area, StringComparison.OrdinalIgnoreCase));
+            if (existingArea != null)
+            {
+                areaEl = existingArea;
+            }
+            else
+            {
+                var areaId = System.Text.RegularExpressions.Regex.Replace(options.Area, @"[^a-zA-Z0-9_]", "_");
+                if (string.IsNullOrEmpty(areaId) || areaId.All(c => c == '_'))
+                    areaId = $"area_{Guid.NewGuid():N}";
+                areaEl = CreateAndAppendArea(siteMapEl, areaId, options.Area);
+            }
         }
         else
         {
@@ -210,10 +228,20 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         XElement groupEl;
         if (!string.IsNullOrEmpty(options.Group))
         {
-            groupEl = areaEl.Elements("Group")
+            var existingGroup = areaEl.Elements("Group")
                 .FirstOrDefault(g => string.Equals(g.Attribute("Id")?.Value, options.Group, StringComparison.OrdinalIgnoreCase)
-                                  || string.Equals(g.Attribute("Title")?.Value, options.Group, StringComparison.OrdinalIgnoreCase))
-                ?? CreateAndAppendGroup(areaEl, options.Group, options.Group);
+                                  || string.Equals(g.Attribute("Title")?.Value, options.Group, StringComparison.OrdinalIgnoreCase));
+            if (existingGroup != null)
+            {
+                groupEl = existingGroup;
+            }
+            else
+            {
+                var groupId = System.Text.RegularExpressions.Regex.Replace(options.Group, @"[^a-zA-Z0-9_]", "_");
+                if (string.IsNullOrEmpty(groupId) || groupId.All(c => c == '_'))
+                    groupId = $"group_{Guid.NewGuid():N}";
+                groupEl = CreateAndAppendGroup(areaEl, groupId, options.Group);
+            }
         }
         else
         {
@@ -244,7 +272,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             }
 
             // --title applies to first entity only; subsequent entities use their DisplayName.
-            var title = (isFirst && !string.IsNullOrEmpty(options.Title)) ? options.Title : entitySummary.DisplayName;
+            var title = (isFirst && !string.IsNullOrEmpty(options.Title)) ? options.Title : (entitySummary.DisplayName ?? entitySummary.LogicalName);
             isFirst = false;
             var subAreaId = $"subarea_{Guid.NewGuid():N}";
 
@@ -882,10 +910,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve forms for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities.ToDictionary(
-            e => e.GetAttributeValue<string>("name") ?? string.Empty,
-            e => e.GetAttributeValue<Guid>("formid"),
-            StringComparer.OrdinalIgnoreCase);
+        var available = result.Entities
+            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("formid"), StringComparer.OrdinalIgnoreCase);
 
         return ResolveComponentIds(formNames, available, "form", entity);
     }
@@ -909,10 +936,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve views for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities.ToDictionary(
-            e => e.GetAttributeValue<string>("name") ?? string.Empty,
-            e => e.GetAttributeValue<Guid>("savedqueryid"),
-            StringComparer.OrdinalIgnoreCase);
+        var available = result.Entities
+            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("savedqueryid"), StringComparer.OrdinalIgnoreCase);
 
         return ResolveComponentIds(viewNames, available, "view", entity);
     }
@@ -936,10 +962,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve charts for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities.ToDictionary(
-            e => e.GetAttributeValue<string>("name") ?? string.Empty,
-            e => e.GetAttributeValue<Guid>("savedqueryvisualizationid"),
-            StringComparer.OrdinalIgnoreCase);
+        var available = result.Entities
+            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("savedqueryvisualizationid"), StringComparer.OrdinalIgnoreCase);
 
         return ResolveComponentIds(chartNames, available, "chart", entity);
     }

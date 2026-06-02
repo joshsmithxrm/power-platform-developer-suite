@@ -11,28 +11,34 @@ namespace PPDS.Cli.Services.ModelDrivenApps;
 public sealed class SitemapSchemaResources
 {
     private static readonly string ResourcePrefix = "PPDS.Cli.Resources.Schemas";
+    private readonly Lazy<XmlSchemaSet> _schemaSet;
+
+    public SitemapSchemaResources()
+    {
+        _schemaSet = new Lazy<XmlSchemaSet>(() =>
+        {
+            var assembly = typeof(SitemapSchemaResources).Assembly;
+            var schemaSet = new XmlSchemaSet
+            {
+                XmlResolver = new EmbeddedXsdResolver(assembly, ResourcePrefix)
+            };
+
+            using var stream = assembly.GetManifestResourceStream($"{ResourcePrefix}.SiteMap.xsd")
+                ?? throw new InvalidOperationException(
+                    "Embedded resource 'SiteMap.xsd' not found. Ensure the file is marked as EmbeddedResource in the project.");
+
+            using var reader = XmlReader.Create(stream);
+            schemaSet.Add(null, reader);
+            schemaSet.Compile();
+
+            return schemaSet;
+        });
+    }
 
     /// <summary>
-    /// Builds and compiles an <see cref="XmlSchemaSet"/> from the bundled SiteMap XSD files.
+    /// Returns the compiled <see cref="XmlSchemaSet"/> for the SiteMap XSD, compiled once on first access.
     /// </summary>
-    public XmlSchemaSet LoadSchemaSet()
-    {
-        var assembly = typeof(SitemapSchemaResources).Assembly;
-        var schemaSet = new XmlSchemaSet
-        {
-            XmlResolver = new EmbeddedXsdResolver(assembly, ResourcePrefix)
-        };
-
-        using var stream = assembly.GetManifestResourceStream($"{ResourcePrefix}.SiteMap.xsd")
-            ?? throw new InvalidOperationException(
-                "Embedded resource 'SiteMap.xsd' not found. Ensure the file is marked as EmbeddedResource in the project.");
-
-        using var reader = XmlReader.Create(stream);
-        schemaSet.Add(null, reader);
-        schemaSet.Compile();
-
-        return schemaSet;
-    }
+    public XmlSchemaSet LoadSchemaSet() => _schemaSet.Value;
 
     private sealed class EmbeddedXsdResolver : XmlResolver
     {
