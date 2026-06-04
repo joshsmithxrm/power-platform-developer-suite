@@ -262,6 +262,41 @@ public class FormXmlEditorTests
         ((string?)parameters.Element("EnableViewPicker")).Should().Be("false");
     }
 
+    [Theory]
+    [Trait("Category", "Unit")]
+    [InlineData(true, "false")]
+    [InlineData(false, "true")]
+    public void AddSubgrid_HideSearchBox_InvertsEnableQuickFind(bool hideSearchBox, string expectedEnableQuickFind)
+    {
+        // Arrange — AC-21: HideSearchBox maps to the sub-grid's EnableQuickFind
+        // element with INVERTED logic (hide => "false", show => "true"). This is the
+        // headline design decision for --hide-search-box and must be asserted at the
+        // generated-XML level.
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var viewId = new Guid("00000000-0000-0000-0000-000000000003");
+
+        var request = new AddSubgridRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            SectionLabel: "Related",
+            Label: "My Subgrid",
+            TargetEntity: "contact",
+            DefaultViewId: viewId,
+            HideSearchBox: hideSearchBox);
+
+        // Act
+        var result = FormXmlEditor.AddSubgrid(formXml, request);
+
+        // Assert
+        var parameters = result.Descendants("control")
+            .Single(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
+            .Element("parameters");
+
+        parameters.Should().NotBeNull();
+        ((string?)parameters!.Element("EnableQuickFind")).Should().Be(expectedEnableQuickFind,
+            "HideSearchBox={0} must invert to EnableQuickFind={1}", hideSearchBox, expectedEnableQuickFind);
+    }
+
     [Fact]
     [Trait("Category", "Unit")]
     public void RemoveSubgrid_ExistingLabel_RemovesControl()
