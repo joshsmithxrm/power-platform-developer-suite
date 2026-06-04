@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ppds views`** — savedquery (view) management: list/get, add/remove/update/reorder columns, set/clear sort, set/clear filter, and set-fetchxml (#1162).
 - **`ppds model-driven-app`** — app navigation management: list, get, sitemap, set-sitemap-xml, add-table/remove-table, and set-forms/views/charts, with bundled sitemap XSD validation (#1165).
 - **`ppds api request`** — authenticated raw Web API calls to Dataverse (GET/POST/PATCH/DELETE) with default OData headers and production write protection (#1164).
-- **Local Choice columns** — `attribute create --type Choice` with inline --option/--options-file, plus attribute add-/update-/remove-option for column-scoped option sets (#1161).
+- **Local Choice columns** — `ppds metadata attribute create --type Choice` with inline --option/--options-file, plus `ppds metadata attribute add-option|update-option|remove-option` for column-scoped option sets (#1161).
 
 ### Changed
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.

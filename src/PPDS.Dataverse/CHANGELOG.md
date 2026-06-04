@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Metadata-authoring support for status reasons and local option sets** — `InsertStatusValue`/`UpdateOptionValue`/`DeleteOptionValue` request DTOs, `StatusReasonInfo`, and the shared `OptionValueDeriver` for publisher-prefix-based option value derivation, backing entity status-reason management and column-scoped (local) Choice option sets ([#1167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1167), [#1159](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1159), [#1160](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1160), [#1161](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1161)).
+- **Metadata-authoring support for status reasons and local option sets** — `AddStatusReasonRequest`/`UpdateStatusReasonRequest`/`RemoveStatusReasonRequest`/`StatusReasonInfo` for entity status-reason management, and `AddOptionValueRequest`/`UpdateOptionValueRequest`/`DeleteOptionValueRequest` plus the shared `OptionValueDeriver` (publisher-prefix-based option value derivation) for column-scoped (local) Choice option sets ([#1167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1167), [#1159](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1159), [#1160](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1160), [#1161](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1161)).
 
 ### Fixed
 
