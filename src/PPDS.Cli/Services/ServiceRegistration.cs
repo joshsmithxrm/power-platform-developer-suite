@@ -15,6 +15,7 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Flows;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.ImportJobs;
+using PPDS.Cli.Services.Forms;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Services.Profile;
@@ -25,6 +26,7 @@ using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Services.Users;
+using PPDS.Cli.Services.Views;
 using PPDS.Cli.Services.WebApi;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tui.Infrastructure;
@@ -295,6 +297,17 @@ public static class ServiceRegistration
         services.AddTransient<IDataQueryService>(sp => new DataQueryService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ILogger<DataQueryService>>()));
+
+        services.AddTransient<IViewService>(sp => new ViewService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<ViewService>>()));
+        // Form management service
+        services.AddTransient<IFormService>(sp => new FormService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IMetadataQueryService>(),
+            sp.GetRequiredService<ILogger<FormService>>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();

@@ -46,6 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\Schemas\*.xsd" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Cli.Tests" />
     <InternalsVisibleTo Include="PPDS.Cli.DaemonTests" />
   </ItemGroup>

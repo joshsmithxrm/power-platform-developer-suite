@@ -459,6 +459,39 @@ public static class ErrorCodes
     }
 
     /// <summary>
+    /// View (savedquery) management errors.
+    /// </summary>
+    public static class View
+    {
+        /// <summary>No savedqueries record matches entity + name.</summary>
+        public const string NotFound = "View.NotFound";
+
+        /// <summary>Multiple records match the view name.</summary>
+        public const string Ambiguous = "View.Ambiguous";
+
+        /// <summary>Attribute not present in layoutxml.</summary>
+        public const string ColumnNotFound = "View.ColumnNotFound";
+
+        /// <summary>--via-relationship attribute not found in entity metadata.</summary>
+        public const string RelationshipNotFound = "View.RelationshipNotFound";
+
+        /// <summary>Dataverse query for savedqueries failed.</summary>
+        public const string ListFailed = "View.ListFailed";
+
+        /// <summary>Retrieve of view record failed.</summary>
+        public const string GetFailed = "View.GetFailed";
+
+        /// <summary>PATCH to savedqueries failed.</summary>
+        public const string UpdateFailed = "View.UpdateFailed";
+
+        /// <summary>PublishXmlRequest failed.</summary>
+        public const string PublishFailed = "View.PublishFailed";
+
+        /// <summary>AddSolutionComponentRequest failed.</summary>
+        public const string AddToSolutionFailed = "View.AddToSolutionFailed";
+    }
+
+    /// <summary>
     /// Safety-guard errors (e.g., refused mutations during shakedown).
     /// </summary>
     public static class Safety
