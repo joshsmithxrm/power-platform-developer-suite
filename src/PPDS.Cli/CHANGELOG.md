@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Canonical metadata nouns** `entity`, `attribute`, `optionset` replace `table`, `column`, `choice` as the primary command surface. Old nouns remain as deprecation shims that delegate to the same execute path and print a migration hint to stderr (#1159).
 - **Status reason management** — `ppds metadata entity add-statusreason|list-statusreasons|update-statusreason|remove-statusreason` for first-class statuscode option-value management (#1160).
 - **`OptionValueDeriver`** shared pure helper for publisher-prefix-based option value derivation — explicit-value wins, prefix×10000 base, gap-fill over existing values (#1160).
+- **`ppds forms`** — form (systemform) management: list/get, set-xml with schema validation, and structured tab/section/field/sub-grid editing on Main forms, with --publish/--solution side effects (#1163).
+- **`ppds views`** — savedquery (view) management: list/get, add/remove/update/reorder columns, set/clear sort, set/clear filter, and set-fetchxml (#1162).
+- **`ppds model-driven-app`** — app navigation management: list, get, sitemap, set-sitemap-xml, add-table/remove-table, and set-forms/views/charts, with bundled sitemap XSD validation (#1165).
+- **`ppds api request`** — authenticated raw Web API calls to Dataverse (GET/POST/PATCH/DELETE) with default OData headers and production write protection (#1164).
+- **Local Choice columns** — `ppds metadata attribute create --type Choice` with inline --option/--options-file, plus `ppds metadata attribute add-option|update-option|remove-option` for column-scoped option sets (#1161).
 
 ### Changed
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
