@@ -5,7 +5,8 @@
   },
   "safety": {
     "shakedown_safe_envs": [
-      "PPDS Demo - Dev"
+      "PPDS Demo - Dev",
+      "PPDS Dev"
     ],
     "readonly_env_var": "PPDS_SHAKEDOWN"
   },
