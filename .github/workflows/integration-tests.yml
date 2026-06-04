@@ -97,7 +97,12 @@ jobs:
         PPDS_TEST_CLIENT_SECRET: ${{ secrets.PPDS_TEST_CLIENT_SECRET }}
         PPDS_TEST_CERT_BASE64: ${{ secrets.PPDS_TEST_CERT_BASE64 }}
         PPDS_TEST_CERT_PASSWORD: ${{ secrets.PPDS_TEST_CERT_PASSWORD }}
-      run: dotnet test ${{ matrix.project }} --configuration Release --no-build --verbosity normal --filter "${{ matrix.filter }}"
+      # --blame-hang-timeout bounds each test: if any live test wedges (e.g. a
+      # missing pre-provisioned resource or a slow publish round-trip), the run
+      # is aborted instead of hanging the host until the job-level timeout. Scoped
+      # to this workflow's integration/live lanes only — never applied to the fast
+      # unit suites. --blame-hang-dump-type none skips the (large) process dump.
+      run: dotnet test ${{ matrix.project }} --configuration Release --no-build --verbosity normal --filter "${{ matrix.filter }}" --blame-hang-timeout 6m --blame-hang-dump-type none
 
   # Gate job for branch protection — aggregates matrix legs into a single status check.
   # Preserves the pre-matrix "Integration Tests" status check name so branch protection

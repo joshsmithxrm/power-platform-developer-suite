@@ -14,7 +14,14 @@ namespace PPDS.LiveTests.Cli;
 ///   - The environment must have an MDA named "PPDS MDA" with "account" in the sitemap.
 ///   - Credentials must be set: DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, PPDS_TEST_TENANT_ID.
 ///   - CLI must be built in Release/net8.0: dotnet build src/PPDS.Cli -c Release -f net8.0
+///
+/// Categorized as SlowIntegration so every CI shard filter (which excludes
+/// Category=SlowIntegration) skips this suite. These tests mutate a shared,
+/// pre-provisioned "PPDS MDA" app (not present in the test-dataverse env) and
+/// perform slow live --publish round-trips, so they must not run in the
+/// credentialed cli-smoke shard until a dedicated lane and the app exist.
 /// </summary>
+[Trait("Category", "SlowIntegration")]
 public class ModelDrivenAppCommandE2ETests : CliE2ETestBase
 {
     // The test app and entities are fixed so we can reason about baseline state.
