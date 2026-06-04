@@ -1,25 +1,22 @@
 using System.CommandLine;
-using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
-using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 
-using PPDS.Cli.Services.Metadata.Authoring;
 namespace PPDS.Cli.Commands.Metadata.Column;
 
 /// <summary>
-/// Command group for Dataverse column (attribute) authoring: create, update, delete.
+/// Deprecation shim for the 'column' command — delegates to 'attribute' canonical commands.
 /// </summary>
 public static class ColumnCommandGroup
 {
     /// <summary>
-    /// Creates the 'column' command group with subcommands.
+    /// Creates the 'column' command group with subcommands (deprecated — use 'attribute').
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("column", "Create, update, or delete columns on Dataverse tables");
+        var command = new Command("column", "Create, update, or delete columns (deprecated — use 'attribute')");
 
         command.Subcommands.Add(CreateCreateCommand());
         command.Subcommands.Add(CreateUpdateCommand());
@@ -190,146 +187,18 @@ public static class ColumnCommandGroup
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            var options = ParseOptionDefinitions(optionsRaw);
+            var options = AttributeCommandGroup.ParseOptionDefinitions(optionsRaw);
 
-            return await ExecuteCreateAsync(
+            DeprecationWarning.Write("ppds metadata column create", "ppds metadata attribute create");
+            return await AttributeCommandGroup.ExecuteCreateAsync(
                 solution, entity, name, displayName, type, description,
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
                 dateTimeBehavior, optionSetName, options, defaultValue,
-                trueLabel, falseLabel, maxSizeInKB, dryRun,
+                trueLabel, falseLabel, maxSizeInKB, dryRun, publish: false,
                 profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    internal static OptionDefinition[]? ParseOptionDefinitions(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        var result = new List<OptionDefinition>();
-
-        foreach (var pair in raw.Split(','))
-        {
-            var trimmed = pair.Trim();
-            var lastEquals = trimmed.LastIndexOf('=');
-            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
-            {
-                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
-            }
-        }
-
-        return result.Count > 0 ? result.ToArray() : null;
-    }
-
-    private static async Task<int> ExecuteCreateAsync(
-        string solution,
-        string entity,
-        string name,
-        string displayName,
-        SchemaColumnType type,
-        string? description,
-        string? requiredLevel,
-        int? maxLength,
-        double? minValue,
-        double? maxValue,
-        int? precision,
-        string? format,
-        string? dateTimeBehavior,
-        string? optionSetName,
-        OptionDefinition[]? options,
-        int? defaultValue,
-        string? trueLabel,
-        string? falseLabel,
-        int? maxSizeInKB,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Validating column creation..." : $"Creating {type} column on '{entity}'...");
-            }
-
-            var request = new CreateColumnRequest
-            {
-                SolutionUniqueName = solution,
-                EntityLogicalName = entity,
-                SchemaName = name,
-                DisplayName = displayName,
-                ColumnType = type,
-                Description = description ?? "",
-                RequiredLevel = requiredLevel,
-                MaxLength = maxLength,
-                MinValue = minValue,
-                MaxValue = maxValue,
-                Precision = precision,
-                Format = format,
-                DateTimeBehavior = dateTimeBehavior,
-                OptionSetName = optionSetName,
-                Options = options,
-                DefaultValue = defaultValue,
-                TrueLabel = trueLabel,
-                FalseLabel = falseLabel,
-                MaxSizeInKB = maxSizeInKB,
-                DryRun = dryRun
-            };
-
-            var result = await authoringService.CreateColumnAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(result);
-            }
-            else
-            {
-                if (dryRun)
-                {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Column '{result.LogicalName}' created successfully on '{entity}'.");
-                }
-
-                foreach (var msg in result.ValidationMessages)
-                {
-                    Console.Error.WriteLine($"  [{msg.Rule}] {msg.Field}: {msg.Message}");
-                }
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "creating column", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateUpdateCommand()
@@ -408,99 +277,13 @@ public static class ColumnCommandGroup
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteUpdateAsync(
+            DeprecationWarning.Write("ppds metadata column update", "ppds metadata attribute update");
+            return await AttributeCommandGroup.ExecuteUpdateAsync(
                 solution, entity, column, displayName, description, requiredLevel, maxLength,
                 dryRun, profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteUpdateAsync(
-        string solution,
-        string entity,
-        string column,
-        string? displayName,
-        string? description,
-        string? requiredLevel,
-        int? maxLength,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Validating column update..." : $"Updating column '{column}' on '{entity}'...");
-            }
-
-            var request = new UpdateColumnRequest
-            {
-                SolutionUniqueName = solution,
-                EntityLogicalName = entity,
-                ColumnLogicalName = column,
-                DisplayName = displayName,
-                Description = description,
-                RequiredLevel = requiredLevel,
-                MaxLength = maxLength,
-                DryRun = dryRun
-            };
-
-            await authoringService.UpdateColumnAsync(request, ct: cancellationToken);
-
-            var publishHint = $"ppds metadata publish {entity}";
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new
-                {
-                    entity,
-                    column,
-                    updated = true,
-                    dryRun,
-                    requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
-                });
-            }
-            else if (dryRun)
-            {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-            }
-            else
-            {
-                Console.Error.WriteLine($"Column '{column}' on '{entity}' updated. Run '{publishHint}' to publish changes.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "updating column", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateDeleteCommand()
@@ -559,138 +342,12 @@ public static class ColumnCommandGroup
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteDeleteAsync(
+            DeprecationWarning.Write("ppds metadata column delete", "ppds metadata attribute delete");
+            return await AttributeCommandGroup.ExecuteDeleteAsync(
                 solution, entity, column, force, dryRun,
                 profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteDeleteAsync(
-        string solution,
-        string entity,
-        string column,
-        bool force,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-            }
-
-            // Dry-run first
-            var dryRunRequest = new DeleteColumnRequest
-            {
-                SolutionUniqueName = solution,
-                EntityLogicalName = entity,
-                ColumnLogicalName = column,
-                DryRun = true
-            };
-
-            await authoringService.DeleteColumnAsync(dryRunRequest, ct: cancellationToken);
-
-            if (dryRun)
-            {
-                if (globalOptions.IsJsonMode)
-                {
-                    writer.WriteSuccess(new { entity, column, dryRun = true });
-                }
-                else
-                {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-                }
-
-                return ExitCodes.Success;
-            }
-
-            // Confirmation prompt
-            if (!force)
-            {
-                if (!Console.IsInputRedirected)
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will permanently delete column '{column}' from '{entity}'.");
-                    Console.Error.WriteLine("         Existing data in this column will be lost.");
-                    Console.ResetColor();
-                    Console.Error.WriteLine();
-
-                    var expectedConfirmation = $"DELETE COLUMN {entity}.{column}";
-                    Console.Error.Write($"Type '{expectedConfirmation}' to confirm, or Ctrl+C to cancel: ");
-                    var confirmation = Console.ReadLine();
-
-                    if (confirmation != expectedConfirmation)
-                    {
-                        Console.Error.WriteLine("Cancelled.");
-                        return ExitCodes.Success;
-                    }
-
-                    Console.Error.WriteLine();
-                }
-                else
-                {
-                    writer.WriteError(StructuredError.Create(
-                        "CONFIRMATION_REQUIRED",
-                        "Use --force to skip confirmation in non-interactive mode"));
-                    return ExitCodes.ConfirmationRequired;
-                }
-            }
-
-            if (!globalOptions.IsJsonMode)
-            {
-                Console.Error.WriteLine($"Deleting column '{column}' from '{entity}'...");
-            }
-
-            var deleteRequest = new DeleteColumnRequest
-            {
-                SolutionUniqueName = solution,
-                EntityLogicalName = entity,
-                ColumnLogicalName = column,
-                DryRun = false
-            };
-
-            await authoringService.DeleteColumnAsync(deleteRequest, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { entity, column, deleted = true });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Column '{column}' deleted from '{entity}' successfully.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "deleting column", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 }

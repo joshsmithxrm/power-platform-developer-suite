@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Cli.Commands.Metadata.Choice;
 using PPDS.Cli.Commands.Metadata.Column;
 using PPDS.Cli.Commands.Metadata.Key;
@@ -37,6 +38,7 @@ public static class MetadataCommandGroup
 
         command.Subcommands.Add(EntitiesCommand.Create());
         command.Subcommands.Add(EntityCommand.Create());
+        command.Subcommands.Add(AttributeCommandGroup.Create());
         command.Subcommands.Add(AttributesCommand.Create());
         command.Subcommands.Add(RelationshipsCommand.Create());
         command.Subcommands.Add(KeysCommand.Create());

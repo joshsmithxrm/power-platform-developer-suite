@@ -35,6 +35,7 @@ public class MetadataCommandGroupTests
 
         Assert.Contains("entities", subcommandNames);
         Assert.Contains("entity", subcommandNames);
+        Assert.Contains("attribute", subcommandNames);
         Assert.Contains("attributes", subcommandNames);
         Assert.Contains("relationships", subcommandNames);
         Assert.Contains("keys", subcommandNames);
@@ -441,10 +442,11 @@ public class OptionSetCommandTests
     }
 
     [Fact]
-    public void Parse_WithoutNameArgument_HasErrors()
+    public void Parse_WithoutNameArgument_Succeeds()
     {
+        // Name argument is optional (ZeroOrOne); bare 'optionset' routes to help output
         var result = _command.Parse("");
-        Assert.NotEmpty(result.Errors);
+        Assert.Empty(result.Errors);
     }
 }
 
