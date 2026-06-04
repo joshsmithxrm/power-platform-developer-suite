@@ -16,7 +16,8 @@ public static class ClearFilterCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var command = new Command("clear-filter", "Remove all filter conditions from a view")

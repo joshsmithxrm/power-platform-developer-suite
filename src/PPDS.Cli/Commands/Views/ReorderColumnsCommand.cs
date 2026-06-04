@@ -16,12 +16,14 @@ public static class ReorderColumnsCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var columnsOption = new Option<string>("--columns")
         {
-            Description = "[Required] Comma-separated list of attribute names in desired order. Columns not in the list are dropped."
+            Description = "[Required] Comma-separated list of attribute names in desired order. Columns not in the list are dropped.",
+            Required = true
         };
 
         var command = new Command("reorder-columns",

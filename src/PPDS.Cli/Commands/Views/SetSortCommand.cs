@@ -16,13 +16,15 @@ public static class SetSortCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var sortOption = new Option<string[]>("--sort")
         {
             Description = "[Required] Sort specification: 'attributename:asc' or 'attributename:desc'. Repeatable; applied in declaration order (first = primary).",
-            AllowMultipleArgumentsPerToken = false
+            AllowMultipleArgumentsPerToken = false,
+            Required = true
         };
         sortOption.Arity = ArgumentArity.OneOrMore;
 

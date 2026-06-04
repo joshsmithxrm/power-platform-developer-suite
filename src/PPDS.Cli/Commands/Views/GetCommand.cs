@@ -17,7 +17,8 @@ public static class GetCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var command = new Command("get", "Get detailed view configuration including columns, sort, and filter")

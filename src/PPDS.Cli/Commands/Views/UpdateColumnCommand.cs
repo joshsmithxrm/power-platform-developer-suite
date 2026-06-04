@@ -16,17 +16,20 @@ public static class UpdateColumnCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var columnOption = new Option<string>("--column", "-c")
         {
-            Description = "[Required] Attribute name of the column to update"
+            Description = "[Required] Attribute name of the column to update",
+            Required = true
         };
 
         var widthOption = new Option<int>("--width")
         {
-            Description = "[Required] New column width in pixels (positive integer)"
+            Description = "[Required] New column width in pixels (positive integer)",
+            Required = true
         };
 
         var command = new Command("update-column", "Update the width of an existing column in a view")

@@ -665,7 +665,7 @@ public class ViewService : IViewService
         return changed;
     }
 
-    private static XDocument AddRelatedLinkEntity(
+    internal static XDocument AddRelatedLinkEntity(
         XDocument fetch,
         string relEntity,
         string relPkName,
@@ -685,6 +685,7 @@ public class ViewService : IViewService
                 new XAttribute("name", relEntity),
                 new XAttribute("from", relPkName),
                 new XAttribute("to", viaRelationship),
+                new XAttribute("link-type", "outer"),
                 new XAttribute("alias", relAlias));
             entityElem.Add(linkEntity);
         }

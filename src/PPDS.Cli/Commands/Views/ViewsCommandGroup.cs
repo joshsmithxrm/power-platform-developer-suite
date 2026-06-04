@@ -19,7 +19,8 @@ public static class ViewsCommandGroup
 
     public static readonly Option<string> EntityOption = new("--entity")
     {
-        Description = "[Required] Entity logical name (e.g., account)"
+        Description = "[Required] Entity logical name (e.g., account)",
+        Required = true
     };
 
     public static readonly Option<string?> SolutionOption = new("--solution")

@@ -16,12 +16,14 @@ public static class RemoveColumnCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var columnOption = new Option<string>("--column", "-c")
         {
-            Description = "[Required] Attribute name of the column to remove"
+            Description = "[Required] Attribute name of the column to remove",
+            Required = true
         };
 
         var command = new Command("remove-column", "Remove a column from a view by attribute name")

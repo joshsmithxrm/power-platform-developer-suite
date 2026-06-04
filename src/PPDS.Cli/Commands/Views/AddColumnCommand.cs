@@ -16,13 +16,15 @@ public static class AddColumnCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var columnOption = new Option<string[]>("--column", "-c")
         {
             Description = "[Required] Column to add. Format: 'attributename' or 'attributename:width' (default width 150). Repeatable.",
-            AllowMultipleArgumentsPerToken = false
+            AllowMultipleArgumentsPerToken = false,
+            Required = true
         };
         columnOption.Arity = ArgumentArity.OneOrMore;
 

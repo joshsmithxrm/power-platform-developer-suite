@@ -31,12 +31,14 @@ public static class SetFetchXmlCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var fetchXmlOption = new Option<string>("--fetchxml")
         {
-            Description = "[Required] Path to a file containing a complete FetchXML document with <fetch> root element."
+            Description = "[Required] Path to a file containing a complete FetchXML document with <fetch> root element.",
+            Required = true
         };
 
         var command = new Command("set-fetchxml",

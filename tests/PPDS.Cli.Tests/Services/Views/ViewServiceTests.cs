@@ -166,6 +166,34 @@ public class ViewServiceTests
         cells.Should().HaveCount(2); // "b" dropped
     }
 
+    // ─── Related (via-relationship) link-entity ─────────────────────────────────
+
+    // AC-04: via-relationship add-column generates an OUTER join so rows with an
+    // empty lookup are not silently dropped (inner-join default would drop them).
+    [Fact]
+    public void AddRelatedLinkEntity_GeneratesOuterJoin()
+    {
+        var fetch = XDocument.Parse(
+            """<fetch><entity name="account"><attribute name="name" /></entity></fetch>""");
+        var columns = new List<ColumnSpec> { new("hsl_specialty") };
+
+        var result = ViewService.AddRelatedLinkEntity(
+            fetch,
+            relEntity: "hsl_vet",
+            relPkName: "hsl_vetid",
+            viaRelationship: "hsl_vet_id",
+            relAlias: "hsl_vet_id",
+            columns: columns);
+
+        var linkEntity = result.Descendants("link-entity").Single();
+        linkEntity.Attribute("link-type")?.Value.Should().Be("outer");
+        linkEntity.Attribute("name")?.Value.Should().Be("hsl_vet");
+        linkEntity.Attribute("from")?.Value.Should().Be("hsl_vetid");
+        linkEntity.Attribute("to")?.Value.Should().Be("hsl_vet_id");
+        linkEntity.Elements("attribute").Select(a => (string?)a.Attribute("name"))
+            .Should().Contain("hsl_specialty");
+    }
+
     // ─── Sort XML helpers ───────────────────────────────────────────────────────
 
     // AC-08: set sort, multiple flags in order

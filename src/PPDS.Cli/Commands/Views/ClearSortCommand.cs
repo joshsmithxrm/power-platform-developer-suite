@@ -16,7 +16,8 @@ public static class ClearSortCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name",
+            Required = true
         };
 
         var command = new Command("clear-sort", "Remove all sort configuration from a view")
