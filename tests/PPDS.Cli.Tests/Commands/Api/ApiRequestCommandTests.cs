@@ -1,4 +1,6 @@
 using System.CommandLine;
+using Moq;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands.Api;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.WebApi;
@@ -254,14 +256,108 @@ public class ApiRequestCommandTests
 
     #endregion
 
-    #region AC-02: write-blocked exit code is exactly 2
+    #region AC-02: write-blocked returns exit code 2
 
     [Fact]
-    public void WriteBlocked_ExitCode_IsExactly2()
+    public async Task WriteBlocked_ReturnsExitCode2()
     {
-        // ExitCodes.Failure must equal 2 so callers can distinguish write-blocked (2)
-        // from non-2xx HTTP response (1). This guards against accidental renumbering.
-        Assert.Equal(2, ExitCodes.Failure);
+        // Drive the real command path: a production mutating request whose service raises
+        // the write-guard PpdsException must map to exit code 2 (distinct from non-2xx = 1).
+        var service = new Mock<IRawWebApiService>();
+        service
+            .Setup(s => s.SendAsync(It.IsAny<RawWebApiRequest>(), null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PpdsException(
+                "Api.WriteBlocked",
+                "Mutating request blocked on Production environment. Add --confirm to proceed."));
+
+        var request = new RawWebApiRequest
+        {
+            EnvironmentUrl = "https://org.crm.dynamics.com",
+            Path = "/api/data/v9.2/accounts",
+            Method = HttpMethod.Post,
+            Body = "{}",
+            IsConfirmed = false,
+            ProtectionLevel = ProtectionLevel.Production
+        };
+
+        var exitCode = await ApiRequestCommand.RunRequestAsync(
+            service.Object, request, include: false, CancellationToken.None);
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(2, ExitCodes.Failure); // contract: write-blocked exit code is exactly 2
+    }
+
+    [Fact]
+    public async Task Non2xxResponse_ReturnsExitCode1()
+    {
+        // A non-2xx response (not a write block) routes to stderr and maps to exit 1,
+        // keeping it distinguishable from the write-blocked exit code (2).
+        var service = new Mock<IRawWebApiService>();
+        service
+            .Setup(s => s.SendAsync(It.IsAny<RawWebApiRequest>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RawWebApiResponse
+            {
+                StatusCode = 404,
+                ReasonPhrase = "Not Found",
+                Body = "{\"error\":{}}"
+            });
+
+        var request = new RawWebApiRequest
+        {
+            EnvironmentUrl = "https://org.crm.dynamics.com",
+            Path = "/api/data/v9.2/nope",
+            Method = HttpMethod.Get
+        };
+
+        var exitCode = await ApiRequestCommand.RunRequestAsync(
+            service.Object, request, include: false, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    #endregion
+
+    #region AC-02/write-guard fail-safe: unknown environment blocks mutating requests
+
+    [Fact]
+    public void ResolveProtectionLevel_UnknownEnvironment_IsProduction()
+    {
+        // Fail-safe: an undetectable environment must resolve to Production so the write
+        // guard is conservative (unlike DmlSafetyGuard.DetectProtectionLevel which maps
+        // Unknown -> Development for SQL DML).
+        var level = ApiRequestCommand.ResolveProtectionLevel(EnvironmentType.Unknown, configuredProtection: null);
+        Assert.Equal(ProtectionLevel.Production, level);
+    }
+
+    [Fact]
+    public void UnknownEnvironment_BlocksMutatingRequestWithoutConfirm()
+    {
+        // End-to-end through the real guard: Unknown env -> Production -> POST without
+        // --confirm is blocked.
+        var level = ApiRequestCommand.ResolveProtectionLevel(EnvironmentType.Unknown, configuredProtection: null);
+
+        var blocked = WebApiWriteGuard.IsBlocked(HttpMethod.Post, level, isConfirmed: false);
+
+        Assert.True(blocked, "Unknown environment must block a mutating request without --confirm");
+    }
+
+    [Fact]
+    public void UnknownEnvironment_AllowsMutatingRequestWithConfirm()
+    {
+        var level = ApiRequestCommand.ResolveProtectionLevel(EnvironmentType.Unknown, configuredProtection: null);
+
+        var blocked = WebApiWriteGuard.IsBlocked(HttpMethod.Post, level, isConfirmed: true);
+
+        Assert.False(blocked, "--confirm must bypass the write guard even on an unknown environment");
+    }
+
+    [Fact]
+    public void ConfiguredProtection_OverridesUnknownFailSafe()
+    {
+        // An explicit per-environment protection override always wins over the Unknown fail-safe.
+        var level = ApiRequestCommand.ResolveProtectionLevel(
+            EnvironmentType.Unknown, configuredProtection: ProtectionLevel.Development);
+        Assert.Equal(ProtectionLevel.Development, level);
     }
 
     #endregion
@@ -277,20 +373,92 @@ public class ApiRequestCommandTests
             const string expectedBody = "{\"name\":\"test\"}";
             await File.WriteAllTextAsync(tempFile, expectedBody);
 
-            // Validate passes (file reading is post-validation in the handler)
-            var validationResult = ApiRequestCommand.ValidateInputs(
-                "/api/data/v9.2/accounts", "POST", null, tempFile, null,
-                out _, out _);
-            Assert.Null(validationResult);
+            // Drive the command's actual file-read branch (ResolveBodyAsync), not a
+            // re-implementation: this exercises the --body-file reading path the handler uses.
+            var (resolvedBody, error, exitCode) = await ApiRequestCommand.ResolveBodyAsync(
+                body: null, bodyFile: tempFile, CancellationToken.None);
 
-            // The actual file read that the handler performs
-            var actualBody = await File.ReadAllTextAsync(tempFile);
-            Assert.Equal(expectedBody, actualBody);
+            Assert.Null(error);
+            Assert.Equal(ExitCodes.Success, exitCode);
+            Assert.Equal(expectedBody, resolvedBody);
         }
         finally
         {
             File.Delete(tempFile);
         }
+    }
+
+    [Fact]
+    public async Task BodyFile_Missing_ReturnsNotFound()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), $"ppds-missing-{Guid.NewGuid():N}.json");
+
+        var (resolvedBody, error, exitCode) = await ApiRequestCommand.ResolveBodyAsync(
+            body: null, bodyFile: missing, CancellationToken.None);
+
+        Assert.Null(resolvedBody);
+        Assert.NotNull(error);
+        Assert.Contains(missing, error);
+        Assert.Equal(ExitCodes.NotFoundError, exitCode);
+    }
+
+    [Fact]
+    public async Task ResolveBody_NoFile_ReturnsInlineBody()
+    {
+        var (resolvedBody, error, _) = await ApiRequestCommand.ResolveBodyAsync(
+            body: "{\"inline\":true}", bodyFile: null, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.Equal("{\"inline\":true}", resolvedBody);
+    }
+
+    #endregion
+
+    #region POST-on-body default (issue #1164)
+
+    [Fact]
+    public void NoMethod_WithInlineBody_DefaultsToPost()
+    {
+        var result = ApiRequestCommand.ValidateInputs(
+            "/api/data/v9.2/accounts", method: null, body: "{}", bodyFile: null, headers: null,
+            out var method, out _);
+
+        Assert.Null(result);
+        Assert.Equal(HttpMethod.Post, method);
+    }
+
+    [Fact]
+    public void NoMethod_WithBodyFile_DefaultsToPost()
+    {
+        var result = ApiRequestCommand.ValidateInputs(
+            "/api/data/v9.2/accounts", method: null, body: null, bodyFile: "file.json", headers: null,
+            out var method, out _);
+
+        Assert.Null(result);
+        Assert.Equal(HttpMethod.Post, method);
+    }
+
+    [Fact]
+    public void NoMethod_NoBody_DefaultsToGet()
+    {
+        var result = ApiRequestCommand.ValidateInputs(
+            "/api/data/v9.2/accounts", method: null, body: null, bodyFile: null, headers: null,
+            out var method, out _);
+
+        Assert.Null(result);
+        Assert.Equal(HttpMethod.Get, method);
+    }
+
+    [Fact]
+    public void ExplicitMethod_WithBody_WinsOverPostDefault()
+    {
+        // An explicit --method always wins, even when a body is present.
+        var result = ApiRequestCommand.ValidateInputs(
+            "/api/data/v9.2/accounts", method: "PATCH", body: "{}", bodyFile: null, headers: null,
+            out var method, out _);
+
+        Assert.Null(result);
+        Assert.Equal(HttpMethod.Patch, method);
     }
 
     #endregion

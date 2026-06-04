@@ -36,7 +36,7 @@ Sends authenticated HTTP requests to the Dataverse Web API from the command line
                                        │
                                        ├── IPowerPlatformTokenProvider.GetTokenForResourceAsync(envUrl)
                                        ├── Write protection: ProtectionLevel check
-                                       └── Default OData headers (OData-Version, Accept)
+                                       └── Default OData headers (OData-Version, OData-MaxVersion, Accept)
 ```
 
 The CLI command is a thin presentation adapter. All logic — auth, headers, write protection, response formatting — lives in `RawWebApiService`.
@@ -66,13 +66,16 @@ The CLI command is a thin presentation adapter. All logic — auth, headers, wri
 2. The service prepends the environment base URL to the user-supplied path (e.g., `--path /api/data/v9.2/accounts` → `https://org.crm.dynamics.com/api/data/v9.2/accounts`).
 3. Default OData headers are applied unless explicitly overridden by user-supplied headers:
     - `OData-Version: 4.0`
+    - `OData-MaxVersion: 4.0`
     - `Accept: application/json`
     - `Content-Type: application/json` (when body is present)
 4. User-supplied headers (`--header`) merge with defaults; user wins on conflict.
-5. The write guard blocks POST/PATCH/DELETE/PUT on production environments (unless `--confirm` is supplied).
-6. GET requests are always allowed regardless of environment type.
-7. The response body is written to stdout. HTTP status line and headers are written to stdout only when `--include` is set.
-8. Non-2xx responses produce a non-zero exit code and write the error body to stderr.
+5. When `--method` is omitted and a body (`--body` or `--body-file`) is supplied, the method defaults to `POST`; otherwise it defaults to `GET`. An explicit `--method` always wins.
+6. **Write-guard fail-safe:** When the environment type cannot be determined (`Unknown`), the api-request path resolves the protection level to `Production` so mutating requests are blocked without `--confirm`. This deliberately differs from `DmlSafetyGuard.DetectProtectionLevel`, which maps `Unknown` to `Development` for SQL DML; api-request resolves `Unknown` locally to fail safe rather than fail open.
+7. The write guard blocks POST/PATCH/DELETE/PUT on production environments (unless `--confirm` is supplied).
+8. GET requests are always allowed regardless of environment type.
+9. The response body is written to stdout. HTTP status line and headers are written to stdout only when `--include` is set.
+10. Non-2xx responses produce a non-zero exit code and write the error body to stderr. The SDK (`RawWebApiService.SendAsync`) does **not** throw on non-2xx — it returns a `RawWebApiResponse` with `IsSuccess = false` (status/body preserved) for composability; the CLI adapter routes non-2xx to stderr with a nonzero exit. (Intentional deviation from issue #1164's "non-2xx throws" wording.)
 
 ### Primary Flows
 
@@ -151,7 +154,9 @@ Exit codes:
 | AC-09 | --body and --body-file together produces validation error                            | `ApiRequestCommandTests.Body_And_BodyFile_Conflict`                       | ✅     |
 | AC-10 | Path without leading `/` produces validation error                                   | `ApiRequestCommandTests.Path_NoLeadingSlash_Error`                        | ✅     |
 | AC-11 | Auth token is acquired for the correct environment URL resource                      | `RawWebApiServiceTests.Token_AcquiredForEnvironmentUrl`                   | ✅     |
-| AC-12 | Default OData headers (OData-Version, Accept) are present on requests                | `RawWebApiServiceTests.DefaultHeaders_Applied`                            | ✅     |
+| AC-12 | Default OData headers (OData-Version, OData-MaxVersion, Accept) are present on requests | `RawWebApiServiceTests.DefaultHeaders_Applied`                            | ✅     |
+| AC-13 | Omitting --method with a body (--body or --body-file) defaults the method to POST; explicit --method wins | `ApiRequestCommandTests.NoMethod_WithInlineBody_DefaultsToPost`, `ApiRequestCommandTests.NoMethod_WithBodyFile_DefaultsToPost`, `ApiRequestCommandTests.ExplicitMethod_WithBody_WinsOverPostDefault` | ✅     |
+| AC-14 | An unknown/undetectable environment resolves to Production protection and blocks mutating requests without --confirm | `ApiRequestCommandTests.ResolveProtectionLevel_UnknownEnvironment_IsProduction`, `ApiRequestCommandTests.UnknownEnvironment_BlocksMutatingRequestWithoutConfirm` | ✅     |
 
 ### Edge Cases
 
@@ -328,6 +333,7 @@ public static class WebApiWriteGuard
 | ---------- | ----------------------------------------------- |
 | 2025-07-25 | Initial spec                                    |
 | 2026-06-01 | Implemented — all 12 ACs verified and passing   |
+| 2026-06-03 | Added `OData-MaxVersion: 4.0` default header (#1164); POST-on-body method default (AC-13); Unknown-env write-guard fail-safe → Production (AC-14); documented intentional non-2xx-returns-not-throws deviation |
 
 ---
 

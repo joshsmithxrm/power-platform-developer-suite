@@ -236,6 +236,7 @@ public class RawWebApiServiceTests
         var request = getRequest();
         Assert.NotNull(request);
         Assert.Contains("4.0", request!.Headers.GetValues("OData-Version"));
+        Assert.Contains("4.0", request.Headers.GetValues("OData-MaxVersion"));
         Assert.Contains("application/json", request.Headers.GetValues("Accept"));
     }
 

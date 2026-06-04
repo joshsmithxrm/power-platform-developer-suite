@@ -60,6 +60,7 @@ public sealed class RawWebApiService : IRawWebApiService, IDisposable
         var effectiveHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["OData-Version"] = "4.0",
+            ["OData-MaxVersion"] = "4.0",
             ["Accept"] = "application/json"
         };
         if (request.Headers != null)

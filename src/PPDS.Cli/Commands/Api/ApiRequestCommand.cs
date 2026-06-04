@@ -112,6 +112,12 @@ public static class ApiRequestCommand
                 return ($"Invalid HTTP method '{method}'. Use GET, POST, PATCH, PUT, DELETE, HEAD, or OPTIONS.", ExitCodes.InvalidArguments);
             httpMethod = new HttpMethod(method.ToUpperInvariant());
         }
+        else if (body != null || bodyFile != null)
+        {
+            // No explicit --method but a body is present: default to POST (issue #1164).
+            // An explicit --method always wins (handled by the branch above).
+            httpMethod = HttpMethod.Post;
+        }
 
         if (headers?.Length > 0)
         {
@@ -148,16 +154,14 @@ public static class ApiRequestCommand
             return validation.Value.ExitCode;
         }
 
-        // Validation: body file exists
-        if (bodyFile != null)
+        // Resolve --body-file from disk (reads the file into the request body).
+        var bodyResolution = await ResolveBodyAsync(body, bodyFile, cancellationToken);
+        if (bodyResolution.Error != null)
         {
-            if (!File.Exists(bodyFile))
-            {
-                Console.Error.WriteLine($"Error: Body file not found: '{bodyFile}'");
-                return ExitCodes.NotFoundError;
-            }
-            body = await File.ReadAllTextAsync(bodyFile, cancellationToken);
+            Console.Error.WriteLine($"Error: {bodyResolution.Error}");
+            return bodyResolution.ExitCode;
         }
+        body = bodyResolution.Body;
 
         try
         {
@@ -174,8 +178,7 @@ public static class ApiRequestCommand
             var apiService = serviceProvider.GetRequiredService<IRawWebApiService>();
 
             var envConfig = await envConfigService.GetConfigAsync(connectionInfo.EnvironmentUrl, cancellationToken);
-            var envType = envConfig?.Type ?? EnvironmentType.Unknown;
-            var protectionLevel = envConfig?.Protection ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+            var protectionLevel = ResolveProtectionLevel(envConfig?.Type ?? EnvironmentType.Unknown, envConfig?.Protection);
 
             var request = new RawWebApiRequest
             {
@@ -188,36 +191,88 @@ public static class ApiRequestCommand
                 ProtectionLevel = protectionLevel
             };
 
-            var response = await apiService.SendAsync(request, cancellationToken: cancellationToken);
-
-            if (response.IsSuccess)
-            {
-                foreach (var line in FormatResponsePreamble(response, include))
-                    Console.WriteLine(line);
-                if (!string.IsNullOrEmpty(response.Body))
-                    Console.WriteLine(response.Body);
-                return ExitCodes.Success;
-            }
-            else
-            {
-                // Non-2xx: route entire response (preamble + body) to stderr so the
-                // stream is consistent and piping to tools like jq works on success only.
-                foreach (var line in FormatResponsePreamble(response, include))
-                    Console.Error.WriteLine(line);
-                Console.Error.WriteLine(response.Body);
-                return 1; // non-2xx per spec
-            }
-        }
-        catch (PpdsException ex) when (ex.ErrorCode == "Api.WriteBlocked")
-        {
-            Console.Error.WriteLine($"Error: {ex.UserMessage}");
-            return ExitCodes.Failure; // 2 per spec
+            // Write-guard blocks (exit 2) and HTTP response routing (exit 0/1) are handled
+            // inside RunRequestAsync; only auth/connectivity failures reach the catch below.
+            return await RunRequestAsync(apiService, request, include, cancellationToken);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 3; // auth/connectivity failure per spec
         }
+    }
+
+    /// <summary>
+    /// Resolves the effective request body: when --body-file is supplied, reads it from disk;
+    /// otherwise returns the inline --body unchanged. On a missing file, returns an error + exit code.
+    /// Exposed internal for unit testing of AC-08 (the --body-file read branch).
+    /// </summary>
+    internal static async Task<(string? Body, string? Error, int ExitCode)> ResolveBodyAsync(
+        string? body,
+        string? bodyFile,
+        CancellationToken cancellationToken)
+    {
+        if (bodyFile == null)
+            return (body, null, ExitCodes.Success);
+
+        if (!File.Exists(bodyFile))
+            return (null, $"Body file not found: '{bodyFile}'", ExitCodes.NotFoundError);
+
+        var fileBody = await File.ReadAllTextAsync(bodyFile, cancellationToken);
+        return (fileBody, null, ExitCodes.Success);
+    }
+
+    /// <summary>
+    /// Resolves the effective protection level for the write guard.
+    /// Fail-safe: an unknown/undetectable environment type resolves to Production so mutating
+    /// requests are blocked without --confirm. (DmlSafetyGuard.DetectProtectionLevel maps Unknown
+    /// to Development for SQL DML, which would fail open here — so api-request resolves Unknown locally.)
+    /// An explicit per-environment protection override always wins.
+    /// Exposed internal for unit testing of the write-guard fail-safe.
+    /// </summary>
+    internal static ProtectionLevel ResolveProtectionLevel(EnvironmentType envType, ProtectionLevel? configuredProtection)
+        => configuredProtection
+            ?? (envType == EnvironmentType.Unknown
+                ? ProtectionLevel.Production
+                : DmlSafetyGuard.DetectProtectionLevel(envType));
+
+    /// <summary>
+    /// Sends the request via the service and maps the response (or write-guard block) to an exit code.
+    /// I1: success body → stdout; non-2xx response and write-block errors → stderr.
+    /// Exposed internal for unit testing of AC-02 (exit codes) without live auth/network.
+    /// </summary>
+    internal static async Task<int> RunRequestAsync(
+        IRawWebApiService apiService,
+        RawWebApiRequest request,
+        bool include,
+        CancellationToken cancellationToken)
+    {
+        RawWebApiResponse response;
+        try
+        {
+            response = await apiService.SendAsync(request, cancellationToken: cancellationToken);
+        }
+        catch (PpdsException ex) when (ex.ErrorCode == "Api.WriteBlocked")
+        {
+            Console.Error.WriteLine($"Error: {ex.UserMessage}");
+            return ExitCodes.Failure; // 2 per spec
+        }
+
+        if (response.IsSuccess)
+        {
+            foreach (var line in FormatResponsePreamble(response, include))
+                Console.WriteLine(line);
+            if (!string.IsNullOrEmpty(response.Body))
+                Console.WriteLine(response.Body);
+            return ExitCodes.Success;
+        }
+
+        // Non-2xx: route entire response (preamble + body) to stderr so the
+        // stream is consistent and piping to tools like jq works on success only.
+        foreach (var line in FormatResponsePreamble(response, include))
+            Console.Error.WriteLine(line);
+        Console.Error.WriteLine(response.Body);
+        return 1; // non-2xx per spec
     }
 
     /// <summary>
