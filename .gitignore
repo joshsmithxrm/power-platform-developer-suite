@@ -136,3 +136,8 @@ __pycache__/
 # CI decodes the real private key from the PLUGINS_SNK_BASE64 secret at publish time.
 *.snk
 .claude/state/
+
+# understand-anything knowledge graph — generated, local-only exploration aid.
+# Regenerate with `/understand src`; view with `/understand-dashboard src`.
+# The durable, human-readable summary lives at docs/ONBOARDING.md (committed).
+.understand-anything/
