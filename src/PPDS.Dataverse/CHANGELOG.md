@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Metadata-authoring support for status reasons and local option sets** — `InsertStatusValue`/`UpdateOptionValue`/`DeleteOptionValue` request DTOs, `StatusReasonInfo`, and the shared `OptionValueDeriver` for publisher-prefix-based option value derivation, backing entity status-reason management and column-scoped (local) Choice option sets ([#1167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1167), [#1159](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1159), [#1160](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1160), [#1161](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1161)).
+
+### Fixed
+
+- **M:N relationship create** — populate `IntersectEntitySchemaName` on the create request (defaulting to the relationship schema name) so many-to-many relationship creation no longer fails with `Required field 'IntersectEntitySchemaName' is missing` ([#1018](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1018)).
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.7` series. Targets `net8.0`, `net9.0`, `net10.0`.
