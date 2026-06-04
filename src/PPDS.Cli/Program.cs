@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Api;
 using PPDS.Cli.Commands.Auth;
 using PPDS.Cli.Commands.Connections;
 using PPDS.Cli.Commands.ConnectionReferences;
@@ -89,6 +90,7 @@ public static class Program
             $"Documentation: {DocsCommand.DocsUrl}");
 
         // Add command groups
+        rootCommand.Subcommands.Add(ApiCommandGroup.Create());
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.CreateOrgAlias()); // 'org' alias for 'env'
