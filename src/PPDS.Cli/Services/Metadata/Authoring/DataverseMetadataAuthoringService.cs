@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -37,6 +38,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     private readonly ILogger<DataverseMetadataAuthoringService>? _logger;
     private readonly ICachedMetadataProvider? _cacheProvider;
     private readonly ConcurrentDictionary<string, string> _publisherPrefixCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _publisherOptionValuePrefixCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DataverseMetadataAuthoringService"/> class.
@@ -289,6 +291,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Creating column", request.SchemaName);
 
+        // #1161: derive values for local Choice options supplied as label-only (no explicit value).
+        await DeriveLocalOptionValuesAsync(request, ct).ConfigureAwait(false);
+
         var attribute = BuildAttributeMetadata(request);
 
         var sdkRequest = new CreateAttributeRequest
@@ -302,6 +307,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
 
         reporter?.ReportInfo($"Column '{request.SchemaName}' created on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Created column {SchemaName} on {Entity} with MetadataId {MetadataId}",
@@ -1092,6 +1100,511 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
     #endregion
 
+    #region Status Reasons
+
+    /// <inheritdoc />
+    public async Task<int> AddStatusReasonAsync(
+        AddStatusReasonRequest request,
+        IMetadataAuthoringProgressReporter? reporter = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.statusReason.add");
+
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.Label, "Label");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.SolutionUniqueName))
+            throw new MetadataValidationException(
+                MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --solution to determine the option value.",
+                "Value");
+
+        var existingReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        var existingValues = existingReasons.Select(r => r.Value).ToList();
+
+        int? optionPrefix = null;
+        if (!string.IsNullOrEmpty(request.SolutionUniqueName))
+            optionPrefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
+
+        var value = OptionValueDeriver.Derive(request.Value, optionPrefix, existingValues);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: AddStatusReason '{Label}' on '{Entity}' validated (derived value {Value})", request.Label, request.EntityLogicalName, value);
+            return value;
+        }
+
+        var sdkRequest = new InsertStatusValueRequest
+        {
+            EntityLogicalName = request.EntityLogicalName,
+            AttributeLogicalName = "statuscode",
+            StateCode = request.StateCode,
+            Value = value,
+            Label = new Label(request.Label, 1033),
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        InsertStatusValueResponse response;
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            response = (InsertStatusValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(
+                MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}': {ex.Message}",
+                ex);
+        }
+
+        _logger?.LogInformation("Added status reason '{Label}' with value {Value} to '{Entity}'", request.Label, response.NewOptionValue, request.EntityLogicalName);
+
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        return response.NewOptionValue;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entityLogicalName))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField, "EntityLogicalName is required.", "EntityLogicalName");
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+
+        var retrieveRequest = new RetrieveAttributeRequest
+        {
+            EntityLogicalName = entityLogicalName,
+            LogicalName = "statuscode"
+        };
+
+        OrganizationResponse retrieveResponse;
+        try
+        {
+            retrieveResponse = await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate, not be masked as a not-found error
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound, $"Could not retrieve statuscode attribute for '{entityLogicalName}': {ex.Message}", ex);
+        }
+
+        if (retrieveResponse is not RetrieveAttributeResponse retrieveAttrResponse
+            || retrieveAttrResponse.AttributeMetadata is not StatusAttributeMetadata statusAttr
+            || statusAttr.OptionSet?.Options == null)
+            return Array.Empty<StatusReasonInfo>();
+
+        var result = new List<StatusReasonInfo>();
+        foreach (var opt in statusAttr.OptionSet.Options)
+        {
+            if (opt is not StatusOptionMetadata statusOpt)
+                continue;
+
+            result.Add(new StatusReasonInfo
+            {
+                Value = statusOpt.Value ?? 0,
+                Label = statusOpt.Label?.UserLocalizedLabel?.Label
+                    ?? statusOpt.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                    ?? "",
+                StateCode = statusOpt.State ?? 0,
+                // Standard Dataverse entities use 0=Active, 1=Inactive; custom multi-state entities (state code >1) are out of scope for #1160
+                StateLabel = (statusOpt.State ?? 0) switch { 0 => "Active", 1 => "Inactive", var n => $"State{n}" },
+                Color = statusOpt.Color
+            });
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.statusReason.update");
+
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(
+                MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target status reason.",
+                "Value");
+
+        int targetValue;
+        string? currentLabel = null;
+
+        // Always list to get currentLabel — prevents blank-label clobber when NewLabel is null
+        var statusReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        if (request.Value.HasValue)
+        {
+            targetValue = request.Value.Value;
+            var valueMatch = statusReasons.FirstOrDefault(r => r.Value == targetValue);
+            if (valueMatch == null)
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.OptionNotFound,
+                    $"Status reason with value {targetValue} not found on '{request.EntityLogicalName}'.",
+                    "Value");
+            currentLabel = valueMatch.Label;
+        }
+        else
+        {
+            var match = statusReasons.FirstOrDefault(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.OptionNotFound,
+                    $"Status reason with label '{request.Label}' not found on '{request.EntityLogicalName}'.",
+                    "Label");
+
+            targetValue = match.Value;
+            currentLabel = match.Label;
+        }
+
+        var newLabel = request.NewLabel ?? currentLabel ?? "";
+
+        var sdkRequest = new SdkUpdateOptionValueRequest
+        {
+            Value = targetValue,
+            Label = new Label(newLabel, 1033),
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = "statuscode";
+
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        try
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(
+                MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}': {ex.Message}",
+                ex);
+        }
+
+        _logger?.LogInformation("Updated status reason (value {Value}) on '{Entity}'", targetValue, request.EntityLogicalName);
+
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveStatusReasonAsync(RemoveStatusReasonRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.statusReason.remove");
+
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(
+                MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target status reason.",
+                "Value");
+
+        var removeReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        int targetValue;
+
+        if (request.Value.HasValue)
+        {
+            targetValue = request.Value.Value;
+            if (!removeReasons.Any(r => r.Value == targetValue))
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.OptionNotFound,
+                    $"Status reason with value {targetValue} not found on '{request.EntityLogicalName}'.",
+                    "Value");
+        }
+        else
+        {
+            var match = removeReasons.FirstOrDefault(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.OptionNotFound,
+                    $"Status reason with label '{request.Label}' not found on '{request.EntityLogicalName}'.",
+                    "Label");
+
+            targetValue = match.Value;
+        }
+
+        var sdkRequest = new SdkDeleteOptionValueRequest
+        {
+            Value = targetValue,
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = "statuscode";
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        try
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(
+                MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}': {ex.Message}",
+                ex);
+        }
+
+        _logger?.LogInformation("Removed status reason (value {Value}) from '{Entity}'", targetValue, request.EntityLogicalName);
+
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+    }
+
+    #endregion
+
+    #region Local Column Options (#1161)
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+    {
+        _validator.ValidateRequiredString(entityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(columnLogicalName, "ColumnLogicalName");
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+
+        var retrieveRequest = new RetrieveAttributeRequest
+        {
+            EntityLogicalName = entityLogicalName,
+            LogicalName = columnLogicalName
+        };
+
+        OrganizationResponse retrieveResponse;
+        try
+        {
+            retrieveResponse = await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound,
+                $"Could not retrieve attribute '{columnLogicalName}' on '{entityLogicalName}': {ex.Message}", ex);
+        }
+
+        var optionSet = (retrieveResponse as RetrieveAttributeResponse)?.AttributeMetadata switch
+        {
+            PicklistAttributeMetadata p => p.OptionSet,
+            MultiSelectPicklistAttributeMetadata m => m.OptionSet,
+            _ => null
+        };
+
+        if (optionSet?.Options == null)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Attribute '{columnLogicalName}' on '{entityLogicalName}' is not a Choice/Choices column with a local option set.",
+                "ColumnLogicalName");
+
+        var result = new List<ColumnOptionInfo>();
+        foreach (var opt in optionSet.Options)
+        {
+            result.Add(new ColumnOptionInfo
+            {
+                Value = opt.Value ?? 0,
+                Label = opt.Label?.UserLocalizedLabel?.Label
+                    ?? opt.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                    ?? "",
+                Color = opt.Color
+            });
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> AddColumnOptionAsync(AddColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.add");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+        _validator.ValidateRequiredString(request.Label, "Label");
+
+        if (!request.Value.HasValue && string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide an explicit value or --solution to derive the option value.", "Value");
+
+        var existing = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var existingValues = existing.Select(o => o.Value).ToList();
+
+        int? optionPrefix = null;
+        if (!string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            optionPrefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
+
+        var value = OptionValueDeriver.Derive(request.Value, optionPrefix, existingValues);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: AddColumnOption '{Label}' to '{Entity}.{Column}' validated (derived value {Value})", request.Label, request.EntityLogicalName, request.ColumnLogicalName, value);
+            return value;
+        }
+
+        var sdkRequest = new InsertOptionValueRequest
+        {
+            Label = new Label(request.Label, 1033),
+            Value = value,
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        InsertOptionValueResponse response;
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Added local option {Value} to {Entity}.{Column}", response.NewOptionValue, request.EntityLogicalName, request.ColumnLogicalName);
+        return response.NewOptionValue;
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.update");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: UpdateColumnOption (value {Value}) on '{Entity}.{Column}' validated", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+            return;
+        }
+
+        var sdkRequest = new SdkUpdateOptionValueRequest
+        {
+            Value = target.Value,
+            Label = new Label(request.NewLabel ?? target.Label, 1033),
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
+
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Updated local option {Value} on {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveColumnOptionAsync(RemoveColumnOptionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _guard.EnsureCanMutate("metadata.columnOption.remove");
+        _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
+        _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: RemoveColumnOption (value {Value}) from '{Entity}.{Column}' validated", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+            return;
+        }
+
+        var sdkRequest = new SdkDeleteOptionValueRequest
+        {
+            Value = target.Value,
+            SolutionUniqueName = request.SolutionUniqueName
+        };
+        sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+        sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Removed local option {Value} from {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+    }
+
+    private static ColumnOptionInfo ResolveColumnOption(IReadOnlyList<ColumnOptionInfo> options, int? value, string? label, string entity, string column)
+    {
+        var match = value.HasValue
+            ? options.FirstOrDefault(o => o.Value == value.Value)
+            : options.FirstOrDefault(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase));
+
+        if (match == null)
+            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                value.HasValue
+                    ? $"Option with value {value.Value} not found on '{entity}.{column}'."
+                    : $"Option with label '{label}' not found on '{entity}.{column}'.",
+                value.HasValue ? "Value" : "Label");
+
+        return match;
+    }
+
+    #endregion
+
     #region Private Helpers
 
     private async Task<string> ResolvePublisherPrefixAsync(string solutionUniqueName, CancellationToken ct)
@@ -1126,7 +1639,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 "SolutionUniqueName");
         }
 
-        var publisherId = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid").Id;
+        var publisherRef = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
+            ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
+                $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName");
+        var publisherId = publisherRef.Id;
 
         // Query publisher for customization prefix
         var publisherQuery = new QueryExpression("publisher")
@@ -1267,19 +1783,65 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else if (request.Options != null && request.Options.Length > 0)
         {
-            // Create local option set
-            var optionSet = new OptionSetMetadata();
-            foreach (var opt in request.Options)
-            {
-                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
-            }
-            attr.OptionSet = optionSet;
+            attr.OptionSet = BuildLocalOptionSet(request.Options);
         }
 
         if (request.DefaultValue.HasValue)
             attr.DefaultFormValue = request.DefaultValue;
 
         return attr;
+    }
+
+    /// <summary>
+    /// Derives values for local Choice options supplied label-only (Value == 0) using the publisher
+    /// option-value prefix (#1161). No-op for global/option-set-name columns or when all values are explicit.
+    /// </summary>
+    private async Task DeriveLocalOptionValuesAsync(CreateColumnRequest request, CancellationToken ct)
+    {
+        if ((request.ColumnType != SchemaColumnType.Choice && request.ColumnType != SchemaColumnType.Choices)
+            || request.Options is not { Length: > 0 }
+            || !string.IsNullOrEmpty(request.OptionSetName))
+            return;
+
+        if (!request.Options.Any(o => o.Value == 0))
+            return; // all explicit
+
+        if (string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+            throw new MetadataValidationException(
+                MetadataErrorCodes.MissingRequiredField,
+                "Local Choice options supplied as label-only require --solution to derive option values.",
+                "Options");
+
+        var prefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
+        var assigned = request.Options.Where(o => o.Value != 0).Select(o => o.Value).ToList();
+        foreach (var opt in request.Options)
+        {
+            if (opt.Value != 0) continue;
+            var v = OptionValueDeriver.Derive(null, prefix, assigned);
+            opt.Value = v;
+            assigned.Add(v);
+        }
+    }
+
+    /// <summary>
+    /// Builds an inline (column-scoped) option set. IsGlobal MUST be explicitly false and
+    /// OptionSetType set, or Dataverse rejects column creation with "IsGlobal is not specified" (#1161).
+    /// </summary>
+    private static OptionSetMetadata BuildLocalOptionSet(OptionDefinition[] options)
+    {
+        var optionSet = new OptionSetMetadata
+        {
+            IsGlobal = false,
+            OptionSetType = OptionSetType.Picklist
+        };
+        foreach (var opt in options)
+        {
+            var om = new OptionMetadata(new Label(opt.Label, 1033), opt.Value);
+            if (!string.IsNullOrEmpty(opt.Color))
+                om.Color = opt.Color;
+            optionSet.Options.Add(om);
+        }
+        return optionSet;
     }
 
     private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request)
@@ -1292,12 +1854,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else if (request.Options != null && request.Options.Length > 0)
         {
-            var optionSet = new OptionSetMetadata();
-            foreach (var opt in request.Options)
-            {
-                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
-            }
-            attr.OptionSet = optionSet;
+            attr.OptionSet = BuildLocalOptionSet(request.Options);
         }
 
         if (request.DefaultValue.HasValue)
@@ -1499,6 +2056,60 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             "dateonly" => DateTimeFormat.DateOnly,
             _ => DateTimeFormat.DateAndTime
         };
+    }
+
+    private async Task<int> ResolvePublisherOptionValuePrefixAsync(string solutionUniqueName, CancellationToken ct)
+    {
+        if (_publisherOptionValuePrefixCache.TryGetValue(solutionUniqueName, out var cached))
+            return cached;
+
+        // D2: acquire, use, release per query — never hold a client across multiple operations
+        Guid publisherId;
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            var solutionQuery = new QueryExpression("solution")
+            {
+                ColumnSet = new ColumnSet("publisherid"),
+                Criteria = { Conditions = { new ConditionExpression("uniquename", ConditionOperator.Equal, solutionUniqueName) } }
+            };
+            var solutionResult = await client.RetrieveMultipleAsync(solutionQuery, ct).ConfigureAwait(false);
+            if (solutionResult.Entities.Count == 0)
+                throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound, $"Solution '{solutionUniqueName}' not found.", "SolutionUniqueName");
+            publisherId = (solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
+                ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
+                    $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName")).Id;
+        }
+
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            var publisherQuery = new QueryExpression("publisher")
+            {
+                ColumnSet = new ColumnSet("customizationoptionvalueprefix"),
+                Criteria = { Conditions = { new ConditionExpression("publisherid", ConditionOperator.Equal, publisherId) } }
+            };
+            var publisherResult = await client.RetrieveMultipleAsync(publisherQuery, ct).ConfigureAwait(false);
+            if (publisherResult.Entities.Count == 0)
+                throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound, $"Publisher for solution '{solutionUniqueName}' not found.", "SolutionUniqueName");
+            var prefix = publisherResult.Entities[0].GetAttributeValue<int?>("customizationoptionvalueprefix");
+            if (!prefix.HasValue)
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.MissingRequiredField,
+                    $"Publisher for solution '{solutionUniqueName}' has no option value prefix configured; pass --value to assign the option value explicitly.",
+                    "SolutionUniqueName");
+            _publisherOptionValuePrefixCache[solutionUniqueName] = prefix.Value;
+            return prefix.Value;
+        }
+    }
+
+    private async Task PublishEntityInternalAsync(string entityLogicalName, CancellationToken ct)
+    {
+        var parameterXml = $"<importexportxml><entities><entity>{entityLogicalName}</entity></entities></importexportxml>";
+        var publishRequest = new PublishXmlRequest { ParameterXml = parameterXml };
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        await client.ExecuteAsync(publishRequest, ct).ConfigureAwait(false);
+
+        _logger?.LogInformation("Published entity '{Entity}'", entityLogicalName);
     }
 
     #endregion

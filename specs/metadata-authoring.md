@@ -1,8 +1,8 @@
 # Metadata Authoring
 
-**Status:** Implemented
-**Last Updated:** 2026-04-01
-**Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
+**Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land)
+**Last Updated:** 2026-05-29
+**Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
 ---
@@ -18,6 +18,9 @@ Create, modify, and delete Dataverse schema objects — tables, columns, relatio
 - **Solution-aware:** Every authoring operation targets an explicit solution — no accidental Default Solution pollution
 - **Safe by default:** Dry-run validation, interactive delete confirmation (mirroring truncate safety pattern), and explicit publish step
 - **Multi-surface consistency:** Same `IMetadataAuthoringService` powers CLI, TUI, Extension, and MCP (Constitution A1, A2)
+- **Canonical, SDK-aligned command surface:** One canonical noun per schema object — `entity`, `attribute`, `optionset` — matching the SDK's singular `*Metadata` naming (`EntityMetadata`, `AttributeMetadata`, `OptionSetMetadata`), consistent with the already-canonical `relationship` and `key`. Redundant legacy nouns (`table`, `column`, `choice`) keep working as deprecation shims (#1159).
+- **Status reason management:** First-class add/list/remove/update of `statuscode` (status reason) option values on an entity — no more raw `InsertStatusValue` POSTs (#1160).
+- **Local choice columns:** `attribute create --type Choice` creates a column-scoped (local) option set by default, plus local option add/remove/update (#1161).
 
 ### Non-Goals
 
@@ -27,6 +30,9 @@ Create, modify, and delete Dataverse schema objects — tables, columns, relatio
 - Duplicate detection rules
 - Solution management (covered by `specs/solutions.md`)
 - Data operations (covered by `specs/data-explorer.md`, `specs/query.md`)
+- **`statecode` (state) authoring** — creating/deleting the Active/Inactive states themselves is not exposed; only their child status reasons (`statuscode`) are managed (#1160). Renaming existing state labels remains available via `UpdateStateValueAsync`.
+- **Adopting publisher-prefix value derivation on `optionset add-option` (global)** — global option-set option values retain the existing SDK auto-assignment behavior in this iteration. The shared `OptionValueDeriver` is applied to status reasons (#1160) and local column options (#1161) only; extending it to global option sets is a follow-up (see Roadmap).
+- **Read-side noun renames** — query commands (`entities`, `attributes`, `relationships`, `keys`, `optionsets`, plus `entity <name>` / `optionset <name>` lookups) are unchanged except where a noun gains authoring subcommands.
 
 ---
 
@@ -96,7 +102,7 @@ Phase 0 prerequisite. Mechanical rename across the entire codebase:
 
 ### IMetadataAuthoringService
 
-All methods accept `CancellationToken` (Constitution R2). Methods that make SDK calls (create, update, delete) accept `IProgressReporter?` for operation feedback (Constitution A3). All methods require `solutionUniqueName` via the request DTO. All methods wrap exceptions in `PpdsException` with `ErrorCode` (Constitution D4).
+All methods accept `CancellationToken` (Constitution R2). Methods that make SDK calls (create, update, delete) accept a progress reporter for operation feedback (Constitution A3). The authoring service uses the domain-specific `IMetadataAuthoringProgressReporter?` (defined in `src/PPDS.Dataverse/Metadata/Authoring/IMetadataAuthoringProgressReporter.cs` — phase/info reporting tailored to schema operations); the generic `IProgressReporter` shorthand in older prose and the `## Core Types` interface block refers to this same authoring reporter. New methods (`AddStatusReasonAsync`) follow the established `IMetadataAuthoringProgressReporter?` signature. All methods require `solutionUniqueName` via the request DTO. All methods wrap exceptions in `PpdsException` with `ErrorCode` (Constitution D4).
 
 #### Table Operations
 
@@ -212,6 +218,37 @@ Task UpdateStateValueAsync(UpdateStateValueRequest request, CancellationToken ct
 - `IsMultiSelect` (bool) — creates OptionSetType.Picklist or OptionSetType.MultiSelectPicklist. Determines whether columns referencing this choice must use `ColumnType.Choice` or `ColumnType.Choices`
 - `DryRun` (bool)
 
+**Local (column-scoped) option sets — #1161 bug fix.** When a `Choice`/`Choices` column is created with inline options (no global choice referenced), the SDK requires `OptionSetMetadata.IsGlobal` to be **explicitly** set to `false`; omitting it produces the Dataverse error *"IsGlobal is not specified"*. `BuildChoiceAttribute`/`BuildMultiSelectChoiceAttribute` MUST set `IsGlobal = false` and `OptionSetType = OptionSetType.Picklist` on the inline `OptionSetMetadata`. Local option add/remove/update reuse the existing `AddOptionValueAsync`/`UpdateOptionValueAsync`/`DeleteOptionValueAsync` methods, which already carry optional `EntityLogicalName` + `AttributeLogicalName` to scope the operation to a column's local set.
+
+#### Status Reason Operations (#1160)
+
+Status reasons are the option values of an entity's `statuscode` attribute (a `StatusAttributeMetadata`). Each value belongs to a state (`statecode`: 0 = Active, 1 = Inactive). Inserting a status reason requires the SDK `InsertStatusValueRequest` (which carries `StateCode`); the generic `InsertOptionValueRequest` cannot create them. List/update/remove reuse the entity-scoped option-value paths against `statuscode`.
+
+```csharp
+Task<int> AddStatusReasonAsync(AddStatusReasonRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default);
+Task UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default);
+Task RemoveStatusReasonAsync(RemoveStatusReasonRequest request, CancellationToken ct = default);
+```
+
+**AddStatusReasonRequest properties:**
+- `EntityLogicalName` (required)
+- `Label` (required)
+- `StateCode` (required, int) — 0 (Active) or 1 (Inactive); the parent state the reason belongs to
+- `Value` (int?) — explicit option value; when null, derived via `OptionValueDeriver` from `SolutionUniqueName`
+- `SolutionUniqueName` (string?) — required for value derivation when `Value` is null; also scopes the SDK request
+- `Color` (string?) — hex color
+- `Publish` (bool) — publish the entity after the change
+- `DryRun` (bool)
+
+**Value derivation (shared, #1160 + #1161):** explicit `Value` wins; else `SolutionUniqueName` → publisher option-value prefix × 10,000, advancing to the lowest free value at or above that base (skipping values already present on `statuscode`, including filling gaps); else fail with `MISSING_REQUIRED_FIELD` ("provide --value or --solution"). See `OptionValueDeriver` in Core Types. Collision behavior is explicit: an **explicit** `Value` that already exists on the set is rejected with `DUPLICATE_OPTION_VALUE`; a **derived** value auto-advances past existing values and never collides.
+
+**StatusReasonInfo (list projection):** `Value` (int), `Label`, `StateCode` (int), `StateLabel` (Active/Inactive), `Color`.
+
+**UpdateStatusReasonRequest:** `EntityLogicalName` (required); target by `Value` (int?) **or** `Label` (string?) — exactly one required; `NewLabel` (string?), `Color` (string?); `SolutionUniqueName` (string?); `Publish` (bool). Delegates to `UpdateOptionValueAsync` scoped to `statuscode`.
+
+**RemoveStatusReasonRequest:** `EntityLogicalName` (required); target by `Value` (int?) **or** `Label` (string?) — exactly one required; `SolutionUniqueName` (string?); `Publish` (bool). Delegates to `DeleteOptionValueAsync` scoped to `statuscode`.
+
 #### Alternate Key Operations
 
 ```csharp
@@ -244,6 +281,13 @@ All authoring operations perform local validation before making SDK calls. In dr
 | Option values are unique within the option set | Choices | `DUPLICATE_OPTION_VALUE` |
 | Entity exists (for column/relationship/key operations) | Columns, relationships, keys | `ENTITY_NOT_FOUND` |
 | ColumnType is not Lookup (use relationship creation instead) | Columns | `USE_RELATIONSHIP_FOR_LOOKUP` |
+| Local choice column sets `OptionSetMetadata.IsGlobal = false` explicitly | Choice/Choices columns with inline options | `IsGlobal` SDK fault (#1161) — prevented by fix |
+| Exactly one of `--value` / `--solution` (neither → missing; both → invalid) | `add-statusreason`, `attribute add-option` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
+| Exactly one of `--value` / `--label` (neither → missing; both → invalid) | `update-/remove-statusreason`, `attribute update-/remove-option` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
+| Exactly one of `--state` / `--state-code` (neither → missing; both → invalid) | `add-statusreason` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
+| `--choice` mutually exclusive with `--option`/`--options`/`--options-file` | `attribute create --type Choice` | `INVALID_CONSTRAINT` |
+| Explicit option value not already present on the target set | status reasons, local options | `DUPLICATE_OPTION_VALUE` |
+| Target status reason / option resolvable by value or label | `update-/remove-statusreason`, local option update/remove | `OPTION_NOT_FOUND` |
 
 ### Cache Invalidation
 
@@ -303,45 +347,100 @@ Schema delete operations follow the truncate safety pattern:
 **Extension:**
 - Confirmation dialog with dependency summary and "Delete" / "Cancel" buttons
 
+### Command Surface Rationalization (#1159)
+
+The authoring surface uses **one canonical noun per schema object**, matching the SDK's singular `*Metadata` types and the already-canonical `relationship`/`key`:
+
+| Schema object | Canonical noun | Deprecated alias (kept working) | SDK type |
+|---------------|----------------|---------------------------------|----------|
+| Table / entity | `entity` | `table` | `EntityMetadata` |
+| Column / field | `attribute` | `column` | `AttributeMetadata` |
+| Global option set | `optionset` (read+write) / `optionsets` (list) | `choice`, `choices` | `OptionSetMetadata` |
+| Relationship | `relationship` | — (already canonical) | `*RelationshipMetadata` |
+| Alternate key | `key` | — (already canonical) | `EntityKeyMetadata` |
+
+Per issue #1159, **both** the singular `choice` and the plural `choices` are deprecated aliases. `choices` (a plural that never had write verbs) is registered solely as a deprecation alias whose warning points to the canonical `optionset`/`optionsets`.
+
+**Verb placement.** Every authoring verb is a subcommand of its canonical noun (`entity create`, `attribute update`, `optionset add-option`) — verb-first, consistent with the existing `relationship`/`key` groups and with the deprecated `table`/`column`/`choice` groups being replaced. The nouns `entity` and `optionset` are **dual-purpose commands**: a bare positional token is the existing read lookup (`metadata entity account`, `metadata optionset new_status`), while a recognized verb token routes to the authoring subcommand (`metadata entity create …`). System.CommandLine binds a subcommand token before the parent's positional argument, so the two never collide except for the pathological case of a Dataverse object literally named `create`/`update`/`delete`/etc.; that edge is documented, not guarded. `attribute` has no read lookup today (reads go through the plural `attributes --entity <e>`), so it is a pure authoring group.
+
+**Deprecation shims.** The deprecated nouns `table`, `column`, `choice`, and `choices` remain registered with identical options and behavior (`choices` carries no write verbs — it only warns toward `optionsets`/`optionset`). Each deprecated subcommand, on invocation, writes a single deprecation warning to **stderr** (Constitution I1 — never stdout) naming the exact canonical replacement, then delegates to the **same** shared execute path as the canonical command (no logic duplication; Constitution A1/A2). Example:
+
+```
+warning: 'ppds metadata table create' is deprecated and will be removed in a future release.
+         Use 'ppds metadata entity create' instead.
+```
+
+The warning is suppressed in `--json` mode's data stream (it is stderr-only and never pollutes stdout). `ppds metadata --help` lists only the canonical nouns plus the publish alias; deprecated nouns are marked `(deprecated)` in their one-line description.
+
 ### Surface-Specific Behavior
 
 #### CLI Surface
 
-Noun-verb subcommands under `ppds metadata`:
+Canonical noun-verb subcommands under `ppds metadata`. Deprecated forms (`table`/`column`/`choice`) accept the identical flags and emit the stderr deprecation warning above.
 
-**Table commands:**
+**Entity commands (was `table`):**
 ```bash
-ppds metadata table create --solution <name> --name <schema> --display-name <name> --plural-name <name> [options]
-ppds metadata table update --solution <name> --entity <name> [property flags]
-ppds metadata table delete --solution <name> --entity <name> [--force] [--dry-run]
+ppds metadata entity <name>                                      # read lookup (unchanged)
+ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [options]
+ppds metadata entity update --solution <s> --entity <name> [property flags]
+ppds metadata entity delete --solution <s> --entity <name> [--force] [--dry-run]
 ```
 
-**Column commands:**
+**Status reason commands (#1160, new — on `entity`):**
 ```bash
-ppds metadata column create --solution <name> --entity <name> --name <schema> --display-name <name> --type <type> [type-specific options]
-ppds metadata column update --solution <name> --entity <name> --column <name> [property flags]
-ppds metadata column delete --solution <name> --entity <name> --column <name> [--force] [--dry-run]
+ppds metadata entity add-statusreason --entity <name> --label <label> (--value <int> | --solution <s>) [--state Active|Inactive | --state-code 0|1] [--color <#hex>] [--publish] [--dry-run]
+ppds metadata entity list-statusreasons --entity <name>
+ppds metadata entity update-statusreason --entity <name> (--value <int> | --label <label>) [--new-label <label>] [--color <#hex>] [--publish]
+ppds metadata entity remove-statusreason --entity <name> (--value <int> | --label <label>) [--force] [--publish]
 ```
 
-**Relationship commands:**
+The status-reason verbs identify the entity with the `--entity <name>` flag (consistent with `entity update`/`entity delete` and with `attribute`/`key` commands), not a bare positional, so they never contend with the `entity <name>` read lookup. `--state` and `--state-code` are mutually exclusive (`--state` maps Active→0, Inactive→1); one is required for `add`. `add` requires exactly one of `--value` / `--solution`; `update`/`remove` require exactly one of `--value` / `--label` to target the reason.
+
+**Attribute commands (was `column`):**
+```bash
+ppds metadata attribute create --solution <s> --entity <name> --name <schema> --display-name <n> --type <type> [type-specific options]
+ppds metadata attribute update --solution <s> --entity <name> --column <name> [property flags]
+ppds metadata attribute delete --solution <s> --entity <name> --column <name> [--force] [--dry-run]
+```
+
+**Local Choice column creation + local option management (#1161, on `attribute`):**
+```bash
+# Local (column-scoped) option set — DEFAULT when --option/--options/--options-file given:
+ppds metadata attribute create --solution <s> --entity <e> --name <schema> --display-name <n> --type Choice \
+    --option "Label[:Value][:#Color]" [--option ...] [--default-value <int>] [--publish]
+ppds metadata attribute create ... --type Choice --options-file <path.json> [--publish]
+# Attach to an existing GLOBAL option set (mutually exclusive with --option/--options/--options-file):
+ppds metadata attribute create ... --type Choice --choice <global-optionset-name> [--publish]
+
+ppds metadata attribute add-option --solution <s> --entity <e> --column <c> --label <l> (--value <int> | --solution <s>) [--color <#hex>] [--publish]
+ppds metadata attribute update-option --solution <s> --entity <e> --column <c> (--value <int> | --label <l>) [--new-label <l>] [--color <#hex>] [--publish]
+ppds metadata attribute remove-option --solution <s> --entity <e> --column <c> (--value <int> | --label <l>) [--force] [--publish]
+```
+
+- `--option` (repeatable) uses `Label[:Value][:#Color]` — label required, value/color optional; omitted values are derived (auto-assigned by the SDK at create time when no `--solution` derivation applies, matching today's local-create behavior). `--options-file` is a JSON array of `{ "label", "value"?, "color"? }`. `--options` (legacy `"Label1=1,Label2=2"` CSV) remains accepted as a synonym for `--option` and maps to the same local set.
+- `--choice <name>` replaces and supersedes the legacy `--option-set-name` flag (kept as a hidden deprecated alias) for attaching to a global option set. `--choice` is mutually exclusive with `--option`/`--options`/`--options-file`; supplying both is a validation error.
+- `add-option` derives the new value via the shared `OptionValueDeriver` (explicit `--value` wins; else `--solution` prefix × 10,000 over the column's current local options; else SDK auto-assign). `update-option`/`remove-option` target by `--value` or `--label`.
+
+**Relationship commands (unchanged):**
 ```bash
 ppds metadata relationship create --solution <name> --from <entity> --to <entity> --type one-to-many|many-to-many --name <schema> [options]
 ppds metadata relationship update --solution <name> --name <schema> [--cascade-delete <behavior>] [--cascade-assign <behavior>] [options]
 ppds metadata relationship delete --solution <name> --name <schema> [--force] [--dry-run]
 ```
 
-**Choice commands:**
+**Option set commands (was `choice` — global option sets):**
 ```bash
-ppds metadata choice create --solution <name> --name <schema> --display-name <name> --options "Label1=1,Label2=2" [options]
-ppds metadata choice update --solution <name> --name <name> [property flags]
-ppds metadata choice delete --solution <name> --name <name> [--force] [--dry-run]
-ppds metadata choice add-option --solution <name> --name <name> --label <label> --value <int> [--color <hex>]
-ppds metadata choice update-option --solution <name> --name <name> --value <int> --label <new-label>
-ppds metadata choice remove-option --solution <name> --name <name> --value <int> [--force]
-ppds metadata choice reorder --solution <name> --name <name> --order "1,3,2,4"
+ppds metadata optionset <name>                                   # read lookup (unchanged)
+ppds metadata optionset create --solution <s> --name <schema> --display-name <n> --options "Label1=1,Label2=2" [options]
+ppds metadata optionset update --solution <s> --name <name> [property flags]
+ppds metadata optionset delete --solution <s> --name <name> [--force] [--dry-run]
+ppds metadata optionset add-option --solution <s> --name <name> --label <label> [--value <int>] [--color <hex>]
+ppds metadata optionset update-option --solution <s> --name <name> --value <int> --label <new-label>
+ppds metadata optionset remove-option --solution <s> --name <name> --value <int> [--force]
+ppds metadata optionset reorder --solution <s> --name <name> --order "1,3,2,4"
 ```
 
-**Key commands:**
+**Key commands (unchanged):**
 ```bash
 ppds metadata key create --solution <name> --entity <name> --name <schema> --display-name <name> --attributes "attr1,attr2"
 ppds metadata key delete --solution <name> --entity <name> --name <name> [--force] [--dry-run]
@@ -353,9 +452,9 @@ ppds metadata key reactivate --solution <name> --entity <name> --name <name>
 ppds metadata publish <entity>... [--solution <name>]
 ```
 
-**Shared flags:** `--dry-run`, `--force` (delete only), `--profile`, `--environment`, `--json`
+**Shared flags:** `--dry-run`, `--force` (delete/remove only), `--publish` (authoring verbs that change live metadata), `--profile`, `--environment`, `--json`
 
-**Output:** Text mode writes status to stderr, structured results to stdout (Constitution I1). JSON mode returns full result objects.
+**Output:** Text mode writes status (including deprecation warnings) to stderr, structured results to stdout (Constitution I1). JSON mode returns full result objects on stdout.
 
 #### TUI Surface
 
@@ -426,7 +525,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-05 | `CreateOneToManyAsync` creates a 1:N relationship with lookup column and cascade configuration | `SchemaValidatorTests.ValidateCreateOneToManyRequest_ValidRequest_DoesNotThrow` | ✅ |
 | AC-06 | `CreateManyToManyAsync` creates an N:N relationship with intersect entity. `IntersectEntitySchemaName` is set on the SDK `CreateManyToManyRequest` (not the metadata) and defaults to `SchemaName` when caller omits it. Issue #1008. | `MetadataAuthoringServiceTests.CreateManyToManyAsync_OmittedIntersect_DefaultsToSchemaNameOnSdkRequest`, `MetadataAuthoringServiceTests.CreateManyToManyAsync_ExplicitIntersect_PassesThroughOnSdkRequest`, `SchemaValidatorTests.ValidateCreateManyToManyRequest_ResolvedIntersectMissing_ThrowsMissingRequiredField`, `MetadataRelationshipCreateE2ETests.CreateManyToMany_OmittedIntersect_DefaultsFromName_Succeeds` | ✅ |
 | AC-07 | `CreateGlobalChoiceAsync` creates a global option set with initial values | `CacheInvalidationTests.CreateGlobalChoice_InvalidatesGlobalOptionSets` | ✅ |
-| AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set | — | ❌ |
+| AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set (local path is now load-bearing for #1161 — AC-55) | `MetadataAuthoringServiceTests.AddOptionValueAsync_GlobalAndLocal_InsertsViaInsertOptionValue` | ❌ |
 | AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |
 | AC-10 | `ReactivateKeyAsync` retries a failed key index creation | — | ❌ |
 | AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting | `MetadataAuthoringServiceTests.DeleteTableAsync_DryRun_DoesNotCallSdk` | ✅ |
@@ -455,6 +554,30 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-34 | Extension Metadata Browser supports click-to-edit on mutable properties, calling update RPC endpoints | `metadataBrowserPanel.test.ts` (message contracts) | ✅ |
 | AC-35 | Validation rejects `ColumnType.Lookup` with `USE_RELATIONSHIP_FOR_LOOKUP` directing user to create a relationship | `MetadataAuthoringServiceTests.CreateColumnAsync_LookupType_ThrowsValidationException` | ✅ |
 | AC-36 | Validation rejects key with 0 or >16 attributes with `INVALID_KEY_ATTRIBUTE_COUNT` | `SchemaValidatorTests.ValidateCreateKeyRequest_ZeroAttributes_ThrowsWithInvalidKeyAttributeCount` | ✅ |
+| AC-37 | `ppds metadata entity create/update/delete` exist as canonical subcommands of `entity` with the same flags as the former `table` commands | `MetadataEntityCommandTests.Entity_HasCreateUpdateDeleteSubcommands` | ❌ |
+| AC-38 | Bare `ppds metadata entity <name>` still performs the read lookup (positional arg) when no verb subcommand matches | `MetadataEntityCommandTests.Entity_BarePositional_RoutesToQuery` | ❌ |
+| AC-39 | `ppds metadata attribute create/update/delete` exist as canonical subcommands (former `column` commands) | `MetadataAttributeCommandTests.Attribute_HasCreateUpdateDeleteSubcommands` | ❌ |
+| AC-40 | `ppds metadata optionset create/update/delete/add-option/update-option/remove-option/reorder` exist as canonical subcommands (former global `choice` commands); bare `optionset <name>` still queries | `MetadataOptionSetCommandTests.OptionSet_HasWriteSubcommandsAndQuery` | ❌ |
+| AC-41 | Deprecated `table`/`column`/`choice` subcommands still execute and write a deprecation warning to **stderr** naming the exact canonical replacement command | `MetadataDeprecationTests.DeprecatedNoun_WritesCanonicalReplacementToStderr` | ❌ |
+| AC-42 | Deprecation warnings never appear on stdout, including in `--json` mode (stdout stays valid JSON) | `MetadataDeprecationTests.DeprecatedNoun_JsonMode_StdoutHasNoWarning` | ❌ |
+| AC-43 | Deprecated and canonical commands delegate to one shared execute path (no logic duplication; A1/A2) | `MetadataDeprecationTests.DeprecatedAndCanonical_ShareExecutePath` | ❌ |
+| AC-44 | All internal consumers (skills, scripts, tests, docs) reference canonical nouns; no non-deprecation reference to `metadata table/column/choice` remains in-repo | `tests/test_metadata_canonical_nouns.py` | ❌ |
+| AC-45 | `AddStatusReasonAsync` inserts a `statuscode` value via `InsertStatusValueRequest` with the given `StateCode`, returning the assigned value | `MetadataStatusReasonServiceTests.AddStatusReason_InsertsViaInsertStatusValue` | ❌ |
+| AC-46 | `add-statusreason` wires the value choice through `OptionValueDeriver` (explicit `--value` used as-is; `--solution`-only derives; neither → `MISSING_REQUIRED_FIELD`) — gap-fill/advance-past-collision semantics are the unit-level responsibility of AC-57 | `MetadataStatusReasonServiceTests.AddStatusReason_DelegatesToDeriver` | ❌ |
+| AC-47 | `add-statusreason` with an explicit `--value` already present on `statuscode` fails `DUPLICATE_OPTION_VALUE` | `MetadataStatusReasonServiceTests.AddStatusReason_ExplicitCollision_Throws` | ❌ |
+| AC-48 | `list-statusreasons` returns each `statuscode` value with label, value, state code, state label, and color | `MetadataStatusReasonServiceTests.ListStatusReasons_ProjectsAllFields` | ❌ |
+| AC-49 | `update-statusreason` / `remove-statusreason` target by `--value` or `--label` and fail `MISSING_REQUIRED_FIELD` when neither given, `OPTION_NOT_FOUND` when unresolved | `MetadataStatusReasonServiceTests.UpdateRemoveStatusReason_Targeting` | ❌ |
+| AC-50 | `add-statusreason` requires exactly one of `--state` / `--state-code`; `--state` maps Active→0, Inactive→1 | `MetadataStatusReasonCommandTests.AddStatusReason_StateFlags` | ❌ |
+| AC-51 | Creating a `Choice` column with inline `--option`(s) sets `OptionSetMetadata.IsGlobal = false` (and `OptionSetType.Picklist`) and succeeds (no "IsGlobal is not specified" fault) | `CreateColumnTypeTests.Choice_WithLocalOptions_SetsIsGlobalFalse` | ✅ |
+| AC-52 | Creating a `Choices` (multi-select) column with inline options sets `IsGlobal = false` and succeeds | `CreateColumnTypeTests.Choices_WithLocalOptions_SetsIsGlobalFalse` | ✅ |
+| AC-53 | `attribute create --type Choice --choice <global>` attaches the column to an existing global option set; `--choice` with `--option/--options/--options-file` is rejected `INVALID_CONSTRAINT` | `MetadataAttributeOptionParseTests.Create_ChoiceWithLocalOptions_ReturnsValidationError` | ✅ |
+| AC-54 | `--option "Label[:Value][:#Color]"` (repeatable) and `--options-file <json>` parse into local option definitions (incl. color); legacy `--options` CSV still accepted | `MetadataAttributeOptionParseTests.ParseOptionSpecs_*`, `CreateColumnTypeTests.Choice_WithLocalOptionColor_AppliesColor` | ✅ |
+| AC-55 | `attribute add-option` derives the local option value via the same `OptionValueDeriver` (explicit `--value` wins; `--solution` derives; neither → `MISSING_REQUIRED_FIELD`); inserts scoped to entity+attribute | `MetadataLocalOptionServiceTests.AddColumnOption_ExplicitValue_InsertsScopedToColumn`, `AddColumnOption_NeitherValueNorSolution_Throws` | ✅ |
+| AC-56 | `attribute update-option` / `remove-option` target a local option by `--value` or `--label` (→ `OPTION_NOT_FOUND` when unresolved), scoped to the column's local set | `MetadataLocalOptionServiceTests.UpdateColumnOption_ByValue_UpdatesScoped`, `RemoveColumnOption_ByLabel_ResolvesAndDeletes`, `RemoveColumnOption_ValueNotFound_ThrowsOptionNotFound` | ✅ |
+| AC-57 | `OptionValueDeriver.Derive` is a single shared helper used by both status-reason add and local-option add; unit tests cover explicit-wins, prefix derivation, gap-fill, collision, and missing-input cases | `OptionValueDeriverTests` | ✅ |
+| AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `attribute create`/`add-/update-/remove-option` and status-reason verbs via `PublishEntityInternalAsync`) | — (wired; live-publish covered by Integration) | ❌ |
+| AC-59 | `ppds metadata --help` lists the canonical nouns and marks deprecated nouns (`table`, `column`, `choice`, `choices`) `(deprecated)` in their one-line description | `MetadataDeprecationTests.MetadataHelp_MarksDeprecatedNouns` | ❌ |
+| AC-60 | `entity --help` lists the status-reason subcommands; `attribute create --help` documents `--option`/`--choice`/derivation; each new subcommand exposes accurate `--help` | `MetadataHelpCoverageTests.NewSubcommands_HaveHelp` | ❌ |
 
 ### Edge Cases
 
@@ -511,12 +634,44 @@ public interface IMetadataAuthoringService
     Task ReorderOptionsAsync(ReorderOptionsRequest request, CancellationToken ct = default);
     Task UpdateStateValueAsync(UpdateStateValueRequest request, CancellationToken ct = default);
 
+    // Status Reasons (#1160)
+    Task<int> AddStatusReasonAsync(AddStatusReasonRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default);
+    Task UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default);
+    Task RemoveStatusReasonAsync(RemoveStatusReasonRequest request, CancellationToken ct = default);
+
     // Alternate Keys
     Task<CreateKeyResult> CreateKeyAsync(CreateKeyRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
     Task DeleteKeyAsync(DeleteKeyRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
     Task ReactivateKeyAsync(ReactivateKeyRequest request, CancellationToken ct = default);
 }
 ```
+
+### OptionValueDeriver (shared — #1160 + #1161)
+
+**Code:** `src/PPDS.Dataverse/Metadata/Authoring/OptionValueDeriver.cs`
+
+Single, pure, unit-testable helper that both status-reason add and local-column option-add use to choose an option value. Owner-mandated single source of truth so both surfaces behave identically. Pure logic: prefix resolution and reading the current option values happen in the service; the deriver only chooses.
+
+```csharp
+public static class OptionValueDeriver
+{
+    /// <summary>
+    /// Chooses an option value. Throws MetadataValidationException on collision or missing inputs.
+    /// </summary>
+    /// <param name="explicitValue">--value, if supplied (wins).</param>
+    /// <param name="publisherOptionPrefix">Publisher customizationoptionvalueprefix, if a solution was supplied for derivation.</param>
+    /// <param name="existingValues">Values already on the target option set (statuscode set, or the column's local set).</param>
+    public static int Derive(int? explicitValue, int? publisherOptionPrefix, IReadOnlyCollection<int> existingValues);
+}
+```
+
+**Algorithm:**
+1. `explicitValue` present → if `existingValues` contains it, throw `DUPLICATE_OPTION_VALUE`; else return it.
+2. else `publisherOptionPrefix` present → `base = publisherOptionPrefix * 10_000`; return the lowest integer `>= base` not in `existingValues` (fills gaps, advances past collisions — never collides).
+3. else → throw `MISSING_REQUIRED_FIELD` ("provide --value or --solution").
+
+The service resolves `publisherOptionPrefix` from the solution's publisher (`customizationoptionvalueprefix`), reusing the publisher-lookup pattern already in `ResolvePublisherPrefixAsync` (extended to also read the option-value prefix).
 
 ### Usage Pattern
 
@@ -559,6 +714,10 @@ var result = await authoringService.CreateTableAsync(new CreateTableRequest
 | `DEPENDENCY_CONFLICT` | Object has dependencies preventing deletion | Remove dependencies first or use cascade |
 | `INVALID_KEY_ATTRIBUTE_COUNT` | Key has 0 or >16 attributes | Use 1–16 attributes per key |
 | `USE_RELATIONSHIP_FOR_LOOKUP` | Attempted to create Lookup column directly | Use `CreateOneToManyAsync` instead |
+| `OPTION_NOT_FOUND` | A status reason / local option targeted by `--value` or `--label` does not resolve to an existing option on the set | List the set (`list-statusreasons` / inspect the column) and target an existing value or label |
+| `MISSING_REQUIRED_FIELD` | An "exactly one of" pair has **neither** member supplied (`--value`/`--solution`, `--value`/`--label`, `--state`/`--state-code`) | Supply exactly one of the pair |
+
+All `ErrorCode`s above are carried on `MetadataValidationException`, which derives from `PpdsException` (Constitution D4): `MetadataValidationException : PpdsException`. `DUPLICATE_OPTION_VALUE` (existing) is reused for collisions on status reasons and local options.
 
 ### Recovery Strategies
 
@@ -626,6 +785,49 @@ var result = await authoringService.CreateTableAsync(new CreateTableRequest
 
 **Rationale:** MCP is designed for AI agent workflows. An AI agent accidentally deleting a table is catastrophic and not easily recoverable. The interactive confirmation pattern (typed text) doesn't translate well to MCP tool invocation. If an AI agent needs to delete schema, it can instruct the user to run the CLI command.
 
+### Why canonical nouns `entity` / `attribute` / `optionset`? (#1159)
+
+**Context:** The authoring surface grew organically with Maker-UI-flavored nouns (`table`, `column`, `choice`) alongside SDK-flavored ones (`relationship`, `key`, `optionset`). Two vocabularies for one surface confuse users and internal callers.
+
+**Decision:** One canonical noun per schema object, aligned to the SDK's singular `*Metadata` type names: `entity` (`EntityMetadata`), `attribute` (`AttributeMetadata`), `optionset` (`OptionSetMetadata`). `relationship` and `key` already follow this; `table`/`column`/`choice` are the stragglers and become deprecation shims.
+
+**Alternatives considered:**
+- Keep Maker nouns (`table`/`column`/`choice`) as canonical — rejected: diverges from the SDK types the code already uses, and from the already-canonical `relationship`/`key`.
+- Hard rename with no shims — rejected: breaks existing user scripts pre-v1 with no migration runway.
+
+**Consequences:** Positive — one vocabulary, SDK-aligned, discoverable. Negative — three deprecation shims to carry until a future removal; a one-time sweep of internal consumers.
+
+### Why verb-first subcommands and `--entity` flag for status reasons, not `entity <name> add-statusreason`? (#1160) — DECIDED: Form A (owner-ratified 2026-05-29)
+
+**Context:** Both issue bodies (#1159, #1160) and the owner brief sketch `entity <name> add-statusreason` — a noun that takes a positional name *and then* hosts a verb. System.CommandLine (2.x, the new `Subcommands`/`SetAction` API this CLI uses) resolves a subcommand token *before* binding the parent's positional argument, so the literal `entity <name> <verb>` ordering (name first, verb second) is not natively parseable; only `entity <verb> …` is.
+
+**Decision:** **Form A** — status-reason verbs are verb-first subcommands of `entity` (`entity add-statusreason`, `entity list-statusreasons`, …) that identify the entity with the `--entity <name>` flag. The bare `entity <name>` read lookup is preserved via the parent command's positional argument + default action; a recognized verb routes to the subcommand, a bare token routes to the lookup.
+
+**Forms considered (owner ratified A on 2026-05-29):**
+| Form | Example | Parseable | Trade-off |
+|------|---------|-----------|-----------|
+| **A — CHOSEN** | `entity add-statusreason --entity hsl_appt --label …` | yes | Consistent with `entity update/delete`, `attribute`, `key` (all use `--entity`). Verbose. |
+| **B** | `entity add-statusreason hsl_appt --label …` | yes | Entity as positional on the verb; reads slightly oddly next to other positionals. |
+| **C (issue literal)** | `entity hsl_appt add-statusreason --label …` | **not** natively in System.CommandLine | Requires a custom positional-then-dispatch parser on `entity`, sacrificing per-verb `--help`/validation. |
+
+**Falsification:** a future System.CommandLine version supports positional-then-subcommand cleanly, or operator usage data shows Form A's `--entity` flag is a friction point.
+
+### Why explicit `IsGlobal = false` for local choice columns? (#1161)
+
+**Context:** `attribute create --type Choice --option …` failed with the Dataverse fault *"IsGlobal is not specified"*. Root cause: `BuildChoiceAttribute` constructed `new OptionSetMetadata()` for the inline (local) set without setting `IsGlobal`, and the SDK does not default it for inline option sets.
+
+**Decision:** Inline/local option sets explicitly set `IsGlobal = false` and `OptionSetType = OptionSetType.Picklist`. Global attach (`--choice <name>`) continues to set `IsGlobal = true` with the referenced name.
+
+**Consequences:** Local choice columns work as designed; the global-vs-local intent is explicit at the construction site rather than relying on SDK defaults that don't exist.
+
+### Why one shared `OptionValueDeriver`? (#1160 + #1161)
+
+**Context:** Both status-reason add and local-column option-add must turn `--value`/`--solution` into a concrete option value with identical collision and prefix semantics. Two copies would drift.
+
+**Decision:** A single pure static `OptionValueDeriver.Derive(explicitValue, publisherOptionPrefix, existingValues)` is the only place that chooses a value. Owner explicitly required one helper. The service supplies the prefix (from `customizationoptionvalueprefix`) and the current values; the deriver chooses; collision behavior is explicit (explicit value collides → throw; derived value advances past collisions and fills gaps).
+
+**Consequences:** Identical behavior across both surfaces, one set of unit tests (AC-57), trivially extensible to global option sets later (Roadmap).
+
 ---
 
 ## Related Specs
@@ -643,3 +845,12 @@ var result = await authoringService.CreateTableAsync(new CreateTableRequest
 |------|--------|
 | 2026-03-31 | Initial spec |
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
+| 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
+
+---
+
+## Roadmap
+
+- Extend `OptionValueDeriver` (publisher-prefix × 10,000 derivation) to `optionset add-option` (global option sets) for uniform value behavior across global and local/status sets.
+- Surface status-reason and local-option management through TUI / Extension / MCP (this iteration ships the Application Service + CLI; the service is surface-agnostic per A1/A2).
+- Remove the `table`/`column`/`choice` deprecation shims in a future release once internal and external callers have migrated.

@@ -1,25 +1,19 @@
 using System.CommandLine;
-using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
-using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Infrastructure.Output;
-using PPDS.Dataverse.Metadata;
-using PPDS.Dataverse.Metadata.Authoring;
 
-using PPDS.Cli.Services.Metadata.Authoring;
 namespace PPDS.Cli.Commands.Metadata.Choice;
 
 /// <summary>
-/// Command group for Dataverse global choice (option set) authoring.
+/// Deprecation shim for the 'choice' command — delegates to 'optionset' canonical commands.
 /// </summary>
 public static class ChoiceCommandGroup
 {
     /// <summary>
-    /// Creates the 'choice' command group with subcommands.
+    /// Creates the 'choice' command group with subcommands (deprecated — use 'optionset').
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("choice", "Create, update, or delete global choices (option sets)");
+        var command = new Command("choice", "Manage global choices/option sets (deprecated — use 'optionset')");
 
         command.Subcommands.Add(CreateCreateCommand());
         command.Subcommands.Add(CreateUpdateCommand());
@@ -95,113 +89,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteCreateAsync(
+            DeprecationWarning.Write("ppds metadata choice create", "ppds metadata optionset create");
+            return await Metadata.OptionSetCommand.ExecuteCreateAsync(
                 solution, name, displayName, optionsRaw, description, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    internal static OptionDefinition[] ParseOptionDefinitions(string raw)
-    {
-        var result = new List<OptionDefinition>();
-
-        foreach (var pair in raw.Split(','))
-        {
-            var trimmed = pair.Trim();
-            // Split on the LAST '=' so labels can contain '=' characters
-            var lastEquals = trimmed.LastIndexOf('=');
-            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
-            {
-                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
-            }
-        }
-
-        return result.ToArray();
-    }
-
-    private static async Task<int> ExecuteCreateAsync(
-        string solution,
-        string name,
-        string displayName,
-        string optionsRaw,
-        string? description,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            var options = ParseOptionDefinitions(optionsRaw);
-
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Validating choice creation..." : "Creating global choice...");
-            }
-
-            var request = new CreateGlobalChoiceRequest
-            {
-                SolutionUniqueName = solution,
-                SchemaName = name,
-                DisplayName = displayName,
-                Description = description ?? "",
-                Options = options,
-                DryRun = dryRun
-            };
-
-            var result = await authoringService.CreateGlobalChoiceAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(result);
-            }
-            else
-            {
-                if (dryRun)
-                {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Global choice '{result.Name}' created successfully.");
-                }
-
-                foreach (var msg in result.ValidationMessages)
-                {
-                    Console.Error.WriteLine($"  [{msg.Rule}] {msg.Field}: {msg.Message}");
-                }
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "creating global choice", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateUpdateCommand()
@@ -258,93 +152,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteUpdateAsync(
+            DeprecationWarning.Write("ppds metadata choice update", "ppds metadata optionset update");
+            return await Metadata.OptionSetCommand.ExecuteUpdateAsync(
                 solution, name, displayName, description, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteUpdateAsync(
-        string solution,
-        string name,
-        string? displayName,
-        string? description,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Validating choice update..." : $"Updating global choice '{name}'...");
-            }
-
-            var request = new UpdateGlobalChoiceRequest
-            {
-                SolutionUniqueName = solution,
-                Name = name,
-                DisplayName = displayName,
-                Description = description,
-                DryRun = dryRun
-            };
-
-            await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
-
-            // Global choices aren't entity-bound; suggest publish --all.
-            const string publishHint = "ppds publish --all";
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new
-                {
-                    name,
-                    updated = true,
-                    dryRun,
-                    requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
-                });
-            }
-            else if (dryRun)
-            {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-            }
-            else
-            {
-                Console.Error.WriteLine($"Global choice '{name}' updated. Run '{publishHint}' to publish changes.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "updating global choice", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateDeleteCommand()
@@ -395,135 +209,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteDeleteAsync(
+            DeprecationWarning.Write("ppds metadata choice delete", "ppds metadata optionset delete");
+            return await Metadata.OptionSetCommand.ExecuteDeleteAsync(
                 solution, name, force, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteDeleteAsync(
-        string solution,
-        string name,
-        bool force,
-        bool dryRun,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-            }
-
-            // Dry-run first
-            var dryRunRequest = new DeleteGlobalChoiceRequest
-            {
-                SolutionUniqueName = solution,
-                Name = name,
-                DryRun = true
-            };
-
-            await authoringService.DeleteGlobalChoiceAsync(dryRunRequest, ct: cancellationToken);
-
-            if (dryRun)
-            {
-                if (globalOptions.IsJsonMode)
-                {
-                    writer.WriteSuccess(new { name, dryRun = true });
-                }
-                else
-                {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
-                }
-
-                return ExitCodes.Success;
-            }
-
-            // Confirmation prompt
-            if (!force)
-            {
-                if (!Console.IsInputRedirected)
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will permanently delete global choice '{name}'.");
-                    Console.ResetColor();
-                    Console.Error.WriteLine();
-
-                    var expectedConfirmation = $"DELETE CHOICE {name}";
-                    Console.Error.Write($"Type '{expectedConfirmation}' to confirm, or Ctrl+C to cancel: ");
-                    var confirmation = Console.ReadLine();
-
-                    if (confirmation != expectedConfirmation)
-                    {
-                        Console.Error.WriteLine("Cancelled.");
-                        return ExitCodes.Success;
-                    }
-
-                    Console.Error.WriteLine();
-                }
-                else
-                {
-                    writer.WriteError(StructuredError.Create(
-                        "CONFIRMATION_REQUIRED",
-                        "Use --force to skip confirmation in non-interactive mode"));
-                    return ExitCodes.ConfirmationRequired;
-                }
-            }
-
-            if (!globalOptions.IsJsonMode)
-            {
-                Console.Error.WriteLine($"Deleting global choice '{name}'...");
-            }
-
-            var deleteRequest = new DeleteGlobalChoiceRequest
-            {
-                SolutionUniqueName = solution,
-                Name = name,
-                DryRun = false
-            };
-
-            await authoringService.DeleteGlobalChoiceAsync(deleteRequest, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { name, deleted = true });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Global choice '{name}' deleted successfully.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "deleting global choice", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateAddOptionCommand()
@@ -580,79 +272,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAddOptionAsync(
+            DeprecationWarning.Write("ppds metadata choice add-option", "ppds metadata optionset add-option");
+            return await Metadata.OptionSetCommand.ExecuteAddOptionAsync(
                 solution, name, label, value, color,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteAddOptionAsync(
-        string solution,
-        string name,
-        string label,
-        int? value,
-        string? color,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Adding option '{label}' to '{name}'...");
-            }
-
-            var request = new AddOptionValueRequest
-            {
-                SolutionUniqueName = solution,
-                OptionSetName = name,
-                Label = label,
-                Value = value,
-                Color = color
-            };
-
-            var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { optionSetName = name, label, value = assignedValue });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Option '{label}' added with value {assignedValue}.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "adding option value", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateUpdateOptionCommand()
@@ -703,77 +329,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteUpdateOptionAsync(
+            DeprecationWarning.Write("ppds metadata choice update-option", "ppds metadata optionset update-option");
+            return await Metadata.OptionSetCommand.ExecuteUpdateOptionAsync(
                 solution, name, value, label,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteUpdateOptionAsync(
-        string solution,
-        string name,
-        int value,
-        string label,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Updating option value {value} in '{name}'...");
-            }
-
-            var request = new UpdateOptionValueRequest
-            {
-                SolutionUniqueName = solution,
-                OptionSetName = name,
-                Value = value,
-                Label = label
-            };
-
-            await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { optionSetName = name, value, label, updated = true });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Option value {value} updated to '{label}'.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "updating option value", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateRemoveOptionCommand()
@@ -824,111 +386,13 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteRemoveOptionAsync(
+            DeprecationWarning.Write("ppds metadata choice remove-option", "ppds metadata optionset remove-option");
+            return await Metadata.OptionSetCommand.ExecuteRemoveOptionAsync(
                 solution, name, value, force,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    private static async Task<int> ExecuteRemoveOptionAsync(
-        string solution,
-        string name,
-        int value,
-        bool force,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-            }
-
-            // Confirmation prompt
-            if (!force)
-            {
-                if (!Console.IsInputRedirected)
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will remove option value {value} from '{name}'.");
-                    Console.Error.WriteLine("         Records using this value will lose their selection.");
-                    Console.ResetColor();
-                    Console.Error.WriteLine();
-
-                    Console.Error.Write("Continue? (y/N): ");
-                    var confirmation = Console.ReadLine();
-
-                    if (!string.Equals(confirmation, "y", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.Error.WriteLine("Cancelled.");
-                        return ExitCodes.Success;
-                    }
-
-                    Console.Error.WriteLine();
-                }
-                else
-                {
-                    writer.WriteError(StructuredError.Create(
-                        "CONFIRMATION_REQUIRED",
-                        "Use --force to skip confirmation in non-interactive mode"));
-                    return ExitCodes.ConfirmationRequired;
-                }
-            }
-
-            if (!globalOptions.IsJsonMode)
-            {
-                Console.Error.WriteLine($"Removing option value {value} from '{name}'...");
-            }
-
-            var request = new DeleteOptionValueRequest
-            {
-                SolutionUniqueName = solution,
-                OptionSetName = name,
-                Value = value
-            };
-
-            await authoringService.DeleteOptionValueAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { optionSetName = name, value, removed = true });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Option value {value} removed from '{name}'.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "removing option value", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 
     internal static Command CreateReorderCommand()
@@ -971,85 +435,12 @@ public static class ChoiceCommandGroup
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteReorderAsync(
+            DeprecationWarning.Write("ppds metadata choice reorder", "ppds metadata optionset reorder");
+            return await Metadata.OptionSetCommand.ExecuteReorderAsync(
                 solution, name, orderRaw,
                 profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
-    }
-
-    internal static int[] ParseOrder(string raw)
-    {
-        return raw.Split(',')
-            .Select(s => s.Trim())
-            .Where(s => int.TryParse(s, out _))
-            .Select(int.Parse)
-            .ToArray();
-    }
-
-    private static async Task<int> ExecuteReorderAsync(
-        string solution,
-        string name,
-        string orderRaw,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
-    {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
-        try
-        {
-            var order = ParseOrder(orderRaw);
-
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
-
-            if (!globalOptions.IsJsonMode)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Reordering options in '{name}'...");
-            }
-
-            var request = new ReorderOptionsRequest
-            {
-                SolutionUniqueName = solution,
-                OptionSetName = name,
-                Order = order
-            };
-
-            await authoringService.ReorderOptionsAsync(request, ct: cancellationToken);
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new { optionSetName = name, order, reordered = true });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Options in '{name}' reordered successfully.");
-            }
-
-            return ExitCodes.Success;
-        }
-        catch (MetadataValidationException ex)
-        {
-            var error = StructuredError.Create(ex.ErrorCode, ex.Message);
-            writer.WriteError(error);
-            return ExitCodes.ValidationError;
-        }
-        catch (Exception ex)
-        {
-            var error = ExceptionMapper.Map(ex, context: "reordering options", debug: globalOptions.Debug);
-            writer.WriteError(error);
-            return ExceptionMapper.ToExitCode(ex);
-        }
     }
 }

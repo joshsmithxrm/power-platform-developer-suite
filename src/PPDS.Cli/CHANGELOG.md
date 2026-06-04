@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Canonical metadata nouns** `entity`, `attribute`, `optionset` replace `table`, `column`, `choice` as the primary command surface. Old nouns remain as deprecation shims that delegate to the same execute path and print a migration hint to stderr (#1159).
+- **Status reason management** — `ppds metadata entity add-statusreason|list-statusreasons|update-statusreason|remove-statusreason` for first-class statuscode option-value management (#1160).
+- **`OptionValueDeriver`** shared pure helper for publisher-prefix-based option value derivation — explicit-value wins, prefix×10000 base, gap-fill over existing values (#1160).
+
+### Changed
+- `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
+
 ## [1.1.0] - 2026-04-26
 
 ### Added

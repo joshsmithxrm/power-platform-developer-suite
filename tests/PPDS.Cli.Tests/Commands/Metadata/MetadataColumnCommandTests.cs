@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Cli.Commands.Metadata.Column;
 using PPDS.Dataverse.Metadata.Authoring;
 using Xunit;
@@ -159,7 +160,7 @@ public class ColumnOptionParsingTests
     [Fact]
     public void ParseOptionDefinitions_ValidInput_ReturnsOptions()
     {
-        var result = ColumnCommandGroup.ParseOptionDefinitions("Active=1,Inactive=2");
+        var result = AttributeCommandGroup.ParseOptionDefinitions("Active=1,Inactive=2");
 
         Assert.NotNull(result);
         Assert.Equal(2, result!.Length);
@@ -172,28 +173,28 @@ public class ColumnOptionParsingTests
     [Fact]
     public void ParseOptionDefinitions_NullInput_ReturnsNull()
     {
-        var result = ColumnCommandGroup.ParseOptionDefinitions(null);
+        var result = AttributeCommandGroup.ParseOptionDefinitions(null);
         Assert.Null(result);
     }
 
     [Fact]
     public void ParseOptionDefinitions_EmptyInput_ReturnsNull()
     {
-        var result = ColumnCommandGroup.ParseOptionDefinitions("");
+        var result = AttributeCommandGroup.ParseOptionDefinitions("");
         Assert.Null(result);
     }
 
     [Fact]
     public void ParseOptionDefinitions_WhitespaceInput_ReturnsNull()
     {
-        var result = ColumnCommandGroup.ParseOptionDefinitions("   ");
+        var result = AttributeCommandGroup.ParseOptionDefinitions("   ");
         Assert.Null(result);
     }
 
     [Fact]
     public void ParseOptionDefinitions_WithSpaces_TrimsCorrectly()
     {
-        var result = ColumnCommandGroup.ParseOptionDefinitions(" Active = 1 , Inactive = 2 ");
+        var result = AttributeCommandGroup.ParseOptionDefinitions(" Active = 1 , Inactive = 2 ");
 
         Assert.NotNull(result);
         Assert.Equal(2, result!.Length);

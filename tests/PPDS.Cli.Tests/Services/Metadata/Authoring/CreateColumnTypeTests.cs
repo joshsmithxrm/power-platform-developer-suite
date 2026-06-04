@@ -248,6 +248,44 @@ public class CreateColumnTypeTests
     }
 
     [Fact]
+    public async Task Choice_WithLocalOptions_SetsIsGlobalFalse() // AC-51 (#1161 bug fix)
+    {
+        var request = MakeRequest(SchemaColumnType.Choice);
+        request.Options = new[] { new OptionDefinition { Label = "Mild", Value = 864630000 } };
+
+        var sdkRequest = await CaptureCreateAttributeRequest(request);
+
+        var attr = sdkRequest.Attribute.Should().BeOfType<PicklistAttributeMetadata>().Subject;
+        attr.OptionSet!.IsGlobal.Should().BeFalse("local choice columns must set IsGlobal=false or Dataverse rejects with 'IsGlobal is not specified'");
+        attr.OptionSet.OptionSetType.Should().Be(OptionSetType.Picklist);
+    }
+
+    [Fact]
+    public async Task Choices_WithLocalOptions_SetsIsGlobalFalse() // AC-52 (#1161 bug fix)
+    {
+        var request = MakeRequest(SchemaColumnType.Choices);
+        request.Options = new[] { new OptionDefinition { Label = "Tag 1", Value = 864630000 } };
+
+        var sdkRequest = await CaptureCreateAttributeRequest(request);
+
+        var attr = sdkRequest.Attribute.Should().BeOfType<MultiSelectPicklistAttributeMetadata>().Subject;
+        attr.OptionSet!.IsGlobal.Should().BeFalse();
+        attr.OptionSet.OptionSetType.Should().Be(OptionSetType.Picklist);
+    }
+
+    [Fact]
+    public async Task Choice_WithLocalOptionColor_AppliesColor() // AC-54 (color on local options)
+    {
+        var request = MakeRequest(SchemaColumnType.Choice);
+        request.Options = new[] { new OptionDefinition { Label = "Mild", Value = 864630000, Color = "#00FF00" } };
+
+        var sdkRequest = await CaptureCreateAttributeRequest(request);
+
+        var attr = sdkRequest.Attribute.Should().BeOfType<PicklistAttributeMetadata>().Subject;
+        attr.OptionSet!.Options.Should().ContainSingle().Which.Color.Should().Be("#00FF00");
+    }
+
+    [Fact]
     public async Task Choice_WithGlobalOptionSet_CreatesPicklistWithGlobalRef()
     {
         var request = MakeRequest(SchemaColumnType.Choice);
