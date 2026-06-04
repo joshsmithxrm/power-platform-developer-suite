@@ -15,6 +15,7 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Flows;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.ImportJobs;
+using PPDS.Cli.Services.Forms;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Services.Profile;
@@ -26,6 +27,8 @@ using PPDS.Cli.Services.ModelDrivenApps;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Services.Users;
+using PPDS.Cli.Services.Views;
+using PPDS.Cli.Services.WebApi;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.BulkOperations;
@@ -199,6 +202,36 @@ public static class ServiceRegistration
                 logger);
         });
 
+        // Raw Web API service — uses same auth pattern as IConnectionService.
+        // DI factory creates the token provider from the resolved profile.
+        services.AddTransient<IRawWebApiService>(sp =>
+        {
+            var connectionInfo = sp.GetRequiredService<ResolvedConnectionInfo>();
+            var credentialStore = sp.GetRequiredService<ISecureCredentialStore>();
+            var logger = sp.GetRequiredService<ILogger<RawWebApiService>>();
+            var profile = connectionInfo.Profile;
+
+            IPowerPlatformTokenProvider tokenProvider;
+            if (profile.AuthMethod == AuthMethod.ClientSecret)
+            {
+                if (string.IsNullOrEmpty(profile.ApplicationId))
+                    throw new AuthenticationException(
+                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.",
+                        "Auth.InvalidCredentials");
+
+#pragma warning disable PPDS012 // Sync-over-async: DI factory cannot be async
+                var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential?.ClientSecret ?? "");
+            }
+            else
+            {
+                tokenProvider = PowerPlatformTokenProvider.FromProfile(profile);
+            }
+
+            return new RawWebApiService(tokenProvider, new HttpClient(), logger);
+        });
+
         // Update check service — singleton, manages its own cache file
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
 
@@ -275,6 +308,16 @@ public static class ServiceRegistration
             sp.GetRequiredService<ICachedMetadataProvider>(),
             sp.GetRequiredService<SitemapXmlValidator>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModelDrivenAppService>>()));
+        services.AddTransient<IViewService>(sp => new ViewService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<ViewService>>()));
+        // Form management service
+        services.AddTransient<IFormService>(sp => new FormService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IMetadataQueryService>(),
+            sp.GetRequiredService<ILogger<FormService>>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();

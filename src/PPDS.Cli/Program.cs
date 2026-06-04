@@ -1,5 +1,7 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Api;
 using PPDS.Cli.Commands.Auth;
+using PPDS.Cli.Commands.Forms;
 using PPDS.Cli.Commands.Connections;
 using PPDS.Cli.Commands.ConnectionReferences;
 using PPDS.Cli.Commands.Data;
@@ -22,6 +24,7 @@ using PPDS.Cli.Commands.Roles;
 using PPDS.Cli.Commands.Serve;
 using PPDS.Cli.Commands.Publish;
 using PPDS.Cli.Commands.ModelDrivenApps;
+using PPDS.Cli.Commands.Views;
 using PPDS.Cli.Commands.WebResources;
 using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Commands.Users;
@@ -89,6 +92,7 @@ public static class Program
             $"Documentation: {DocsCommand.DocsUrl}");
 
         // Add command groups
+        rootCommand.Subcommands.Add(ApiCommandGroup.Create());
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.CreateOrgAlias()); // 'org' alias for 'env'
@@ -112,6 +116,8 @@ public static class Program
         rootCommand.Subcommands.Add(UsersCommandGroup.Create());
         rootCommand.Subcommands.Add(RolesCommandGroup.Create());
         rootCommand.Subcommands.Add(ModelDrivenAppCommandGroup.Create());
+        rootCommand.Subcommands.Add(ViewsCommandGroup.Create());
+        rootCommand.Subcommands.Add(FormsCommandGroup.Create());
         rootCommand.Subcommands.Add(WebResourcesCommandGroup.Create());
         rootCommand.Subcommands.Add(PublishCommandGroup.Create());
         rootCommand.Subcommands.Add(ServeCommand.Create());
