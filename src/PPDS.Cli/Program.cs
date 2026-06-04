@@ -23,6 +23,7 @@ using PPDS.Cli.Commands.Query;
 using PPDS.Cli.Commands.Roles;
 using PPDS.Cli.Commands.Serve;
 using PPDS.Cli.Commands.Publish;
+using PPDS.Cli.Commands.Views;
 using PPDS.Cli.Commands.WebResources;
 using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Commands.Users;
@@ -113,6 +114,7 @@ public static class Program
         rootCommand.Subcommands.Add(DeploymentSettingsCommandGroup.Create());
         rootCommand.Subcommands.Add(UsersCommandGroup.Create());
         rootCommand.Subcommands.Add(RolesCommandGroup.Create());
+        rootCommand.Subcommands.Add(ViewsCommandGroup.Create());
         rootCommand.Subcommands.Add(FormsCommandGroup.Create());
         rootCommand.Subcommands.Add(WebResourcesCommandGroup.Create());
         rootCommand.Subcommands.Add(PublishCommandGroup.Create());

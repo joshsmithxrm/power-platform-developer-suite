@@ -26,6 +26,7 @@ using PPDS.Cli.Services.SolutionComponents;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Services.Users;
+using PPDS.Cli.Services.Views;
 using PPDS.Cli.Services.WebApi;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tui.Infrastructure;
@@ -297,6 +298,11 @@ public static class ServiceRegistration
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ILogger<DataQueryService>>()));
 
+        services.AddTransient<IViewService>(sp => new ViewService(
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<IShakedownGuard>(),
+            sp.GetRequiredService<ILogger<ViewService>>()));
         // Form management service
         services.AddTransient<IFormService>(sp => new FormService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
