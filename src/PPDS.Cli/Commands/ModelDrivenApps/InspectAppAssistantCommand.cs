@@ -106,12 +106,10 @@ public static class InspectAppAssistantCommand
         foreach (var finding in diagnostics.Findings)
         {
             var botLabel = finding.BotName ?? finding.BotId?.ToString() ?? "(none)";
-            var lightweight = finding.IsLightweightBot switch
-            {
-                true => "true",
-                false => "false",
-                null => "unknown"
-            };
+            // Unvalued (null) reads as "unknown"; otherwise the bool's lowercase literal.
+            var lightweight = finding.IsLightweightBot.HasValue
+                ? (finding.IsLightweightBot.Value ? "true" : "false")
+                : "unknown";
             var appElements = string.Join(", ", finding.AppElementIds);
 
             // The finding record is the diagnostic data → stdout.
