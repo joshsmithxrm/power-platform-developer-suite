@@ -31,6 +31,7 @@ public static class RemoveCopilotCommand
             botOption,
             ModelDrivenAppCommandGroup.PublishOption,
             dryRunOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -43,10 +44,11 @@ public static class RemoveCopilotCommand
             var bot = parseResult.GetValue(botOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, bot, publish, dryRun, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, bot, publish, dryRun, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -57,6 +59,7 @@ public static class RemoveCopilotCommand
         string? bot,
         bool publish,
         bool dryRun,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -91,7 +94,7 @@ public static class RemoveCopilotCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new CopilotOptions(publish, dryRun);
+            var options = new CopilotOptions(publish, dryRun, Force: false, Confirm: confirm);
             var result = await service.RemoveCopilotAsync(appName, bot, options, null, ct);
 
             if (globalOptions.IsJsonMode)

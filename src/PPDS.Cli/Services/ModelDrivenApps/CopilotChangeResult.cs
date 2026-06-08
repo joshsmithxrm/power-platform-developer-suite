@@ -12,6 +12,11 @@ namespace PPDS.Cli.Services.ModelDrivenApps;
 /// <param name="UniqueName">The appelement unique name.</param>
 /// <param name="DryRun">True when no write was performed.</param>
 /// <param name="Published">True when the app was published as part of the change.</param>
+/// <param name="EligibilityReason">
+/// Null when the app supports the model-driven app assistant; otherwise the reason it is unsupported
+/// (issue #1192). Surfaced on a <see cref="DryRun"/> verdict, or alongside <see cref="Forced"/>.
+/// </param>
+/// <param name="Forced">True when an unsupported app was wired anyway via --force.</param>
 public sealed record CopilotChangeResult(
     string AppName,
     Guid AppModuleId,
@@ -21,4 +26,6 @@ public sealed record CopilotChangeResult(
     Guid? AppElementId,
     string UniqueName,
     bool DryRun,
-    bool Published);
+    bool Published,
+    string? EligibilityReason = null,
+    bool Forced = false);

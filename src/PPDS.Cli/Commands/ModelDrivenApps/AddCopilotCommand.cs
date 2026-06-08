@@ -22,7 +22,12 @@ public static class AddCopilotCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Preview the appelement that would be created; makes no changes"
+            Description = "Preview the appelement that would be created (and the eligibility verdict); makes no changes"
+        };
+
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Wire the Copilot even if the app is reported unsupported for the app-assistant agent"
         };
 
         var command = new Command("add-copilot", "Wire a Copilot Studio agent (bot) into the app")
@@ -31,6 +36,8 @@ public static class AddCopilotCommand
             botOption,
             ModelDrivenAppCommandGroup.PublishOption,
             dryRunOption,
+            forceOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -43,10 +50,12 @@ public static class AddCopilotCommand
             var bot = parseResult.GetValue(botOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var force = parseResult.GetValue(forceOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, bot, publish, dryRun, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, bot, publish, dryRun, force, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -57,6 +66,8 @@ public static class AddCopilotCommand
         string? bot,
         bool publish,
         bool dryRun,
+        bool force,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -91,7 +102,7 @@ public static class AddCopilotCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new CopilotOptions(publish, dryRun);
+            var options = new CopilotOptions(publish, dryRun, force, confirm);
             var result = await service.AddCopilotAsync(appName, bot, options, null, ct);
 
             if (globalOptions.IsJsonMode)
@@ -106,7 +117,10 @@ public static class AddCopilotCommand
                     botId = result.BotId,
                     appElementId = result.AppElementId,
                     uniqueName = result.UniqueName,
-                    published = result.Published
+                    published = result.Published,
+                    eligible = result.EligibilityReason == null,
+                    eligibilityReason = result.EligibilityReason,
+                    forced = result.Forced
                 });
             }
             else if (result.DryRun)
@@ -117,10 +131,18 @@ public static class AddCopilotCommand
                 Console.Error.WriteLine($"  parentappmoduleid     = appmodule({result.AppModuleId})");
                 Console.Error.WriteLine($"  objectid              = bot({result.BotId})  // {result.BotName}");
                 Console.Error.WriteLine("  (a unique suffix is appended automatically if this name is already taken)");
+                Console.Error.WriteLine(result.EligibilityReason == null
+                    ? "  eligibility           = OK (app supports the app-assistant agent)"
+                    : $"  eligibility           = UNSUPPORTED — {result.EligibilityReason} (re-run without --dry-run and with --force to wire anyway)");
                 Console.Error.WriteLine("No changes made.");
             }
             else
             {
+                if (result.Forced && result.EligibilityReason != null)
+                {
+                    Console.Error.WriteLine($"WARNING: app reported unsupported ({result.EligibilityReason}) — wired anyway because --force was set.");
+                }
+
                 Console.Error.WriteLine($"Wired Copilot '{result.BotName}' into app '{result.AppName}' (appelement {result.AppElementId}).");
                 Console.Error.WriteLine(result.Published
                     ? "App published."

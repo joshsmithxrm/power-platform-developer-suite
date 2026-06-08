@@ -307,7 +307,9 @@ public static class ServiceRegistration
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ICachedMetadataProvider>(),
             sp.GetRequiredService<SitemapXmlValidator>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModelDrivenAppService>>()));
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModelDrivenAppService>>(),
+            sp.GetRequiredService<PPDS.Cli.Services.Environment.IEnvironmentConfigService>(),
+            sp.GetRequiredService<PPDS.Cli.Infrastructure.ResolvedConnectionInfo>()));
         services.AddTransient<IViewService>(sp => new ViewService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ICachedMetadataProvider>(),

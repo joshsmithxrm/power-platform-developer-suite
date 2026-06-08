@@ -25,6 +25,7 @@ public static class SetSitemapXmlCommand
             xmlOption,
             ModelDrivenAppCommandGroup.SolutionOption,
             ModelDrivenAppCommandGroup.PublishOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -37,10 +38,11 @@ public static class SetSitemapXmlCommand
             var xml = parseResult.GetValue(xmlOption);
             var solution = parseResult.GetValue(ModelDrivenAppCommandGroup.SolutionOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, xml, solution, publish, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, xml, solution, publish, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -51,6 +53,7 @@ public static class SetSitemapXmlCommand
         string? xmlPath,
         string? solution,
         bool publish,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -93,7 +96,7 @@ public static class SetSitemapXmlCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new SetSitemapOptions(solution, publish);
+            var options = new SetSitemapOptions(solution, publish, confirm);
             await service.SetSitemapXmlAsync(appName, xml, options, null, ct);
 
             if (!globalOptions.IsJsonMode)
