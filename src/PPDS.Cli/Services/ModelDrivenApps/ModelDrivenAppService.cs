@@ -3,8 +3,11 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
+using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.WebApi;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 
@@ -19,6 +22,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     private readonly ICachedMetadataProvider _metadata;
     private readonly SitemapXmlValidator _validator;
     private readonly ILogger<ModelDrivenAppService> _logger;
+    private readonly IEnvironmentConfigService _envConfig;
+    private readonly ResolvedConnectionInfo _connectionInfo;
 
     private const int ComponentTypeEntity = 1;
     private const int ComponentTypeView = 26;
@@ -37,12 +42,34 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         IDataverseConnectionPool pool,
         ICachedMetadataProvider metadata,
         SitemapXmlValidator validator,
-        ILogger<ModelDrivenAppService> logger)
+        ILogger<ModelDrivenAppService> logger,
+        IEnvironmentConfigService envConfig,
+        ResolvedConnectionInfo connectionInfo)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _envConfig = envConfig ?? throw new ArgumentNullException(nameof(envConfig));
+        _connectionInfo = connectionInfo ?? throw new ArgumentNullException(nameof(connectionInfo));
+    }
+
+    // ── Production write protection (issue #1195) ───────────────────────────────
+
+    /// <summary>
+    /// Mirrors the <c>ppds api request</c> guard for SDK-based writes: blocks a mutating operation on a
+    /// Production-flagged environment unless the caller passed --confirm. Protection-level resolution is
+    /// shared with the api-request path via <see cref="WriteProtectionResolver"/> (no divergent copy).
+    /// </summary>
+    private async Task EnsureWriteAllowedAsync(bool confirm, CancellationToken ct)
+    {
+        var level = await WriteProtectionResolver.ResolveAsync(_envConfig, _connectionInfo.EnvironmentUrl, ct);
+        if (WebApiWriteGuard.IsBlocked(level, confirm))
+        {
+            throw new PpdsException(
+                ModelDrivenAppErrorCodes.WriteBlockedOnProduction,
+                $"Mutating request blocked on Production environment '{_connectionInfo.EnvironmentUrl}'. Add --confirm to proceed.");
+        }
     }
 
     /// <inheritdoc />
@@ -171,6 +198,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
 
         await PatchSitemapAsync(client, sitemapId, xml, ct);
@@ -196,6 +224,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
         var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished: true);
 
@@ -312,6 +341,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
         var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
         var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished: true);
 
@@ -354,6 +384,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
 
         await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
@@ -392,6 +423,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
 
         await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
@@ -430,6 +462,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
 
         await EnsureEntityInSitemapAsync(client, appModuleId, entity, appName, ct);
 
@@ -468,7 +501,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         progress?.ReportPhase("Loading app", appName);
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var (appModuleId, appUniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (appModuleId, appDisplayName, appUniqueName) = await ResolveAppRecordAsync(appName, client, ct);
         var (botId, botName, botSchemaName) = await ResolveBotAsync(bot, client, ct);
 
         // Best-effort guard. appelement reads can lag writes, so a freshly-added binding may not
@@ -481,15 +514,43 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
                 $"Remove it first with: ppds model-driven-app remove-copilot --app \"{appName}\" --bot \"{bot}\"");
         }
 
+        // Eligibility preflight (issue #1192): some apps never render an app-assistant agent, so wiring
+        // the binding silently fails to surface a Copilot. Evaluate before any write.
+        progress?.ReportPhase("Checking eligibility", appDisplayName);
+        var eligibilityReason = await EvaluateCopilotEligibilityAsync(
+            client, appModuleId, appDisplayName, appUniqueName, ct);
+
         // Cap at the appelement.uniquename 100-char limit; an over-length value throws a non-duplicate
         // exception on create that the fallback path would not recognize.
         var baseUniqueName = Truncate($"{SchemaPrefix(botSchemaName)}_{appUniqueName}_schemaname_{botSchemaName}", MaxUniqueNameLength);
 
         if (options.DryRun)
         {
+            // Report the verdict without writing; --dry-run never blocks (no mutation occurs).
             return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
-                AppElementId: null, baseUniqueName, DryRun: true, Published: false);
+                AppElementId: null, baseUniqueName, DryRun: true, Published: false,
+                EligibilityReason: eligibilityReason, Forced: false);
         }
+
+        var forced = false;
+        if (eligibilityReason != null)
+        {
+            if (!options.Force)
+            {
+                throw new PpdsException(ModelDrivenAppErrorCodes.CopilotAppUnsupported,
+                    $"App '{appName}' does not support the model-driven app assistant agent: {eligibilityReason} " +
+                    "See https://learn.microsoft.com/en-us/power-apps/maker/model-driven-apps/add-app-assistant-agent (Limitations). " +
+                    "Re-run with --force to wire it anyway.");
+            }
+
+            forced = true;
+            // Surface the override on stderr (command) and the daemon/RPC log.
+            _logger.LogWarning(
+                "add-copilot eligibility check overridden by --force for app '{App}': {Reason}", appName, eligibilityReason);
+        }
+
+        // Production write protection (issue #1195): block on a Production-flagged env without --confirm.
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
 
         progress?.ReportPhase("Wiring Copilot", botName);
         Guid appElementId;
@@ -513,7 +574,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
 
         return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
-            appElementId, uniqueName, DryRun: false, published);
+            appElementId, uniqueName, DryRun: false, published,
+            EligibilityReason: forced ? eligibilityReason : null, Forced: forced);
     }
 
     /// <inheritdoc />
@@ -538,6 +600,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
                 bindings[0].AppElementId, bindings[0].UniqueName, DryRun: true, Published: false);
         }
+
+        // Production write protection (issue #1195): block on a Production-flagged env without --confirm.
+        await EnsureWriteAllowedAsync(options.Confirm, ct);
 
         progress?.ReportPhase("Removing Copilot", botName);
         foreach (var binding in bindings)
@@ -579,6 +644,17 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         IPooledClient client,
         CancellationToken ct)
     {
+        var (appModuleId, _, uniqueName) = await ResolveAppRecordAsync(appName, client, ct);
+        return (appModuleId, uniqueName);
+    }
+
+    // Resolves the appmodule and surfaces its display name as well as the unique name.
+    // Used by add-copilot's eligibility preflight, which matches on both fields.
+    private async Task<(Guid AppModuleId, string Name, string UniqueName)> ResolveAppRecordAsync(
+        string appName,
+        IPooledClient client,
+        CancellationToken ct)
+    {
         // Filter server-side to avoid over-fetching all apps (no TopCount cap).
         var query = new QueryExpression("appmodule")
         {
@@ -611,6 +687,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         return (
             match.GetAttributeValue<Guid>("appmoduleid"),
+            match.GetAttributeValue<string>("name") ?? string.Empty,
             match.GetAttributeValue<string>("uniquename") ?? string.Empty);
     }
 
@@ -715,6 +792,64 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
 
         return bindings;
+    }
+
+    // Known first-party / template apps that do not support the model-driven app assistant agent (#1192).
+    // Matched case-insensitively against the app display name AND unique name. The support matrix changes,
+    // so this is best-effort and bypassable with --force; Microsoft's doc remains the source of truth.
+    // More specific tokens precede their substrings so the reported reason names the closest match.
+    // Ref: https://learn.microsoft.com/en-us/power-apps/maker/model-driven-apps/add-app-assistant-agent
+    private static readonly string[] UnsupportedAppTokens =
+    {
+        "Field Service Mobile",
+        "Connected Field Service",
+        "Field Service",
+        "Sales Hub",
+        "Customer Service Hub",
+        "Customer Service workspace",
+        "Project Operations",
+        "Customer Insights",
+        "Omnichannel"
+    };
+
+    // Returns null when the app supports the app-assistant agent; otherwise a human-readable reason.
+    private async Task<string?> EvaluateCopilotEligibilityAsync(
+        IPooledClient client, Guid appModuleId, string appDisplayName, string appUniqueName, CancellationToken ct)
+    {
+        foreach (var token in UnsupportedAppTokens)
+        {
+            if (ContainsToken(appDisplayName, token) || ContainsToken(appUniqueName, token))
+            {
+                return $"'{token}' apps are listed as unsupported.";
+            }
+        }
+
+        // Table-pair rule: an app containing BOTH the Lead and Opportunity tables is unsupported.
+        // Reported distinctly from the named-app cases.
+        var entities = await GetAppEntityLogicalNamesAsync(client, appModuleId, ct);
+        if (entities.Contains("lead") && entities.Contains("opportunity"))
+        {
+            return "it contains both the Lead and Opportunity tables.";
+        }
+
+        return null;
+    }
+
+    private static bool ContainsToken(string? value, string token) =>
+        !string.IsNullOrEmpty(value) && value.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+    // Collects the entity logical names referenced by the app's sitemap navigation (SubArea@Entity),
+    // lower-cased for case-insensitive membership tests.
+    private async Task<HashSet<string>> GetAppEntityLogicalNamesAsync(
+        IPooledClient client, Guid appModuleId, CancellationToken ct)
+    {
+        var sitemapXml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct, unpublished: true);
+        var doc = XDocument.Parse(sitemapXml);
+        return doc.Descendants("SubArea")
+            .Select(s => s.Attribute("Entity")?.Value)
+            .Where(e => !string.IsNullOrEmpty(e))
+            .Select(e => e!.ToLowerInvariant())
+            .ToHashSet();
     }
 
     // The appelement unique name convention observed in maker-created rows:

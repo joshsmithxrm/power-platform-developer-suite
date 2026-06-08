@@ -8,4 +8,5 @@ public sealed record AddTableOptions(
     string? Area,
     string? Title,
     string? Solution,
-    bool Publish);
+    bool Publish,
+    bool Confirm = false);

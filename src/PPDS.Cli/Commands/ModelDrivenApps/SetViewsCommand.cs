@@ -40,6 +40,7 @@ public static class SetViewsCommand
             viewOption,
             ModelDrivenAppCommandGroup.SolutionOption,
             ModelDrivenAppCommandGroup.PublishOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -54,10 +55,11 @@ public static class SetViewsCommand
             var views = parseResult.GetValue(viewOption) ?? [];
             var solution = parseResult.GetValue(ModelDrivenAppCommandGroup.SolutionOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, entity, all, views, solution, publish, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, entity, all, views, solution, publish, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -70,6 +72,7 @@ public static class SetViewsCommand
         string[] viewNames,
         string? solution,
         bool publish,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -104,7 +107,7 @@ public static class SetViewsCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new ComponentSelectionOptions(all, viewNames, solution, publish);
+            var options = new ComponentSelectionOptions(all, viewNames, solution, publish, confirm);
             await service.SetViewsAsync(appName, entity, options, null, ct);
 
             if (!globalOptions.IsJsonMode)

@@ -7,4 +7,5 @@ public sealed record ComponentSelectionOptions(
     bool All,
     IReadOnlyList<string> ComponentNames,
     string? Solution,
-    bool Publish);
+    bool Publish,
+    bool Confirm = false);

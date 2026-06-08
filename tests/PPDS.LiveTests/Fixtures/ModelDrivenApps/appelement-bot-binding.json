@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Reference fixture for the add-copilot appelement->bot binding shape (issue #1196).",
+    "Captured (with generic placeholder ids/names) from a known-good binding read back from a live org.",
+    "It pins the UNDOCUMENTED Dataverse internals that add-copilot relies on, so a future platform change",
+    "is caught by the drift-guard test (AppElementBindingDriftGuardTests) rather than by a user in production.",
+    "Re-capture from a live org when Dataverse changes, then update the drift guard."
+  ],
+  "appelement": {
+    "appelementid": "00000000-0000-0000-0000-0000000000a1",
+    "name": "demo_copilot",
+    "uniquename": "demo_demoapp_schemaname_demo_copilot",
+    "_objectid_value": "00000000-0000-0000-0000-0000000000b2",
+    "_objectid_value@Microsoft.Dynamics.CRM.lookuplogicalname": "bot",
+    "_objectid_value@Microsoft.Dynamics.CRM.associatednavigationproperty": "objectid",
+    "_parentappmoduleid_value": "00000000-0000-0000-0000-0000000000c3",
+    "_parentappmoduleid_value@Microsoft.Dynamics.CRM.lookuplogicalname": "appmodule"
+  },
+  "objectidLookup": {
+    "navigationProperty": "objectid",
+    "createOnly": true,
+    "targets": [ "bot", "aiskillconfig", "mcpserver" ]
+  },
+  "bot": {
+    "botid": "00000000-0000-0000-0000-0000000000b2",
+    "isLightweightBot": true
+  }
+}

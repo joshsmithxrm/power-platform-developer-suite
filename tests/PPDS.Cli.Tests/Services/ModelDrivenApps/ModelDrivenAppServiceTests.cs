@@ -10,7 +10,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.ModelDrivenApps;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
@@ -49,11 +52,21 @@ public class ModelDrivenAppServiceTests
 
     // ── Mock harness ──────────────────────────────────────────────────────────
 
+    private const string TestEnvUrl = "https://test.crm.dynamics.com/";
+
     private sealed class Harness
     {
         public Mock<IDataverseConnectionPool> Pool { get; } = new();
         public Mock<IPooledClient> Client { get; } = new();
         public Mock<ICachedMetadataProvider> Metadata { get; } = new();
+        public Mock<IEnvironmentConfigService> EnvConfig { get; } = new();
+
+        /// <summary>
+        /// The environment type the mocked <see cref="IEnvironmentConfigService"/> reports. Defaults to
+        /// Sandbox (Development protection) so write operations are not blocked. Flip to Production to
+        /// exercise the #1195 write guard.
+        /// </summary>
+        public EnvironmentType EnvType { get; set; } = EnvironmentType.Sandbox;
 
         /// <summary>The XML written by the last UpdateAsync on the sitemap record, if any.</summary>
         public string? WrittenSitemapXml { get; private set; }
@@ -63,11 +76,23 @@ public class ModelDrivenAppServiceTests
 
         public ModelDrivenAppService Build()
         {
+            // Resolve the env type lazily so a test can set EnvType before Build() (or anytime before the call).
+            EnvConfig.Setup(e => e.GetConfigAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new EnvironmentConfig { Url = TestEnvUrl, Type = EnvType });
+
+            var connectionInfo = new ResolvedConnectionInfo
+            {
+                Profile = new AuthProfile(),
+                EnvironmentUrl = TestEnvUrl
+            };
+
             return new ModelDrivenAppService(
                 Pool.Object,
                 Metadata.Object,
                 new SitemapXmlValidator(new SitemapSchemaResources()),
-                new NullLogger<ModelDrivenAppService>());
+                new NullLogger<ModelDrivenAppService>(),
+                EnvConfig.Object,
+                connectionInfo);
         }
 
         /// <summary>
@@ -569,6 +594,12 @@ public class ModelDrivenAppServiceTests
 
     // ── Constructor guards ─────────────────────────────────────────────────────
 
+    private static ResolvedConnectionInfo TestConnectionInfo() => new()
+    {
+        Profile = new AuthProfile(),
+        EnvironmentUrl = TestEnvUrl
+    };
+
     [Fact]
     [Trait("Category", "Unit")]
     public void Constructor_ThrowsOnNullPool()
@@ -577,7 +608,9 @@ public class ModelDrivenAppServiceTests
             null!,
             new Mock<ICachedMetadataProvider>().Object,
             new SitemapXmlValidator(new SitemapSchemaResources()),
-            new NullLogger<ModelDrivenAppService>());
+            new NullLogger<ModelDrivenAppService>(),
+            new Mock<IEnvironmentConfigService>().Object,
+            TestConnectionInfo());
 
         act.Should().Throw<ArgumentNullException>().WithParameterName("pool");
     }
@@ -590,9 +623,26 @@ public class ModelDrivenAppServiceTests
             new Mock<IDataverseConnectionPool>().Object,
             null!,
             new SitemapXmlValidator(new SitemapSchemaResources()),
-            new NullLogger<ModelDrivenAppService>());
+            new NullLogger<ModelDrivenAppService>(),
+            new Mock<IEnvironmentConfigService>().Object,
+            TestConnectionInfo());
 
         act.Should().Throw<ArgumentNullException>().WithParameterName("metadata");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Constructor_ThrowsOnNullEnvConfig()
+    {
+        var act = () => new ModelDrivenAppService(
+            new Mock<IDataverseConnectionPool>().Object,
+            new Mock<ICachedMetadataProvider>().Object,
+            new SitemapXmlValidator(new SitemapSchemaResources()),
+            new NullLogger<ModelDrivenAppService>(),
+            null!,
+            TestConnectionInfo());
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("envConfig");
     }
 
     // ── Copilot wiring (add/remove/list) ───────────────────────────────────────
@@ -604,7 +654,13 @@ public class ModelDrivenAppServiceTests
     // {prefix}_{appUniqueName}_schemaname_{botSchema} where prefix is the bot schema's leading segment.
     private const string ExpectedCopilotUniqueName = "cr8a6_ppds_myapp_schemaname_cr8a6_test";
 
-    private static void SetupCopilotCommon(Harness h)
+    // A sitemap containing BOTH lead and opportunity — exercises the #1192 table-pair eligibility rule.
+    private const string SitemapWithLeadAndOpportunity =
+        @"<SiteMap><Area Id=""Area1"" Title=""Main""><Group Id=""Group1"" Title=""Sales"">"
+        + @"<SubArea Id=""sub_lead"" Entity=""lead"" Title=""Leads"" />"
+        + @"<SubArea Id=""sub_opp"" Entity=""opportunity"" Title=""Opportunities"" /></Group></Area></SiteMap>";
+
+    private static void SetupCopilotCommon(Harness h, string sitemapXml = SitemapWithAccount)
     {
         h.Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
         h.Client.Setup(c => c.Dispose());
@@ -636,6 +692,39 @@ public class ModelDrivenAppServiceTests
                     ["schemaname"] = CopilotBotSchema
                 }
             }));
+
+        // Eligibility preflight (#1192) reads the app's sitemap: appmodulecomponent (type 62) → sitemap id,
+        // then RetrieveUnpublishedMultiple → sitemapxml. The default sitemap has no Lead+Opportunity pair.
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appmodulecomponent"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("appmodulecomponent") { ["objectid"] = SitemapId }
+            }));
+
+        h.Client.Setup(c => c.ExecuteAsync(
+                It.IsAny<OrganizationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
+            {
+                h.ExecutedRequests.Add(req);
+                if (req is RetrieveUnpublishedMultipleRequest)
+                {
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results =
+                        {
+                            ["EntityCollection"] = new EntityCollection(new List<Entity>
+                            {
+                                new("sitemap") { ["sitemapid"] = SitemapId, ["sitemapxml"] = sitemapXml }
+                            })
+                        }
+                    };
+                }
+
+                return new OrganizationResponse();
+            });
     }
 
     private static Entity BotBoundAppElement(Guid appElementId)
@@ -754,10 +843,7 @@ public class ModelDrivenAppServiceTests
     public async Task AddCopilot_LongNames_CapsUniqueNameAt100()
     {
         var h = new Harness();
-        h.Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
-        h.Client.Setup(c => c.Dispose());
-        h.Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(h.Client.Object);
+        SetupCopilotCommon(h);
 
         // A long app unique name would push the maker-convention name past the 100-char limit.
         var longAppUnique = new string('a', 120);
@@ -766,12 +852,6 @@ public class ModelDrivenAppServiceTests
             .ReturnsAsync(new EntityCollection(new List<Entity>
             {
                 new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = longAppUnique, ["name"] = AppName }
-            }));
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "bot"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                new("bot") { ["botid"] = CopilotBotId, ["name"] = CopilotBotName, ["schemaname"] = CopilotBotSchema }
             }));
         h.Client.Setup(c => c.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(qe => qe.EntityName == "appelement"), It.IsAny<CancellationToken>()))
@@ -927,5 +1007,207 @@ public class ModelDrivenAppServiceTests
         copilots.Should().HaveCount(1);
         copilots[0].BotId.Should().Be(CopilotBotId);
         copilots[0].BotName.Should().Be(CopilotBotName);
+    }
+
+    // ── #1195: production write-protection gate ────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_ProductionWithoutConfirm_ThrowsWriteBlocked()
+    {
+        var h = new Harness { EnvType = EnvironmentType.Production };
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var act = async () => await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.WriteBlockedOnProduction);
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_ProductionWithConfirm_Proceeds()
+    {
+        var h = new Harness { EnvType = EnvironmentType.Production };
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+        var newId = new Guid("ab1d0000-0000-0000-0000-000000000001");
+        h.Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newId);
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false, Force: false, Confirm: true),
+            progress: null, CancellationToken.None);
+
+        result.AppElementId.Should().Be(newId);
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_ProductionDryRun_NotBlocked()
+    {
+        // A dry run performs no write, so the production guard must not block it.
+        var h = new Harness { EnvType = EnvironmentType.Production };
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: true), progress: null, CancellationToken.None);
+
+        result.DryRun.Should().BeTrue();
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_ProductionWithoutConfirm_ThrowsWriteBlocked()
+    {
+        // The gate applies to every write-capable subcommand, not just add-copilot.
+        var h = new Harness { EnvType = EnvironmentType.Production };
+        h.Setup(SitemapWithAccount, DefaultEntities);
+        var service = h.Build();
+
+        var act = async () => await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.WriteBlockedOnProduction);
+        h.WrittenSitemapXml.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_ProductionWithConfirm_Proceeds()
+    {
+        var h = new Harness { EnvType = EnvironmentType.Production };
+        h.Setup(SitemapWithAccount, DefaultEntities);
+        var service = h.Build();
+
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false, Confirm: true),
+            progress: null,
+            CancellationToken.None);
+
+        h.WrittenSitemapXml.Should().NotBeNull();
+    }
+
+    // ── #1192: app-eligibility preflight ───────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_UnsupportedTemplateApp_ThrowsCopilotAppUnsupported()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+        // Override the app to a known-unsupported first-party app (matched by display name).
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = "msdyn_saleshub", ["name"] = "Sales Hub" }
+            }));
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var act = async () => await service.AddCopilotAsync(
+            "Sales Hub", CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.CopilotAppUnsupported);
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_LeadAndOpportunityApp_ThrowsCopilotAppUnsupported()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h, SitemapWithLeadAndOpportunity);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var act = async () => await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.CopilotAppUnsupported);
+        // The table-pair rule is reported distinctly.
+        ex.Which.Message.Should().Contain("Lead and Opportunity");
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_UnsupportedApp_ForceBypass_Creates()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h, SitemapWithLeadAndOpportunity);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+        var newId = new Guid("ab1d0000-0000-0000-0000-000000000002");
+        h.Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newId);
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false, Force: true, Confirm: false),
+            progress: null, CancellationToken.None);
+
+        result.Forced.Should().BeTrue();
+        result.EligibilityReason.Should().NotBeNull();
+        result.AppElementId.Should().Be(newId);
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_UnsupportedApp_DryRun_ReportsVerdictWithoutWriting()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h, SitemapWithLeadAndOpportunity);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: true), progress: null, CancellationToken.None);
+
+        result.DryRun.Should().BeTrue();
+        result.EligibilityReason.Should().Contain("Lead and Opportunity");
+        result.Forced.Should().BeFalse();
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

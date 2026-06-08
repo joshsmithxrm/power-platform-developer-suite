@@ -49,4 +49,10 @@ public static class ModelDrivenAppErrorCodes
 
     /// <summary>The Copilot is not wired into the app.</summary>
     public const string CopilotNotInApp = "ModelDrivenApp.CopilotNotInApp";
+
+    /// <summary>The target app does not support the model-driven app assistant agent feature.</summary>
+    public const string CopilotAppUnsupported = "ModelDrivenApp.CopilotAppUnsupported";
+
+    /// <summary>A mutating write was blocked on a Production-flagged environment without --confirm.</summary>
+    public const string WriteBlockedOnProduction = "ModelDrivenApp.WriteBlockedOnProduction";
 }

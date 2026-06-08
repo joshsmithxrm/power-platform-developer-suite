@@ -89,10 +89,13 @@ ppds model-driven-app
 ├── set-forms --app <name> --entity <name> (--all | --form <name>...) [--solution] [--publish]
 ├── set-views --app <name> --entity <name> (--all | --view <name>...) [--solution] [--publish]
 ├── set-charts --app <name> --entity <name> (--all | --chart <name>...) [--solution] [--publish]
-├── add-copilot --app <name> --bot <name|id> [--publish] [--dry-run]      # Wire a Copilot (bot) into the app
-├── remove-copilot --app <name> --bot <name|id> [--publish] [--dry-run]   # Remove a Copilot binding
+├── add-copilot --app <name> --bot <name|id> [--publish] [--dry-run] [--force] [--confirm]   # Wire a Copilot (bot) into the app
+├── remove-copilot --app <name> --bot <name|id> [--publish] [--dry-run] [--confirm]          # Remove a Copilot binding
 └── list-copilots --app <name>                                            # List Copilots wired into the app
 ```
+
+All write subcommands (`set-sitemap-xml`, `add-table`, `remove-table`, `set-forms`/`set-views`/`set-charts`,
+`add-copilot`, `remove-copilot`) accept `--confirm` for the production write gate (see below).
 
 ### Shared Options
 
@@ -101,6 +104,8 @@ ppds model-driven-app
 | `--app <name>` | string | App display name or unique name (required on all except `list`) |
 | `--solution <name>` | string | Add app (type 80) + sitemap (type 62) to solution if not present |
 | `--publish` | flag | Publish the app after modification (default: false) |
+| `--confirm` | flag | Bypass write protection on production-flagged environments (all write subcommands; issue #1195) |
+| `--force` | flag | `add-copilot` only — wire the binding even if the app is reported unsupported (issue #1192) |
 
 ### Core Requirements
 
@@ -393,8 +398,13 @@ public record ComponentSelectionOptions(
 ```csharp
 public record CopilotOptions(
     bool Publish,
-    bool DryRun);
+    bool DryRun,
+    bool Force = false,    // bypass the eligibility preflight (#1192)
+    bool Confirm = false); // bypass production write protection (#1195)
 ```
+
+The other write options records (`AddTableOptions`, `ModifyOptions`, `SetSitemapOptions`,
+`ComponentSelectionOptions`) each carry a trailing `bool Confirm = false` for the same production gate.
 
 ---
 
@@ -411,6 +421,8 @@ public record CopilotOptions(
 | `ComponentNotFound` | Form/view/chart name not found for entity | List available components |
 | `SolutionNotFound` | Solution name doesn't exist | List available solutions |
 | `InvalidSitemapXml` | XML fails XSD validation | Show line/element details |
+| `CopilotAppUnsupported` | `add-copilot` target app does not support the app-assistant agent (#1192) | Use a supported app, or `--force` |
+| `WriteBlockedOnProduction` | Mutating write on a Production-flagged env without `--confirm` (#1195) | Re-run with `--confirm` |
 
 ### Error Messages
 
@@ -480,6 +492,61 @@ The SDK `EntityReference` carries the explicit target logical name, so it has no
 - `appelement` mutations reconcile slowly server-side: creates/deletes return success but reads trail by minutes. Verification must tolerate this — a fresh create's `objectid` resolves to the bot once reads catch up (verified live: a created appelement read back with `_objectid_value@…lookuplogicalname = "bot"`). Because the "already wired" guard reads through this lag, re-running `add-copilot` for the same bot within the reconciliation window can create a second binding; the design accepts this over blocking on a slow consistency check.
 - **Bot prerequisite (out of scope for this command):** the model-driven app designer only surfaces an agent whose bot is a valid *app-assistant* (`isLightweightBot`). A bot created standalone in Copilot Studio binds correctly at the `appelement` level but won't render in-app until it's configured as an app assistant (e.g. via the designer's Configure flow). `add-copilot` wires the binding; making the bot app-assistant-eligible is a separate, bot-side concern.
 
+### Production write protection (#1195)
+
+**Context:** `ppds api request` blocks mutating requests against Production-flagged environments unless
+`--confirm` is supplied (`RawWebApiService` → `WebApiWriteGuard`). The model-driven-app write commands go
+through the **SDK pool client** in `ModelDrivenAppService`, not `RawWebApiService`, so they originally
+bypassed that guard entirely.
+
+**Decision:** Apply the same gate to every write-capable subcommand. `ModelDrivenAppService` resolves the
+environment protection level via the **shared** `WriteProtectionResolver` (the single implementation that
+`api request` also uses — no divergent copy) and calls `WebApiWriteGuard.IsBlocked(level, confirm)` before
+any mutation. A Production-flagged environment blocks the write with `WriteBlockedOnProduction` (message
+mirrors `api request`) unless `--confirm` is passed.
+
+**Notes:**
+- `--dry-run` performs no write, so it is never gated (consistent with read requests in `api request`).
+- Protection resolution is fail-safe: an unknown/undetectable environment type resolves to Production.
+
+### App-eligibility preflight (#1192)
+
+**Context:** `add-copilot` will happily create the `appelement` → `bot` binding on apps where the
+model-driven app-assistant agent is **unsupported and never renders** — the command reports success but the
+Copilot silently does not appear.
+
+**Decision:** Before writing, `add-copilot` evaluates eligibility and fails fast with `CopilotAppUnsupported`
+(+ doc link) for unsupported apps. Two detection paths:
+- **Known apps** — matched case-insensitively against the app display name and unique name: Field Service,
+  Field Service Mobile, Connected Field Service, Sales Hub, Customer Service Hub, Customer Service workspace,
+  Project Operations, Customer Insights, Omnichannel.
+- **Table-pair rule** — any app whose sitemap contains BOTH the `lead` and `opportunity` tables (reported
+  distinctly).
+
+**Escape hatch / preview:**
+- `--force` wires the binding anyway (the support matrix changes; the doc is the source of truth). The
+  override is logged to stderr and to the service log.
+- `--dry-run` reports the eligibility verdict without writing.
+
+Ref: <https://learn.microsoft.com/en-us/power-apps/maker/model-driven-apps/add-app-assistant-agent> (Limitations).
+
+### Drift guard for undocumented internals (#1196)
+
+**Context:** `add-copilot` depends on undocumented Dataverse internals that Microsoft can change without
+notice (see the "Why the SDK …" notes above): the polymorphic `appelement.objectid` bind resolving to `bot`,
+its create-only behaviour, the `bot`/`aiskillconfig`/`mcpserver` target set, and the `isLightweightBot`
+prerequisite.
+
+**Decision:** Commit a reference fixture capturing the known-good shape and add an integration-tagged drift
+guard that asserts it, so a future platform change is caught by our tests rather than by a user in production.
+
+- **Fixture:** [`tests/PPDS.LiveTests/Fixtures/ModelDrivenApps/appelement-bot-binding.json`](../tests/PPDS.LiveTests/Fixtures/ModelDrivenApps/appelement-bot-binding.json)
+  — `_objectid_value@…lookuplogicalname = "bot"`, the polymorphic target set, `objectid` create-only, and
+  `isLightweightBot`. (Generic placeholder ids/names only.)
+- **Guard:** `AppElementBindingDriftGuardTests` (Category=Integration) asserts the relied-on shape and fails
+  loudly ("Dataverse internals changed — revalidate add-copilot") on mismatch. Re-capture the fixture from a
+  live org whenever Dataverse changes.
+
 ### Why strict XSD validation?
 
 **Context:** Sitemap XML can be validated client-side or server-side.
@@ -519,3 +586,4 @@ The SDK `EntityReference` carries the explicit target logical name, so it has no
 | Date | Change |
 |------|--------|
 | 2026-06-01 | Initial spec |
+| 2026-06-08 | add-copilot follow-ups: production `--confirm` write gate (#1195), app-eligibility preflight + `--force` (#1192), drift fixture + guard for undocumented internals (#1196) |

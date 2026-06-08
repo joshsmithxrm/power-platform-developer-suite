@@ -231,10 +231,7 @@ public static class ApiRequestCommand
     /// Exposed internal for unit testing of the write-guard fail-safe.
     /// </summary>
     internal static ProtectionLevel ResolveProtectionLevel(EnvironmentType envType, ProtectionLevel? configuredProtection)
-        => configuredProtection
-            ?? (envType == EnvironmentType.Unknown
-                ? ProtectionLevel.Production
-                : DmlSafetyGuard.DetectProtectionLevel(envType));
+        => WriteProtectionResolver.Resolve(envType, configuredProtection);
 
     /// <summary>
     /// Sends the request via the service and maps the response (or write-guard block) to an exit code.

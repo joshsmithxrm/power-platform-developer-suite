@@ -44,6 +44,7 @@ public static class AddTableCommand
             titleOption,
             ModelDrivenAppCommandGroup.SolutionOption,
             ModelDrivenAppCommandGroup.PublishOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -59,10 +60,11 @@ public static class AddTableCommand
             var title = parseResult.GetValue(titleOption);
             var solution = parseResult.GetValue(ModelDrivenAppCommandGroup.SolutionOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(entities, app, group, area, title, solution, publish, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(entities, app, group, area, title, solution, publish, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -76,6 +78,7 @@ public static class AddTableCommand
         string? title,
         string? solution,
         bool publish,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -104,7 +107,7 @@ public static class AddTableCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new AddTableOptions(group, area, title, solution, publish);
+            var options = new AddTableOptions(group, area, title, solution, publish, confirm);
             await service.AddTableAsync(appName, entities, options, null, ct);
 
             if (!globalOptions.IsJsonMode)

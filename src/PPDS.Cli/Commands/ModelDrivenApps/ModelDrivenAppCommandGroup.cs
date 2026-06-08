@@ -37,6 +37,12 @@ public static class ModelDrivenAppCommandGroup
         Description = "Publish the app after modification"
     };
 
+    /// <summary>Shared --confirm flag. Bypasses production write protection (issue #1195).</summary>
+    public static readonly Option<bool> ConfirmOption = new("--confirm")
+    {
+        Description = "Bypass write protection on production-flagged environments"
+    };
+
     /// <summary>
     /// Creates the model-driven-app command group.
     /// </summary>

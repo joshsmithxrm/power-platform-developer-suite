@@ -25,6 +25,7 @@ public static class RemoveTableCommand
             entityOption,
             ModelDrivenAppCommandGroup.SolutionOption,
             ModelDrivenAppCommandGroup.PublishOption,
+            ModelDrivenAppCommandGroup.ConfirmOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -37,10 +38,11 @@ public static class RemoveTableCommand
             var entity = parseResult.GetValue(entityOption);
             var solution = parseResult.GetValue(ModelDrivenAppCommandGroup.SolutionOption);
             var publish = parseResult.GetValue(ModelDrivenAppCommandGroup.PublishOption);
+            var confirm = parseResult.GetValue(ModelDrivenAppCommandGroup.ConfirmOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, entity, solution, publish, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, entity, solution, publish, confirm, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -51,6 +53,7 @@ public static class RemoveTableCommand
         string? entity,
         string? solution,
         bool publish,
+        bool confirm,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -85,7 +88,7 @@ public static class RemoveTableCommand
                 Console.Error.WriteLine();
             }
 
-            var options = new ModifyOptions(solution, publish);
+            var options = new ModifyOptions(solution, publish, confirm);
             await service.RemoveTableAsync(appName, entity, options, null, ct);
 
             if (!globalOptions.IsJsonMode)
