@@ -58,7 +58,7 @@ public class ModelDrivenAppServiceTests
         /// <summary>The XML written by the last UpdateAsync on the sitemap record, if any.</summary>
         public string? WrittenSitemapXml { get; private set; }
 
-        /// <summary>All organization requests passed to ExecuteAsync (for RemoveAppComponents assertions).</summary>
+        /// <summary>All organization requests passed to ExecuteAsync (for Add/RemoveAppComponents assertions).</summary>
         public List<OrganizationRequest> ExecutedRequests { get; } = new();
 
         public ModelDrivenAppService Build()
@@ -493,6 +493,52 @@ public class ModelDrivenAppServiceTests
 
         var ex = await act.Should().ThrowAsync<PpdsException>();
         ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.InvalidArguments);
+    }
+
+    // ── set-views: AddAppComponents passes AppId as Guid, not EntityReference (#1183) ──
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task SetViews_NamedView_AddAppComponentsPassesAppIdAsGuid()
+    {
+        var h = new Harness();
+        h.Setup(SitemapWithAccount, DefaultEntities);
+
+        var viewId = new Guid("eeeeeeee-5555-5555-5555-555555555555");
+        const string viewName = "Active Accounts";
+
+        // ResolveViewIdsAsync → savedquery lookup returns the named view to add.
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "savedquery"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("savedquery") { ["savedqueryid"] = viewId, ["name"] = viewName }
+            }));
+
+        var service = h.Build();
+
+        // Explicit named view (NOT --all) — this is the only path that hits the add helper.
+        var options = new ComponentSelectionOptions(
+            All: false,
+            ComponentNames: new[] { viewName },
+            Solution: null,
+            Publish: false);
+
+        await service.SetViewsAsync(
+            AppName, "account", options, progress: null, CancellationToken.None);
+
+        // The AddAppComponents message must type AppId as the appmodule Guid. Passing an
+        // EntityReference triggers Dataverse's "Input field type 'EntityReference' does not
+        // match expected type 'Guid' for field 'AppId'" — the #1183 regression.
+        var addReq = h.ExecutedRequests.Single(r => r.RequestName == "AddAppComponents");
+
+        addReq["AppId"].Should().BeOfType<Guid>()
+            .Which.Should().Be(AppModuleId);
+
+        // The components themselves are still EntityReferences to the savedquery rows.
+        addReq["Components"].Should().BeOfType<EntityReferenceCollection>()
+            .Which.Should().ContainSingle(er => er.LogicalName == "savedquery" && er.Id == viewId);
     }
 
     // ── ResolveAppAsync: app not found throws AppNotFound (D4) ──────────────────
