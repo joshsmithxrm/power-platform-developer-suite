@@ -648,7 +648,7 @@ public class ModelDrivenAppServiceTests
     // ── Copilot wiring (add/remove/list) ───────────────────────────────────────
 
     private static readonly Guid CopilotBotId = new("eeeeeeee-6666-6666-6666-666666666666");
-    private const string CopilotBotName = "Member Summary Assistant";
+    private const string CopilotBotName = "Test Copilot Agent";
     private const string CopilotBotSchema = "cr8a6_test";
 
     // {prefix}_{appUniqueName}_schemaname_{botSchema} where prefix is the bot schema's leading segment.
