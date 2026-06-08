@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
 
+### Fixed
+- `ppds model-driven-app set-views|set-forms|set-charts` with explicit named components no longer fail with `Input field type 'EntityReference' does not match expected type 'Guid' for field 'AppId'`. The shared `AddAppComponents` helper now passes the appmodule id as a `Guid` (matching the working `RemoveAppComponents` sibling); a regression test asserts the request parameter type (#1183).
+
 ## [1.1.0] - 2026-04-26
 
 ### Added

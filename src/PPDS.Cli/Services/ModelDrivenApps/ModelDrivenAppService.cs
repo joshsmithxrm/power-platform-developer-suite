@@ -893,7 +893,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         var refs = componentIds.Select(id => new EntityReference(componentEntityName, id)).ToList();
         var request = new OrganizationRequest("AddAppComponents");
-        request["AppId"] = new EntityReference("appmodule", appModuleId);
+        request["AppId"] = appModuleId;
         request["Components"] = new EntityReferenceCollection(refs);
 
         try
