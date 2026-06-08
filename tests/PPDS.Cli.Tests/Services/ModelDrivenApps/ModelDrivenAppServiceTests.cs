@@ -638,13 +638,19 @@ public class ModelDrivenAppServiceTests
             }));
     }
 
-    private static Entity BotBoundAppElement(Guid appElementId) => new("appelement")
+    private static Entity BotBoundAppElement(Guid appElementId)
     {
-        ["appelementid"] = appElementId,
-        ["uniquename"] = ExpectedCopilotUniqueName,
-        ["name"] = CopilotBotSchema,
-        ["objectid"] = new EntityReference("bot", CopilotBotId) { Name = CopilotBotName }
-    };
+        var entity = new Entity("appelement")
+        {
+            ["appelementid"] = appElementId,
+            ["uniquename"] = ExpectedCopilotUniqueName,
+            ["name"] = CopilotBotSchema,
+            ["objectid"] = new EntityReference("bot", CopilotBotId)
+        };
+        // RetrieveMultiple surfaces the bot display name via FormattedValues, not EntityReference.Name.
+        entity.FormattedValues["objectid"] = CopilotBotName;
+        return entity;
+    }
 
     [Fact]
     [Trait("Category", "Unit")]
@@ -741,6 +747,47 @@ public class ModelDrivenAppServiceTests
         h.Client.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
         h.Client.Verify(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         result.AppElementId.Should().Be(newId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_LongNames_CapsUniqueNameAt100()
+    {
+        var h = new Harness();
+        h.Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        h.Client.Setup(c => c.Dispose());
+        h.Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(h.Client.Object);
+
+        // A long app unique name would push the maker-convention name past the 100-char limit.
+        var longAppUnique = new string('a', 120);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = longAppUnique, ["name"] = AppName }
+            }));
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "bot"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("bot") { ["botid"] = CopilotBotId, ["name"] = CopilotBotName, ["schemaname"] = CopilotBotSchema }
+            }));
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        Entity? created = null;
+        h.Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        var service = h.Build();
+        await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        created.Should().NotBeNull();
+        created!.GetAttributeValue<string>("uniquename").Length.Should().BeLessThanOrEqualTo(100);
     }
 
     [Fact]

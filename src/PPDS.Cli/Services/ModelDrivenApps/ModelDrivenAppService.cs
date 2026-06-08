@@ -27,6 +27,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     private const int ComponentTypeSitemap = 62;
     private const int ComponentTypeApp = 80;
 
+    // appelement.uniquename is a unique key with a 100-character maximum.
+    private const int MaxUniqueNameLength = 100;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ModelDrivenAppService"/> class.
     /// </summary>
@@ -478,7 +481,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
                 $"Remove it first with: ppds model-driven-app remove-copilot --app \"{appName}\" --bot \"{bot}\"");
         }
 
-        var baseUniqueName = $"{SchemaPrefix(botSchemaName)}_{appUniqueName}_schemaname_{botSchemaName}";
+        // Cap at the appelement.uniquename 100-char limit; an over-length value throws a non-duplicate
+        // exception on create that the fallback path would not recognize.
+        var baseUniqueName = Truncate($"{SchemaPrefix(botSchemaName)}_{appUniqueName}_schemaname_{botSchemaName}", MaxUniqueNameLength);
 
         if (options.DryRun)
         {
@@ -695,12 +700,18 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
                 continue;
             }
 
+            // RetrieveMultiple does not populate EntityReference.Name; the bot display name comes from
+            // the formatted value of the lookup column (falling back to the reference name if absent).
+            var botDisplayName = entity.FormattedValues.Contains("objectid")
+                ? entity.FormattedValues["objectid"]
+                : objectRef.Name;
+
             bindings.Add(new CopilotBinding(
                 entity.GetAttributeValue<Guid>("appelementid"),
                 entity.GetAttributeValue<string>("uniquename") ?? string.Empty,
                 entity.GetAttributeValue<string>("name") ?? string.Empty,
                 objectRef.Id,
-                objectRef.Name));
+                botDisplayName));
         }
 
         return bindings;
@@ -714,6 +725,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var idx = schemaName.IndexOf('_');
         return idx > 0 ? schemaName[..idx] : schemaName;
     }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 
     // Creates the appelement binding. appelement.uniquename is a unique key, and appelement mutations
     // reconcile slowly server-side, so a stale row left by a prior failed wiring can occupy the
@@ -731,7 +745,10 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
         catch (Exception ex) when (ex is not OperationCanceledException && IsDuplicateKeyViolation(ex))
         {
-            var fallbackName = $"{baseUniqueName}_{Guid.NewGuid():N}"[..(baseUniqueName.Length + 9)];
+            // Suffix is "_" + 8 hex chars (9). Truncate the base first so the result stays within
+            // the 100-char uniquename limit even when the base is already near the cap.
+            var suffix = "_" + Guid.NewGuid().ToString("N")[..8];
+            var fallbackName = Truncate(baseUniqueName, MaxUniqueNameLength - suffix.Length) + suffix;
             var id = await client.CreateAsync(
                 BuildCopilotAppElement(appModuleId, botId, botSchemaName, fallbackName), ct);
             return (id, fallbackName);
