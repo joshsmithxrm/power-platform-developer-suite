@@ -506,7 +506,7 @@ public class ViewService : IViewService
     /// </summary>
     private static string DescribeDataverseFault(Exception ex)
     {
-        for (var current = (Exception?)ex; current != null; current = current.InnerException)
+        for (Exception? current = ex; current != null; current = current.InnerException)
         {
             if (current is FaultException<OrganizationServiceFault> typed && typed.Detail != null)
                 return $"Dataverse error 0x{typed.Detail.ErrorCode:x8}: {typed.Detail.Message}";
