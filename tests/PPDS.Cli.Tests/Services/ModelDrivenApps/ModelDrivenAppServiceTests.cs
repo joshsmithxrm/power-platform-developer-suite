@@ -1210,4 +1210,187 @@ public class ModelDrivenAppServiceTests
         result.Forced.Should().BeFalse();
         h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // ── inspect-app-assistant (copilot doctor) — read-only diagnostic (#1193) ─────
+
+    private static readonly Guid SecondElementId = new("17171717-aaaa-bbbb-cccc-171717171717");
+
+    // Wires the pool/client mocks shared by inspect tests: a single resolvable app.
+    private static void SetupInspectCommon(Harness h)
+    {
+        h.Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        h.Client.Setup(c => c.Dispose());
+        h.Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(h.Client.Object);
+
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("appmodule")
+                {
+                    ["appmoduleid"] = AppModuleId,
+                    ["uniquename"] = AppUniqueName,
+                    ["name"] = AppName
+                }
+            }));
+    }
+
+    private static void SetupAppElements(Harness h, params Entity[] rows)
+    {
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(rows.ToList()));
+    }
+
+    private static void SetupBots(Harness h, params Entity[] bots)
+    {
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "bot"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(bots.ToList()));
+    }
+
+    private static Entity BotEntity(Guid id, string name, bool isLightweightBot) =>
+        new("bot") { ["botid"] = id, ["name"] = name, ["islightweightbot"] = isLightweightBot };
+
+    // A copilot-shaped appelement whose objectid is null (dangling, no target bot).
+    private static Entity OrphanCopilotAppElement(Guid appElementId) =>
+        new("appelement")
+        {
+            ["appelementid"] = appElementId,
+            // Carries the "_schemaname_" maker-convention marker, but no objectid.
+            ["uniquename"] = "cr8a6_ppds_myapp_schemaname_cr8a6_orphan"
+        };
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_NotAppAssistant_FlaggedWhenIsLightweightBotFalse()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        var elementId = new Guid("15151515-aaaa-bbbb-cccc-151515151515");
+        SetupAppElements(h, BotBoundAppElement(elementId));
+        SetupBots(h, BotEntity(CopilotBotId, CopilotBotName, isLightweightBot: false));
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        diag.IsHealthy.Should().BeFalse();
+        diag.Findings.Should().ContainSingle(f => f.Kind == AppAssistantFindingKind.NotAppAssistant);
+        var finding = diag.Findings.Single(f => f.Kind == AppAssistantFindingKind.NotAppAssistant);
+        finding.BotId.Should().Be(CopilotBotId);
+        finding.BotName.Should().Be(CopilotBotName);
+        finding.IsLightweightBot.Should().BeFalse();
+        finding.AppElementIds.Should().ContainSingle().Which.Should().Be(elementId);
+        finding.Remediation.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_DuplicateBinding_Flagged()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        var firstId = new Guid("16161616-aaaa-bbbb-cccc-161616161616");
+        // Two appelements bind the same bot. The bot IS an app assistant, so only the
+        // duplicate is flagged (not the not-app-assistant finding).
+        SetupAppElements(h, BotBoundAppElement(firstId), BotBoundAppElement(SecondElementId));
+        SetupBots(h, BotEntity(CopilotBotId, CopilotBotName, isLightweightBot: true));
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        diag.Findings.Should().ContainSingle();
+        var finding = diag.Findings.Single();
+        finding.Kind.Should().Be(AppAssistantFindingKind.DuplicateBinding);
+        finding.BotId.Should().Be(CopilotBotId);
+        finding.AppElementIds.Should().BeEquivalentTo(new[] { firstId, SecondElementId });
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_OrphanAppElement_Flagged()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        var orphanId = new Guid("18181818-aaaa-bbbb-cccc-181818181818");
+        // One orphan copilot-shaped row plus a null-objectid row WITHOUT the marker (ignored).
+        SetupAppElements(h,
+            OrphanCopilotAppElement(orphanId),
+            new Entity("appelement") { ["appelementid"] = Guid.NewGuid(), ["uniquename"] = "some_other_element" });
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        diag.Findings.Should().ContainSingle();
+        var finding = diag.Findings.Single();
+        finding.Kind.Should().Be(AppAssistantFindingKind.OrphanAppElement);
+        finding.BotId.Should().BeNull();
+        finding.IsLightweightBot.Should().BeNull();
+        finding.AppElementIds.Should().ContainSingle().Which.Should().Be(orphanId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_Healthy_NoFindings()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        // A single binding to a bot that is a valid app assistant — nothing to report.
+        SetupAppElements(h, BotBoundAppElement(new Guid("19191919-aaaa-bbbb-cccc-191919191919")));
+        SetupBots(h, BotEntity(CopilotBotId, CopilotBotName, isLightweightBot: true));
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        diag.IsHealthy.Should().BeTrue();
+        diag.Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_UnvaluedLightweightFlag_ReportedAsUnknownAndFlagged()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        // The bot row has no islightweightbot value at all (unvalued in Dataverse).
+        SetupAppElements(h, BotBoundAppElement(new Guid("21212121-aaaa-bbbb-cccc-212121212121")));
+        SetupBots(h, new Entity("bot") { ["botid"] = CopilotBotId, ["name"] = CopilotBotName });
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        var finding = diag.Findings.Single(f => f.Kind == AppAssistantFindingKind.NotAppAssistant);
+        // Unvalued must read as "unknown" (null), not be forced to false.
+        finding.IsLightweightBot.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_IsReadOnly_NoMutatingSdkCall()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        // A scenario with findings, to exercise the full diagnostic path.
+        SetupAppElements(h, BotBoundAppElement(new Guid("20202020-aaaa-bbbb-cccc-202020202020")));
+        SetupBots(h, BotEntity(CopilotBotId, CopilotBotName, isLightweightBot: false));
+
+        var service = h.Build();
+        await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        // The diagnostic is read-only: no create/update/delete/execute against Dataverse.
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

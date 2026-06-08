@@ -637,6 +637,67 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         return await FindCopilotBindingsAsync(client, appModuleId, botId: null, ct);
     }
 
+    /// <inheritdoc />
+    public async Task<AppAssistantDiagnostics> InspectAppAssistantAsync(string appName, CancellationToken ct)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+        var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
+
+        // Reuse the #1186 binding-discovery helper for bot-bound appelements (findings 1 & 2),
+        // then a sibling read for orphan (null-objectid) copilot-shaped rows (finding 3).
+        // Both reads are RetrieveMultiple only — this method never mutates.
+        var bindings = await FindCopilotBindingsAsync(client, appModuleId, botId: null, ct);
+        var orphans = await FindOrphanCopilotAppElementsAsync(client, appModuleId, ct);
+
+        var distinctBotIds = bindings.Select(b => b.BotId).Distinct().ToList();
+        var botInfo = await GetBotAppAssistantInfoAsync(client, distinctBotIds, ct);
+
+        var findings = new List<AppAssistantFinding>();
+
+        foreach (var group in bindings.GroupBy(b => b.BotId))
+        {
+            var botId = group.Key;
+            var appElementIds = group.Select(b => b.AppElementId).ToList();
+            var hasInfo = botInfo.TryGetValue(botId, out var info);
+            var botName = (hasInfo ? info!.Name : null) ?? group.First().BotName;
+            var botLabel = botName ?? botId.ToString();
+            bool? isLightweight = hasInfo ? info!.IsLightweightBot : null;
+
+            // Finding 1: bound but not an app-assistant (islightweightbot != true) → never renders in-app.
+            if (isLightweight != true)
+            {
+                findings.Add(new AppAssistantFinding(
+                    AppAssistantFindingKind.NotAppAssistant,
+                    botName, botId, isLightweight, appElementIds,
+                    $"Bot '{botLabel}' is bound but is not an app assistant (isLightweightBot=false), " +
+                    "so it will not render in-app. Configure it as an app assistant in Copilot Studio, " +
+                    $"or remove the binding: ppds model-driven-app remove-copilot --app \"{appName}\" --bot \"{botId}\"."));
+            }
+
+            // Finding 2: more than one appelement binds the same bot.
+            if (appElementIds.Count > 1)
+            {
+                findings.Add(new AppAssistantFinding(
+                    AppAssistantFindingKind.DuplicateBinding,
+                    botName, botId, isLightweight, appElementIds,
+                    $"Bot '{botLabel}' is bound by {appElementIds.Count} appelements; keep one and remove the " +
+                    $"rest with: ppds model-driven-app remove-copilot --app \"{appName}\" --bot \"{botId}\"."));
+            }
+        }
+
+        // Finding 3: orphan copilot-shaped appelements with a null objectid (no target bot).
+        foreach (var orphanId in orphans)
+        {
+            findings.Add(new AppAssistantFinding(
+                AppAssistantFindingKind.OrphanAppElement,
+                BotName: null, BotId: null, IsLightweightBot: null, new[] { orphanId },
+                $"Appelement {orphanId} is copilot-shaped but has a null objectid (no target bot); " +
+                "it is a dangling row left by a prior failed wiring. Remove it in the maker portal."));
+        }
+
+        return new AppAssistantDiagnostics(appName, appModuleId, findings);
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────────
 
     private async Task<(Guid AppModuleId, string UniqueName)> ResolveAppAsync(
@@ -1427,5 +1488,92 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.InvalidArguments,
                 $"Either --all or at least one {optionName} is required.");
         }
+    }
+
+    // ── inspect-app-assistant read-only helpers (#1193) ──────────────────────────
+
+    // The maker-convention appelement uniquename embeds "_schemaname_" (see the add-copilot
+    // BuildCopilotAppElement convention). A null-objectid appelement carrying this marker is a
+    // dangling copilot binding; an unrelated appelement without it is left alone.
+    private const string CopilotAppElementNameMarker = "_schemaname_";
+
+    // islightweightbot is a Dataverse two-options field that can be unvalued; keep it nullable so a
+    // missing value reads as "unknown" rather than being forced to false.
+    private sealed record BotAppAssistantInfo(string? Name, bool? IsLightweightBot);
+
+    // Bulk-reads the app-assistant flag (and name) for the supplied bots. Read-only.
+    private async Task<Dictionary<Guid, BotAppAssistantInfo>> GetBotAppAssistantInfoAsync(
+        IPooledClient client, IReadOnlyCollection<Guid> botIds, CancellationToken ct)
+    {
+        if (botIds.Count == 0)
+        {
+            return [];
+        }
+
+        var query = new QueryExpression("bot")
+        {
+            ColumnSet = new ColumnSet("botid", "name", "islightweightbot")
+        };
+        query.Criteria.AddCondition("botid", ConditionOperator.In, botIds.Select(id => (object)id).ToArray());
+
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to query Copilot (bot) app-assistant flags.", ex);
+        }
+
+        var map = new Dictionary<Guid, BotAppAssistantInfo>();
+        foreach (var e in result.Entities)
+        {
+            map[e.GetAttributeValue<Guid>("botid")] = new BotAppAssistantInfo(
+                e.GetAttributeValue<string>("name"),
+                e.GetAttributeValue<bool?>("islightweightbot"));
+        }
+
+        return map;
+    }
+
+    // Finds copilot-shaped appelement rows in the app whose objectid is null (no target bot).
+    // Mirrors FindCopilotBindingsAsync's query but keeps the rows that helper discards. Read-only.
+    private async Task<List<Guid>> FindOrphanCopilotAppElementsAsync(
+        IPooledClient client, Guid appModuleId, CancellationToken ct)
+    {
+        var query = new QueryExpression("appelement")
+        {
+            ColumnSet = new ColumnSet("appelementid", "uniquename", "objectid")
+        };
+        query.Criteria.AddCondition("parentappmoduleid", ConditionOperator.Equal, appModuleId);
+
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to query Copilot appelements.", ex);
+        }
+
+        var orphans = new List<Guid>();
+        foreach (var entity in result.Entities)
+        {
+            // A populated objectid (bot or any other target) is not an orphan.
+            if (entity.GetAttributeValue<EntityReference>("objectid") != null)
+            {
+                continue;
+            }
+
+            var uniqueName = entity.GetAttributeValue<string>("uniquename") ?? string.Empty;
+            if (uniqueName.Contains(CopilotAppElementNameMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                orphans.Add(entity.GetAttributeValue<Guid>("appelementid"));
+            }
+        }
+
+        return orphans;
     }
 }
