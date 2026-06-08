@@ -42,4 +42,11 @@ public interface IModelDrivenAppService
 
     /// <summary>Lists the Copilots (bots) wired into the app.</summary>
     Task<IReadOnlyList<CopilotBinding>> ListCopilotsAsync(string appName, CancellationToken ct);
+
+    /// <summary>
+    /// Read-only diagnostic ("copilot doctor") that inspects the app's Copilot (bot)
+    /// <c>appelement</c> bindings and reports problems (non-app-assistant bots, duplicate
+    /// bindings, orphan rows) without writing anything.
+    /// </summary>
+    Task<AppAssistantDiagnostics> InspectAppAssistantAsync(string appName, CancellationToken ct);
 }

@@ -30,7 +30,8 @@ public class HelpTests
         Assert.Contains("add-copilot", names);
         Assert.Contains("remove-copilot", names);
         Assert.Contains("list-copilots", names);
-        Assert.Equal(12, names.Count);
+        Assert.Contains("inspect-app-assistant", names);
+        Assert.Equal(13, names.Count);
     }
 
     [Fact]

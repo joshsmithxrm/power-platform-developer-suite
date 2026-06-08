@@ -62,6 +62,7 @@ public static class ModelDrivenAppCommandGroup
         command.Subcommands.Add(AddCopilotCommand.Create());
         command.Subcommands.Add(RemoveCopilotCommand.Create());
         command.Subcommands.Add(ListCopilotsCommand.Create());
+        command.Subcommands.Add(InspectAppAssistantCommand.Create());
 
         return command;
     }
