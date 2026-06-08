@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
 using Xunit;
@@ -59,12 +58,12 @@ public class AppElementBindingDriftGuardTests
         isLightweight.GetBoolean().Should().BeTrue(because: DriftMessage);
     }
 
-    private static JsonDocument LoadFixture([CallerFilePath] string? thisFile = null)
+    private static JsonDocument LoadFixture()
     {
-        // Resolve the fixture relative to this source file so the test needs no csproj copy step.
-        var dir = Path.GetDirectoryName(thisFile)!;
-        var path = Path.GetFullPath(Path.Combine(dir, "..", "Fixtures", "ModelDrivenApps", "appelement-bot-binding.json"));
-        File.Exists(path).Should().BeTrue($"reference fixture must be committed at {path}");
+        // The fixture is copied next to the test binary (see PPDS.LiveTests.csproj), so resolve it from
+        // the output directory — reliable under CI runners / containerized execution.
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ModelDrivenApps", "appelement-bot-binding.json");
+        File.Exists(path).Should().BeTrue($"reference fixture must be present at {path}");
         return JsonDocument.Parse(File.ReadAllText(path));
     }
 }

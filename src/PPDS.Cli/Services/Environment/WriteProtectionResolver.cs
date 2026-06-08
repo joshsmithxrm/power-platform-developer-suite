@@ -31,6 +31,8 @@ public static class WriteProtectionResolver
         string environmentUrl,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(envConfigService);
+
         var config = await envConfigService.GetConfigAsync(environmentUrl, ct);
         return Resolve(config?.Type ?? EnvironmentType.Unknown, config?.Protection);
     }

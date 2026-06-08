@@ -30,4 +30,11 @@
     <ProjectReference Include="..\..\src\PPDS.Auth\PPDS.Auth.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Reference fixtures (e.g. the appelement->bot drift-guard fixture, #1196) are copied next to the
+         test binary so tests resolve them via AppContext.BaseDirectory rather than a compile-time source
+         path (reliable under CI runners / containerized execution). -->
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
