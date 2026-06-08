@@ -53,6 +53,9 @@ public static class ModelDrivenAppCommandGroup
         command.Subcommands.Add(SetFormsCommand.Create());
         command.Subcommands.Add(SetViewsCommand.Create());
         command.Subcommands.Add(SetChartsCommand.Create());
+        command.Subcommands.Add(AddCopilotCommand.Create());
+        command.Subcommands.Add(RemoveCopilotCommand.Create());
+        command.Subcommands.Add(ListCopilotsCommand.Create());
 
         return command;
     }
