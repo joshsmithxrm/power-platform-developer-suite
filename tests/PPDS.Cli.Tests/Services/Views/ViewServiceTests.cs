@@ -1,11 +1,20 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.ServiceModel;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Views;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 
@@ -323,5 +332,120 @@ public class ViewServiceTests
         var logger = new NullLogger<ViewService>();
         var act = () => new ViewService(pool, meta, null!, logger);
         act.Should().Throw<ArgumentNullException>().WithParameterName("guard");
+    }
+
+    // ─── Honest view writes: fault surfacing / managed guidance / read-back verify (#1190, #1194) ──
+
+    private const int ContactOtc = 2;
+    private static readonly Guid ViewId = new("8df19b44-a073-40c3-9d6d-ee1355d8c4ba");
+    private const string ViewName = "Quick Find Active Contacts";
+    private const string OriginalFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /></entity></fetch>";
+    private const string NewFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /><attribute name=\"emailaddress1\" /></entity></fetch>";
+
+    /// <summary>
+    /// Builds a ViewService whose fetch returns a single contact view (managed or not), whose write
+    /// either throws a supplied Dataverse fault or succeeds, and whose read-back returns
+    /// <paramref name="fetchAfterWrite"/> — letting tests drive every ApplyViewWriteAsync branch.
+    /// </summary>
+    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite)
+    {
+        var pool = new Mock<IDataverseConnectionPool>();
+        var client = new Mock<IPooledClient>();
+        var metadata = new Mock<ICachedMetadataProvider>();
+
+        client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        client.Setup(c => c.Dispose());
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(client.Object);
+        metadata.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<EntitySummary>
+            {
+                new()
+                {
+                    LogicalName = "contact",
+                    DisplayName = "Contact",
+                    SchemaName = "Contact",
+                    MetadataId = Guid.NewGuid(),
+                    ObjectTypeCode = ContactOtc
+                }
+            });
+
+        // The view-fetch (filters by name) returns the original record; the read-back verification
+        // (filters by savedqueryid) returns fetchAfterWrite.
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase q, CancellationToken _) =>
+            {
+                var qe = (QueryExpression)q;
+                var isReadBack = qe.Criteria.Conditions.Any(c => c.AttributeName == "savedqueryid");
+                var e = new Entity("savedquery")
+                {
+                    ["savedqueryid"] = ViewId,
+                    ["fetchxml"] = isReadBack ? fetchAfterWrite : OriginalFetch,
+                    ["ismanaged"] = isManaged
+                };
+                return new EntityCollection(new List<Entity> { e });
+            });
+
+        if (updateThrows != null)
+            client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(updateThrows);
+        else
+            client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>());
+    }
+
+    private static FaultException<OrganizationServiceFault> DataverseFault(int code, string message)
+        => new(new OrganizationServiceFault { ErrorCode = code, Message = message }, new FaultReason(message));
+
+    [Fact]
+    public async Task SetFetchXml_ManagedView_WriteRejected_ThrowsManagedComponentNotEditableWithGuidance()
+    {
+        var svc = BuildViewWriteService(
+            isManaged: true,
+            updateThrows: DataverseFault(unchecked((int)0x80040216), "An unexpected error occurred."),
+            fetchAfterWrite: OriginalFetch);
+
+        var ex = await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().ThrowAsync<PpdsException>();
+
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.View.ManagedComponentNotEditable);
+        ex.Which.Message.Should().Contain("0x80040216").And.Contain("maker UI");
+    }
+
+    [Fact]
+    public async Task SetFetchXml_UnmanagedView_WriteFails_SurfacesUnderlyingDataverseFault()
+    {
+        var svc = BuildViewWriteService(
+            isManaged: false,
+            updateThrows: DataverseFault(unchecked((int)0x80040203), "FetchXml is invalid."),
+            fetchAfterWrite: OriginalFetch);
+
+        var ex = await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().ThrowAsync<PpdsException>();
+
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.View.UpdateFailed);
+        ex.Which.Message.Should().Contain("0x80040203").And.Contain("FetchXml is invalid");
+    }
+
+    [Fact]
+    public async Task SetFetchXml_WriteSilentlyDropped_ThrowsUpdateNotPersisted()
+    {
+        // Update "succeeds" but the read-back still shows the original value → silent no-op (#1194).
+        var svc = BuildViewWriteService(isManaged: false, updateThrows: null, fetchAfterWrite: OriginalFetch);
+
+        var ex = await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().ThrowAsync<PpdsException>();
+
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.View.UpdateNotPersisted);
+    }
+
+    [Fact]
+    public async Task SetFetchXml_WritePersists_Succeeds()
+    {
+        // Update succeeds and the read-back reflects the new value → no throw.
+        var svc = BuildViewWriteService(isManaged: false, updateThrows: null, fetchAfterWrite: NewFetch);
+
+        await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().NotThrowAsync();
     }
 }

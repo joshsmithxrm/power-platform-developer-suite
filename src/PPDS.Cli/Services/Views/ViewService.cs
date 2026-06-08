@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -309,7 +310,7 @@ public class ViewService : IViewService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid", "layoutxml"), cancellationToken);
+            new ColumnSet("savedqueryid", "layoutxml", "ismanaged"), cancellationToken);
 
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
@@ -318,15 +319,9 @@ public class ViewService : IViewService
         var update = new Entity("savedquery", savedQueryId);
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
-        try
-        {
-            await client.UpdateAsync(update, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateFailed,
-                $"Failed to update view '{viewName}' after reordering columns.", ex);
-        }
+        await ApplyViewWriteAsync(
+            client, savedQueryId, viewName, "reordering columns", "layoutxml",
+            layoutXml, update, entity.GetAttributeValue<bool>("ismanaged"), cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -422,7 +417,7 @@ public class ViewService : IViewService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid", "fetchxml"), cancellationToken);
+            new ColumnSet("savedqueryid", "fetchxml", "ismanaged"), cancellationToken);
 
         var fetchXml = entity.GetAttributeValue<string>("fetchxml") ?? "<fetch><entity /></fetch>";
         var fetchDoc = XDocument.Parse(fetchXml);
@@ -431,15 +426,9 @@ public class ViewService : IViewService
         var update = new Entity("savedquery", savedQueryId);
         update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
-        try
-        {
-            await client.UpdateAsync(update, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateFailed,
-                $"Failed to update view '{viewName}' after setting filter.", ex);
-        }
+        await ApplyViewWriteAsync(
+            client, savedQueryId, viewName, "setting filter", "fetchxml",
+            fetchXml, update, entity.GetAttributeValue<bool>("ismanaged"), cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -494,27 +483,131 @@ public class ViewService : IViewService
                 "FetchXML must have <fetch> as the root element.");
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var (savedQueryId, _) = await FetchViewRecordAsync(
+        var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid"), cancellationToken);
+            new ColumnSet("savedqueryid", "fetchxml", "ismanaged"), cancellationToken);
 
         var update = new Entity("savedquery", savedQueryId);
         update["fetchxml"] = fetchXml;
 
-        try
-        {
-            await client.UpdateAsync(update, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateFailed,
-                $"Failed to update view '{viewName}' after setting fetchxml.", ex);
-        }
+        await ApplyViewWriteAsync(
+            client, savedQueryId, viewName, "setting fetchxml", "fetchxml",
+            entity.GetAttributeValue<string>("fetchxml") ?? string.Empty,
+            update, entity.GetAttributeValue<bool>("ismanaged"), cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
 
     // ─── Private helpers ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Surfaces the underlying Dataverse fault (hex code + message) from a wrapped exception
+    /// so callers see the real cause (e.g. 0x80040216) instead of an opaque wrapper message.
+    /// </summary>
+    private static string DescribeDataverseFault(Exception ex)
+    {
+        for (var current = (Exception?)ex; current != null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> typed && typed.Detail != null)
+                return $"Dataverse error 0x{typed.Detail.ErrorCode:x8}: {typed.Detail.Message}";
+        }
+        return ex.Message;
+    }
+
+    /// <summary>
+    /// Writes a savedquery field update, then confirms it persisted. Surfaces the real Dataverse
+    /// fault on failure — with managed-view guidance for the unpatchable case (#1190) — and fails
+    /// loudly when the platform accepts the write but silently drops it (#1194) rather than
+    /// reporting a false success.
+    /// </summary>
+    private async Task ApplyViewWriteAsync(
+        IDataverseClient client,
+        Guid savedQueryId,
+        string viewName,
+        string operation,
+        string fieldName,
+        string oldValue,
+        Entity update,
+        bool isManaged,
+        CancellationToken ct)
+    {
+        var newValue = update.GetAttributeValue<string>(fieldName) ?? string.Empty;
+
+        try
+        {
+            await client.UpdateAsync(update, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var fault = DescribeDataverseFault(ex);
+            if (isManaged)
+                throw new PpdsException(ErrorCodes.View.ManagedComponentNotEditable,
+                    $"Cannot update {fieldName} on managed view '{viewName}' ({fault}). " +
+                    $"PPDS cannot patch a managed view's {fieldName} through the Web API. " +
+                    "Edit it in the maker UI and Publish (for Quick Find search columns: open the table's " +
+                    "Quick Find view and use \"Edit find table columns\").", ex);
+            throw new PpdsException(ErrorCodes.View.UpdateFailed,
+                $"Failed to update view '{viewName}' after {operation}: {fault}", ex);
+        }
+
+        // Read-back verification (#1194). A managed / solution-layered savedquery can return success
+        // for the write yet not surface the change. If we intended a change but a lag-tolerant
+        // re-read still shows the pre-write value, the platform dropped the write — report it
+        // instead of a phantom success.
+        if (!XmlEquivalent(newValue, oldValue) &&
+            !await VerifyViewWritePersistedAsync(client, savedQueryId, fieldName, oldValue, ct))
+        {
+            throw new PpdsException(ErrorCodes.View.UpdateNotPersisted,
+                $"Update to view '{viewName}' reported success but did not persist " +
+                "(read-back verification failed). The platform accepted the write but the change is not " +
+                "visible — typically a solution-layering conflict. No effective change was made.");
+        }
+    }
+
+    /// <summary>
+    /// Re-reads a savedquery field and returns true once it differs from its pre-write value.
+    /// Tolerates read-after-write lag with a small bounded retry so a delayed read does not
+    /// produce a false "did not persist".
+    /// </summary>
+    private static async Task<bool> VerifyViewWritePersistedAsync(
+        IDataverseClient client, Guid savedQueryId, string fieldName, string oldValue, CancellationToken ct)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var query = new QueryExpression("savedquery")
+            {
+                ColumnSet = new ColumnSet(fieldName),
+                Criteria = new FilterExpression
+                {
+                    Conditions = { new ConditionExpression("savedqueryid", ConditionOperator.Equal, savedQueryId) }
+                }
+            };
+            var result = await client.RetrieveMultipleAsync(query, ct);
+            var current = result.Entities.Count > 0
+                ? result.Entities[0].GetAttributeValue<string>(fieldName) ?? string.Empty
+                : string.Empty;
+            if (!XmlEquivalent(current, oldValue))
+                return true;
+            if (attempt < maxAttempts)
+                await Task.Delay(TimeSpan.FromMilliseconds(750), ct);
+        }
+        return false;
+    }
+
+    /// <summary>Structural XML equality (ignores formatting); falls back to ordinal compare.</summary>
+    private static bool XmlEquivalent(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.Ordinal)) return true;
+        try
+        {
+            return XNode.DeepEquals(XDocument.Parse(a), XDocument.Parse(b));
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private async Task<int> ResolveObjectTypeCodeAsync(string entityLogicalName, CancellationToken ct)
     {

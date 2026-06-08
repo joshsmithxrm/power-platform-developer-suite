@@ -44,6 +44,10 @@ public static class ApiRequestCommand
         {
             Description = "Target environment URL (default: active profile)"
         };
+        var profileOption = new Option<string?>("--profile", "-p")
+        {
+            Description = "Authentication profile to use (default: active profile)"
+        };
         var confirmOption = new Option<bool>("--confirm")
         {
             Description = "Bypass write protection on production environments"
@@ -58,6 +62,7 @@ public static class ApiRequestCommand
             headerOption,
             includeOption,
             environmentOption,
+            profileOption,
             confirmOption
         };
 
@@ -72,12 +77,13 @@ public static class ApiRequestCommand
             var headers = parseResult.GetValue(headerOption);
             var include = parseResult.GetValue(includeOption);
             var environment = parseResult.GetValue(environmentOption);
+            var profile = parseResult.GetValue(profileOption);
             var confirm = parseResult.GetValue(confirmOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAsync(
                 path, method, body, bodyFile, headers, include,
-                environment, confirm, globalOptions, cancellationToken);
+                environment, profile, confirm, globalOptions, cancellationToken);
         });
 
         return command;
@@ -142,6 +148,7 @@ public static class ApiRequestCommand
         string[]? headers,
         bool include,
         string? environment,
+        string? profile,
         bool confirm,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
@@ -166,7 +173,7 @@ public static class ApiRequestCommand
         try
         {
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                null,
+                profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,

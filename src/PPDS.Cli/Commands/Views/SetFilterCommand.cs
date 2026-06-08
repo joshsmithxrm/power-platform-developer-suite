@@ -179,7 +179,7 @@ public static class SetFilterCommand
             }
             catch (Exception ex)
             {
-                var error = ExceptionMapper.Map(ex, context: "setting filter", debug: globalOptions.Debug);
+                var error = ExceptionMapper.Map(ex, context: ex is PpdsException ? null : "setting filter", debug: globalOptions.Debug);
                 writer.WriteError(error);
                 return ExceptionMapper.ToExitCode(ex);
             }

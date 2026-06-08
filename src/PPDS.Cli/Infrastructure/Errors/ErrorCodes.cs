@@ -484,6 +484,12 @@ public static class ErrorCodes
         /// <summary>PATCH to savedqueries failed.</summary>
         public const string UpdateFailed = "View.UpdateFailed";
 
+        /// <summary>Managed view's fetchxml/layout cannot be patched via the Web API — edit in the maker UI.</summary>
+        public const string ManagedComponentNotEditable = "View.ManagedComponentNotEditable";
+
+        /// <summary>Write reported success but a read-back showed the change did not persist (silent no-op).</summary>
+        public const string UpdateNotPersisted = "View.UpdateNotPersisted";
+
         /// <summary>PublishXmlRequest failed.</summary>
         public const string PublishFailed = "View.PublishFailed";
 
