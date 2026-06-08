@@ -37,4 +37,16 @@ public static class ModelDrivenAppErrorCodes
 
     /// <summary>Failed to update the sitemap record in Dataverse.</summary>
     public const string UpdateFailed = "ModelDrivenApp.UpdateFailed";
+
+    /// <summary>The specified Copilot (bot) was not found.</summary>
+    public const string CopilotNotFound = "ModelDrivenApp.CopilotNotFound";
+
+    /// <summary>Multiple Copilots matched the supplied name; disambiguation required.</summary>
+    public const string CopilotAmbiguous = "ModelDrivenApp.CopilotAmbiguous";
+
+    /// <summary>The Copilot is already wired into the app.</summary>
+    public const string CopilotAlreadyInApp = "ModelDrivenApp.CopilotAlreadyInApp";
+
+    /// <summary>The Copilot is not wired into the app.</summary>
+    public const string CopilotNotInApp = "ModelDrivenApp.CopilotNotInApp";
 }

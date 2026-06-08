@@ -1,7 +1,7 @@
 # Model-Driven App Navigation Management
 
 **Status:** Draft
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-08
 **Code:** [src/PPDS.Cli/Services/ModelDrivenApps/](../src/PPDS.Cli/Services/ModelDrivenApps/), [src/PPDS.Cli/Commands/ModelDrivenApps/](../src/PPDS.Cli/Commands/ModelDrivenApps/)
 **Surfaces:** CLI
 
@@ -88,7 +88,10 @@ ppds model-driven-app
 ├── remove-table --app <name> --entity <name> [--solution] [--publish]
 ├── set-forms --app <name> --entity <name> (--all | --form <name>...) [--solution] [--publish]
 ├── set-views --app <name> --entity <name> (--all | --view <name>...) [--solution] [--publish]
-└── set-charts --app <name> --entity <name> (--all | --chart <name>...) [--solution] [--publish]
+├── set-charts --app <name> --entity <name> (--all | --chart <name>...) [--solution] [--publish]
+├── add-copilot --app <name> --bot <name|id> [--publish] [--dry-run]      # Wire a Copilot (bot) into the app
+├── remove-copilot --app <name> --bot <name|id> [--publish] [--dry-run]   # Remove a Copilot binding
+└── list-copilots --app <name>                                            # List Copilots wired into the app
 ```
 
 ### Shared Options
@@ -341,6 +344,10 @@ public interface IModelDrivenAppService
     Task SetFormsAsync(string appName, string entity, ComponentSelectionOptions options, IProgressReporter? progress, CancellationToken ct);
     Task SetViewsAsync(string appName, string entity, ComponentSelectionOptions options, IProgressReporter? progress, CancellationToken ct);
     Task SetChartsAsync(string appName, string entity, ComponentSelectionOptions options, IProgressReporter? progress, CancellationToken ct);
+
+    Task<CopilotChangeResult> AddCopilotAsync(string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct);
+    Task<CopilotChangeResult> RemoveCopilotAsync(string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct);
+    Task<IReadOnlyList<CopilotBinding>> ListCopilotsAsync(string appName, CancellationToken ct);
 }
 ```
 
@@ -379,6 +386,14 @@ public record ComponentSelectionOptions(
     IReadOnlyList<string> ComponentNames,
     string? Solution,
     bool Publish);
+```
+
+### CopilotOptions
+
+```csharp
+public record CopilotOptions(
+    bool Publish,
+    bool DryRun);
 ```
 
 ---
@@ -447,6 +462,23 @@ Error: Sitemap XML validation failed at line 5, position 12:
 ```
 
 **Key distinction:** `appmoduleid` (used in API paths and `AppId` parameter) vs `appmoduleidunique` (lookup value in `appmodulecomponents` table). The `appmodulecomponents` table is read-only — no Create/Update via Web API.
+
+### Why the SDK (not the Web API) for Copilot wiring?
+
+**Context:** A Copilot Studio agent is wired into an app by an `appelement` row whose polymorphic `objectid` lookup targets the `bot` table (confirmed against maker-created rows). `add-copilot` must set that lookup.
+
+**Decision:** Create/update the `appelement` through the SDK (`IPooledClient` / `IOrganizationServiceAsync2`) with `objectid = new EntityReference("bot", botId)` — never via raw Web API `@odata.bind`.
+
+**Evidence (verified live):** `appelement.objectid` has three targets — `bot`, `aiskillconfig`, `mcpserver` — whose relationships (`bot_appelement_objectid`, `aiskillconfig_appelement_objectid`, `mcpserver_appelement_objectid`) all expose the **same** `ReferencingEntityNavigationPropertyName` (`objectid`). Consequently:
+- `objectid@odata.bind: /bots(<id>)` → `404 Entity 'aiskillconfig' … Does Not Exist` (the URL entity set is ignored; resolution falls back to the first target).
+- `objectid_bot@odata.bind` → `400` (undeclared navigation property).
+
+The SDK `EntityReference` carries the explicit target logical name, so it has no disambiguation problem — the same mechanism that sets `customerid` / `regardingobjectid`.
+
+**Notes:**
+- `appelement.objectid` is **create-only** — the platform silently ignores an update to an existing row's objectid (etag/modifiedon bump, but the value stays null). So `add-copilot` always *creates* the binding. `appelement.uniquename` is a unique key; if a stale row from a prior failed wiring occupies the maker-convention name, `add-copilot` falls back to a unique-suffixed name (the binding is defined by `objectid` + `parentappmoduleid`, not the unique name).
+- `appelement` mutations reconcile slowly server-side: creates/deletes return success but reads trail by minutes. Verification must tolerate this — a fresh create's `objectid` resolves to the bot once reads catch up (verified live: a created appelement read back with `_objectid_value@…lookuplogicalname = "bot"`).
+- **Bot prerequisite (out of scope for this command):** the model-driven app designer only surfaces an agent whose bot is a valid *app-assistant* (`isLightweightBot`). A bot created standalone in Copilot Studio binds correctly at the `appelement` level but won't render in-app until it's configured as an app assistant (e.g. via the designer's Configure flow). `add-copilot` wires the binding; making the bot app-assistant-eligible is a separate, bot-side concern.
 
 ### Why strict XSD validation?
 

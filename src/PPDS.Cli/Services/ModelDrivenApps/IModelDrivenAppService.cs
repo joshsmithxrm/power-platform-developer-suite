@@ -33,4 +33,13 @@ public interface IModelDrivenAppService
 
     /// <summary>Sets explicit chart visibility for an entity in the app.</summary>
     Task SetChartsAsync(string appName, string entity, ComponentSelectionOptions options, IProgressReporter? progress, CancellationToken ct);
+
+    /// <summary>Wires a Copilot Studio agent (bot) into the app by creating an appelement whose objectid targets the bot.</summary>
+    Task<CopilotChangeResult> AddCopilotAsync(string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct);
+
+    /// <summary>Removes a Copilot (bot) binding from the app.</summary>
+    Task<CopilotChangeResult> RemoveCopilotAsync(string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct);
+
+    /// <summary>Lists the Copilots (bots) wired into the app.</summary>
+    Task<IReadOnlyList<CopilotBinding>> ListCopilotsAsync(string appName, CancellationToken ct);
 }

@@ -458,6 +458,115 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<CopilotChangeResult> AddCopilotAsync(
+        string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct)
+    {
+        progress?.ReportPhase("Loading app", appName);
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+        var (appModuleId, appUniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (botId, botName, botSchemaName) = await ResolveBotAsync(bot, client, ct);
+
+        // Best-effort guard. appelement reads can lag writes, so a freshly-added binding may not
+        // be visible yet — this catches the common case without promising perfect idempotency.
+        var existing = await FindCopilotBindingsAsync(client, appModuleId, botId, ct);
+        if (existing.Count > 0)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.CopilotAlreadyInApp,
+                $"Copilot '{botName}' is already wired into app '{appName}'. " +
+                $"Remove it first with: ppds model-driven-app remove-copilot --app \"{appName}\" --bot \"{bot}\"");
+        }
+
+        var baseUniqueName = $"{SchemaPrefix(botSchemaName)}_{appUniqueName}_schemaname_{botSchemaName}";
+
+        if (options.DryRun)
+        {
+            return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
+                AppElementId: null, baseUniqueName, DryRun: true, Published: false);
+        }
+
+        progress?.ReportPhase("Wiring Copilot", botName);
+        Guid appElementId;
+        var uniqueName = baseUniqueName;
+        try
+        {
+            (appElementId, uniqueName) = await CreateCopilotAppElementAsync(
+                client, appModuleId, botId, botSchemaName, baseUniqueName, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed,
+                $"Failed to wire Copilot '{botName}' into app '{appName}': {ex.Message}", ex);
+        }
+
+        var published = false;
+        if (options.Publish)
+        {
+            await PublishAppAsync(client, appModuleId, appUniqueName, ct);
+            published = true;
+        }
+
+        return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
+            appElementId, uniqueName, DryRun: false, published);
+    }
+
+    /// <inheritdoc />
+    public async Task<CopilotChangeResult> RemoveCopilotAsync(
+        string appName, string bot, CopilotOptions options, IProgressReporter? progress, CancellationToken ct)
+    {
+        progress?.ReportPhase("Loading app", appName);
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+        var (appModuleId, appUniqueName) = await ResolveAppAsync(appName, client, ct);
+        var (botId, botName, botSchemaName) = await ResolveBotAsync(bot, client, ct);
+
+        var bindings = await FindCopilotBindingsAsync(client, appModuleId, botId, ct);
+        if (bindings.Count == 0)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.CopilotNotInApp,
+                $"Copilot '{botName}' is not wired into app '{appName}'.");
+        }
+
+        if (options.DryRun)
+        {
+            return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
+                bindings[0].AppElementId, bindings[0].UniqueName, DryRun: true, Published: false);
+        }
+
+        progress?.ReportPhase("Removing Copilot", botName);
+        foreach (var binding in bindings)
+        {
+            try
+            {
+                await client.DeleteAsync("appelement", binding.AppElementId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed,
+                    $"Failed to remove Copilot '{botName}' from app '{appName}': {ex.Message}", ex);
+            }
+        }
+
+        var published = false;
+        if (options.Publish)
+        {
+            await PublishAppAsync(client, appModuleId, appUniqueName, ct);
+            published = true;
+        }
+
+        return new CopilotChangeResult(appName, appModuleId, botId, botName, botSchemaName,
+            bindings[0].AppElementId, bindings[0].UniqueName, DryRun: false, published);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CopilotBinding>> ListCopilotsAsync(string appName, CancellationToken ct)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+        var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
+        return await FindCopilotBindingsAsync(client, appModuleId, botId: null, ct);
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────────
 
     private async Task<(Guid AppModuleId, string UniqueName)> ResolveAppAsync(
@@ -499,6 +608,152 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             match.GetAttributeValue<Guid>("appmoduleid"),
             match.GetAttributeValue<string>("uniquename") ?? string.Empty);
     }
+
+    // Resolves a Copilot (bot) by id, schema name, or display name.
+    private async Task<(Guid BotId, string Name, string SchemaName)> ResolveBotAsync(
+        string bot, IPooledClient client, CancellationToken ct)
+    {
+        var query = new QueryExpression("bot")
+        {
+            ColumnSet = new ColumnSet("botid", "name", "schemaname"),
+            TopCount = 2
+        };
+
+        if (Guid.TryParse(bot, out var botGuid))
+        {
+            query.Criteria.AddCondition("botid", ConditionOperator.Equal, botGuid);
+        }
+        else
+        {
+            var filter = new FilterExpression(LogicalOperator.Or);
+            filter.AddCondition("name", ConditionOperator.Equal, bot);
+            filter.AddCondition("schemaname", ConditionOperator.Equal, bot);
+            query.Criteria.AddFilter(filter);
+        }
+
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to resolve Copilot '{bot}'.", ex);
+        }
+
+        if (result.Entities.Count == 0)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.CopilotNotFound,
+                $"Copilot (bot) '{bot}' not found. Provide the bot's display name, schema name, or id.");
+        }
+
+        if (result.Entities.Count > 1)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.CopilotAmbiguous,
+                $"Multiple Copilots match '{bot}'. Specify the bot id or schema name to disambiguate.");
+        }
+
+        var entity = result.Entities[0];
+        return (
+            entity.GetAttributeValue<Guid>("botid"),
+            entity.GetAttributeValue<string>("name") ?? string.Empty,
+            entity.GetAttributeValue<string>("schemaname") ?? string.Empty);
+    }
+
+    // Finds appelement rows in the app whose polymorphic objectid targets the bot table.
+    // When botId is supplied, restricts to that bot. Non-bot bindings (aiskillconfig, mcpserver)
+    // and unbound rows are filtered out by the objectid logical name.
+    private async Task<List<CopilotBinding>> FindCopilotBindingsAsync(
+        IPooledClient client, Guid appModuleId, Guid? botId, CancellationToken ct)
+    {
+        var query = new QueryExpression("appelement")
+        {
+            ColumnSet = new ColumnSet("appelementid", "uniquename", "name", "objectid")
+        };
+        query.Criteria.AddCondition("parentappmoduleid", ConditionOperator.Equal, appModuleId);
+        if (botId.HasValue)
+        {
+            query.Criteria.AddCondition("objectid", ConditionOperator.Equal, botId.Value);
+        }
+
+        EntityCollection result;
+        try
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "Failed to query Copilot bindings.", ex);
+        }
+
+        var bindings = new List<CopilotBinding>();
+        foreach (var entity in result.Entities)
+        {
+            var objectRef = entity.GetAttributeValue<EntityReference>("objectid");
+            if (objectRef == null || !string.Equals(objectRef.LogicalName, "bot", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            bindings.Add(new CopilotBinding(
+                entity.GetAttributeValue<Guid>("appelementid"),
+                entity.GetAttributeValue<string>("uniquename") ?? string.Empty,
+                entity.GetAttributeValue<string>("name") ?? string.Empty,
+                objectRef.Id,
+                objectRef.Name));
+        }
+
+        return bindings;
+    }
+
+    // The appelement unique name convention observed in maker-created rows:
+    // {publisherPrefix}_{appUniqueName}_schemaname_{botSchemaName}, where the publisher
+    // prefix is the leading segment of the bot's schema name.
+    private static string SchemaPrefix(string schemaName)
+    {
+        var idx = schemaName.IndexOf('_');
+        return idx > 0 ? schemaName[..idx] : schemaName;
+    }
+
+    // Creates the appelement binding. appelement.uniquename is a unique key, and appelement mutations
+    // reconcile slowly server-side, so a stale row left by a prior failed wiring can occupy the
+    // maker-convention name. Rather than depend on a slow delete to free it, fall back to a
+    // uniquely-suffixed name on collision — the binding is defined by objectid + parentappmoduleid,
+    // not the unique name. Returns the created id and the name actually used.
+    private static async Task<(Guid Id, string UniqueName)> CreateCopilotAppElementAsync(
+        IPooledClient client, Guid appModuleId, Guid botId, string botSchemaName, string baseUniqueName, CancellationToken ct)
+    {
+        try
+        {
+            var id = await client.CreateAsync(
+                BuildCopilotAppElement(appModuleId, botId, botSchemaName, baseUniqueName), ct);
+            return (id, baseUniqueName);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && IsDuplicateKeyViolation(ex))
+        {
+            var fallbackName = $"{baseUniqueName}_{Guid.NewGuid():N}"[..(baseUniqueName.Length + 9)];
+            var id = await client.CreateAsync(
+                BuildCopilotAppElement(appModuleId, botId, botSchemaName, fallbackName), ct);
+            return (id, fallbackName);
+        }
+    }
+
+    private static Entity BuildCopilotAppElement(Guid appModuleId, Guid botId, string name, string uniqueName) =>
+        new("appelement")
+        {
+            ["name"] = name,
+            ["uniquename"] = uniqueName,
+            ["parentappmoduleid"] = new EntityReference("appmodule", appModuleId),
+            // The SDK EntityReference carries the explicit target type ("bot"). The Web API @odata.bind
+            // cannot: all three objectid targets (bot, aiskillconfig, mcpserver) share the "objectid"
+            // navigation property, so a bare bind mis-resolves to the first target (aiskillconfig).
+            ["objectid"] = new EntityReference("bot", botId)
+        };
+
+    private static bool IsDuplicateKeyViolation(Exception ex) =>
+        ex.Message.Contains("database constraint", StringComparison.OrdinalIgnoreCase)
+        || (ex.Message.Contains("uniquename", StringComparison.OrdinalIgnoreCase)
+            && ex.Message.Contains("Cannot complete", StringComparison.OrdinalIgnoreCase));
 
     // Queries appmodulecomponent joined to appmodule via appmoduleidunique relationship,
     // filtering by appmodule.appmoduleid to avoid EntityReference cast issues.

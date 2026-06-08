@@ -27,7 +27,10 @@ public class HelpTests
         Assert.Contains("set-forms", names);
         Assert.Contains("set-views", names);
         Assert.Contains("set-charts", names);
-        Assert.Equal(9, names.Count);
+        Assert.Contains("add-copilot", names);
+        Assert.Contains("remove-copilot", names);
+        Assert.Contains("list-copilots", names);
+        Assert.Equal(12, names.Count);
     }
 
     [Fact]

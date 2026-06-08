@@ -594,4 +594,271 @@ public class ModelDrivenAppServiceTests
 
         act.Should().Throw<ArgumentNullException>().WithParameterName("metadata");
     }
+
+    // ── Copilot wiring (add/remove/list) ───────────────────────────────────────
+
+    private static readonly Guid CopilotBotId = new("eeeeeeee-6666-6666-6666-666666666666");
+    private const string CopilotBotName = "Member Summary Assistant";
+    private const string CopilotBotSchema = "cr8a6_test";
+
+    // {prefix}_{appUniqueName}_schemaname_{botSchema} where prefix is the bot schema's leading segment.
+    private const string ExpectedCopilotUniqueName = "cr8a6_ppds_myapp_schemaname_cr8a6_test";
+
+    private static void SetupCopilotCommon(Harness h)
+    {
+        h.Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        h.Client.Setup(c => c.Dispose());
+        h.Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(h.Client.Object);
+
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("appmodule")
+                {
+                    ["appmoduleid"] = AppModuleId,
+                    ["uniquename"] = AppUniqueName,
+                    ["name"] = AppName
+                }
+            }));
+
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "bot"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("bot")
+                {
+                    ["botid"] = CopilotBotId,
+                    ["name"] = CopilotBotName,
+                    ["schemaname"] = CopilotBotSchema
+                }
+            }));
+    }
+
+    private static Entity BotBoundAppElement(Guid appElementId) => new("appelement")
+    {
+        ["appelementid"] = appElementId,
+        ["uniquename"] = ExpectedCopilotUniqueName,
+        ["name"] = CopilotBotSchema,
+        ["objectid"] = new EntityReference("bot", CopilotBotId) { Name = CopilotBotName }
+    };
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_NewBinding_CreatesAppElementWithBotObjectId()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+
+        // No existing appelement (unbound row absent) and the bot is not yet wired.
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        Entity? created = null;
+        var newId = new Guid("ffffffff-7777-7777-7777-777777777777");
+        h.Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created = e)
+            .ReturnsAsync(newId);
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        created.Should().NotBeNull();
+        created!.LogicalName.Should().Be("appelement");
+        created.GetAttributeValue<string>("uniquename").Should().Be(ExpectedCopilotUniqueName);
+        created.GetAttributeValue<string>("name").Should().Be(CopilotBotSchema);
+
+        var parent = created.GetAttributeValue<EntityReference>("parentappmoduleid");
+        parent.LogicalName.Should().Be("appmodule");
+        parent.Id.Should().Be(AppModuleId);
+
+        // The crux: the polymorphic objectid must be an EntityReference whose target type is "bot".
+        var objectId = created.GetAttributeValue<EntityReference>("objectid");
+        objectId.Should().NotBeNull();
+        objectId!.LogicalName.Should().Be("bot");
+        objectId.Id.Should().Be(CopilotBotId);
+
+        result.DryRun.Should().BeFalse();
+        result.AppElementId.Should().Be(newId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_UniqueNameCollision_CreatesWithFallbackName()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+
+        // Bot not yet wired.
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        // First create collides with a stale row on the maker-convention name; the second (suffixed)
+        // create succeeds. objectid is never updated/deleted — only created.
+        var created = new List<Entity>();
+        var calls = 0;
+        var newId = new Guid("99999999-8888-8888-8888-999999999999");
+        h.Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>((e, _) =>
+            {
+                created.Add(e);
+                calls++;
+                if (calls == 1)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot complete the creation of AppElement because it violates a database constraint. " +
+                        "The violation happens on the key uniquename: " + ExpectedCopilotUniqueName);
+                }
+
+                return Task.FromResult(newId);
+            });
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        created.Should().HaveCount(2);
+        created[0].GetAttributeValue<string>("uniquename").Should().Be(ExpectedCopilotUniqueName);
+
+        // Fallback name keeps the maker-convention base but appends a unique suffix.
+        var fallbackName = created[1].GetAttributeValue<string>("uniquename");
+        fallbackName.Should().StartWith(ExpectedCopilotUniqueName + "_");
+        fallbackName.Should().NotBe(ExpectedCopilotUniqueName);
+
+        var objectId = created[1].GetAttributeValue<EntityReference>("objectid");
+        objectId!.LogicalName.Should().Be("bot");
+        objectId.Id.Should().Be(CopilotBotId);
+
+        h.Client.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        result.AppElementId.Should().Be(newId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_DryRun_DoesNotWrite()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var result = await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: true), progress: null, CancellationToken.None);
+
+        result.DryRun.Should().BeTrue();
+        result.BotId.Should().Be(CopilotBotId);
+        result.UniqueName.Should().Be(ExpectedCopilotUniqueName);
+        h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddCopilot_AlreadyWired_ThrowsCopilotAlreadyInApp()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+
+        // The bot is already wired (a bot-bound appelement exists).
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { BotBoundAppElement(Guid.NewGuid()) }));
+
+        var service = h.Build();
+        var act = async () => await service.AddCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.CopilotAlreadyInApp);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RemoveCopilot_DeletesBoundAppElement()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+
+        var elementId = new Guid("13131313-aaaa-bbbb-cccc-131313131313");
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { BotBoundAppElement(elementId) }));
+
+        (string Entity, Guid Id)? deleted = null;
+        h.Client.Setup(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, CancellationToken>((n, id, _) => deleted = (n, id))
+            .Returns(Task.CompletedTask);
+
+        var service = h.Build();
+        var result = await service.RemoveCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        deleted.Should().NotBeNull();
+        deleted!.Value.Entity.Should().Be("appelement");
+        deleted.Value.Id.Should().Be(elementId);
+        result.AppElementId.Should().Be(elementId);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RemoveCopilot_NotWired_ThrowsCopilotNotInApp()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        var service = h.Build();
+        var act = async () => await service.RemoveCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: false), progress: null, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.CopilotNotInApp);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ListCopilots_ReturnsOnlyBotBindings()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+
+        // Mixed objectid targets: one bot (kept), one aiskillconfig and one unbound row (filtered out).
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                BotBoundAppElement(new Guid("14141414-aaaa-bbbb-cccc-141414141414")),
+                new("appelement")
+                {
+                    ["appelementid"] = Guid.NewGuid(),
+                    ["objectid"] = new EntityReference("aiskillconfig", Guid.NewGuid())
+                },
+                new("appelement") { ["appelementid"] = Guid.NewGuid() } // objectid null
+            }));
+
+        var service = h.Build();
+        var copilots = await service.ListCopilotsAsync(AppName, CancellationToken.None);
+
+        copilots.Should().HaveCount(1);
+        copilots[0].BotId.Should().Be(CopilotBotId);
+        copilots[0].BotName.Should().Be(CopilotBotName);
+    }
 }
