@@ -1,0 +1,12 @@
+{
+  "round": 1,
+  "timestamp": "2026-06-08T03:04:58Z",
+  "pr": 1186,
+  "failure_summary": "CI run 27113541130 is still in progress; no failure log is available to diagnose. The two remaining Gemini medium-priority findings (IsRequired = true on --bot option in AddCopilotCommand.cs and RemoveCopilotCommand.cs) are unaddressed in the diff and within scope, but file write permissions are not granted in this headless session.",
+  "files_touched": [],
+  "lines_added": 0,
+  "lines_removed": 0,
+  "action": "escalate",
+  "escalation_reason": "The CI run has not completed, so there is no failure to fix. The three high-priority Gemini issues (uniquename truncation, fallback-name length cap, FormattedValues for bot display name) were already addressed in commit 096ad8f40. Two medium-priority issues remain \u2014 IsRequired = true on the --bot Option<string?> in AddCopilotCommand.cs:18 and RemoveCopilotCommand.cs:18 \u2014 but these are UX improvements that do not cause test failures, and file write permissions are blocked in this headless session requiring manual operator approval to proceed.",
+  "scope_violation": false
+}

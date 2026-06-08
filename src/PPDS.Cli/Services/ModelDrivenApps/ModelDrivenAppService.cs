@@ -493,7 +493,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         progress?.ReportPhase("Wiring Copilot", botName);
         Guid appElementId;
-        var uniqueName = baseUniqueName;
+        string uniqueName;
         try
         {
             (appElementId, uniqueName) = await CreateCopilotAppElementAsync(
