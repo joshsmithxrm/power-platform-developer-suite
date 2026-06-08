@@ -114,13 +114,13 @@ public static class InspectAppAssistantCommand
             };
             var appElements = string.Join(", ", finding.AppElementIds);
 
-            // The finding row is the diagnostic data → stdout.
+            // The finding record is the diagnostic data → stdout.
             Console.WriteLine($"[{Describe(finding.Kind)}] {botLabel}");
             Console.WriteLine($"  botId            : {finding.BotId?.ToString() ?? "(none)"}");
             Console.WriteLine($"  isLightweightBot : {lightweight}");
             Console.WriteLine($"  appelement id(s) : {appElements}");
-            Console.WriteLine($"  fix              : {finding.Remediation}");
-            Console.WriteLine();
+            // The remediation hint is advisory guidance, not pipeable data → stderr (stdout discipline).
+            Console.Error.WriteLine($"  fix [{botLabel}]   : {finding.Remediation}");
         }
     }
 

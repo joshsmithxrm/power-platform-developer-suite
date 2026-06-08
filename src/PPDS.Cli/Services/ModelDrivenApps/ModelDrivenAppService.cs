@@ -1497,7 +1497,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     // dangling copilot binding; an unrelated appelement without it is left alone.
     private const string CopilotAppElementNameMarker = "_schemaname_";
 
-    private sealed record BotAppAssistantInfo(string? Name, bool IsLightweightBot);
+    // islightweightbot is a Dataverse two-options field that can be unvalued; keep it nullable so a
+    // missing value reads as "unknown" rather than being forced to false.
+    private sealed record BotAppAssistantInfo(string? Name, bool? IsLightweightBot);
 
     // Bulk-reads the app-assistant flag (and name) for the supplied bots. Read-only.
     private async Task<Dictionary<Guid, BotAppAssistantInfo>> GetBotAppAssistantInfoAsync(
@@ -1529,7 +1531,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         {
             map[e.GetAttributeValue<Guid>("botid")] = new BotAppAssistantInfo(
                 e.GetAttributeValue<string>("name"),
-                e.GetAttributeValue<bool>("islightweightbot"));
+                e.GetAttributeValue<bool?>("islightweightbot"));
         }
 
         return map;

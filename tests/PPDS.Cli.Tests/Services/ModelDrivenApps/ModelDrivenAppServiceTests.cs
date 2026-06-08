@@ -1356,6 +1356,25 @@ public class ModelDrivenAppServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task InspectAppAssistant_UnvaluedLightweightFlag_ReportedAsUnknownAndFlagged()
+    {
+        var h = new Harness();
+        SetupInspectCommon(h);
+
+        // The bot row has no islightweightbot value at all (unvalued in Dataverse).
+        SetupAppElements(h, BotBoundAppElement(new Guid("21212121-aaaa-bbbb-cccc-212121212121")));
+        SetupBots(h, new Entity("bot") { ["botid"] = CopilotBotId, ["name"] = CopilotBotName });
+
+        var service = h.Build();
+        var diag = await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
+
+        var finding = diag.Findings.Single(f => f.Kind == AppAssistantFindingKind.NotAppAssistant);
+        // Unvalued must read as "unknown" (null), not be forced to false.
+        finding.IsLightweightBot.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task InspectAppAssistant_IsReadOnly_NoMutatingSdkCall()
     {
         var h = new Harness();
