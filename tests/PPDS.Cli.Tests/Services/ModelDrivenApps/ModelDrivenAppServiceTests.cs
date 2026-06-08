@@ -728,10 +728,11 @@ public class ModelDrivenAppServiceTests
         created.Should().HaveCount(2);
         created[0].GetAttributeValue<string>("uniquename").Should().Be(ExpectedCopilotUniqueName);
 
-        // Fallback name keeps the maker-convention base but appends a unique suffix.
+        // Fallback name keeps the maker-convention base but appends a unique suffix ("_" + 8 hex).
         var fallbackName = created[1].GetAttributeValue<string>("uniquename");
         fallbackName.Should().StartWith(ExpectedCopilotUniqueName + "_");
         fallbackName.Should().NotBe(ExpectedCopilotUniqueName);
+        fallbackName.Length.Should().Be(ExpectedCopilotUniqueName.Length + 9);
 
         var objectId = created[1].GetAttributeValue<EntityReference>("objectid");
         objectId!.LogicalName.Should().Be("bot");
@@ -830,6 +831,25 @@ public class ModelDrivenAppServiceTests
 
         var ex = await act.Should().ThrowAsync<PpdsException>();
         ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.CopilotNotInApp);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RemoveCopilot_DryRun_DoesNotDelete()
+    {
+        var h = new Harness();
+        SetupCopilotCommon(h);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { BotBoundAppElement(Guid.NewGuid()) }));
+
+        var service = h.Build();
+        var result = await service.RemoveCopilotAsync(
+            AppName, CopilotBotName, new CopilotOptions(Publish: false, DryRun: true), progress: null, CancellationToken.None);
+
+        result.DryRun.Should().BeTrue();
+        h.Client.Verify(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
