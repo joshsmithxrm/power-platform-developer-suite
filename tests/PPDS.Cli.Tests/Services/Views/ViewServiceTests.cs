@@ -342,6 +342,8 @@ public class ViewServiceTests
     private const string ViewName = "Quick Find Active Contacts";
     private const string OriginalFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /></entity></fetch>";
     private const string NewFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /><attribute name=\"emailaddress1\" /></entity></fetch>";
+    private const string OriginalLayout = "<grid><row><cell name=\"fullname\" width=\"200\" /><cell name=\"telephone1\" width=\"150\" /></row></grid>";
+    private const string NewLayout = "<grid><row><cell name=\"fullname\" width=\"300\" /></row></grid>";
 
     /// <summary>
     /// Builds a ViewService whose fetch returns a single contact view (managed or not), whose write
@@ -379,6 +381,7 @@ public class ViewServiceTests
                 {
                     ["savedqueryid"] = ViewId,
                     ["fetchxml"] = OriginalFetch,
+                    ["layoutxml"] = OriginalLayout,
                     ["ismanaged"] = isManaged,
                     ["returnedtypecode"] = "contact"
                 }
@@ -391,7 +394,10 @@ public class ViewServiceTests
             {
                 Results = new ParameterCollection
                 {
-                    { "EntityCollection", new EntityCollection(new List<Entity> { new("savedquery") { ["fetchxml"] = fetchAfterWrite } }) }
+                    { "EntityCollection", new EntityCollection(new List<Entity>
+                        {
+                            new("savedquery") { ["fetchxml"] = fetchAfterWrite, ["layoutxml"] = NewLayout }
+                        }) }
                 }
             });
 
@@ -503,6 +509,33 @@ public class ViewServiceTests
             onUpdate: e => captured = e);
 
         await svc.ClearSortAsync("contact", ViewName);
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task RemoveColumn_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        // layoutxml-only writers now also route through the verified write path (#1200 parity).
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.RemoveColumnAsync("contact", ViewName, "telephone1");
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task UpdateColumn_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.UpdateColumnAsync("contact", ViewName, "fullname", 300);
 
         captured.Should().NotBeNull();
         captured!["returnedtypecode"].Should().Be("contact");
