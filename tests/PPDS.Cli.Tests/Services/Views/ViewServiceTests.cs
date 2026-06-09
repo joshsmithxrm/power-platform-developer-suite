@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -341,13 +342,15 @@ public class ViewServiceTests
     private const string ViewName = "Quick Find Active Contacts";
     private const string OriginalFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /></entity></fetch>";
     private const string NewFetch = "<fetch><entity name=\"contact\"><attribute name=\"fullname\" /><attribute name=\"emailaddress1\" /></entity></fetch>";
+    private const string OriginalLayout = "<grid><row><cell name=\"fullname\" width=\"200\" /><cell name=\"telephone1\" width=\"150\" /></row></grid>";
+    private const string NewLayout = "<grid><row><cell name=\"fullname\" width=\"300\" /></row></grid>";
 
     /// <summary>
     /// Builds a ViewService whose fetch returns a single contact view (managed or not), whose write
     /// either throws a supplied Dataverse fault or succeeds, and whose read-back returns
     /// <paramref name="fetchAfterWrite"/> — letting tests drive every ApplyViewWriteAsync branch.
     /// </summary>
-    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite)
+    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite, Action<Entity>? onUpdate = null, Exception? readBackThrows = null)
     {
         var pool = new Mock<IDataverseConnectionPool>();
         var client = new Mock<IPooledClient>();
@@ -370,26 +373,43 @@ public class ViewServiceTests
                 }
             });
 
-        // The view-fetch (filters by name) returns the original record; the read-back verification
-        // (filters by savedqueryid) returns fetchAfterWrite.
+        // The view-fetch (RetrieveMultiple, filters by name) returns the original record.
         client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryBase q, CancellationToken _) =>
+            .ReturnsAsync(new EntityCollection(new List<Entity>
             {
-                var qe = (QueryExpression)q;
-                var isReadBack = qe.Criteria.Conditions.Any(c => c.AttributeName == "savedqueryid");
-                var e = new Entity("savedquery")
+                new("savedquery")
                 {
                     ["savedqueryid"] = ViewId,
-                    ["fetchxml"] = isReadBack ? fetchAfterWrite : OriginalFetch,
-                    ["ismanaged"] = isManaged
-                };
-                return new EntityCollection(new List<Entity> { e });
+                    ["fetchxml"] = OriginalFetch,
+                    ["layoutxml"] = OriginalLayout,
+                    ["ismanaged"] = isManaged,
+                    ["returnedtypecode"] = "contact"
+                }
+            }));
+
+        // Read-back verification reads the UNPUBLISHED (draft) record via RetrieveUnpublishedMultiple.
+        var readBack = client.Setup(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r is RetrieveUnpublishedMultipleRequest), It.IsAny<CancellationToken>()));
+        if (readBackThrows != null)
+            readBack.ThrowsAsync(readBackThrows);
+        else
+            readBack.ReturnsAsync(new RetrieveUnpublishedMultipleResponse
+            {
+                Results = new ParameterCollection
+                {
+                    { "EntityCollection", new EntityCollection(new List<Entity>
+                        {
+                            new("savedquery") { ["fetchxml"] = fetchAfterWrite, ["layoutxml"] = NewLayout }
+                        }) }
+                }
             });
 
         if (updateThrows != null)
             client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(updateThrows);
         else
-            client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+                .Callback<Entity, CancellationToken>((e, _) => onUpdate?.Invoke(e))
+                .Returns(Task.CompletedTask);
 
         return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>());
     }
@@ -400,6 +420,9 @@ public class ViewServiceTests
     [Fact]
     public async Task SetFetchXml_ManagedView_WriteRejected_ThrowsManagedComponentNotEditableWithGuidance()
     {
+        // With returnedtypecode now sent (#1200), a managed-view fetchxml write succeeds; this
+        // simulates a genuinely locked component (still rejected) and asserts the honest fault +
+        // accurate guidance — no longer the incorrect "PPDS can't do this, use the maker UI".
         var svc = BuildViewWriteService(
             isManaged: true,
             updateThrows: DataverseFault(unchecked((int)0x80040216), "An unexpected error occurred."),
@@ -409,7 +432,7 @@ public class ViewServiceTests
             .Should().ThrowAsync<PpdsException>();
 
         ex.Which.ErrorCode.Should().Be(ErrorCodes.View.ManagedComponentNotEditable);
-        ex.Which.Message.Should().Contain("0x80040216").And.Contain("maker UI");
+        ex.Which.Message.Should().Contain("0x80040216").And.Contain("locked");
     }
 
     [Fact]
@@ -447,5 +470,90 @@ public class ViewServiceTests
 
         await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
             .Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task SetFetchXml_ReadBackFails_AssumesPersisted_DoesNotThrow()
+    {
+        // The unpublished read-back itself fails (e.g. missing RetrieveUnpublished privilege).
+        // Verification is best-effort, so a successful write must not be reported as not-persisted.
+        // fetchAfterWrite=OriginalFetch would otherwise trip UpdateNotPersisted if read-back ran.
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: OriginalFetch,
+            readBackThrows: new InvalidOperationException("PrincipalPrivilegeDenied: prvReadSavedQuery"));
+
+        await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().NotThrowAsync();
+    }
+
+    // ─── returnedtypecode carried in fetchxml writes (#1200) ────────────────────
+    // Without returnedtypecode, Dataverse rejects fetchxml updates on managed views with
+    // 0x80040216. The shared write path must include it for every fetchxml-mutating command.
+
+    [Fact]
+    public async Task SetFetchXml_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.SetFetchXmlAsync("contact", ViewName, NewFetch);
+
+        captured.Should().NotBeNull();
+        captured!.Contains("returnedtypecode").Should().BeTrue();
+        captured["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task SetFilter_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.SetFilterAsync("contact", ViewName,
+            "<filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\" /></filter>");
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task ClearSort_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.ClearSortAsync("contact", ViewName);
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task RemoveColumn_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        // layoutxml-only writers now also route through the verified write path (#1200 parity).
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.RemoveColumnAsync("contact", ViewName, "telephone1");
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
+    }
+
+    [Fact]
+    public async Task UpdateColumn_UpdatePayload_IncludesReturnedTypeCode()
+    {
+        Entity? captured = null;
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+            onUpdate: e => captured = e);
+
+        await svc.UpdateColumnAsync("contact", ViewName, "fullname", 300);
+
+        captured.Should().NotBeNull();
+        captured!["returnedtypecode"].Should().Be("contact");
     }
 }
