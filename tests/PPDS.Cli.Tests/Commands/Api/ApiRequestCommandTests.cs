@@ -125,6 +125,54 @@ public class ApiRequestCommandTests
 
     #endregion
 
+    #region Validation — #1204: shell-mangled Windows path yields MSYS hint
+
+    [Theory]
+    [InlineData(@"C:/Program Files/Git/api/data/v9.2/contacts")] // Git Bash forward-slash rewrite
+    [InlineData(@"C:\Program Files\Git\api\data\v9.2\contacts")] // backslash variant
+    [InlineData("D:/api/data/v9.2/accounts")]                    // bare drive-rooted path
+    public void Path_ShellMangledWindowsPath_IncludesMsysHint(string mangled)
+    {
+        // AC-1: a leading-slash --path rewritten by Git Bash/MSYS into a Windows path must surface
+        // the MSYS workaround hint instead of the bare "must start with '/'" message.
+        var result = ApiRequestCommand.ValidateInputs(
+            mangled, null, null, null, null,
+            out _, out _);
+
+        Assert.NotNull(result);
+        Assert.Equal(ExitCodes.InvalidArguments, result!.Value.ExitCode);
+        Assert.Contains("MSYS_NO_PATHCONV=1", result.Value.Error);
+    }
+
+    [Fact]
+    public void Path_NormalRelative_OmitsMsysHint()
+    {
+        // AC-2 regression guard: an ordinary not-a-path value keeps the original message with no
+        // MSYS hint, so the augmented branch only fires on the shell-mangled signature.
+        var result = ApiRequestCommand.ValidateInputs(
+            "api/data/v9.2/accounts", null, null, null, null,
+            out _, out _);
+
+        Assert.NotNull(result);
+        Assert.Equal(ExitCodes.InvalidArguments, result!.Value.ExitCode);
+        Assert.DoesNotContain("MSYS_NO_PATHCONV", result.Value.Error);
+    }
+
+    [Fact]
+    public void Path_LeadingSlash_PassesIntact_NoMangleDetection()
+    {
+        // AC-2: a normal /api/... path that reached the CLI intact validates and is never treated
+        // as shell-mangled.
+        var result = ApiRequestCommand.ValidateInputs(
+            "/api/data/v9.2/accounts", null, null, null, null,
+            out _, out _);
+
+        Assert.Null(result);
+        Assert.False(ApiRequestCommand.LooksLikeShellMangledPath("/api/data/v9.2/accounts"));
+    }
+
+    #endregion
+
     #region Validation — AC-09: --body and --body-file conflict
 
     [Fact]

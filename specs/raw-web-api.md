@@ -119,6 +119,13 @@ Exit codes:
 - 2: Request blocked by write guard (no HTTP call made)
 - 3: Authentication or connectivity failure
 
+> **Git Bash / MSYS gotcha:** a leading-slash `--path` (e.g. `/api/data/v9.2/accounts`) is rewritten by
+> MSYS path conversion into a Windows path (`C:/Program Files/Git/api/data/v9.2/accounts`) **before** it
+> reaches the CLI, so the path arrives without its leading `/` and validation fails. This is a shell
+> artifact, not a CLI bug. Work around it by prefixing the command with `MSYS_NO_PATHCONV=1`, setting
+> `MSYS2_ARG_CONV_EXCL='*'`, or running from PowerShell/cmd. The validator detects this signature and
+> appends the hint to the error. Paths containing `?` (a query string) are unaffected — MSYS skips them.
+
 ### Constraints
 
 - Application Service lives in `PPDS.Dataverse` (or new project `PPDS.WebApi` if warranted by dependency concerns)
