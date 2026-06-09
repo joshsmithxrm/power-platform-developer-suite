@@ -53,7 +53,12 @@ public static class ApiRequestCommand
             Description = "Bypass write protection on production environments"
         };
 
-        var command = new Command("request", "Send a raw HTTP request to the Dataverse Web API")
+        var command = new Command(
+            "request",
+            "Send a raw HTTP request to the Dataverse Web API. " +
+            "Note: on Git Bash/MSYS a leading-slash --path (e.g. /api/data/v9.2/accounts) is rewritten " +
+            "into a Windows path before it reaches the CLI; prefix with MSYS_NO_PATHCONV=1, set " +
+            "MSYS2_ARG_CONV_EXCL='*', or run from PowerShell/cmd.")
         {
             pathOption,
             methodOption,
@@ -106,7 +111,13 @@ public static class ApiRequestCommand
         parsedHeaders = null;
 
         if (!path.StartsWith('/'))
-            return ("Path must start with '/'. Example: /api/data/v9.2/accounts", ExitCodes.InvalidArguments);
+        {
+            var message = "Path must start with '/'. Example: /api/data/v9.2/accounts";
+            if (LooksLikeShellMangledPath(path))
+                message += " It looks like your shell rewrote the path. On Git Bash/MSYS, prefix the command with " +
+                           "`MSYS_NO_PATHCONV=1`, set `MSYS2_ARG_CONV_EXCL='*'`, or run from PowerShell/cmd.";
+            return (message, ExitCodes.InvalidArguments);
+        }
 
         if (body != null && bodyFile != null)
             return ("Cannot specify both --body and --body-file.", ExitCodes.InvalidArguments);
@@ -139,6 +150,21 @@ public static class ApiRequestCommand
 
         return null;
     }
+
+    /// <summary>
+    /// Detects a `--path` value that Git Bash/MSYS rewrote from a leading-slash argument into an
+    /// absolute Windows path before the CLI was exec'd (e.g. `/api/data/v9.2/contacts` becomes
+    /// `C:/Program Files/Git/api/data/v9.2/contacts`). This is a shell artifact, not a user typo —
+    /// the CLI never sees the leading slash. MSYS path translation always produces a drive-letter-
+    /// rooted absolute path (`X:\` or `X:/`), so that prefix is a necessary and sufficient signature;
+    /// matching on it alone avoids false positives on relative paths that merely contain a "git"
+    /// segment. Exposed internal for unit testing of the MSYS hint (#1204).
+    /// </summary>
+    internal static bool LooksLikeShellMangledPath(string path)
+        => path.Length >= 3
+            && char.IsAsciiLetter(path[0])
+            && path[1] == ':'
+            && (path[2] == '/' || path[2] == '\\');
 
     private static async Task<int> ExecuteAsync(
         string path,

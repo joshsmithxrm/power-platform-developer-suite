@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
+- **`ppds api request --path`** now detects when Git Bash/MSYS has rewritten a leading-slash path into a Windows path (e.g. `/api/data/v9.2/contacts` → `C:/Program Files/Git/api/data/v9.2/contacts`) and augments the "Path must start with '/'" error with a hint to prefix `MSYS_NO_PATHCONV=1`, set `MSYS2_ARG_CONV_EXCL='*'`, or run from PowerShell/cmd. The command help also documents the gotcha (#1204).
 
 ### Fixed
 - **`ppds forms` write commands no longer fail on modern UCI forms** — `forms set-xml` and the structured `add/update/remove tab|section|field|subgrid` editors re-validate the whole form document against the bundled `FormXml.xsd` before writing to Dataverse. The root `<form>` element's type was a closed attribute allowlist with no `xs:anyAttribute`, so the `headerdensity` attribute Microsoft added to modern model-driven (UCI) Main forms (e.g. `headerdensity="HighWithControls"`) was rejected with `The 'headerdensity' attribute is not declared`. The schema now declares `headerdensity` and accepts unknown `<form>` attributes leniently (`xs:anyAttribute processContents="lax"`) so future server-side additions no longer hard-fail valid forms. GUID/control-id validation is unchanged (#1203).
