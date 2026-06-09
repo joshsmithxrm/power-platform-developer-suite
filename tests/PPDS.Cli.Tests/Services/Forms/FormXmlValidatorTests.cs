@@ -71,11 +71,12 @@ public class FormXmlValidatorTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Validate_InvalidXml_ThrowsWithInvalidFormXml()
+    public void Validate_MalformedGuidOnGuidTypedId_ThrowsWithInvalidFormXml()
     {
-        // Arrange — AC-03/AC-05: The structure is schema-valid (FormGuidType permits
-        // unbraced GUIDs) but the tab id lacks braces, so the custom GUID check rejects it.
-        var formXml = BuildValidFormXml(tabId: "12345678-1234-1234-1234-123456789012");
+        // Arrange — #1209 AC-4: A genuinely malformed id (not a GUID at all) on a
+        // GUID-typed attribute (<tab>.id is FormGuidType) must still be rejected.
+        // Format is now enforced by the XSD's FormGuidType pattern, not a custom check.
+        var formXml = BuildValidFormXml(tabId: "not-a-guid");
 
         // Act
         var act = () => FormXmlValidator.Validate(formXml);
@@ -168,36 +169,36 @@ public class FormXmlValidatorTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Validate_NonBraceGuid_ErrorMessageIncludesAttribute()
+    public void Validate_DuplicateGuid_ErrorMessageIncludesValue()
     {
-        // Arrange — AC-04: The GUID-format failure message must mention the bad value
-        // or the attribute name so the caller can locate the problem.
-        const string badGuid = "12345678-1234-1234-1234-123456789012";
-        var formXml = BuildValidFormXml(tabId: badGuid);
+        // Arrange — the duplicate-GUID failure message must mention the offending
+        // value so the caller can locate it. (Format failures are now surfaced by the
+        // schema, which has its own line/position message — see schema-violation test.)
+        var sharedGuid = NewBraceGuid();
+        var formXml = BuildValidFormXml(tabId: sharedGuid, sectionId: sharedGuid);
 
         // Act
         var act = () => FormXmlValidator.ValidateGuids(formXml);
 
         // Assert
         act.Should().Throw<PpdsValidationException>()
-            .Which.Message.Should().ContainAny(badGuid, "id", "labelid");
+            .Which.Message.Should().ContainAll(sharedGuid, "duplicate");
     }
 
-    // ── AC-05: Non-brace GUID throws InvalidFormXml ───────────────────────────
+    // ── #1209: Unbraced GUIDs and logical-name ids round-trip ─────────────────
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Validate_NonBraceGuid_ThrowsWithInvalidFormXml()
+    public void Validate_UnbracedGuidOnSectionId_DoesNotThrow()
     {
-        // Arrange — AC-05: An id without surrounding braces is rejected with InvalidFormXml.
-        var formXml = BuildValidFormXml(sectionId: "12345678-1234-1234-1234-123456789012");
+        // Arrange — #1209 AC-3: Real modern forms carry valid but *unbraced* GUIDs on
+        // id/labelid (observed on <section>). The XSD's FormGuidType (\{?...\}?) accepts
+        // them, and the custom check no longer over-rejects them.
+        var formXml = BuildValidFormXml(sectionId: "8d5e5d54-cae9-42ac-a610-85e840196095");
 
-        // Act
+        // Act & Assert
         var act = () => FormXmlValidator.Validate(formXml);
-
-        // Assert
-        act.Should().Throw<PpdsValidationException>()
-            .Which.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+        act.Should().NotThrow();
     }
 
     // ── AC-06: Duplicate GUID throws DuplicateGuid ────────────────────────────
@@ -242,21 +243,20 @@ public class FormXmlValidatorTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void ValidateGuids_NonBraceGuid_Throws()
+    public void ValidateGuids_UnbracedGuid_DoesNotThrow()
     {
-        // Arrange — an id value of "abc" is not a GUID at all and must be rejected.
+        // Arrange — #1209 AC-3: ValidateGuids itself must tolerate unbraced GUIDs
+        // (format is the schema's job). Braced and unbraced forms are still treated
+        // as the same GUID for uniqueness.
         var formXml = XDocument.Parse(@"<form>
   <tabs>
-    <tab id=""abc"" name=""t"" labelid=""{00000000-0000-0000-0000-000000000001}"" />
+    <tab id=""8d5e5d54-cae9-42ac-a610-85e840196095"" name=""t"" labelid=""{00000000-0000-0000-0000-000000000001}"" />
   </tabs>
 </form>");
 
-        // Act
+        // Act & Assert
         var act = () => FormXmlValidator.ValidateGuids(formXml);
-
-        // Assert
-        act.Should().Throw<PpdsValidationException>()
-            .Which.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+        act.Should().NotThrow();
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public class FormXmlValidatorTests
     public void ValidateGuids_ControlIdLogicalName_DoesNotThrow()
     {
         // Arrange — a <control> id is the column logical name (xs:string), not a GUID,
-        // so it must be exempt from the brace-format check.
+        // so it must not participate in GUID validation.
         var formXml = XDocument.Parse($@"<form>
   <tabs>
     <tab id=""{NewBraceGuid()}"" name=""t"">
@@ -286,5 +286,83 @@ public class FormXmlValidatorTests
         // Act & Assert
         var act = () => FormXmlValidator.ValidateGuids(formXml);
         act.Should().NotThrow();
+    }
+
+    // ── #1209: Real modern-form fragments (data / dependency logical-name ids) ──
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateGuids_DataAndDependencyLogicalNameIds_DoNotThrow()
+    {
+        // Arrange — #1209 AC-2: Real Microsoft model-driven forms carry logical names
+        // (not GUIDs) on <data>.id and <dependency>.id. The XSD types these as
+        // xs:string; ValidateGuids must ignore them rather than demand a GUID. These
+        // fragments are taken verbatim from a live Contact Main form's <formjsdata> /
+        // dependency blocks.
+        var formXml = XDocument.Parse(@"<form>
+  <formjsdata>
+    <data id=""fullname"" />
+    <data id=""relationshipdata"" />
+    <data id=""mobileofflineprofileitemid"" />
+  </formjsdata>
+  <DataSource>
+    <dependencies>
+      <dependency id=""absoluteurl"" />
+      <dependency id=""parentsite"" />
+      <dependency id=""relativeurl"" />
+      <dependency id=""parentsiteorlocation"" />
+    </dependencies>
+  </DataSource>
+</form>");
+
+        // Act & Assert — note: this exercises ValidateGuids directly (the GUID gate),
+        // independent of the surrounding schema structure.
+        var act = () => FormXmlValidator.ValidateGuids(formXml);
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateGuids_RepeatedLogicalNameIds_DoNotCollide()
+    {
+        // Arrange — #1209: logical-name ids are plain strings that may legitimately
+        // repeat across a form (e.g. the same dependency referenced in two blocks).
+        // They must not trip the GUID-uniqueness check.
+        var formXml = XDocument.Parse(@"<form>
+  <dependencies>
+    <dependency id=""absoluteurl"" />
+  </dependencies>
+  <somethingelse>
+    <dependency id=""absoluteurl"" />
+  </somethingelse>
+</form>");
+
+        // Act & Assert
+        var act = () => FormXmlValidator.ValidateGuids(formXml);
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateGuids_BracedAndUnbracedSameGuid_AreDuplicates()
+    {
+        // Arrange — #1209: "{G}" and "G" denote the same GUID, so they must collide
+        // under the uniqueness check after brace normalisation.
+        var formXml = XDocument.Parse(@"<form>
+  <tabs>
+    <tab id=""{8d5e5d54-cae9-42ac-a610-85e840196095}"" name=""t"">
+      <columns><column width=""100%""><sections>
+        <section id=""8d5e5d54-cae9-42ac-a610-85e840196095"" name=""s""><rows /></section>
+      </sections></column></columns>
+    </tab>
+  </tabs>
+</form>");
+
+        // Act
+        var act = () => FormXmlValidator.ValidateGuids(formXml);
+
+        // Assert
+        act.Should().Throw<PpdsValidationException>()
+            .Which.ErrorCode.Should().Be(FormErrorCodes.DuplicateGuid);
     }
 }
