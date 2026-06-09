@@ -22,14 +22,20 @@ public class FormXmlValidatorTests
         string? tabId = null,
         string? tabLabelId = null,
         string? sectionId = null,
-        string? sectionLabelId = null)
+        string? sectionLabelId = null,
+        string? formAttributes = null)
     {
         tabId ??= NewBraceGuid();
         tabLabelId ??= NewBraceGuid();
         sectionId ??= NewBraceGuid();
         sectionLabelId ??= NewBraceGuid();
 
-        return XDocument.Parse($@"<form>
+        // formAttributes lets a caller inject extra attributes onto the root <form>
+        // element (e.g. headerdensity, or an unknown future attribute) to exercise
+        // the schema's forward-compatibility behaviour.
+        var formAttrs = string.IsNullOrEmpty(formAttributes) ? string.Empty : " " + formAttributes;
+
+        return XDocument.Parse($@"<form{formAttrs}>
   <tabs>
     <tab name=""{tabId}"" id=""{tabId}"" IsUserDefined=""0"" locklevel=""0"" showlabel=""1"" expanded=""1"" visible=""1"" availableforphone=""1"" labelid=""{tabLabelId}"">
       <labels><label description=""General"" languagecode=""1033"" /></labels>
@@ -97,6 +103,38 @@ public class FormXmlValidatorTests
         // Assert
         act.Should().Throw<PpdsValidationException>()
             .Which.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+    }
+
+    // ── #1203: Modern UCI form attributes pass validation ─────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Validate_ModernMainFormWithHeaderDensity_DoesNotThrow()
+    {
+        // Arrange — #1203 AC-1: A modern model-driven (UCI) Main form carries
+        // headerdensity on the root <form> element (observed value
+        // "HighWithControls"). The bundled XSD must accept it.
+        var formXml = BuildValidFormXml(
+            formAttributes: @"showImage=""true"" headerdensity=""HighWithControls""");
+
+        // Act & Assert
+        var act = () => FormXmlValidator.Validate(formXml);
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Validate_UnknownFutureFormAttribute_DoesNotThrow()
+    {
+        // Arrange — #1203 AC-3: The schema accepts unknown <form> attributes
+        // leniently (xs:anyAttribute processContents="lax") so a future
+        // server-side addition does not hard-fail valid forms.
+        var formXml = BuildValidFormXml(
+            formAttributes: @"somefutureattribute=""whatever""");
+
+        // Act & Assert
+        var act = () => FormXmlValidator.Validate(formXml);
+        act.Should().NotThrow();
     }
 
     // ── AC-04: Error message identifies the failing element/position ──────────
