@@ -19,6 +19,10 @@ internal static class FormXmlValidator
         @"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$",
         RegexOptions.Compiled);
 
+    // The GUID-bearing structural attributes. Hoisted so the per-element loop in
+    // ValidateGuids does not re-allocate the array for every descendant.
+    private static readonly string[] GuidAttributeNames = { "id", "labelid" };
+
     /// <summary>
     /// Validates formxml against the bundled XSD schema and checks GUID constraints.
     /// Throws <see cref="PpdsValidationException"/> on failure.
@@ -86,11 +90,13 @@ internal static class FormXmlValidator
     /// </remarks>
     internal static void ValidateGuids(XDocument formXml)
     {
+        ArgumentNullException.ThrowIfNull(formXml);
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var element in formXml.Descendants())
         {
-            foreach (var attrName in new[] { "id", "labelid" })
+            foreach (var attrName in GuidAttributeNames)
             {
                 var attr = element.Attribute(attrName);
                 if (attr is null) continue;
