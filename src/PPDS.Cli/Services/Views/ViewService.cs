@@ -234,7 +234,7 @@ public class ViewService : IViewService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid", "layoutxml", "fetchxml"), cancellationToken);
+            new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
@@ -243,15 +243,9 @@ public class ViewService : IViewService
         var update = new Entity("savedquery", savedQueryId);
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
-        try
-        {
-            await client.UpdateAsync(update, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateFailed,
-                $"Failed to update view '{viewName}' after removing column '{attributeName}'.", ex);
-        }
+        await ApplyViewWriteAsync(
+            client, savedQueryId, viewName, $"removing column '{attributeName}'", "layoutxml",
+            layoutXml, update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -269,7 +263,7 @@ public class ViewService : IViewService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid", "layoutxml"), cancellationToken);
+            new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
@@ -278,15 +272,9 @@ public class ViewService : IViewService
         var update = new Entity("savedquery", savedQueryId);
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
-        try
-        {
-            await client.UpdateAsync(update, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateFailed,
-                $"Failed to update view '{viewName}' after updating column width.", ex);
-        }
+        await ApplyViewWriteAsync(
+            client, savedQueryId, viewName, "updating column width", "layoutxml",
+            layoutXml, update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -569,10 +557,10 @@ public class ViewService : IViewService
                     Conditions = { new ConditionExpression("savedqueryid", ConditionOperator.Equal, savedQueryId) }
                 }
             };
-            var response = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(
+            var response = (RetrieveUnpublishedMultipleResponse?)await client.ExecuteAsync(
                 new RetrieveUnpublishedMultipleRequest { Query = query }, ct);
-            var result = response.EntityCollection;
-            var current = result.Entities.Count > 0
+            var result = response?.EntityCollection;
+            var current = result != null && result.Entities.Count > 0
                 ? result.Entities[0].GetAttributeValue<string>(fieldName) ?? string.Empty
                 : string.Empty;
             if (!XmlEquivalent(current, oldValue))
