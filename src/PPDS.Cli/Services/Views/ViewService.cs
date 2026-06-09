@@ -304,7 +304,7 @@ public class ViewService : IViewService
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
             client, entityLogicalName, viewName,
-            new ColumnSet("savedqueryid", "layoutxml", "ismanaged"), cancellationToken);
+            new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
