@@ -495,6 +495,9 @@ public class ViewService : IViewService
         Entity source,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(update);
+
         // Carry returnedtypecode so the platform has the entity context for the write. Without it,
         // updates that change fetchxml are rejected with 0x80040216 ("An unexpected error occurred")
         // on managed views — most visibly when editing find columns on a managed Quick Find view.
@@ -541,9 +544,12 @@ public class ViewService : IViewService
     /// falsely report "did not persist" for any not-yet-published change — especially on managed
     /// views. RetrieveUnpublished reflects the write immediately while still catching a genuine
     /// silent drop (#1194); it is also what the Power Apps maker reads back. (#1200)
-    /// Tolerates read-after-write lag with a small bounded retry.
+    /// Tolerates read-after-write lag with a small bounded retry. Verification is best-effort: if
+    /// the unpublished read itself fails (e.g. the caller lacks the privilege RetrieveUnpublished
+    /// requires, or a transient error), we assume the write persisted rather than block an
+    /// otherwise-successful update with a false "did not persist".
     /// </summary>
-    private static async Task<bool> VerifyViewWritePersistedAsync(
+    private async Task<bool> VerifyViewWritePersistedAsync(
         IDataverseClient client, Guid savedQueryId, string fieldName, string oldValue, CancellationToken ct)
     {
         const int maxAttempts = 3;
@@ -557,8 +563,21 @@ public class ViewService : IViewService
                     Conditions = { new ConditionExpression("savedqueryid", ConditionOperator.Equal, savedQueryId) }
                 }
             };
-            var response = (RetrieveUnpublishedMultipleResponse?)await client.ExecuteAsync(
-                new RetrieveUnpublishedMultipleRequest { Query = query }, ct);
+
+            RetrieveUnpublishedMultipleResponse? response;
+            try
+            {
+                response = (RetrieveUnpublishedMultipleResponse?)await client.ExecuteAsync(
+                    new RetrieveUnpublishedMultipleRequest { Query = query }, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Could not verify the write to savedquery {SavedQueryId} via RetrieveUnpublished; " +
+                    "assuming it persisted.", savedQueryId);
+                return true;
+            }
+
             var result = response?.EntityCollection;
             var current = result != null && result.Entities.Count > 0
                 ? result.Entities[0].GetAttributeValue<string>(fieldName) ?? string.Empty

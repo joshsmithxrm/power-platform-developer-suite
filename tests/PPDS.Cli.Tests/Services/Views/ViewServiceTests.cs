@@ -350,7 +350,7 @@ public class ViewServiceTests
     /// either throws a supplied Dataverse fault or succeeds, and whose read-back returns
     /// <paramref name="fetchAfterWrite"/> — letting tests drive every ApplyViewWriteAsync branch.
     /// </summary>
-    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite, Action<Entity>? onUpdate = null)
+    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite, Action<Entity>? onUpdate = null, Exception? readBackThrows = null)
     {
         var pool = new Mock<IDataverseConnectionPool>();
         var client = new Mock<IPooledClient>();
@@ -388,9 +388,12 @@ public class ViewServiceTests
             }));
 
         // Read-back verification reads the UNPUBLISHED (draft) record via RetrieveUnpublishedMultiple.
-        client.Setup(c => c.ExecuteAsync(
-                It.Is<OrganizationRequest>(r => r is RetrieveUnpublishedMultipleRequest), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RetrieveUnpublishedMultipleResponse
+        var readBack = client.Setup(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r is RetrieveUnpublishedMultipleRequest), It.IsAny<CancellationToken>()));
+        if (readBackThrows != null)
+            readBack.ThrowsAsync(readBackThrows);
+        else
+            readBack.ReturnsAsync(new RetrieveUnpublishedMultipleResponse
             {
                 Results = new ParameterCollection
                 {
@@ -464,6 +467,19 @@ public class ViewServiceTests
     {
         // Update succeeds and the read-back reflects the new value → no throw.
         var svc = BuildViewWriteService(isManaged: false, updateThrows: null, fetchAfterWrite: NewFetch);
+
+        await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task SetFetchXml_ReadBackFails_AssumesPersisted_DoesNotThrow()
+    {
+        // The unpublished read-back itself fails (e.g. missing RetrieveUnpublished privilege).
+        // Verification is best-effort, so a successful write must not be reported as not-persisted.
+        // fetchAfterWrite=OriginalFetch would otherwise trip UpdateNotPersisted if read-back ran.
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: OriginalFetch,
+            readBackThrows: new InvalidOperationException("PrincipalPrivilegeDenied: prvReadSavedQuery"));
 
         await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
             .Should().NotThrowAsync();
