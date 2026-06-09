@@ -401,6 +401,7 @@
 		<xs:attribute name="addedby" type="xs:string" />
 		<xs:attribute name="shownavigationbar" type="xs:boolean" />
 		<xs:attribute name="showImage" type="xs:boolean" />
+		<xs:attribute name="headerdensity" type="xs:string" />
 		<xs:attribute name="maxWidth" use="optional">
 			<xs:simpleType>
 				<xs:restriction base="xs:positiveInteger">
@@ -408,7 +409,11 @@
 				</xs:restriction>
 			</xs:simpleType>
 		</xs:attribute>
-		
+		<!-- Forward-compatibility: Dataverse adds new root <form> attributes over time
+		     (e.g. headerdensity). A closed allowlist hard-fails real, valid forms on
+		     every server-side addition, so accept unknown attributes leniently rather
+		     than re-breaking on the next one. See issue #1203. -->
+		<xs:anyAttribute processContents="lax" />
 	</xs:complexType>
 	<xs:complexType name="FormXmlControlType">
 		<xs:sequence>
