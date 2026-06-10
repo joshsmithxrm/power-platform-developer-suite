@@ -900,6 +900,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide --value or --label to identify the target option.", "Value");
 
+        if (request.Value.HasValue && !string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Value and Label are mutually exclusive; provide exactly one to identify the target option.", "Value");
+
         // #1170: resolve the target by value or label; the current label is preserved when
         // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
@@ -944,6 +948,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide --value or --label to identify the target option.", "Value");
+
+        if (request.Value.HasValue && !string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Value and Label are mutually exclusive; provide exactly one to identify the target option.", "Value");
 
         // #1169: resolve the target by value or label, mirroring the local (column) option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);

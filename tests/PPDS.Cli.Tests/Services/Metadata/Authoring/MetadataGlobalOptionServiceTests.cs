@@ -129,6 +129,37 @@ public class MetadataGlobalOptionServiceTests
     }
 
     [Fact]
+    public async Task UpdateOptionValue_BothValueAndLabel_ThrowsInvalidConstraint() // review: service-layer mutual exclusivity
+    {
+        var act = () => _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            Label = "Draft",
+            NewLabel = "Renamed"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_BothValueAndLabel_ThrowsInvalidConstraint() // review: service-layer mutual exclusivity
+    {
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            Label = "Draft"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
+    }
+
+    [Fact]
     public async Task DeleteOptionValue_NeitherValueNorLabel_ThrowsMissingRequiredField() // #1169
     {
         var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
