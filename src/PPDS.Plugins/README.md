@@ -37,13 +37,21 @@ public class AccountUpdatePlugin : IPlugin
 }
 ```
 
-Build your plugin project, then deploy with the PPDS CLI:
+Build your plugin project, then deploy with the PPDS CLI in two steps. First extract the attribute metadata from the compiled assembly into a `registrations.json` config:
 
 ```bash
-ppds plugins deploy --assembly bin/Release/net462/MyPlugins.dll
+ppds plugins extract --input bin/Release/net462/MyPlugins.dll
 ```
 
-The CLI reflects over the assembly, extracts every `[PluginStep]`, `[PluginImage]`, and `[CustomApi]` attribute, and creates or updates the corresponding Dataverse plugin type, step, image, and Custom API records.
+This reflects over the assembly and writes every `[PluginStep]`, `[PluginImage]`, and `[CustomApi]` attribute to `registrations.json` (next to the assembly by default; use `--output` to choose another path). Then deploy that config to the connected environment:
+
+```bash
+ppds plugins deploy --config registrations.json
+```
+
+Deploy reads the config and creates or updates the corresponding Dataverse plugin type, step, image, and Custom API records. Check the config into source control so registrations diff cleanly in pull requests.
+
+> **Important:** If any step sets a `secureConfiguration` value, do not commit that secret to source control. Keep secrets out of the tracked `registrations.json` and supply them at deploy time from a git-ignored file, an environment variable, or a secret manager.
 
 ## Attributes
 
