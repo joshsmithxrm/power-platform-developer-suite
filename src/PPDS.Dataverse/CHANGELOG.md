@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Metadata-authoring support for status reasons and local option sets** — `AddStatusReasonRequest`/`UpdateStatusReasonRequest`/`RemoveStatusReasonRequest`/`StatusReasonInfo` for entity status-reason management, and `AddOptionValueRequest`/`UpdateOptionValueRequest`/`DeleteOptionValueRequest` plus the shared `OptionValueDeriver` (publisher-prefix-based option value derivation) for column-scoped (local) Choice option sets ([#1167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1167), [#1159](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1159), [#1160](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1160), [#1161](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1161)).
 - **`DeleteOptionValueRequest` targets by value or label** — `Value` is now nullable and a `Label` selector was added (exactly one required); the service resolves the target against unpublished metadata and throws `OPTION_NOT_FOUND` when unresolved ([#1169](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1169)).
+- **`UpdateOptionValueRequest` aligned with `UpdateColumnOptionRequest`** — `Value`/`Label` are now the (exactly-one) target selectors, `NewLabel` carries the updated label (current label preserved when omitted), and `Color` is now forwarded to the SDK ([#1170](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1170)).
 
 ### Fixed
 

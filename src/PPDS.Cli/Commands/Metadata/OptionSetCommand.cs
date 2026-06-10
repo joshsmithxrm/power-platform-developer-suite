@@ -794,16 +794,24 @@ public static class OptionSetCommand
             Required = true
         };
 
-        var valueOption = new Option<int>("--value")
+        var valueOption = new Option<int?>("--value")
         {
-            Description = "Numeric value of the option to update",
-            Required = true
+            Description = "Target option by value (mutually exclusive with --label)"
         };
 
-        var labelOption = new Option<string>("--label")
+        var labelOption = new Option<string?>("--label")
         {
-            Description = "New label for the option",
-            Required = true
+            Description = "Target option by current label (mutually exclusive with --value)"
+        };
+
+        var newLabelOption = new Option<string?>("--new-label")
+        {
+            Description = "New label to apply"
+        };
+
+        var colorOption = new Option<string?>("--color")
+        {
+            Description = "New hex color (e.g. #FF0000)"
         };
 
         var command = new Command("update-option", "Update an existing option value in an option set")
@@ -812,6 +820,8 @@ public static class OptionSetCommand
             nameOption,
             valueOption,
             labelOption,
+            newLabelOption,
+            colorOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -823,13 +833,30 @@ public static class OptionSetCommand
             var solution = parseResult.GetValue(solutionOption)!;
             var name = parseResult.GetValue(nameOption)!;
             var value = parseResult.GetValue(valueOption);
-            var label = parseResult.GetValue(labelOption)!;
+            var label = parseResult.GetValue(labelOption);
+            var newLabel = parseResult.GetValue(newLabelOption);
+            var color = parseResult.GetValue(colorOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            // #1170: align with attribute update-option — (--value | --label) selects the
+            // target, --new-label carries the update (the old shape used --label as the new label).
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteUpdateOptionAsync(
-                solution, name, value, label,
+                solution, name, value, label, newLabel, color,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -839,8 +866,10 @@ public static class OptionSetCommand
     internal static async Task<int> ExecuteUpdateOptionAsync(
         string solution,
         string name,
-        int value,
-        string label,
+        int? value,
+        string? label,
+        string? newLabel,
+        string? color,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -863,7 +892,7 @@ public static class OptionSetCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine($"Updating option value {value} in '{name}'...");
+                Console.Error.WriteLine($"Updating option on '{name}'...");
             }
 
             var request = new UpdateOptionValueRequest
@@ -871,18 +900,20 @@ public static class OptionSetCommand
                 SolutionUniqueName = solution,
                 OptionSetName = name,
                 Value = value,
-                Label = label
+                Label = label,
+                NewLabel = newLabel,
+                Color = color
             };
 
             await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, value, label, updated = true });
+                writer.WriteSuccess(new { optionSetName = name, updated = true });
             }
             else
             {
-                Console.Error.WriteLine($"Option value {value} updated to '{label}'.");
+                Console.Error.WriteLine($"Option on '{name}' updated successfully.");
             }
 
             return ExitCodes.Success;

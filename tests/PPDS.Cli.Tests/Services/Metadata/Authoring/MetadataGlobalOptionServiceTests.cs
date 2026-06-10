@@ -12,6 +12,7 @@ using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 using SdkDeleteOptionValueRequest = Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest;
+using SdkUpdateOptionValueRequest = Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -134,6 +135,59 @@ public class MetadataGlobalOptionServiceTests
         {
             SolutionUniqueName = "TestSolution",
             OptionSetName = "new_mystatus"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.MissingRequiredField);
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_ByLabel_AppliesNewLabel() // #1170
+    {
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "Approved"));
+
+        await _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Approved",
+            NewLabel = "Accepted"
+        });
+
+        var upd = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
+        upd.Value.Should().Be(100000001);
+        upd.Label.LocalizedLabels.Should().ContainSingle()
+            .Which.Label.Should().Be("Accepted");
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor() // #1170
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            Color = "#FF0000"
+        });
+
+        var upd = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
+        upd.Value.Should().Be(100000000);
+        upd.Label.LocalizedLabels.Should().ContainSingle()
+            .Which.Label.Should().Be("Draft");
+        upd["Color"].Should().Be("#FF0000");
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_NeitherValueNorLabel_ThrowsMissingRequiredField() // #1170
+    {
+        var act = () => _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            NewLabel = "Renamed"
         });
 
         await act.Should().ThrowAsync<MetadataValidationException>()

@@ -874,18 +874,27 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _guard.EnsureCanMutate("metadata.option.update");
 
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
-        _validator.ValidateRequiredString(request.Label, "Label");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        // #1170: resolve the target by value or label; the current label is preserved when
+        // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
+        var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
-            Value = request.Value,
-            Label = new Label(request.Label, 1033),
+            Value = target.Value,
+            Label = new Label(request.NewLabel ?? target.Label, 1033),
             SolutionUniqueName = request.SolutionUniqueName
         };
 
         if (!string.IsNullOrEmpty(request.Description))
             sdkRequest.Description = new Label(request.Description, 1033);
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
         if (!string.IsNullOrEmpty(request.EntityLogicalName))
             sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
@@ -894,7 +903,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
-        _logger?.LogInformation("Updated option value {Value} in {OptionSet}", request.Value, request.OptionSetName);
+        _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
     }
 
     /// <inheritdoc />
