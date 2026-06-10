@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ppds webresources create <file>`** — create a brand-new web resource directly from a local file: type inferred from the file extension (`--type` single-type override), `--display-name`, optional atomic `--solution` binding (SDK equivalent of the `MSCRM.SolutionUniqueName` header), and `--publish`. Fails with `WebResource.AlreadyExists` (hinting at `update`) when the name is taken (#1207).
+- **`ppds webresources update <name|id> <file>`** — replace an existing web resource's content from a local file (binary types allowed — this is file replacement, not text editing), with optional `--publish`. Resolves by exact name or GUID only, so a fuzzy match can never overwrite the wrong resource; warns when the file extension implies a different type than the stored resource (#1207).
 - **Canonical metadata nouns** `entity`, `attribute`, `optionset` replace `table`, `column`, `choice` as the primary command surface. Old nouns remain as deprecation shims that delegate to the same execute path and print a migration hint to stderr (#1159).
 - **Status reason management** — `ppds metadata entity add-statusreason|list-statusreasons|update-statusreason|remove-statusreason` for first-class statuscode option-value management (#1160).
 - **`OptionValueDeriver`** shared pure helper for publisher-prefix-based option value derivation — explicit-value wins, prefix×10000 base, gap-fill over existing values (#1160).
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local Choice columns** — `ppds metadata attribute create --type Choice` with inline --option/--options-file, plus `ppds metadata attribute add-option|update-option|remove-option` for column-scoped option sets (#1161).
 
 ### Changed
+- **`ppds metadata entity` authoring verbs accept a positional `<entity>`** — `update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, and `remove-statusreason` now take the entity logical name positionally (`ppds metadata entity update hsl_veterinarian --solution …`), matching how the parent `entity <name>` read lookup is typed. `--entity` keeps working as a fully equivalent flag; if both are supplied they must agree or the command errors clearly instead of silently picking one (#1208).
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
 - **`ppds api request --path`** now detects when Git Bash/MSYS has rewritten a leading-slash path into a Windows path (e.g. `/api/data/v9.2/contacts` → `C:/Program Files/Git/api/data/v9.2/contacts`) and augments the "Path must start with '/'" error with a hint to prefix `MSYS_NO_PATHCONV=1`, set `MSYS2_ARG_CONV_EXCL='*'`, or run from PowerShell/cmd. The command help also documents the gotcha (#1204).
 

@@ -54,6 +54,20 @@ public class WebResourcesCommandGroupTests
     }
 
     [Fact]
+    public void Create_HasCreateSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "create");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
+    public void Create_HasUpdateSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "update");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
     public void ProfileOption_HasCorrectName()
     {
         Assert.Equal("--profile", WebResourcesCommandGroup.ProfileOption.Name);

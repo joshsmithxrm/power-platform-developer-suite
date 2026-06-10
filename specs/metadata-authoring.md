@@ -1,7 +1,7 @@
 # Metadata Authoring
 
-**Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land)
-**Last Updated:** 2026-05-29
+**Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
+**Last Updated:** 2026-06-10
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -382,19 +382,19 @@ Canonical noun-verb subcommands under `ppds metadata`. Deprecated forms (`table`
 ```bash
 ppds metadata entity <name>                                      # read lookup (unchanged)
 ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [options]
-ppds metadata entity update --solution <s> --entity <name> [property flags]
-ppds metadata entity delete --solution <s> --entity <name> [--force] [--dry-run]
+ppds metadata entity update <entity> --solution <s> [property flags]
+ppds metadata entity delete <entity> --solution <s> [--force] [--dry-run]
 ```
 
 **Status reason commands (#1160, new — on `entity`):**
 ```bash
-ppds metadata entity add-statusreason --entity <name> --label <label> (--value <int> | --solution <s>) [--state Active|Inactive | --state-code 0|1] [--color <#hex>] [--publish] [--dry-run]
-ppds metadata entity list-statusreasons --entity <name>
-ppds metadata entity update-statusreason --entity <name> (--value <int> | --label <label>) [--new-label <label>] [--color <#hex>] [--publish]
-ppds metadata entity remove-statusreason --entity <name> (--value <int> | --label <label>) [--force] [--publish]
+ppds metadata entity add-statusreason <entity> --label <label> (--value <int> | --solution <s>) [--state Active|Inactive | --state-code 0|1] [--color <#hex>] [--publish] [--dry-run]
+ppds metadata entity list-statusreasons <entity>
+ppds metadata entity update-statusreason <entity> (--value <int> | --label <label>) [--new-label <label>] [--color <#hex>] [--publish]
+ppds metadata entity remove-statusreason <entity> (--value <int> | --label <label>) [--force] [--publish]
 ```
 
-The status-reason verbs identify the entity with the `--entity <name>` flag (consistent with `entity update`/`entity delete` and with `attribute`/`key` commands), not a bare positional, so they never contend with the `entity <name>` read lookup. `--state` and `--state-code` are mutually exclusive (`--state` maps Active→0, Inactive→1); one is required for `add`. `add` requires exactly one of `--value` / `--solution`; `update`/`remove` require exactly one of `--value` / `--label` to target the reason.
+All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, `remove-statusreason`) identify the entity with a **positional `<entity>` argument**, with `--entity <name>` retained as a fully equivalent flag for back-compat (#1208). A positional on the *subcommand* binds after the verb token, so it never contends with the parent's `entity <name>` read lookup — the original flag-only rationale overstated the collision risk; the real consideration was cross-noun consistency, and operator usage showed the flag-only form was a recurring stumble (users naturally type `entity <name> update`, which the parser cannot route, then reach for `entity update <name>`, which previously printed help). When both the positional and `--entity` are supplied they must agree (case-insensitive) or the parse fails with a clear "disagree" error; supplying neither is also a parse error. `attribute` and `key` verbs keep `--entity` only (scope (a) of #1208 — they have no positional read form to mirror). `--state` and `--state-code` are mutually exclusive (`--state` maps Active→0, Inactive→1); one is required for `add`. `add` requires exactly one of `--value` / `--solution`; `update`/`remove` require exactly one of `--value` / `--label` to target the reason.
 
 **Attribute commands (was `column`):**
 ```bash
@@ -578,6 +578,8 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `attribute create`/`add-/update-/remove-option` and status-reason verbs via `PublishEntityInternalAsync`) | — (wired; live-publish covered by Integration) | ❌ |
 | AC-59 | `ppds metadata --help` lists the canonical nouns and marks deprecated nouns (`table`, `column`, `choice`, `choices`) `(deprecated)` in their one-line description | `MetadataDeprecationTests.MetadataHelp_MarksDeprecatedNouns` | ❌ |
 | AC-60 | `entity --help` lists the status-reason subcommands; `attribute create --help` documents `--option`/`--choice`/derivation; each new subcommand exposes accurate `--help` | `MetadataHelpCoverageTests.NewSubcommands_HaveHelp` | ❌ |
+| AC-61 | All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, `remove-statusreason`) accept a positional `<entity>`; `--entity` still works (#1208) | `MetadataEntityCommandTests.AuthoringVerb_ParsesPositionalEntity` + `AuthoringVerb_StillAcceptsEntityFlag` | ✅ |
+| AC-62 | When both the positional `<entity>` and `--entity` are supplied they must agree (case-insensitive) or the parse fails with a "disagree" error; supplying neither is a parse error (#1208) | `MetadataEntityCommandTests.AuthoringVerb_PositionalAndFlagAgreeing_HasNoErrors` + `AuthoringVerb_PositionalAndFlagDisagreeing_HasErrors` + `AuthoringVerb_MissingEntity_HasErrors` | ✅ |
 
 ### Edge Cases
 
@@ -812,6 +814,8 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 **Falsification:** a future System.CommandLine version supports positional-then-subcommand cleanly, or operator usage data shows Form A's `--entity` flag is a friction point.
 
+**Amendment (#1208, 2026-06-10):** The falsification condition fired — operator usage showed Form A's flag-only surface is a real friction point (users type `entity <name> update …`, the parser can't route it, and the natural fallback `entity update <name> …` printed help instead of working). The `entity` authoring verbs now additionally accept Form B's positional `<entity>` on the verb subcommand, keeping `--entity` as a fully equivalent back-compat flag; when both are supplied they must agree or the parse errors. This is additive — Form A invocations are unchanged. Scope is `entity` verbs only: `attribute`/`key` keep `--entity` exclusively, since they have no positional read form to mirror and their verbs take other identifying flags (`--column`, `--name`).
+
 ### Why explicit `IsGlobal = false` for local choice columns? (#1161)
 
 **Context:** `attribute create --type Choice --option …` failed with the Dataverse fault *"IsGlobal is not specified"*. Root cause: `BuildChoiceAttribute` constructed `new OptionSetMetadata()` for the inline (local) set without setting `IsGlobal`, and the SDK does not default it for inline option sets.
@@ -846,6 +850,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-03-31 | Initial spec |
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
+| 2026-06-10 | `entity` authoring verbs accept positional `<entity>` alongside `--entity` (#1208) — amended the #1160 Form A decision (Form B accepted additively), rewrote the §"CLI Surface" rationale, added AC-61/AC-62. `attribute`/`key` unchanged. |
 
 ---
 

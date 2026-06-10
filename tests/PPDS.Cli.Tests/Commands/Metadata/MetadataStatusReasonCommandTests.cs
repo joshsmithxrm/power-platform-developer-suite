@@ -103,7 +103,8 @@ public class MetadataStatusReasonCommandTests
     {
         var opt = _updateStatusReasonCmd.Options.FirstOrDefault(o => o.Name == "--entity");
         Assert.NotNull(opt);
-        Assert.True(opt!.Required);
+        // #1208: optional — the entity can come from the positional <entity> instead
+        Assert.False(opt!.Required);
     }
 
     [Fact]
@@ -148,7 +149,7 @@ public class MetadataStatusReasonCommandTests
     {
         var opt = _removeStatusReasonCmd.Options.FirstOrDefault(o => o.Name == "--entity");
         Assert.NotNull(opt);
-        Assert.True(opt!.Required);
+        Assert.False(opt!.Required);
     }
 
     [Fact]
@@ -187,7 +188,7 @@ public class MetadataStatusReasonCommandTests
         var listCmd = _entityCommand.Subcommands.First(c => c.Name == "list-statusreasons");
         var opt = listCmd.Options.FirstOrDefault(o => o.Name == "--entity");
         Assert.NotNull(opt);
-        Assert.True(opt!.Required);
+        Assert.False(opt!.Required);
     }
 
     [Fact]

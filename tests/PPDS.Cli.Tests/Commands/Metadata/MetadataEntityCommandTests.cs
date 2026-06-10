@@ -68,12 +68,15 @@ public class MetadataEntityCommandTests
     }
 
     [Fact]
-    public void AddStatusReason_HasRequiredEntityOption()
+    public void AddStatusReason_HasOptionalEntityOption_WithPositionalAlternative()
     {
+        // #1208: --entity is no longer Required at parse level — the entity can come
+        // from the positional argument instead; a validator enforces at-least-one.
         var sub = _command.Subcommands.First(c => c.Name == "add-statusreason");
         var opt = sub.Options.FirstOrDefault(o => o.Name == "--entity");
         Assert.NotNull(opt);
-        Assert.True(opt!.Required);
+        Assert.False(opt!.Required);
+        Assert.NotNull(sub.Arguments.FirstOrDefault(a => a.Name == "entity"));
     }
 
     [Fact]
@@ -130,7 +133,7 @@ public class MetadataEntityCommandTests
         var sub = _command.Subcommands.First(c => c.Name == "list-statusreasons");
         var opt = sub.Options.FirstOrDefault(o => o.Name == "--entity");
         Assert.NotNull(opt);
-        Assert.True(opt!.Required);
+        Assert.False(opt!.Required);
     }
 
     [Theory]
@@ -149,5 +152,91 @@ public class MetadataEntityCommandTests
         var sub = _command.Subcommands.First(c => c.Name == "add-statusreason");
         var result = sub.Parse("--label Active2 --state Active --solution MySol");
         Assert.NotEmpty(result.Errors);
+    }
+
+    // -------------------------------------------------------------------------
+    // #1208 — authoring verbs accept positional <entity>, keeping --entity
+    // -------------------------------------------------------------------------
+
+    /// <summary>Each authoring verb with the minimum other flags it needs to parse cleanly.</summary>
+    public static TheoryData<string, string> AuthoringVerbs => new()
+    {
+        { "update", "--solution MySol" },
+        { "delete", "--solution MySol" },
+        { "add-statusreason", "--label Active2 --state Active --solution MySol" },
+        { "list-statusreasons", "" },
+        { "update-statusreason", "--value 5 --new-label Renamed" },
+        { "remove-statusreason", "--value 5" },
+    };
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_ParsesPositionalEntity(string verb, string extraFlags)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+        var entityArgument = (Argument<string?>)sub.Arguments.First(a => a.Name == "entity");
+
+        var result = sub.Parse($"hsl_veterinarian {extraFlags}".Trim());
+
+        Assert.Empty(result.Errors);
+        Assert.Equal("hsl_veterinarian", result.GetValue(entityArgument));
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_StillAcceptsEntityFlag(string verb, string extraFlags)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse($"--entity hsl_veterinarian {extraFlags}".Trim());
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_PositionalAndFlagAgreeing_HasNoErrors(string verb, string extraFlags)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse($"hsl_veterinarian --entity HSL_Veterinarian {extraFlags}".Trim());
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_PositionalAndFlagDisagreeing_HasErrors(string verb, string extraFlags)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse($"hsl_veterinarian --entity hsl_appointment {extraFlags}".Trim());
+
+        Assert.NotEmpty(result.Errors);
+        Assert.Contains(result.Errors, e => e.Message.Contains("disagree"));
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_MissingEntity_HasErrors(string verb, string extraFlags)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse(extraFlags);
+
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_WhitespacePositional_WithValidFlag_HasNoErrors(string verb, string extraFlags)
+    {
+        // A whitespace-only positional must be treated as absent so a valid --entity flag wins
+        // (the validator and ResolveEntity both ignore whitespace).
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse(["  ", "--entity", "hsl_veterinarian", .. extraFlags.Split(' ', StringSplitOptions.RemoveEmptyEntries)]);
+
+        Assert.Empty(result.Errors);
     }
 }

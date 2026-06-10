@@ -212,6 +212,57 @@ public static class EntityCommand
     }
 
     // -------------------------------------------------------------------------
+    // Shared entity identification for authoring verbs (#1208)
+    // Verbs accept the entity as a positional argument ('entity update <name>')
+    // or via --entity (back-compat). A subcommand-level positional binds after
+    // the verb token, so it never contends with the parent's read lookup.
+    // -------------------------------------------------------------------------
+
+    /// <summary>Creates the optional positional entity argument for authoring verbs.</summary>
+    private static Argument<string?> CreateEntityArgument() => new("entity")
+    {
+        Description = "Logical name of the entity (alternative to --entity)",
+        Arity = ArgumentArity.ZeroOrOne
+    };
+
+    /// <summary>Creates the optional --entity flag for authoring verbs (back-compat with the original flag-only surface).</summary>
+    private static Option<string?> CreateEntityOption() => new("--entity", "-e")
+    {
+        Description = "Logical name of the entity (alternative to the positional <entity>)"
+    };
+
+    /// <summary>
+    /// Requires the entity via the positional argument or --entity; when both are
+    /// supplied they must agree, so a typo can never silently target the wrong entity.
+    /// </summary>
+    private static void AddEntityValidator(Command command, Argument<string?> entityArgument, Option<string?> entityOption)
+    {
+        command.Validators.Add(result =>
+        {
+            var positional = result.GetValue(entityArgument);
+            var flag = result.GetValue(entityOption);
+
+            if (string.IsNullOrWhiteSpace(positional) && string.IsNullOrWhiteSpace(flag))
+            {
+                result.AddError("The entity logical name is required. Pass it as the positional <entity> argument or via --entity.");
+            }
+            else if (!string.IsNullOrWhiteSpace(positional) && !string.IsNullOrWhiteSpace(flag) &&
+                     !string.Equals(positional, flag, StringComparison.OrdinalIgnoreCase))
+            {
+                result.AddError($"Positional <entity> '{positional}' and --entity '{flag}' disagree. Provide one, or make them match.");
+            }
+        });
+    }
+
+    /// <summary>Resolves the entity from the positional argument or --entity (validator guarantees at least one non-whitespace value).</summary>
+    private static string ResolveEntity(System.CommandLine.ParseResult parseResult, Argument<string?> entityArgument, Option<string?> entityOption)
+    {
+        var positional = parseResult.GetValue(entityArgument);
+        // A whitespace-only positional must not shadow a valid --entity flag.
+        return !string.IsNullOrWhiteSpace(positional) ? positional : parseResult.GetValue(entityOption)!;
+    }
+
+    // -------------------------------------------------------------------------
     // Table authoring subcommands (ported from TableCommandGroup)
     // CreateCreateCommand / CreateUpdateCommand / CreateDeleteCommand are public
     // so the deprecated TableCommandGroup shim can call them.
@@ -386,17 +437,15 @@ public static class EntityCommand
     /// <summary>Creates the 'entity update' subcommand.</summary>
     public static Command CreateUpdateCommand()
     {
+        var entityArgument = CreateEntityArgument();
+
         var solutionOption = new Option<string>("--solution", "-s")
         {
             Description = "Solution unique name containing the table",
             Required = true
         };
 
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity to update",
-            Required = true
-        };
+        var entityOption = CreateEntityOption();
 
         var displayNameOption = new Option<string?>("--display-name")
         {
@@ -421,6 +470,7 @@ public static class EntityCommand
 
         var command = new Command("update", "Update an existing Dataverse table (entity)")
         {
+            entityArgument,
             solutionOption,
             entityOption,
             displayNameOption,
@@ -432,11 +482,12 @@ public static class EntityCommand
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var solution = parseResult.GetValue(solutionOption)!;
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var displayName = parseResult.GetValue(displayNameOption);
             var pluralName = parseResult.GetValue(pluralNameOption);
             var description = parseResult.GetValue(descriptionOption);
@@ -538,17 +589,15 @@ public static class EntityCommand
     /// <summary>Creates the 'entity delete' subcommand.</summary>
     public static Command CreateDeleteCommand()
     {
+        var entityArgument = CreateEntityArgument();
+
         var solutionOption = new Option<string>("--solution", "-s")
         {
             Description = "Solution unique name containing the table",
             Required = true
         };
 
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity to delete",
-            Required = true
-        };
+        var entityOption = CreateEntityOption();
 
         var forceOption = new Option<bool>("--force")
         {
@@ -564,6 +613,7 @@ public static class EntityCommand
 
         var command = new Command("delete", "Delete a Dataverse table (entity)")
         {
+            entityArgument,
             solutionOption,
             entityOption,
             forceOption,
@@ -573,11 +623,12 @@ public static class EntityCommand
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var solution = parseResult.GetValue(solutionOption)!;
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var force = parseResult.GetValue(forceOption);
             var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
@@ -722,11 +773,8 @@ public static class EntityCommand
 
     private static Command CreateAddStatusReasonCommand()
     {
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity",
-            Required = true
-        };
+        var entityArgument = CreateEntityArgument();
+        var entityOption = CreateEntityOption();
 
         var labelOption = new Option<string>("--label")
         {
@@ -774,6 +822,7 @@ public static class EntityCommand
 
         var command = new Command("add-statusreason", "Add a new status reason to an entity's statuscode attribute")
         {
+            entityArgument,
             entityOption,
             labelOption,
             valueOption,
@@ -788,10 +837,11 @@ public static class EntityCommand
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var label = parseResult.GetValue(labelOption)!;
             var value = parseResult.GetValue(valueOption);
             var solution = parseResult.GetValue(solutionOption);
@@ -960,24 +1010,23 @@ public static class EntityCommand
 
     private static Command CreateListStatusReasonsCommand()
     {
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity",
-            Required = true
-        };
+        var entityArgument = CreateEntityArgument();
+        var entityOption = CreateEntityOption();
 
         var command = new Command("list-statusreasons", "List all status reasons for an entity's statuscode attribute")
         {
+            entityArgument,
             entityOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
@@ -1057,11 +1106,8 @@ public static class EntityCommand
 
     private static Command CreateUpdateStatusReasonCommand()
     {
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity",
-            Required = true
-        };
+        var entityArgument = CreateEntityArgument();
+        var entityOption = CreateEntityOption();
 
         var valueOption = new Option<int?>("--value")
         {
@@ -1096,6 +1142,7 @@ public static class EntityCommand
 
         var command = new Command("update-statusreason", "Update an existing status reason on an entity")
         {
+            entityArgument,
             entityOption,
             valueOption,
             labelOption,
@@ -1108,10 +1155,11 @@ public static class EntityCommand
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var value = parseResult.GetValue(valueOption);
             var label = parseResult.GetValue(labelOption);
             var newLabel = parseResult.GetValue(newLabelOption);
@@ -1232,11 +1280,8 @@ public static class EntityCommand
 
     private static Command CreateRemoveStatusReasonCommand()
     {
-        var entityOption = new Option<string>("--entity", "-e")
-        {
-            Description = "Logical name of the entity",
-            Required = true
-        };
+        var entityArgument = CreateEntityArgument();
+        var entityOption = CreateEntityOption();
 
         var valueOption = new Option<int?>("--value")
         {
@@ -1267,6 +1312,7 @@ public static class EntityCommand
 
         var command = new Command("remove-statusreason", "Remove a status reason from an entity's statuscode attribute")
         {
+            entityArgument,
             entityOption,
             valueOption,
             labelOption,
@@ -1278,10 +1324,11 @@ public static class EntityCommand
         };
 
         GlobalOptions.AddToCommand(command);
+        AddEntityValidator(command, entityArgument, entityOption);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var entity = parseResult.GetValue(entityOption)!;
+            var entity = ResolveEntity(parseResult, entityArgument, entityOption);
             var value = parseResult.GetValue(valueOption);
             var label = parseResult.GetValue(labelOption);
             var solution = parseResult.GetValue(solutionOption);
