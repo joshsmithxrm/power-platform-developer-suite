@@ -289,6 +289,9 @@ def get_active_env_names() -> list:
         return []
 
     candidates = []
+    profile_name = active.get("name")
+    if isinstance(profile_name, str) and profile_name.strip():
+        candidates.append(profile_name.strip())
     for key in ("displayName", "uniqueName"):
         val = env.get(key)
         if isinstance(val, str) and val.strip():
