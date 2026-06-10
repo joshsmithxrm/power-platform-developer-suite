@@ -1,4 +1,3 @@
-using System;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -17,8 +16,8 @@ using SdkUpdateOptionValueRequest = Microsoft.Xrm.Sdk.Messages.UpdateOptionValue
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
-/// Covers global option-value targeting by value/label on the authoring service (#1169)
-/// — the global counterpart of the local (column) option tests.
+/// Covers global (option-set-scoped) option management on the authoring service:
+/// add-option color forwarding (#1233) and value/label targeting + dry-run (#1169/#1170/#1172).
 /// </summary>
 [Trait("Category", "Unit")]
 public class MetadataGlobalOptionServiceTests
@@ -34,6 +33,23 @@ public class MetadataGlobalOptionServiceTests
         _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_client.Object);
         _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+
+        // Default mock: handles add-option (Insert). Tests that target an existing option by
+        // value/label call SetupGlobalOptions, which re-setups the client for Retrieve/Delete/Update.
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                switch (req)
+                {
+                    case InsertOptionValueRequest insert:
+                        _captured = req;
+                        var ins = new InsertOptionValueResponse();
+                        ins.Results["NewOptionValue"] = insert.Value ?? 0;
+                        return Task.FromResult<OrganizationResponse>(ins);
+                    default:
+                        return Task.FromResult(new OrganizationResponse());
+                }
+            });
     }
 
     /// <summary>Sets up the global option set returned by RetrieveOptionSet, and captures mutations.</summary>
@@ -62,6 +78,43 @@ public class MetadataGlobalOptionServiceTests
                 }
             });
     }
+
+    // ---- add-option color forwarding (#1233) ----
+
+    [Fact]
+    public async Task AddOptionValue_WithColor_ForwardsColorToInsertRequest()
+    {
+        var assigned = await _service.AddOptionValueAsync(new AddOptionValueRequest
+        {
+            OptionSetName = "hsl_severity",
+            SolutionUniqueName = "MySolution",
+            Label = "Severe",
+            Value = 864630001,
+            Color = "#FF0000"
+        });
+
+        assigned.Should().Be(864630001);
+        var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
+        insert.Value.Should().Be(864630001);
+        insert["Color"].Should().Be("#FF0000");
+    }
+
+    [Fact]
+    public async Task AddOptionValue_WithoutColor_DoesNotSetColorParameter()
+    {
+        await _service.AddOptionValueAsync(new AddOptionValueRequest
+        {
+            OptionSetName = "hsl_severity",
+            SolutionUniqueName = "MySolution",
+            Label = "Mild",
+            Value = 864630000
+        });
+
+        var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
+        insert.Parameters.ContainsKey("Color").Should().BeFalse();
+    }
+
+    // ---- remove-option targeting by value/label (#1169) ----
 
     [Fact]
     public async Task DeleteOptionValue_ByLabel_ResolvesAndDeletes() // #1169
@@ -129,37 +182,6 @@ public class MetadataGlobalOptionServiceTests
     }
 
     [Fact]
-    public async Task UpdateOptionValue_BothValueAndLabel_ThrowsInvalidConstraint() // review: service-layer mutual exclusivity
-    {
-        var act = () => _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
-        {
-            SolutionUniqueName = "TestSolution",
-            OptionSetName = "new_mystatus",
-            Value = 100000000,
-            Label = "Draft",
-            NewLabel = "Renamed"
-        });
-
-        await act.Should().ThrowAsync<MetadataValidationException>()
-            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
-    }
-
-    [Fact]
-    public async Task DeleteOptionValue_BothValueAndLabel_ThrowsInvalidConstraint() // review: service-layer mutual exclusivity
-    {
-        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
-        {
-            SolutionUniqueName = "TestSolution",
-            OptionSetName = "new_mystatus",
-            Value = 100000000,
-            Label = "Draft"
-        });
-
-        await act.Should().ThrowAsync<MetadataValidationException>()
-            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
-    }
-
-    [Fact]
     public async Task DeleteOptionValue_NeitherValueNorLabel_ThrowsMissingRequiredField() // #1169
     {
         var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
@@ -171,6 +193,26 @@ public class MetadataGlobalOptionServiceTests
         await act.Should().ThrowAsync<MetadataValidationException>()
             .Where(e => e.ErrorCode == MetadataErrorCodes.MissingRequiredField);
     }
+
+    [Fact]
+    public async Task DeleteOptionValue_Resolution_RetrievesAsIfPublished() // #1169
+    {
+        // A just-added option is unpublished; resolution must see unpublished metadata
+        // or value/label targeting regresses for the add-then-remove flow.
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000
+        });
+
+        _retrieveRequest.Should().NotBeNull();
+        _retrieveRequest!.RetrieveAsIfPublished.Should().BeTrue();
+    }
+
+    // ---- update-option alignment (#1170) ----
 
     [Fact]
     public async Task UpdateOptionValue_ByLabel_AppliesNewLabel() // #1170
@@ -224,6 +266,41 @@ public class MetadataGlobalOptionServiceTests
         await act.Should().ThrowAsync<MetadataValidationException>()
             .Where(e => e.ErrorCode == MetadataErrorCodes.MissingRequiredField);
     }
+
+    // ---- service-layer value/label mutual exclusivity (Gemini review) ----
+
+    [Fact]
+    public async Task UpdateOptionValue_BothValueAndLabel_ThrowsInvalidConstraint()
+    {
+        var act = () => _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            Label = "Draft",
+            NewLabel = "Renamed"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_BothValueAndLabel_ThrowsInvalidConstraint()
+    {
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            Label = "Draft"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.InvalidConstraint);
+    }
+
+    // ---- dry-run early exit (#1172) ----
 
     [Fact]
     public async Task AddOptionValue_DryRun_DoesNotCallSdk() // #1172
@@ -292,23 +369,5 @@ public class MetadataGlobalOptionServiceTests
 
         await act.Should().ThrowAsync<MetadataValidationException>()
             .Where(e => e.ErrorCode == MetadataErrorCodes.OptionNotFound);
-    }
-
-    [Fact]
-    public async Task DeleteOptionValue_Resolution_RetrievesAsIfPublished() // #1169
-    {
-        // A just-added option is unpublished; resolution must see unpublished metadata
-        // or value/label targeting regresses for the add-then-remove flow.
-        SetupGlobalOptions((100000000, "Draft"));
-
-        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
-        {
-            SolutionUniqueName = "TestSolution",
-            OptionSetName = "new_mystatus",
-            Value = 100000000
-        });
-
-        _retrieveRequest.Should().NotBeNull();
-        _retrieveRequest!.RetrieveAsIfPublished.Should().BeTrue();
     }
 }

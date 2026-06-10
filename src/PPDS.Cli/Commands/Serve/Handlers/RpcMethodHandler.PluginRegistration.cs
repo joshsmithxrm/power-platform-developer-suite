@@ -22,7 +22,6 @@ using PPDS.Dataverse.Diagnostics;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using Authoring = PPDS.Dataverse.Metadata.Authoring;
-using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Security;
@@ -77,7 +76,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var response = new PluginsGetResponse { Type = type };
@@ -140,7 +138,6 @@ public partial class RpcMethodHandler
     {
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
             var messages = await registrationService.ListMessagesAsync(filter, ct);
             return new PluginsMessagesResponse { Messages = messages };
@@ -162,7 +159,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
             var attributes = await registrationService.ListEntityAttributesAsync(entityLogicalName, ct);
             return new PluginsEntityAttributesResponse
@@ -193,7 +189,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             if (enabled)
@@ -224,7 +219,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var bytes = Convert.FromBase64String(content);
@@ -253,7 +247,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var bytes = Convert.FromBase64String(content);
@@ -303,7 +296,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var messageId = await registrationService.GetSdkMessageIdAsync(message, ct)
@@ -362,7 +354,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             // Resolve message name from step if not provided
@@ -411,7 +402,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var request = new StepUpdateRequest(
@@ -448,7 +438,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var request = new ImageUpdateRequest(
@@ -481,7 +470,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             UnregisterResult result = type.ToLowerInvariant() switch
@@ -527,7 +515,6 @@ public partial class RpcMethodHandler
 
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             (byte[] bytes, string fileName) = type.ToLowerInvariant() switch

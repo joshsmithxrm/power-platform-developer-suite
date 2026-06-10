@@ -875,6 +875,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         if (!string.IsNullOrEmpty(request.Description))
             sdkRequest.Description = new Label(request.Description, 1033);
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
         if (!string.IsNullOrEmpty(request.EntityLogicalName))
             sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
