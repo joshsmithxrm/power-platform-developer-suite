@@ -92,7 +92,7 @@ public class FormServiceTests
             ["name"] = "Test Form",
             ["type"] = new OptionSetValue(formType),
             ["ismanaged"] = false,
-            ["iscustomizable"] = isCustomizable,
+            ["iscustomizable"] = new BooleanManagedProperty(isCustomizable),
             ["formxml"] = formXml,
             ["description"] = null
         };

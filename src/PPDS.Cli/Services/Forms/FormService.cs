@@ -558,7 +558,7 @@ public sealed class FormService : IFormService
         // Dataverse silently ignores UpdateAsync on forms where iscustomizable=false — the call
         // succeeds with no error but the change does not persist. Detect this early so the user
         // gets a clear message instead of a silent no-op.
-        if (requireCustomizable && !form.GetAttributeValue<bool>("iscustomizable"))
+        if (requireCustomizable && form.GetAttributeValue<BooleanManagedProperty>("iscustomizable") is not { Value: true })
             throw new PpdsException(FormErrorCodes.FormNotCustomizable,
                 $"Form '{formName}' on entity '{entityLogicalName}' is not customizable and cannot be modified by PPDS. " +
                 "To make it customizable, add it to an unmanaged solution layer in this environment, then retry.");
