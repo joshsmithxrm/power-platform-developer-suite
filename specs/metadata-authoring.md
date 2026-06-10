@@ -434,9 +434,9 @@ ppds metadata optionset <name>                                   # read lookup (
 ppds metadata optionset create --solution <s> --name <schema> --display-name <n> --options "Label1=1,Label2=2" [options]
 ppds metadata optionset update --solution <s> --name <name> [property flags]
 ppds metadata optionset delete --solution <s> --name <name> [--force] [--dry-run]
-ppds metadata optionset add-option --solution <s> --name <name> --label <label> [--value <int>] [--color <hex>]
-ppds metadata optionset update-option --solution <s> --name <name> (--value <int> | --label <l>) [--new-label <l>] [--color <#hex>]
-ppds metadata optionset remove-option --solution <s> --name <name> (--value <int> | --label <l>) [--force]
+ppds metadata optionset add-option --solution <s> --name <name> --label <label> [--value <int>] [--color <hex>] [--dry-run]
+ppds metadata optionset update-option --solution <s> --name <name> (--value <int> | --label <l>) [--new-label <l>] [--color <#hex>] [--dry-run]
+ppds metadata optionset remove-option --solution <s> --name <name> (--value <int> | --label <l>) [--force] [--dry-run]
 ppds metadata optionset reorder --solution <s> --name <name> --order "1,3,2,4"
 ```
 
@@ -582,6 +582,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-62 | When both the positional `<entity>` and `--entity` are supplied they must agree (case-insensitive) or the parse fails with a "disagree" error; supplying neither is a parse error (#1208) | `MetadataEntityCommandTests.AuthoringVerb_PositionalAndFlagAgreeing_HasNoErrors` + `AuthoringVerb_PositionalAndFlagDisagreeing_HasErrors` + `AuthoringVerb_MissingEntity_HasErrors` | ✅ |
 | AC-63 | `optionset remove-option` targets a global option by `--value` or `--label` (exactly one; service-side resolution against unpublished metadata; `OPTION_NOT_FOUND` when unresolved) | `MetadataGlobalOptionServiceTests.DeleteOptionValue_ByLabel_ResolvesAndDeletes`, `DeleteOptionValue_ValueNotFound_ThrowsOptionNotFound`, `DeleteOptionValue_Resolution_RetrievesAsIfPublished` | ✅ |
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
+| AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
 ### Edge Cases
 

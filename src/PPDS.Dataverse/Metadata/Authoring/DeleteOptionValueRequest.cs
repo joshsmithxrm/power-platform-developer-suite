@@ -23,4 +23,7 @@ public sealed class DeleteOptionValueRequest
 
     /// <summary>Gets or sets the target option label (mutually exclusive with <see cref="Value"/>) (#1169).</summary>
     public string? Label { get; set; }
+
+    /// <summary>Gets or sets whether this is a dry-run (validate the target exists, no changes persisted) (#1172).</summary>
+    public bool DryRun { get; set; }
 }

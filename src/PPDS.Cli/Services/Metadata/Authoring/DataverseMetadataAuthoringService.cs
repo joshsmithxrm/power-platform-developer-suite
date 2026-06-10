@@ -857,6 +857,14 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
         _validator.ValidateRequiredString(request.Label, "Label");
 
+        if (request.DryRun)
+        {
+            // The SDK assigns the value at insert time, so a dry-run can only echo the
+            // requested value (0 = would be auto-assigned).
+            _logger?.LogInformation("Dry-run: AddOptionValue '{Label}' to {OptionSet} validated", request.Label, request.OptionSetName);
+            return request.Value ?? 0;
+        }
+
         var sdkRequest = new InsertOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
@@ -896,6 +904,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
 
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: UpdateOptionValue {Value} in {OptionSet} validated", target.Value, request.OptionSetName);
+            return;
+        }
+
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
@@ -933,6 +947,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         // #1169: resolve the target by value or label, mirroring the local (column) option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: DeleteOptionValue {Value} from {OptionSet} validated", target.Value, request.OptionSetName);
+            return;
+        }
 
         var sdkRequest = new SdkDeleteOptionValueRequest
         {

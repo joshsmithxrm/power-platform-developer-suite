@@ -28,4 +28,7 @@ public sealed class AddOptionValueRequest
 
     /// <summary>Gets or sets the color associated with the option (hex string).</summary>
     public string? Color { get; set; }
+
+    /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted) (#1172).</summary>
+    public bool DryRun { get; set; }
 }

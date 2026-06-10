@@ -678,6 +678,12 @@ public static class OptionSetCommand
             Description = "Color for the option (hex string, e.g., #FF0000)"
         };
 
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate only, do not persist changes",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("add-option", "Add a new option value to an existing option set")
         {
             solutionOption,
@@ -685,6 +691,7 @@ public static class OptionSetCommand
             labelOption,
             valueOption,
             colorOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -698,12 +705,13 @@ public static class OptionSetCommand
             var label = parseResult.GetValue(labelOption)!;
             var value = parseResult.GetValue(valueOption);
             var color = parseResult.GetValue(colorOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAddOptionAsync(
-                solution, name, label, value, color,
+                solution, name, label, value, color, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -716,6 +724,7 @@ public static class OptionSetCommand
         string label,
         int? value,
         string? color,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -747,14 +756,21 @@ public static class OptionSetCommand
                 OptionSetName = name,
                 Label = label,
                 Value = value,
-                Color = color
+                Color = color,
+                DryRun = dryRun
             };
 
             var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, label, value = assignedValue });
+                // On dry-run the SDK never assigns a value, so report the requested one
+                // (null = would be auto-assigned at execution time).
+                writer.WriteSuccess(new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
@@ -814,6 +830,12 @@ public static class OptionSetCommand
             Description = "New hex color (e.g. #FF0000)"
         };
 
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate only, do not persist changes",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("update-option", "Update an existing option value in an option set")
         {
             solutionOption,
@@ -822,6 +844,7 @@ public static class OptionSetCommand
             labelOption,
             newLabelOption,
             colorOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -836,6 +859,7 @@ public static class OptionSetCommand
             var label = parseResult.GetValue(labelOption);
             var newLabel = parseResult.GetValue(newLabelOption);
             var color = parseResult.GetValue(colorOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
@@ -856,7 +880,7 @@ public static class OptionSetCommand
             }
 
             return await ExecuteUpdateOptionAsync(
-                solution, name, value, label, newLabel, color,
+                solution, name, value, label, newLabel, color, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -870,6 +894,7 @@ public static class OptionSetCommand
         string? label,
         string? newLabel,
         string? color,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -902,14 +927,19 @@ public static class OptionSetCommand
                 Value = value,
                 Label = label,
                 NewLabel = newLabel,
-                Color = color
+                Color = color,
+                DryRun = dryRun
             };
 
             await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, updated = true });
+                writer.WriteSuccess(new { optionSetName = name, updated = true, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
@@ -965,6 +995,12 @@ public static class OptionSetCommand
             DefaultValueFactory = _ => false
         };
 
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate that the target option exists, without removing it",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("remove-option", "Remove an option value from an option set")
         {
             solutionOption,
@@ -972,6 +1008,7 @@ public static class OptionSetCommand
             valueOption,
             labelOption,
             forceOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -985,6 +1022,7 @@ public static class OptionSetCommand
             var value = parseResult.GetValue(valueOption);
             var label = parseResult.GetValue(labelOption);
             var force = parseResult.GetValue(forceOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
@@ -1004,7 +1042,7 @@ public static class OptionSetCommand
             }
 
             return await ExecuteRemoveOptionAsync(
-                solution, name, value, label, force,
+                solution, name, value, label, force, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -1017,6 +1055,7 @@ public static class OptionSetCommand
         int? value,
         string? label,
         bool force,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -1042,8 +1081,8 @@ public static class OptionSetCommand
                 Console.Error.WriteLine();
             }
 
-            // Confirmation prompt
-            if (!force)
+            // Confirmation prompt (#1172: dry-run never mutates, so it never prompts)
+            if (!force && !dryRun)
             {
                 if (!Console.IsInputRedirected)
                 {
@@ -1083,14 +1122,19 @@ public static class OptionSetCommand
                 SolutionUniqueName = solution,
                 OptionSetName = name,
                 Value = value,
-                Label = label
+                Label = label,
+                DryRun = dryRun
             };
 
             await authoringService.DeleteOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, removed = true });
+                writer.WriteSuccess(new { optionSetName = name, removed = !dryRun, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. Option exists and can be removed.");
             }
             else
             {

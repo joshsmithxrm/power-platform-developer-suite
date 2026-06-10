@@ -33,4 +33,7 @@ public sealed class UpdateOptionValueRequest
 
     /// <summary>Gets or sets the updated color for the option (hex string).</summary>
     public string? Color { get; set; }
+
+    /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted) (#1172).</summary>
+    public bool DryRun { get; set; }
 }

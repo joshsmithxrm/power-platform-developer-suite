@@ -160,4 +160,26 @@ public class MetadataOptionSetCommandGroupTests
         var result = sub.Parse("--solution MySol --name new_status --label Active --force");
         Assert.Empty(result.Errors);
     }
+
+    // ---- --dry-run parity on option mutation subcommands (#1172) ----
+
+    [Theory]
+    [InlineData("add-option")]
+    [InlineData("update-option")]
+    [InlineData("remove-option")]
+    public void OptionMutationSubcommands_HaveDryRunOption(string subcommandName)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == subcommandName);
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--dry-run");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void AddOptionSubcommand_ParsesWithDryRun()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "add-option");
+        var result = sub.Parse("--solution MySol --name new_status --label Pending --dry-run");
+        Assert.Empty(result.Errors);
+    }
 }

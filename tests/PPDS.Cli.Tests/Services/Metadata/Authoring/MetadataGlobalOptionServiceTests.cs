@@ -195,6 +195,75 @@ public class MetadataGlobalOptionServiceTests
     }
 
     [Fact]
+    public async Task AddOptionValue_DryRun_DoesNotCallSdk() // #1172
+    {
+        var assigned = await _service.AddOptionValueAsync(new AddOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Pending",
+            Value = 100000005,
+            DryRun = true
+        });
+
+        assigned.Should().Be(100000005);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating() // #1172
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000,
+            NewLabel = "Renamed",
+            DryRun = true
+        });
+
+        // Resolution ran (validating the target exists) but no mutation was sent.
+        _retrieveRequest.Should().NotBeNull();
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<SdkUpdateOptionValueRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating() // #1172
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Draft",
+            DryRun = true
+        });
+
+        _retrieveRequest.Should().NotBeNull();
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<SdkDeleteOptionValueRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_DryRun_TargetNotFound_StillThrows() // #1172
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 42,
+            DryRun = true
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.OptionNotFound);
+    }
+
+    [Fact]
     public async Task DeleteOptionValue_Resolution_RetrievesAsIfPublished() // #1169
     {
         // A just-added option is unpublished; resolution must see unpublished metadata
