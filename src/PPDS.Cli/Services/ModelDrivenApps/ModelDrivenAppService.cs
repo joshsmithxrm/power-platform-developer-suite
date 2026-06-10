@@ -86,7 +86,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         EntityCollection result;
         try
         {
-            result = await client.RetrieveMultipleAsync(query, ct);
+            var request = new RetrieveUnpublishedMultipleRequest { Query = query };
+            var response = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(request, ct);
+            result = response.EntityCollection;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -158,14 +160,23 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
     }
 
     /// <inheritdoc />
-    public async Task<SitemapStructure> GetSitemapAsync(string appName, CancellationToken ct)
+    public async Task<SitemapStructure> GetSitemapAsync(string appName, bool unpublished, CancellationToken ct)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
 
         var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
-        var xml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct);
+        var xml = await FetchSitemapXmlForAppAsync(client, appModuleId, ct, unpublished);
 
         return ParseSitemapStructure(xml);
+    }
+
+    /// <inheritdoc />
+    public async Task<string> GetSitemapXmlAsync(string appName, bool unpublished, CancellationToken ct)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+
+        var (appModuleId, _) = await ResolveAppAsync(appName, client, ct);
+        return await FetchSitemapXmlForAppAsync(client, appModuleId, ct, unpublished);
     }
 
     /// <inheritdoc />
@@ -225,8 +236,10 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
         var (appModuleId, uniqueName) = await ResolveAppAsync(appName, client, ct);
         await EnsureWriteAllowedAsync(options.Confirm, ct);
-        var sitemapId = await GetSitemapIdAsync(client, appModuleId, ct);
-        var sitemapXml = await FetchSitemapXmlByIdAsync(client, sitemapId, ct, unpublished: true);
+        var existingSitemapId = await TryGetSitemapIdAsync(client, appModuleId, ct);
+        var sitemapXml = existingSitemapId.HasValue
+            ? await FetchSitemapXmlByIdAsync(client, existingSitemapId.Value, ct, unpublished: true)
+            : "<SiteMap />";
 
         var doc = XDocument.Parse(sitemapXml);
         var siteMapEl = doc.Root!;
@@ -287,6 +300,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var isFirst = true;
+        var entityComponents = new EntityReferenceCollection();
         foreach (var entityName in entities)
         {
             progress?.ReportInfo($"Adding {entityName}");
@@ -315,13 +329,36 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
             groupEl.Add(subAreaEl);
             existingEntities.Add(entitySummary.LogicalName);
+
+            // Register the table component by its OWN logical name, not the literal "entity":
+            // "entity" is itself a real table (the metadata-definition table), so AddAppComponents
+            // would resolve the reference to that table (adding a spurious "Entity" component) and
+            // ignore the table we mean. The objectid Dataverse stores is the table's MetadataId.
+            if (entitySummary.MetadataId != Guid.Empty)
+                entityComponents.Add(new EntityReference(entitySummary.LogicalName, entitySummary.MetadataId));
         }
 
         var updatedXml = doc.ToString(SaveOptions.DisableFormatting);
         _validator.Validate(XDocument.Parse(updatedXml));
 
-        progress?.ReportPhase("Updating sitemap");
-        await PatchSitemapAsync(client, sitemapId, updatedXml, ct);
+        Guid sitemapId;
+        if (existingSitemapId.HasValue)
+        {
+            progress?.ReportPhase("Updating sitemap");
+            await PatchSitemapAsync(client, existingSitemapId.Value, updatedXml, ct);
+            sitemapId = existingSitemapId.Value;
+        }
+        else
+        {
+            progress?.ReportPhase("Creating sitemap");
+            sitemapId = await CreateSitemapForAppAsync(client, appModuleId, uniqueName, updatedXml, ct);
+        }
+
+        if (entityComponents.Count > 0)
+        {
+            progress?.ReportPhase("Registering table components");
+            await AddAppComponentsAsync(client, appModuleId, entityComponents, ct);
+        }
 
         if (options.Solution != null)
         {
@@ -716,7 +753,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         IPooledClient client,
         CancellationToken ct)
     {
-        // Filter server-side to avoid over-fetching all apps (no TopCount cap).
+        // appmodule is a publishable entity. RetrieveMultiple only returns published records, so draft
+        // apps (never published) would not be found — the query below uses RetrieveUnpublishedMultiple
+        // so both draft and published apps are visible. Filter server-side to avoid over-fetching.
         var query = new QueryExpression("appmodule")
         {
             ColumnSet = new ColumnSet("appmoduleid", "uniquename", "name"),
@@ -731,7 +770,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         EntityCollection result;
         try
         {
-            result = await client.RetrieveMultipleAsync(query, ct);
+            var request = new RetrieveUnpublishedMultipleRequest { Query = query };
+            var response = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(request, ct);
+            result = response.EntityCollection;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -968,10 +1009,23 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         || (ex.Message.Contains("uniquename", StringComparison.OrdinalIgnoreCase)
             && ex.Message.Contains("Cannot complete", StringComparison.OrdinalIgnoreCase));
 
-    // Queries appmodulecomponent joined to appmodule via appmoduleidunique relationship,
-    // filtering by appmodule.appmoduleid to avoid EntityReference cast issues.
     private async Task<Guid> GetSitemapIdAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
     {
+        var id = await TryGetSitemapIdAsync(client, appModuleId, ct);
+        return id ?? throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "App has no associated sitemap record.");
+    }
+
+    // Returns null only when the app truly has no sitemap (never-published app with no navigation yet).
+    // Three-tier lookup:
+    //   Tier 1: appmodulecomponent (fast path; works for apps that have been published at least once)
+    //   Tier 2: match sitemap.sitemapnameunique == appmodule.uniquename (handles draft apps whose
+    //           sitemap isn't in appmodulecomponent yet). The Power Apps maker creates an app-aware
+    //           sitemap whose unique name equals the app's uniquename; this shared name is the only
+    //           reliable link for a draft sitemap, since sitemap has no FK to appmodule.
+    //   Tier 3: OData navigation property (works for published apps with a published sitemap).
+    private async Task<Guid?> TryGetSitemapIdAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
+    {
+        // Tier 1: appmodulecomponent SDK query (works for published apps).
         var query = new QueryExpression("appmodulecomponent")
         {
             ColumnSet = new ColumnSet("objectid"),
@@ -993,13 +1047,158 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
 
         var sitemapId = result.Entities.FirstOrDefault()?.GetAttributeValue<Guid>("objectid");
+        if (sitemapId.HasValue && sitemapId.Value != Guid.Empty)
+            return sitemapId;
 
-        if (sitemapId == null || sitemapId == Guid.Empty)
+        // Tier 2: match the app's sitemap by shared unique name. The Power Apps maker creates an
+        // app-aware sitemap whose sitemapnameunique equals the app's uniquename; this is how a draft
+        // (never-published) app links to its sitemap, since sitemap has no FK to appmodule and the
+        // sitemap is not registered in appmodulecomponent until the app is published. Query
+        // unpublished so draft sitemaps are visible.
+        var appUniqueName = await TryResolveAppUniqueNameAsync(client, appModuleId, ct);
+        if (!string.IsNullOrEmpty(appUniqueName))
         {
-            throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, "App has no associated sitemap record.");
+            var nameQuery = new QueryExpression("sitemap")
+            {
+                ColumnSet = new ColumnSet("sitemapid"),
+                TopCount = 1
+            };
+            nameQuery.Criteria.AddCondition("sitemapnameunique", ConditionOperator.Equal, appUniqueName);
+
+            try
+            {
+                var nameRequest = new RetrieveUnpublishedMultipleRequest { Query = nameQuery };
+                var nameResponse = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(nameRequest, ct);
+                var nameMatch = nameResponse.EntityCollection.Entities.FirstOrDefault();
+                if (nameMatch != null)
+                {
+                    var id = nameMatch.GetAttributeValue<Guid>("sitemapid");
+                    if (id != Guid.Empty)
+                        return id;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Sitemap lookup by app uniquename '{UniqueName}' failed for app {AppModuleId}.", appUniqueName, appModuleId);
+            }
         }
 
-        return sitemapId.Value;
+        // Tier 3: OData navigation property (works for published apps with a published sitemap).
+        var sitemapViaNav = await TryGetSitemapIdViaNavigationAsync(client, appModuleId, ct);
+        if (sitemapViaNav.HasValue)
+            return sitemapViaNav;
+
+        return null;
+    }
+
+    private async Task<Guid?> TryGetSitemapIdViaNavigationAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
+    {
+        // Tier A: direct navigation property. Works when a published sitemap is linked.
+        try
+        {
+            var json = await client.GetRawWebApiAsync(
+                $"appmodules({appModuleId:D})/appmodulesitemap?$select=sitemapid", ct);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("sitemapid", out var el)
+                    && el.ValueKind == System.Text.Json.JsonValueKind.String
+                    && Guid.TryParse(el.GetString(), out var g) && g != Guid.Empty)
+                    return g;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "appmodulesitemap direct GET failed for app {AppModuleId}.", appModuleId);
+        }
+
+        // Tier B: $ref endpoint. Returns just the entity reference URL, which may succeed even
+        // when the full navigation returns 404 for an unpublished sitemap.
+        try
+        {
+            var json = await client.GetRawWebApiAsync(
+                $"appmodules({appModuleId:D})/appmodulesitemap/$ref", ct);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                // Response: {"@odata.id":"https://org.crm.dynamics.com/api/data/v9.2/sitemaps(guid)"}
+                if (doc.RootElement.TryGetProperty("@odata.id", out var idProp))
+                {
+                    var odataId = idProp.GetString();
+                    if (!string.IsNullOrEmpty(odataId))
+                    {
+                        var start = odataId.LastIndexOf('(') + 1;
+                        var end = odataId.LastIndexOf(')');
+                        if (start > 0 && end > start
+                            && Guid.TryParse(odataId.AsSpan(start, end - start), out var refGuid)
+                            && refGuid != Guid.Empty)
+                            return refGuid;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "appmodulesitemap $ref GET failed for app {AppModuleId}.", appModuleId);
+        }
+
+        return null;
+    }
+
+    // Resolves the app's uniquename from a draft-or-published appmodule record. Used to find the
+    // maker-created sitemap by shared unique name (Tier 2) and to name a sitemap we create so it is
+    // discoverable on subsequent runs. Returns null if the app can't be resolved.
+    private async Task<string?> TryResolveAppUniqueNameAsync(IPooledClient client, Guid appModuleId, CancellationToken ct)
+    {
+        var query = new QueryExpression("appmodule")
+        {
+            ColumnSet = new ColumnSet("uniquename"),
+            TopCount = 1
+        };
+        query.Criteria.AddCondition("appmoduleid", ConditionOperator.Equal, appModuleId);
+
+        try
+        {
+            var request = new RetrieveUnpublishedMultipleRequest { Query = query };
+            var response = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(request, ct);
+            return response.EntityCollection.Entities.FirstOrDefault()?.GetAttributeValue<string>("uniquename");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Failed to resolve uniquename for app {AppModuleId}.", appModuleId);
+            return null;
+        }
+    }
+
+    private async Task<Guid> CreateSitemapForAppAsync(IPooledClient client, Guid appModuleId, string appUniqueName, string sitemapXml, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(appUniqueName))
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed,
+                "Cannot create a sitemap for an app with no uniquename.");
+        }
+
+        var sitemap = new Entity("sitemap")
+        {
+            // Match the maker convention: an app-aware sitemap shares the app's uniquename. Naming
+            // it this way means a subsequent run finds it via Tier 2 instead of creating a second
+            // sitemap, which Dataverse rejects with "App can't have multiple site maps" (0x80050111).
+            ["sitemapnameunique"] = appUniqueName,
+            ["sitemapxml"] = sitemapXml
+        };
+
+        Guid sitemapId;
+        try
+        {
+            sitemapId = await client.CreateAsync(sitemap, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed, "Failed to create sitemap for app.", ex);
+        }
+
+        await AddAppComponentsAsync(client, appModuleId, "sitemap", [sitemapId], ct);
+        return sitemapId;
     }
 
     private async Task<string> FetchSitemapXmlForAppAsync(IPooledClient client, Guid appModuleId, CancellationToken ct, bool unpublished = false)
@@ -1315,7 +1514,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
 
         if (entityMeta != null && entityMeta.MetadataId != Guid.Empty)
         {
-            var entityRef = new EntityReference("entity", entityMeta.MetadataId);
+            // Reference the table by its OWN logical name (not the literal "entity", which is itself
+            // a real table) so the remove targets the table component that add-table registered.
+            var entityRef = new EntityReference(entityMeta.LogicalName, entityMeta.MetadataId);
             await RemoveAppComponentsAsync(client, appModuleId, [entityRef], ct);
         }
     }
@@ -1347,22 +1548,35 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
     }
 
-    private async Task AddAppComponentsAsync(
+    // Registers component records (forms, views, charts, sitemap) that all live in the same entity:
+    // the EntityReference logical name is that entity, the id is the record id.
+    private Task AddAppComponentsAsync(
         IPooledClient client,
         Guid appModuleId,
         string componentEntityName,
         List<Guid> componentIds,
         CancellationToken ct)
+        => AddAppComponentsAsync(
+            client,
+            appModuleId,
+            new EntityReferenceCollection(
+                componentIds.Select(id => new EntityReference(componentEntityName, id)).ToList()),
+            ct);
+
+    private async Task AddAppComponentsAsync(
+        IPooledClient client,
+        Guid appModuleId,
+        EntityReferenceCollection components,
+        CancellationToken ct)
     {
-        if (componentIds.Count == 0)
+        if (components.Count == 0)
         {
             return;
         }
 
-        var refs = componentIds.Select(id => new EntityReference(componentEntityName, id)).ToList();
         var request = new OrganizationRequest("AddAppComponents");
         request["AppId"] = appModuleId;
-        request["Components"] = new EntityReferenceCollection(refs);
+        request["Components"] = components;
 
         try
         {
@@ -1370,6 +1584,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            _logger.LogWarning(ex, "Failed to add {Count} app components", components.Count);
             throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed,
                 $"Failed to add app components: {ex.Message}", ex);
         }

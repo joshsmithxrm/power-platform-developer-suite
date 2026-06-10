@@ -160,6 +160,10 @@ namespace PPDS.Dataverse.Pooling
         /// <inheritdoc />
         public IDataverseClient Clone() => _client.Clone();
 
+        /// <inheritdoc />
+        public Task<string?> GetRawWebApiAsync(string queryString, CancellationToken ct)
+            => _client.GetRawWebApiAsync(queryString, ct);
+
         /// <summary>
         /// Updates the last used timestamp.
         /// </summary>

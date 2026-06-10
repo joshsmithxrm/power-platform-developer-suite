@@ -36,4 +36,16 @@ public class SitemapCommandTests
     {
         Assert.Contains(_command.Options, o => o.Name == "--profile");
     }
+
+    [Fact]
+    public void Create_HasUnpublishedOption()
+    {
+        Assert.Contains(_command.Options, o => o.Name == "--unpublished");
+    }
+
+    [Fact]
+    public void Create_HasRawOption()
+    {
+        Assert.Contains(_command.Options, o => o.Name == "--raw");
+    }
 }

@@ -71,6 +71,12 @@ public class ModelDrivenAppServiceTests
         /// <summary>The XML written by the last UpdateAsync on the sitemap record, if any.</summary>
         public string? WrittenSitemapXml { get; private set; }
 
+        /// <summary>The sitemapxml passed to CreateAsync when a new sitemap was created, if any.</summary>
+        public string? CreatedSitemapXml { get; private set; }
+
+        /// <summary>The sitemapnameunique passed to CreateAsync when a new sitemap was created, if any.</summary>
+        public string? CreatedSitemapName { get; private set; }
+
         /// <summary>All organization requests passed to ExecuteAsync (for Add/RemoveAppComponents assertions).</summary>
         public List<OrganizationRequest> ExecutedRequests { get; } = new();
 
@@ -149,7 +155,9 @@ public class ModelDrivenAppServiceTests
                     return new EntityCollection(new List<Entity>());
                 });
 
-            // FetchSitemapXmlByIdAsync(unpublished: true) → RetrieveUnpublishedMultiple.
+            // ResolveAppAsync → RetrieveUnpublishedMultiple on appmodule.
+            // FetchSitemapXmlByIdAsync → RetrieveUnpublishedMultiple on sitemap.
+            // Route by EntityName so each call gets the right response.
             Client.Setup(c => c.ExecuteAsync(
                     It.IsAny<OrganizationRequest>(),
                     It.IsAny<CancellationToken>()))
@@ -157,8 +165,28 @@ public class ModelDrivenAppServiceTests
                 {
                     ExecutedRequests.Add(req);
 
-                    if (req is RetrieveUnpublishedMultipleRequest)
+                    if (req is RetrieveUnpublishedMultipleRequest unpubReq)
                     {
+                        var qe = (QueryExpression)unpubReq.Query;
+                        if (qe.EntityName == "appmodule")
+                        {
+                            return new RetrieveUnpublishedMultipleResponse
+                            {
+                                Results =
+                                {
+                                    ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                    {
+                                        new("appmodule")
+                                        {
+                                            ["appmoduleid"] = AppModuleId,
+                                            ["uniquename"] = AppUniqueName,
+                                            ["name"] = AppName
+                                        }
+                                    })
+                                }
+                            };
+                        }
+
                         return new RetrieveUnpublishedMultipleResponse
                         {
                             Results =
@@ -186,6 +214,160 @@ public class ModelDrivenAppServiceTests
                     {
                         WrittenSitemapXml = (string)e["sitemapxml"];
                     }
+                })
+                .Returns(Task.CompletedTask);
+        }
+
+        /// <summary>
+        /// Like Setup but simulates a draft app: appmodulecomponent has no sitemap entry
+        /// (componenttype=62). AddTableAsync will build the full XML first then create the
+        /// sitemap record via CreateAsync (captured in CreatedSitemapXml).
+        /// </summary>
+        public void SetupDraftApp(IReadOnlyList<EntitySummary> entities)
+        {
+            Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+            Client.Setup(c => c.Dispose());
+            Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Client.Object);
+            Metadata.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(entities);
+
+            // appmodulecomponent returns empty — TryGetSitemapIdAsync returns null.
+            Client.Setup(c => c.RetrieveMultipleAsync(
+                    It.Is<QueryExpression>(qe => qe.EntityName == "appmodulecomponent"),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+            // RetrieveUnpublishedMultiple: appmodule (ResolveAppAsync + Tier 2 uniquename resolve)
+            // returns the app; sitemap (Tier 2 lookup-by-uniquename) returns nothing, so PPDS falls
+            // through to creating the sitemap via CreateAsync.
+            Client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
+                {
+                    ExecutedRequests.Add(req);
+
+                    if (req is RetrieveUnpublishedMultipleRequest unpubReq)
+                    {
+                        var qe = (QueryExpression)unpubReq.Query;
+                        if (qe.EntityName == "appmodule")
+                        {
+                            return new RetrieveUnpublishedMultipleResponse
+                            {
+                                Results =
+                                {
+                                    ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                    {
+                                        new("appmodule")
+                                        {
+                                            ["appmoduleid"] = AppModuleId,
+                                            ["uniquename"] = AppUniqueName,
+                                            ["name"] = AppName
+                                        }
+                                    })
+                                }
+                            };
+                        }
+
+                        // sitemap lookup-by-uniquename: no existing sitemap for this draft app.
+                        return new RetrieveUnpublishedMultipleResponse
+                        {
+                            Results = { ["EntityCollection"] = new EntityCollection(new List<Entity>()) }
+                        };
+                    }
+
+                    return new OrganizationResponse();
+                });
+
+            // CreateAsync captures the sitemapxml and unique name so tests can verify them.
+            Client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+                .Callback<Entity, CancellationToken>((e, _) =>
+                {
+                    if (e.LogicalName == "sitemap" && e.Contains("sitemapxml"))
+                        CreatedSitemapXml = (string)e["sitemapxml"];
+                    if (e.LogicalName == "sitemap" && e.Contains("sitemapnameunique"))
+                        CreatedSitemapName = (string)e["sitemapnameunique"];
+                })
+                .ReturnsAsync(SitemapId);
+        }
+
+        /// <summary>
+        /// Simulates a maker-created draft app: appmodulecomponent has no sitemap entry (Tier 1
+        /// misses), but a sitemap exists whose sitemapnameunique equals the app's uniquename. Tier 2
+        /// must find it by shared unique name and patch it via UpdateAsync rather than creating a
+        /// duplicate.
+        /// </summary>
+        public void SetupMakerDraftApp(string sitemapXml, IReadOnlyList<EntitySummary> entities)
+        {
+            Client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+            Client.Setup(c => c.Dispose());
+            Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Client.Object);
+            Metadata.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(entities);
+
+            // Tier 1: appmodulecomponent returns empty — the draft sitemap is not a component yet.
+            Client.Setup(c => c.RetrieveMultipleAsync(
+                    It.Is<QueryExpression>(qe => qe.EntityName == "appmodulecomponent"),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+            // RetrieveUnpublishedMultiple: appmodule → app (with uniquename); sitemap → the existing
+            // maker sitemap (serves both the Tier 2 lookup-by-uniquename and FetchSitemapXmlByIdAsync).
+            Client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
+                {
+                    ExecutedRequests.Add(req);
+
+                    if (req is RetrieveUnpublishedMultipleRequest unpubReq)
+                    {
+                        var qe = (QueryExpression)unpubReq.Query;
+                        if (qe.EntityName == "appmodule")
+                        {
+                            return new RetrieveUnpublishedMultipleResponse
+                            {
+                                Results =
+                                {
+                                    ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                    {
+                                        new("appmodule")
+                                        {
+                                            ["appmoduleid"] = AppModuleId,
+                                            ["uniquename"] = AppUniqueName,
+                                            ["name"] = AppName
+                                        }
+                                    })
+                                }
+                            };
+                        }
+
+                        if (qe.EntityName == "sitemap")
+                        {
+                            return new RetrieveUnpublishedMultipleResponse
+                            {
+                                Results =
+                                {
+                                    ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                    {
+                                        new("sitemap")
+                                        {
+                                            ["sitemapid"] = SitemapId,
+                                            ["sitemapxml"] = sitemapXml
+                                        }
+                                    })
+                                }
+                            };
+                        }
+                    }
+
+                    return new OrganizationResponse();
+                });
+
+            // PatchSitemapAsync → capture the written XML.
+            Client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+                .Callback<Entity, CancellationToken>((e, _) =>
+                {
+                    if (e.LogicalName == "sitemap" && e.Contains("sitemapxml"))
+                        WrittenSitemapXml = (string)e["sitemapxml"];
                 })
                 .Returns(Task.CompletedTask);
         }
@@ -337,6 +519,35 @@ public class ModelDrivenAppServiceTests
             .Should().Be("A & B <\"injected\"/>");
     }
 
+    // ── add-table: entity component (type 1) registered via AddAppComponents ─────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_RegistersEntityComponentViaAddAppComponents()
+    {
+        var h = new Harness();
+        h.Setup(EmptySitemap, DefaultEntities);
+        var service = h.Build();
+
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        // An AddAppComponents request must target the table component by the table's OWN logical
+        // name (not the literal "entity", which is itself a real table) and its metadata ID, with
+        // AppId typed as Guid (not EntityReference — see #1183).
+        var addReq = h.ExecutedRequests.Single(r => r.RequestName == "AddAppComponents");
+
+        addReq["AppId"].Should().BeOfType<Guid>()
+            .Which.Should().Be(AppModuleId);
+
+        addReq["Components"].Should().BeOfType<EntityReferenceCollection>()
+            .Which.Should().ContainSingle(er => er.LogicalName == "contact" && er.Id == ContactMetadataId);
+    }
+
     // ── add-table: duplicate entity throws EntityAlreadyInApp ──────────────────
 
     [Fact]
@@ -419,7 +630,8 @@ public class ModelDrivenAppServiceTests
             progress: null,
             CancellationToken.None);
 
-        // A RemoveAppComponents request must target the "entity" component by metadata ID.
+        // A RemoveAppComponents request must target the table component by the table's OWN logical
+        // name (not the literal "entity") and its metadata ID.
         var removeReqs = h.ExecutedRequests
             .Where(r => r.RequestName == "RemoveAppComponents")
             .ToList();
@@ -429,7 +641,7 @@ public class ModelDrivenAppServiceTests
             .Select(r => r["Components"] as EntityReferenceCollection)
             .Where(c => c != null)
             .SelectMany(c => c!)
-            .Any(er => er.LogicalName == "entity" && er.Id == AccountMetadataId);
+            .Any(er => er.LogicalName == "account" && er.Id == AccountMetadataId);
 
         entityRefRemoved.Should().BeTrue();
     }
@@ -566,6 +778,169 @@ public class ModelDrivenAppServiceTests
             .Which.Should().ContainSingle(er => er.LogicalName == "savedquery" && er.Id == viewId);
     }
 
+    // ── ResolveAppAsync: draft app resolved via RetrieveUnpublishedMultiple ────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_DraftApp_ResolvedViaUnpublishedMultiple()
+    {
+        // Draft apps are not returned by RetrieveMultiple. ResolveAppAsync must use
+        // RetrieveUnpublishedMultiple so both draft and published apps are found.
+        // The harness's Setup() routes ExecuteAsync/appmodule to the app entity, so
+        // this test verifies the full flow succeeds without any RetrieveMultiple on appmodule.
+        var h = new Harness();
+        h.Setup(EmptySitemap, DefaultEntities);
+        var service = h.Build();
+
+        // Should not throw AppNotFound even though no RetrieveMultiple mock for appmodule is set.
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        h.WrittenSitemapXml.Should().NotBeNull();
+    }
+
+    // ── add-table: draft app — sitemap created when appmodulecomponent is empty ────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_DraftApp_FallsBackToSitemapDirectQuery()
+    {
+        // Draft/brand-new app: appmodulecomponent has no sitemap entry (componenttype=62).
+        // AddTableAsync must build the full XML first, then create the sitemap record via
+        // CreateAsync with that content (no dummy structure left behind).
+        var h = new Harness();
+        h.SetupDraftApp(DefaultEntities);
+        var service = h.Build();
+
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        // Sitemap must have been CREATED (not patched) with the entity already in it.
+        h.CreatedSitemapXml.Should().NotBeNull();
+        var doc = XDocument.Parse(h.CreatedSitemapXml!);
+        doc.Descendants("SubArea")
+            .Should().ContainSingle(s => (string?)s.Attribute("Entity") == "contact");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_BrandNewDraftApp_CreatesSitemap()
+    {
+        // Brand-new draft app: AddTableAsync must create the sitemap via CreateAsync and
+        // register it via AddAppComponents so subsequent calls find it in appmodulecomponent.
+        var h = new Harness();
+        h.SetupDraftApp(DefaultEntities);
+        var service = h.Build();
+
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        // CreateAsync must have been called with a sitemap entity.
+        h.Client.Verify(c => c.CreateAsync(
+            It.Is<Entity>(e => e.LogicalName == "sitemap"),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // AddAppComponents must have been called to register the new sitemap.
+        var sitemapAddReq = h.ExecutedRequests
+            .Where(r => r.RequestName == "AddAppComponents")
+            .FirstOrDefault(r =>
+            {
+                var comps = r["Components"] as EntityReferenceCollection;
+                return comps != null && comps.Any(er => er.LogicalName == "sitemap" && er.Id == SitemapId);
+            });
+        sitemapAddReq.Should().NotBeNull("an AddAppComponents call for the sitemap component was expected");
+
+        // The contact table must be in the created sitemap XML.
+        h.CreatedSitemapXml.Should().NotBeNull();
+        var doc = XDocument.Parse(h.CreatedSitemapXml!);
+        doc.Descendants("SubArea").Should().ContainSingle(s => (string?)s.Attribute("Entity") == "contact");
+
+        // The created sitemap must share the app's uniquename so a later run discovers it via Tier 2
+        // instead of minting a duplicate (which Dataverse rejects: "App can't have multiple site maps").
+        h.CreatedSitemapName.Should().Be(AppUniqueName);
+    }
+
+    // ── add-table: maker-created draft sitemap found via uniquename (Tier 2) ────
+
+    /// <summary>
+    /// Regression for the duplicate-sitemap bug: a maker-created draft app has a sitemap whose
+    /// sitemapnameunique equals the app's uniquename, but it is NOT yet in appmodulecomponent
+    /// (Tier 1 misses). Tier 2 must find it by shared unique name and PATCH it — never create a
+    /// second sitemap, which Dataverse rejects with 0x80050111 "App can't have multiple site maps".
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddTable_MakerDraftApp_FindsSitemapByUniqueNameAndPatches()
+    {
+        var h = new Harness();
+        h.SetupMakerDraftApp(SitemapWithAccount, DefaultEntities);
+        var service = h.Build();
+
+        await service.AddTableAsync(
+            AppName,
+            new[] { "contact" },
+            new AddTableOptions(Group: null, Area: null, Title: null, Solution: null, Publish: false),
+            progress: null,
+            CancellationToken.None);
+
+        // Existing sitemap must be UPDATED, not duplicated.
+        h.WrittenSitemapXml.Should().NotBeNull("sitemap found via uniquename must be patched via UpdateAsync");
+        h.Client.Verify(
+            c => c.CreateAsync(It.Is<Entity>(e => e.LogicalName == "sitemap"), It.IsAny<CancellationToken>()),
+            Times.Never(),
+            "no new sitemap must be created when an existing one is found by shared uniquename");
+
+        var doc = XDocument.Parse(h.WrittenSitemapXml!);
+        doc.Descendants("SubArea")
+            .Select(s => s.Attribute("Entity")?.Value)
+            .Should().Contain("contact", "the new entity must appear in the patched sitemap XML");
+    }
+
+    // ── sitemap read: raw XML + unpublished ────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetSitemapXml_Unpublished_ReturnsRawXmlUnparsed()
+    {
+        // The raw read must return the sitemap XML verbatim (not a parsed structure), reading the
+        // unpublished/draft record via RetrieveUnpublishedMultiple.
+        var h = new Harness();
+        h.Setup(SitemapWithAccount, DefaultEntities);
+        var service = h.Build();
+
+        var xml = await service.GetSitemapXmlAsync(AppName, unpublished: true, CancellationToken.None);
+
+        xml.Should().Be(SitemapWithAccount);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetSitemap_Unpublished_ParsesDraftStructure()
+    {
+        var h = new Harness();
+        h.Setup(SitemapWithAccount, DefaultEntities);
+        var service = h.Build();
+
+        var structure = await service.GetSitemapAsync(AppName, unpublished: true, CancellationToken.None);
+
+        structure.Areas
+            .SelectMany(a => a.Groups)
+            .SelectMany(g => g.SubAreas)
+            .Should().Contain(s => s.Entity == "account");
+    }
+
     // ── ResolveAppAsync: app not found throws AppNotFound (D4) ──────────────────
 
     [Fact]
@@ -574,11 +949,23 @@ public class ModelDrivenAppServiceTests
     {
         var h = new Harness();
         h.Setup(SitemapWithAccount, DefaultEntities);
-        // Override appmodule lookup to return nothing.
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
+        // Override ExecuteAsync so the RetrieveUnpublishedMultiple on appmodule returns nothing.
+        h.Client.Setup(c => c.ExecuteAsync(
+                It.IsAny<OrganizationRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
+            {
+                h.ExecutedRequests.Add(req);
+                if (req is RetrieveUnpublishedMultipleRequest unpubReq
+                    && ((QueryExpression)unpubReq.Query).EntityName == "appmodule")
+                {
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results = { ["EntityCollection"] = new EntityCollection(new List<Entity>()) }
+                    };
+                }
+                return new OrganizationResponse();
+            });
         var service = h.Build();
 
         var act = async () => await service.RemoveTableAsync(
@@ -668,19 +1055,6 @@ public class ModelDrivenAppServiceTests
             .ReturnsAsync(h.Client.Object);
 
         h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                new("appmodule")
-                {
-                    ["appmoduleid"] = AppModuleId,
-                    ["uniquename"] = AppUniqueName,
-                    ["name"] = AppName
-                }
-            }));
-
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(qe => qe.EntityName == "bot"),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>
@@ -703,14 +1077,31 @@ public class ModelDrivenAppServiceTests
                 new("appmodulecomponent") { ["objectid"] = SitemapId }
             }));
 
+        // ResolveAppAsync resolves the appmodule via RetrieveUnpublishedMultiple (draft apps visible);
+        // the sitemap fetch also uses RetrieveUnpublishedMultiple. Branch on the queried entity.
         h.Client.Setup(c => c.ExecuteAsync(
                 It.IsAny<OrganizationRequest>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
             {
                 h.ExecutedRequests.Add(req);
-                if (req is RetrieveUnpublishedMultipleRequest)
+                if (req is RetrieveUnpublishedMultipleRequest unpubReq)
                 {
+                    var qe = (QueryExpression)unpubReq.Query;
+                    if (qe.EntityName == "appmodule")
+                    {
+                        return new RetrieveUnpublishedMultipleResponse
+                        {
+                            Results =
+                            {
+                                ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                {
+                                    new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = AppUniqueName, ["name"] = AppName }
+                                })
+                            }
+                        };
+                    }
+
                     return new RetrieveUnpublishedMultipleResponse
                     {
                         Results =
@@ -847,12 +1238,44 @@ public class ModelDrivenAppServiceTests
 
         // A long app unique name would push the maker-convention name past the 100-char limit.
         var longAppUnique = new string('a', 120);
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
+        h.Client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
             {
-                new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = longAppUnique, ["name"] = AppName }
-            }));
+                if (req is RetrieveUnpublishedMultipleRequest unpubReq)
+                {
+                    var qe = (QueryExpression)unpubReq.Query;
+                    if (qe.EntityName == "appmodule")
+                    {
+                        return new RetrieveUnpublishedMultipleResponse
+                        {
+                            Results =
+                            {
+                                ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                {
+                                    new("appmodule")
+                                    {
+                                        ["appmoduleid"] = AppModuleId,
+                                        ["uniquename"] = longAppUnique,
+                                        ["name"] = AppName
+                                    }
+                                })
+                            }
+                        };
+                    }
+
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results =
+                        {
+                            ["EntityCollection"] = new EntityCollection(new List<Entity>
+                            {
+                                new("sitemap") { ["sitemapid"] = SitemapId, ["sitemapxml"] = SitemapWithAccount }
+                            })
+                        }
+                    };
+                }
+                return new OrganizationResponse();
+            });
         h.Client.Setup(c => c.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(qe => qe.EntityName == "appelement"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>()));
@@ -1122,13 +1545,43 @@ public class ModelDrivenAppServiceTests
         var h = new Harness();
         SetupCopilotCommon(h);
         // Override the app to a known-unsupported first-party app (matched by display name).
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
+        // Resolution uses RetrieveUnpublishedMultiple, so override that path (appmodule → Sales Hub;
+        // sitemap → default) ahead of SetupCopilotCommon's setup.
+        h.Client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
             {
-                new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = "msdyn_saleshub", ["name"] = "Sales Hub" }
-            }));
+                h.ExecutedRequests.Add(req);
+                if (req is RetrieveUnpublishedMultipleRequest unpubReq)
+                {
+                    var qe = (QueryExpression)unpubReq.Query;
+                    if (qe.EntityName == "appmodule")
+                    {
+                        return new RetrieveUnpublishedMultipleResponse
+                        {
+                            Results =
+                            {
+                                ["EntityCollection"] = new EntityCollection(new List<Entity>
+                                {
+                                    new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = "msdyn_saleshub", ["name"] = "Sales Hub" }
+                                })
+                            }
+                        };
+                    }
+
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results =
+                        {
+                            ["EntityCollection"] = new EntityCollection(new List<Entity>
+                            {
+                                new("sitemap") { ["sitemapid"] = SitemapId, ["sitemapxml"] = SitemapWithAccount }
+                            })
+                        }
+                    };
+                }
+
+                return new OrganizationResponse();
+            });
         h.Client.Setup(c => c.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(qe => qe.EntityName == "appelement"),
                 It.IsAny<CancellationToken>()))
@@ -1223,18 +1676,30 @@ public class ModelDrivenAppServiceTests
         h.Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(h.Client.Object);
 
-        h.Client.Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(qe => qe.EntityName == "appmodule"),
+        // ResolveAppAsync resolves the appmodule via RetrieveUnpublishedMultiple (draft apps visible).
+        h.Client.Setup(c => c.ExecuteAsync(
+                It.IsAny<OrganizationRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
             {
-                new("appmodule")
+                h.ExecutedRequests.Add(req);
+                if (req is RetrieveUnpublishedMultipleRequest unpubReq
+                    && ((QueryExpression)unpubReq.Query).EntityName == "appmodule")
                 {
-                    ["appmoduleid"] = AppModuleId,
-                    ["uniquename"] = AppUniqueName,
-                    ["name"] = AppName
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results =
+                        {
+                            ["EntityCollection"] = new EntityCollection(new List<Entity>
+                            {
+                                new("appmodule") { ["appmoduleid"] = AppModuleId, ["uniquename"] = AppUniqueName, ["name"] = AppName }
+                            })
+                        }
+                    };
                 }
-            }));
+
+                return new OrganizationResponse();
+            });
     }
 
     private static void SetupAppElements(Harness h, params Entity[] rows)
@@ -1387,10 +1852,12 @@ public class ModelDrivenAppServiceTests
         var service = h.Build();
         await service.InspectAppAssistantAsync(AppName, CancellationToken.None);
 
-        // The diagnostic is read-only: no create/update/delete/execute against Dataverse.
+        // The diagnostic is read-only: no create/update/delete, and the only Execute is the
+        // read-only RetrieveUnpublishedMultiple used to resolve the app — never a mutating message.
         h.Client.Verify(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
         h.Client.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
         h.Client.Verify(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        h.Client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Client.Verify(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r.GetType() != typeof(RetrieveUnpublishedMultipleRequest)), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

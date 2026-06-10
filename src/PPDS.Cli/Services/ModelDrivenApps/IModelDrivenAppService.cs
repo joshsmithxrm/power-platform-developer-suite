@@ -13,8 +13,11 @@ public interface IModelDrivenAppService
     /// <summary>Returns detailed information about a single app by display or unique name.</summary>
     Task<ModelDrivenAppDetails> GetAppAsync(string appName, CancellationToken ct);
 
-    /// <summary>Returns the hierarchical sitemap structure for an app.</summary>
-    Task<SitemapStructure> GetSitemapAsync(string appName, CancellationToken ct);
+    /// <summary>Returns the hierarchical sitemap structure for an app. Set <paramref name="unpublished"/> to read the latest draft.</summary>
+    Task<SitemapStructure> GetSitemapAsync(string appName, bool unpublished, CancellationToken ct);
+
+    /// <summary>Returns the raw sitemap XML for an app. Set <paramref name="unpublished"/> to read the latest draft.</summary>
+    Task<string> GetSitemapXmlAsync(string appName, bool unpublished, CancellationToken ct);
 
     /// <summary>Replaces the sitemap XML for an app after validating against the XSD.</summary>
     Task SetSitemapXmlAsync(string appName, string xml, SetSitemapOptions options, IProgressReporter? progress, CancellationToken ct);
