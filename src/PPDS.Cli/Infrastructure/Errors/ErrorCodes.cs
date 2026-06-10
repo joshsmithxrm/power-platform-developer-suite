@@ -435,6 +435,9 @@ public static class ErrorCodes
 
         /// <summary>A general metadata authoring operation failed.</summary>
         public const string OperationFailed = "MetadataAuthoring.OperationFailed";
+
+        /// <summary>A --label selector matched more than one option; the target is ambiguous and must be disambiguated with --value.</summary>
+        public const string AmbiguousOptionLabel = "MetadataAuthoring.AmbiguousOptionLabel";
     }
 
     /// <summary>

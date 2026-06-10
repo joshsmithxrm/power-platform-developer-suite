@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -275,6 +276,85 @@ public class MetadataGlobalOptionServiceTests
 
         _retrieveRequest.Should().NotBeNull();
         _retrieveRequest!.RetrieveAsIfPublished.Should().BeTrue();
+    }
+
+    // ---- ambiguous --label resolution on duplicate labels (#1235) ----
+
+    [Fact]
+    public async Task DeleteOptionValue_DuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        // Two options share the label "Draft" (legal in Dataverse). Removing by label must refuse
+        // to act rather than silently delete the first match.
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "Draft"));
+
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Draft"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+        // Nothing was mutated — resolution threw before any SDK delete.
+        _captured.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_DuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "Draft"));
+
+        var act = () => _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Draft",
+            NewLabel = "Accepted"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+        _captured.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_CaseInsensitiveDuplicateLabel_ThrowsAmbiguous() // #1235
+    {
+        // Resolution is case-insensitive, so labels that differ only in case are duplicates too and
+        // a label selector that case-insensitively matches both must be rejected as ambiguous.
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "draft"));
+
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "DRAFT"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+        _captured.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_UniqueLabelAmongDuplicates_ResolvesSingleMatch() // #1235
+    {
+        // A label that matches exactly one option still resolves, even when other options share a different label.
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "Draft"), (100000002, "Approved"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Approved"
+        });
+
+        _captured.Should().BeOfType<SdkDeleteOptionValueRequest>()
+            .Which.Value.Should().Be(100000002);
     }
 
     // ---- update-option alignment (#1170) ----
