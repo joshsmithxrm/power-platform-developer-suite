@@ -141,6 +141,21 @@ public static class TableCommandGroup
             Description = "Updated description"
         };
 
+        var iconSmallOption = new Option<string?>("--icon-small")
+        {
+            Description = "16×16 icon: web resource logical name. Use empty string to clear."
+        };
+
+        var iconMediumOption = new Option<string?>("--icon-medium")
+        {
+            Description = "32×32 icon: web resource logical name. Use empty string to clear."
+        };
+
+        var iconVectorOption = new Option<string?>("--icon-vector")
+        {
+            Description = "SVG vector icon: web resource logical name. Use empty string to clear."
+        };
+
         var dryRunOption = new Option<bool>("--dry-run")
         {
             Description = "Validate only, do not persist changes",
@@ -160,6 +175,9 @@ public static class TableCommandGroup
             displayNameOption,
             pluralNameOption,
             descriptionOption,
+            iconSmallOption,
+            iconMediumOption,
+            iconVectorOption,
             dryRunOption,
             publishOption,
             MetadataCommandGroup.ProfileOption,
@@ -175,6 +193,9 @@ public static class TableCommandGroup
             var displayName = parseResult.GetValue(displayNameOption);
             var pluralName = parseResult.GetValue(pluralNameOption);
             var description = parseResult.GetValue(descriptionOption);
+            var iconSmall = parseResult.GetValue(iconSmallOption);
+            var iconMedium = parseResult.GetValue(iconMediumOption);
+            var iconVector = parseResult.GetValue(iconVectorOption);
             var dryRun = parseResult.GetValue(dryRunOption);
             var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
@@ -183,7 +204,8 @@ public static class TableCommandGroup
 
             DeprecationWarning.Write("ppds metadata table update", "ppds metadata entity update");
             return await Metadata.EntityCommand.ExecuteUpdateAsync(
-                solution, entity, displayName, pluralName, description, dryRun, publish,
+                solution, entity, displayName, pluralName, description,
+                iconSmall, iconMedium, iconVector, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 

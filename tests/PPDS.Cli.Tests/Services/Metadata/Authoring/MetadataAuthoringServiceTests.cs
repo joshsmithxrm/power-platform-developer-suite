@@ -231,6 +231,38 @@ public class MetadataAuthoringServiceTests
     }
 
     [Fact]
+    public async Task UpdateTableAsync_SetsIconFields_ViaUpdateEntityRequest()
+    {
+        // Dataverse rejects icon assignment through Web API EntityDefinitions PATCH.
+        // The correct path is UpdateEntityRequest (SDK) which accepts IconSmallName,
+        // IconMediumName, and IconVectorName on EntityMetadata.
+        UpdateEntityRequest? capturedRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is UpdateEntityRequest update) capturedRequest = update;
+            })
+            .ReturnsAsync(new OrganizationResponse());
+
+        var request = new UpdateTableRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "new_pet",
+            IconSmallName = "new_icons/pet16.png",
+            IconMediumName = "new_icons/pet32.png",
+            IconVectorName = "new_icons/pet.svg"
+        };
+
+        await _service.UpdateTableAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Entity.IconSmallName.Should().Be("new_icons/pet16.png");
+        capturedRequest.Entity.IconMediumName.Should().Be("new_icons/pet32.png");
+        capturedRequest.Entity.IconVectorName.Should().Be("new_icons/pet.svg");
+    }
+
+    [Fact]
     public async Task UpdateTableAsync_WithPublish_PublishesEntity() // #1171
     {
         Microsoft.Crm.Sdk.Messages.PublishXmlRequest? publishRequest = null;
