@@ -1410,15 +1410,27 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else
         {
-            var match = statusReasons.FirstOrDefault(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase));
-            if (match == null)
+            // Duplicate status-reason labels are legal in Dataverse. Collect every match and refuse to act
+            // when more than one matches (#1235) — silently picking the first could update the wrong reason.
+            var labelMatches = statusReasons
+                .Where(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (labelMatches.Count == 0)
                 throw new MetadataValidationException(
                     MetadataErrorCodes.OptionNotFound,
                     $"Status reason with label '{request.Label}' not found on '{request.EntityLogicalName}'.",
                     "Label");
 
-            targetValue = match.Value;
-            currentLabel = match.Label;
+            if (labelMatches.Count > 1)
+                throw new PpdsException(
+                    ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel,
+                    $"Label '{request.Label}' matches {labelMatches.Count} status reasons on '{request.EntityLogicalName}' " +
+                    $"(values: {string.Join(", ", labelMatches.Select(r => r.Value))}). " +
+                    "Select the target status reason with --value instead.");
+
+            targetValue = labelMatches[0].Value;
+            currentLabel = labelMatches[0].Label;
         }
 
         var newLabel = request.NewLabel ?? currentLabel ?? "";
@@ -1485,14 +1497,26 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         else
         {
-            var match = removeReasons.FirstOrDefault(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase));
-            if (match == null)
+            // Duplicate status-reason labels are legal in Dataverse. Collect every match and refuse to act
+            // when more than one matches (#1235) — silently picking the first could delete the wrong reason.
+            var labelMatches = removeReasons
+                .Where(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (labelMatches.Count == 0)
                 throw new MetadataValidationException(
                     MetadataErrorCodes.OptionNotFound,
                     $"Status reason with label '{request.Label}' not found on '{request.EntityLogicalName}'.",
                     "Label");
 
-            targetValue = match.Value;
+            if (labelMatches.Count > 1)
+                throw new PpdsException(
+                    ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel,
+                    $"Label '{request.Label}' matches {labelMatches.Count} status reasons on '{request.EntityLogicalName}' " +
+                    $"(values: {string.Join(", ", labelMatches.Select(r => r.Value))}). " +
+                    "Select the target status reason with --value instead.");
+
+            targetValue = labelMatches[0].Value;
         }
 
         var sdkRequest = new SdkDeleteOptionValueRequest

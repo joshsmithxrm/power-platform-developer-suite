@@ -10,6 +10,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Metadata.Query;
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -358,6 +359,85 @@ public class MetadataStatusReasonServiceTests
 
         await act.Should().ThrowAsync<MetadataValidationException>()
             .Where(e => e.ErrorCode == MetadataErrorCodes.OptionNotFound);
+    }
+
+    // ---- ambiguous --label resolution on duplicate status-reason labels (#1235 follow-up) ----
+
+    [Fact]
+    public async Task UpdateStatusReasonAsync_ByDuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        // Two status reasons share the label "Pending" (legal in Dataverse). Updating by label must refuse
+        // to act rather than silently update the first match.
+        SetupListStatusReasons("account", [(100000000, "Pending", 0), (100000001, "Pending", 0)]);
+
+        var act = async () => await _service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest
+        {
+            EntityLogicalName = "account",
+            Label = "Pending",
+            NewLabel = "InReview"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+        // Nothing was mutated — resolution threw before any SDK update.
+        _client.Verify(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue"),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveStatusReasonAsync_ByDuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        SetupListStatusReasons("account", [(100000000, "Pending", 0), (100000001, "Pending", 0)]);
+
+        var act = async () => await _service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest
+        {
+            EntityLogicalName = "account",
+            Label = "Pending"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+        // Nothing was mutated — resolution threw before any SDK delete.
+        _client.Verify(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r.RequestName == "DeleteOptionValue"),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveStatusReasonAsync_CaseInsensitiveDuplicateLabel_ThrowsAmbiguous() // #1235
+    {
+        // Resolution is case-insensitive, so labels differing only in case are duplicates too.
+        SetupListStatusReasons("account", [(100000000, "Pending", 0), (100000001, "pending", 0)]);
+
+        var act = async () => await _service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest
+        {
+            EntityLogicalName = "account",
+            Label = "PENDING"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("100000000").And.Contain("100000001");
+    }
+
+    [Fact]
+    public async Task RemoveStatusReasonAsync_UniqueLabelAmongDuplicates_ResolvesSingleMatch() // #1235
+    {
+        // A label matching exactly one reason still resolves, even when others share a different label.
+        SetupListStatusReasons("account", [(100000000, "Pending", 0), (100000001, "Pending", 0), (100000002, "Closed", 1)]);
+
+        await _service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest
+        {
+            EntityLogicalName = "account",
+            Label = "Closed"
+        });
+
+        _client.Verify(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r.RequestName == "DeleteOptionValue"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
