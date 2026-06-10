@@ -2055,9 +2055,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
 
         // EnumAttributeMetadata is the base for Picklist / MultiSelectPicklist / State / Status — all expose OptionSet.
-        var optionSet = (attribute as EnumAttributeMetadata)?.OptionSet
+        var enumAttribute = attribute as EnumAttributeMetadata
             ?? throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 $"Attribute '{attributeLogicalName}' on '{entityLogicalName}' is not a choice or status column.", "ColumnLogicalName");
+
+        var optionSet = enumAttribute.OptionSet
+            ?? throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Attribute '{attributeLogicalName}' on '{entityLogicalName}' has no option set to color.", "ColumnLogicalName");
 
         var target = optionSet.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
@@ -2065,15 +2069,17 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         target.Color = color;
 
-        // Re-send the retrieved attribute with its option set intact — this is the documented mechanism for
-        // option color. Unlike #1009 (re-sending drops attribute-level RequiredLevel), the option collection
-        // IS honored on the wire, so the modified OptionMetadata.Color persists.
+        // Send a MINIMAL attribute carrying only the modified option set — never the full retrieved attribute.
+        // Re-posting all retrieved attribute-level managed properties can reset them on the platform (#1009,
+        // e.g. RequiredLevel); a fresh attribute leaves every unset property null, so the platform changes only
+        // the option collection (and thus OptionMetadata.Color). Mirrors CreateUpdateAttribute on the column path.
+        var carrier = BuildOptionColorCarrierAttribute(enumAttribute, optionSet);
         try
         {
             await client.ExecuteAsync(new UpdateAttributeRequest
             {
                 EntityName = entityLogicalName,
-                Attribute = attribute,
+                Attribute = carrier,
                 SolutionUniqueName = solutionUniqueName
             }, ct).ConfigureAwait(false);
         }
@@ -2085,6 +2091,31 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateEntity(entityLogicalName);
         _logger?.LogInformation("Applied color {Color} to option {Value} on {Entity}.{Attribute}", color, value, entityLogicalName, attributeLogicalName);
+    }
+
+    /// <summary>
+    /// Builds a minimal enum attribute of the same SDK type that carries only the (modified) option set, for
+    /// re-sending option colors via UpdateAttribute without disturbing attribute-level managed properties (#1009).
+    /// Covers the choice/status families that expose an option set; mirrors <see cref="CreateUpdateAttribute"/>.
+    /// </summary>
+    private static EnumAttributeMetadata BuildOptionColorCarrierAttribute(EnumAttributeMetadata source, OptionSetMetadata optionSet)
+    {
+        EnumAttributeMetadata fresh = source switch
+        {
+            StatusAttributeMetadata => new StatusAttributeMetadata(),
+            StateAttributeMetadata => new StateAttributeMetadata(),
+            MultiSelectPicklistAttributeMetadata => new MultiSelectPicklistAttributeMetadata(),
+            PicklistAttributeMetadata => new PicklistAttributeMetadata(),
+            _ => throw new MetadataValidationException(
+                MetadataErrorCodes.InvalidConstraint,
+                $"Unsupported choice attribute type for option color update: {source.GetType().Name}",
+                "ColumnLogicalName")
+        };
+
+        fresh.LogicalName = source.LogicalName;
+        fresh.SchemaName = source.SchemaName;
+        fresh.OptionSet = optionSet;
+        return fresh;
     }
 
     /// <summary>
