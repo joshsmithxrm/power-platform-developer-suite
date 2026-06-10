@@ -94,7 +94,9 @@ public class MetadataGlobalOptionColorTests
             Color = "#AABBCC"
         });
 
-        _captured.Should().BeOfType<InsertOptionValueRequest>();
+        var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
+        // Guard against reintroducing the ignored indexer: color must NOT ride on the Insert message.
+        insert.Parameters.ContainsKey("Color").Should().BeFalse();
         _capturedColorUpdate.Should().NotBeNull();
         CapturedColorFor(101).Should().Be("#AABBCC");
     }
@@ -127,7 +129,8 @@ public class MetadataGlobalOptionColorTests
             Color = "#112233"
         });
 
-        _captured.Should().BeOfType<SdkUpdateOptionValueRequest>();
+        var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
+        update.Parameters.ContainsKey("Color").Should().BeFalse();
         _capturedColorUpdate.Should().NotBeNull();
         CapturedColorFor(100).Should().Be("#112233");
     }

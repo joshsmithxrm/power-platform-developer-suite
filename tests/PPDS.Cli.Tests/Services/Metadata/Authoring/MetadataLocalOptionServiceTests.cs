@@ -133,6 +133,7 @@ public class MetadataLocalOptionServiceTests
         });
 
         // The Insert message does not carry color — a follow-up UpdateAttribute sets OptionMetadata.Color.
+        ((InsertOptionValueRequest)_captured!).Parameters.ContainsKey("Color").Should().BeFalse();
         _capturedColorUpdate.Should().NotBeNull();
         _capturedColorUpdate!.EntityName.Should().Be("hsl_diagnosis");
         CapturedColorFor(864630001).Should().Be("#FF8800");
@@ -219,8 +220,9 @@ public class MetadataLocalOptionServiceTests
             Color = "#00FF00"
         });
 
-        // Label change still goes through UpdateOptionValue...
-        _captured.Should().BeOfType<SdkUpdateOptionValueRequest>();
+        // Label change still goes through UpdateOptionValue (without a Color parameter)...
+        var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
+        update.Parameters.ContainsKey("Color").Should().BeFalse();
         // ...but color is applied via the documented OptionMetadata.Color + UpdateAttribute mechanism.
         _capturedColorUpdate.Should().NotBeNull();
         _capturedColorUpdate!.EntityName.Should().Be("hsl_diagnosis");
