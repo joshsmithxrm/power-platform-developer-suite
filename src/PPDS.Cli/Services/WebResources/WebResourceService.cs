@@ -177,6 +177,11 @@ public class WebResourceService : IWebResourceService
     /// <inheritdoc />
     public async Task<WebResourceInfo?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Web resource name cannot be null or whitespace.", nameof(name));
+        }
+
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
         var query = new QueryExpression(WebResource.EntityLogicalName)
@@ -195,6 +200,9 @@ public class WebResourceService : IWebResourceService
     /// <inheritdoc />
     public async Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Content);
+
         _guard.EnsureCanMutate("webresources.create");
 
         var existing = await GetByNameAsync(request.Name, cancellationToken);
@@ -344,6 +352,8 @@ public class WebResourceService : IWebResourceService
     /// <inheritdoc />
     public async Task UpdateContentAsync(Guid id, byte[] content, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(content);
+
         _guard.EnsureCanMutate("webresources.updateContent");
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);

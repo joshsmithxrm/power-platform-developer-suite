@@ -97,9 +97,12 @@ public static class UpdateCommand
             var webResourceService = serviceProvider.GetRequiredService<IWebResourceService>();
 
             // Exact name or GUID only — partial matching is intentionally not supported for
-            // mutations, so a fuzzy match can never overwrite the wrong resource.
+            // mutations, so a fuzzy match can never overwrite the wrong resource. When the
+            // argument parses as a GUID but no resource has that ID, fall back to an exact-name
+            // lookup (a web resource can legitimately be named with a GUID-shaped string).
             var resource = Guid.TryParse(name, out var id)
                 ? await webResourceService.GetAsync(id, cancellationToken)
+                  ?? await webResourceService.GetByNameAsync(name, cancellationToken)
                 : await webResourceService.GetByNameAsync(name, cancellationToken);
 
             if (resource == null)

@@ -226,4 +226,17 @@ public class MetadataEntityCommandTests
 
         Assert.NotEmpty(result.Errors);
     }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_WhitespacePositional_WithValidFlag_HasNoErrors(string verb, string extraFlags)
+    {
+        // A whitespace-only positional must be treated as absent so a valid --entity flag wins
+        // (the validator and ResolveEntity both ignore whitespace).
+        var sub = _command.Subcommands.First(c => c.Name == verb);
+
+        var result = sub.Parse(["  ", "--entity", "hsl_veterinarian", .. extraFlags.Split(' ', StringSplitOptions.RemoveEmptyEntries)]);
+
+        Assert.Empty(result.Errors);
+    }
 }

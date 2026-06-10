@@ -452,6 +452,38 @@ public class WebResourceServiceTests
         createRequest.Target[WebResource.Fields.DisplayName].Should().Be("new_script.js");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetByNameAsync_Throws_WhenNameNullOrWhitespace(string name)
+    {
+        var service = CreateService();
+
+        var act = () => service.GetByNameAsync(name);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_Throws_WhenContentNull()
+    {
+        var service = CreateService();
+
+        var act = () => service.CreateAsync(new CreateWebResourceRequest("new_x.js", null, 3, null!, null));
+
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task UpdateContentAsync_Bytes_Throws_WhenContentNull()
+    {
+        var service = CreateService();
+
+        var act = () => service.UpdateContentAsync(Guid.NewGuid(), (byte[])null!);
+
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
     [Fact]
     public async Task CreateAsync_Throws_WhenNameAlreadyExists()
     {

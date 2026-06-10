@@ -254,9 +254,13 @@ public static class EntityCommand
         });
     }
 
-    /// <summary>Resolves the entity from the positional argument or --entity (validator guarantees at least one).</summary>
-    private static string ResolveEntity(System.CommandLine.ParseResult parseResult, Argument<string?> entityArgument, Option<string?> entityOption) =>
-        parseResult.GetValue(entityArgument) ?? parseResult.GetValue(entityOption)!;
+    /// <summary>Resolves the entity from the positional argument or --entity (validator guarantees at least one non-whitespace value).</summary>
+    private static string ResolveEntity(System.CommandLine.ParseResult parseResult, Argument<string?> entityArgument, Option<string?> entityOption)
+    {
+        var positional = parseResult.GetValue(entityArgument);
+        // A whitespace-only positional must not shadow a valid --entity flag.
+        return !string.IsNullOrWhiteSpace(positional) ? positional : parseResult.GetValue(entityOption)!;
+    }
 
     // -------------------------------------------------------------------------
     // Table authoring subcommands (ported from TableCommandGroup)
