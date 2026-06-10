@@ -678,6 +678,12 @@ public static class OptionSetCommand
             Description = "Color for the option (hex string, e.g., #FF0000)"
         };
 
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate only, do not persist changes",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("add-option", "Add a new option value to an existing option set")
         {
             solutionOption,
@@ -685,6 +691,7 @@ public static class OptionSetCommand
             labelOption,
             valueOption,
             colorOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -698,12 +705,13 @@ public static class OptionSetCommand
             var label = parseResult.GetValue(labelOption)!;
             var value = parseResult.GetValue(valueOption);
             var color = parseResult.GetValue(colorOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAddOptionAsync(
-                solution, name, label, value, color,
+                solution, name, label, value, color, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -716,6 +724,7 @@ public static class OptionSetCommand
         string label,
         int? value,
         string? color,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -747,14 +756,21 @@ public static class OptionSetCommand
                 OptionSetName = name,
                 Label = label,
                 Value = value,
-                Color = color
+                Color = color,
+                DryRun = dryRun
             };
 
             var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, label, value = assignedValue });
+                // On dry-run the SDK never assigns a value, so report the requested one
+                // (null = would be auto-assigned at execution time).
+                writer.WriteSuccess(new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
@@ -794,16 +810,30 @@ public static class OptionSetCommand
             Required = true
         };
 
-        var valueOption = new Option<int>("--value")
+        var valueOption = new Option<int?>("--value")
         {
-            Description = "Numeric value of the option to update",
-            Required = true
+            Description = "Target option by value (mutually exclusive with --label)"
         };
 
-        var labelOption = new Option<string>("--label")
+        var labelOption = new Option<string?>("--label")
         {
-            Description = "New label for the option",
-            Required = true
+            Description = "Target option by current label (mutually exclusive with --value)"
+        };
+
+        var newLabelOption = new Option<string?>("--new-label")
+        {
+            Description = "New label to apply"
+        };
+
+        var colorOption = new Option<string?>("--color")
+        {
+            Description = "New hex color (e.g. #FF0000)"
+        };
+
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate only, do not persist changes",
+            DefaultValueFactory = _ => false
         };
 
         var command = new Command("update-option", "Update an existing option value in an option set")
@@ -812,6 +842,9 @@ public static class OptionSetCommand
             nameOption,
             valueOption,
             labelOption,
+            newLabelOption,
+            colorOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -823,13 +856,31 @@ public static class OptionSetCommand
             var solution = parseResult.GetValue(solutionOption)!;
             var name = parseResult.GetValue(nameOption)!;
             var value = parseResult.GetValue(valueOption);
-            var label = parseResult.GetValue(labelOption)!;
+            var label = parseResult.GetValue(labelOption);
+            var newLabel = parseResult.GetValue(newLabelOption);
+            var color = parseResult.GetValue(colorOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            // #1170: align with attribute update-option — (--value | --label) selects the
+            // target, --new-label carries the update (the old shape used --label as the new label).
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteUpdateOptionAsync(
-                solution, name, value, label,
+                solution, name, value, label, newLabel, color, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -839,8 +890,11 @@ public static class OptionSetCommand
     internal static async Task<int> ExecuteUpdateOptionAsync(
         string solution,
         string name,
-        int value,
-        string label,
+        int? value,
+        string? label,
+        string? newLabel,
+        string? color,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -863,7 +917,7 @@ public static class OptionSetCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine($"Updating option value {value} in '{name}'...");
+                Console.Error.WriteLine($"Updating option on '{name}'...");
             }
 
             var request = new UpdateOptionValueRequest
@@ -871,18 +925,25 @@ public static class OptionSetCommand
                 SolutionUniqueName = solution,
                 OptionSetName = name,
                 Value = value,
-                Label = label
+                Label = label,
+                NewLabel = newLabel,
+                Color = color,
+                DryRun = dryRun
             };
 
             await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, value, label, updated = true });
+                writer.WriteSuccess(new { optionSetName = name, updated = true, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
             }
             else
             {
-                Console.Error.WriteLine($"Option value {value} updated to '{label}'.");
+                Console.Error.WriteLine($"Option on '{name}' updated successfully.");
             }
 
             return ExitCodes.Success;
@@ -918,10 +979,14 @@ public static class OptionSetCommand
             Required = true
         };
 
-        var valueOption = new Option<int>("--value")
+        var valueOption = new Option<int?>("--value")
         {
-            Description = "Numeric value of the option to remove",
-            Required = true
+            Description = "Target option by value (mutually exclusive with --label)"
+        };
+
+        var labelOption = new Option<string?>("--label")
+        {
+            Description = "Target option by label (mutually exclusive with --value)"
         };
 
         var forceOption = new Option<bool>("--force")
@@ -930,12 +995,20 @@ public static class OptionSetCommand
             DefaultValueFactory = _ => false
         };
 
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Validate that the target option exists, without removing it",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("remove-option", "Remove an option value from an option set")
         {
             solutionOption,
             nameOption,
             valueOption,
+            labelOption,
             forceOption,
+            dryRunOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -947,13 +1020,29 @@ public static class OptionSetCommand
             var solution = parseResult.GetValue(solutionOption)!;
             var name = parseResult.GetValue(nameOption)!;
             var value = parseResult.GetValue(valueOption);
+            var label = parseResult.GetValue(labelOption);
             var force = parseResult.GetValue(forceOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            // #1169: --value or --label as selector, parity with attribute remove-option.
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteRemoveOptionAsync(
-                solution, name, value, force,
+                solution, name, value, label, force, dryRun,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -963,14 +1052,17 @@ public static class OptionSetCommand
     internal static async Task<int> ExecuteRemoveOptionAsync(
         string solution,
         string name,
-        int value,
+        int? value,
+        string? label,
         bool force,
+        bool dryRun,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var target = value.HasValue ? $"value {value}" : $"label '{label}'";
 
         try
         {
@@ -989,13 +1081,13 @@ public static class OptionSetCommand
                 Console.Error.WriteLine();
             }
 
-            // Confirmation prompt
-            if (!force)
+            // Confirmation prompt (#1172: dry-run never mutates, so it never prompts)
+            if (!force && !dryRun)
             {
                 if (!Console.IsInputRedirected)
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will remove option value {value} from '{name}'.");
+                    Console.Error.WriteLine($"WARNING: This will remove the option ({target}) from '{name}'.");
                     Console.Error.WriteLine("         Records using this value will lose their selection.");
                     Console.ResetColor();
                     Console.Error.WriteLine();
@@ -1022,25 +1114,31 @@ public static class OptionSetCommand
 
             if (!globalOptions.IsJsonMode)
             {
-                Console.Error.WriteLine($"Removing option value {value} from '{name}'...");
+                Console.Error.WriteLine($"Removing option ({target}) from '{name}'...");
             }
 
             var request = new DeleteOptionValueRequest
             {
                 SolutionUniqueName = solution,
                 OptionSetName = name,
-                Value = value
+                Value = value,
+                Label = label,
+                DryRun = dryRun
             };
 
             await authoringService.DeleteOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, value, removed = true });
+                writer.WriteSuccess(new { optionSetName = name, removed = !dryRun, dryRun });
+            }
+            else if (dryRun)
+            {
+                Console.Error.WriteLine("[Dry-Run] Validation passed. Option exists and can be removed.");
             }
             else
             {
-                Console.Error.WriteLine($"Option value {value} removed from '{name}'.");
+                Console.Error.WriteLine($"Option ({target}) removed from '{name}'.");
             }
 
             return ExitCodes.Success;

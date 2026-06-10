@@ -165,6 +165,22 @@ public class AttributeUpdateCommandTests
             "--solution MySol --entity account --column new_col");
         Assert.Empty(result.Errors);
     }
+
+    [Fact]
+    public void Update_HasPublishOption() // #1171
+    {
+        var opt = _command.Options.FirstOrDefault(o => o.Name == "--publish");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void Parse_WithPublish_Succeeds() // #1171
+    {
+        var result = _command.Parse(
+            "--solution MySol --entity account --column new_col --display-name Renamed --publish");
+        Assert.Empty(result.Errors);
+    }
 }
 
 [Trait("Category", "Unit")]

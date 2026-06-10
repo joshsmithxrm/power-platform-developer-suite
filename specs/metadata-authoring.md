@@ -283,7 +283,7 @@ All authoring operations perform local validation before making SDK calls. In dr
 | ColumnType is not Lookup (use relationship creation instead) | Columns | `USE_RELATIONSHIP_FOR_LOOKUP` |
 | Local choice column sets `OptionSetMetadata.IsGlobal = false` explicitly | Choice/Choices columns with inline options | `IsGlobal` SDK fault (#1161) — prevented by fix |
 | Exactly one of `--value` / `--solution` (neither → missing; both → invalid) | `add-statusreason`, `attribute add-option` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
-| Exactly one of `--value` / `--label` (neither → missing; both → invalid) | `update-/remove-statusreason`, `attribute update-/remove-option` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
+| Exactly one of `--value` / `--label` (neither → missing; both → invalid) | `update-/remove-statusreason`, `attribute update-/remove-option`, `optionset update-/remove-option` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
 | Exactly one of `--state` / `--state-code` (neither → missing; both → invalid) | `add-statusreason` | `MISSING_REQUIRED_FIELD` (neither) / `INVALID_CONSTRAINT` (both) |
 | `--choice` mutually exclusive with `--option`/`--options`/`--options-file` | `attribute create --type Choice` | `INVALID_CONSTRAINT` |
 | Explicit option value not already present on the target set | status reasons, local options | `DUPLICATE_OPTION_VALUE` |
@@ -381,8 +381,8 @@ Canonical noun-verb subcommands under `ppds metadata`. Deprecated forms (`table`
 **Entity commands (was `table`):**
 ```bash
 ppds metadata entity <name>                                      # read lookup (unchanged)
-ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [options]
-ppds metadata entity update <entity> --solution <s> [property flags]
+ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [--publish] [options]
+ppds metadata entity update <entity> --solution <s> [property flags] [--publish]
 ppds metadata entity delete <entity> --solution <s> [--force] [--dry-run]
 ```
 
@@ -399,7 +399,7 @@ All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-
 **Attribute commands (was `column`):**
 ```bash
 ppds metadata attribute create --solution <s> --entity <name> --name <schema> --display-name <n> --type <type> [type-specific options]
-ppds metadata attribute update --solution <s> --entity <name> --column <name> [property flags]
+ppds metadata attribute update --solution <s> --entity <name> --column <name> [property flags] [--publish]
 ppds metadata attribute delete --solution <s> --entity <name> --column <name> [--force] [--dry-run]
 ```
 
@@ -434,9 +434,9 @@ ppds metadata optionset <name>                                   # read lookup (
 ppds metadata optionset create --solution <s> --name <schema> --display-name <n> --options "Label1=1,Label2=2" [options]
 ppds metadata optionset update --solution <s> --name <name> [property flags]
 ppds metadata optionset delete --solution <s> --name <name> [--force] [--dry-run]
-ppds metadata optionset add-option --solution <s> --name <name> --label <label> [--value <int>] [--color <hex>]
-ppds metadata optionset update-option --solution <s> --name <name> --value <int> --label <new-label>
-ppds metadata optionset remove-option --solution <s> --name <name> --value <int> [--force]
+ppds metadata optionset add-option --solution <s> --name <name> --label <label> [--value <int>] [--color <hex>] [--dry-run]
+ppds metadata optionset update-option --solution <s> --name <name> (--value <int> | --label <l>) [--new-label <l>] [--color <#hex>] [--dry-run]
+ppds metadata optionset remove-option --solution <s> --name <name> (--value <int> | --label <l>) [--force] [--dry-run]
 ppds metadata optionset reorder --solution <s> --name <name> --order "1,3,2,4"
 ```
 
@@ -575,11 +575,14 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-55 | `attribute add-option` derives the local option value via the same `OptionValueDeriver` (explicit `--value` wins; `--solution` derives; neither → `MISSING_REQUIRED_FIELD`); inserts scoped to entity+attribute | `MetadataLocalOptionServiceTests.AddColumnOption_ExplicitValue_InsertsScopedToColumn`, `AddColumnOption_NeitherValueNorSolution_Throws` | ✅ |
 | AC-56 | `attribute update-option` / `remove-option` target a local option by `--value` or `--label` (→ `OPTION_NOT_FOUND` when unresolved), scoped to the column's local set | `MetadataLocalOptionServiceTests.UpdateColumnOption_ByValue_UpdatesScoped`, `RemoveColumnOption_ByLabel_ResolvesAndDeletes`, `RemoveColumnOption_ValueNotFound_ThrowsOptionNotFound` | ✅ |
 | AC-57 | `OptionValueDeriver.Derive` is a single shared helper used by both status-reason add and local-option add; unit tests cover explicit-wins, prefix derivation, gap-fill, collision, and missing-input cases | `OptionValueDeriverTests` | ✅ |
-| AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `attribute create`/`add-/update-/remove-option` and status-reason verbs via `PublishEntityInternalAsync`) | — (wired; live-publish covered by Integration) | ❌ |
+| AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `entity create`/`update`, `attribute create`/`update`/`add-/update-/remove-option`, and status-reason verbs via `PublishEntityInternalAsync`; #1171 added the entity create/update and attribute update surfaces) | `MetadataAuthoringServiceTests.CreateTableAsync_WithPublish_PublishesEntity`, `UpdateTableAsync_WithPublish_PublishesEntity`, `UpdateColumnAsync_WithPublish_PublishesEntity` | ✅ |
 | AC-59 | `ppds metadata --help` lists the canonical nouns and marks deprecated nouns (`table`, `column`, `choice`, `choices`) `(deprecated)` in their one-line description | `MetadataDeprecationTests.MetadataHelp_MarksDeprecatedNouns` | ❌ |
 | AC-60 | `entity --help` lists the status-reason subcommands; `attribute create --help` documents `--option`/`--choice`/derivation; each new subcommand exposes accurate `--help` | `MetadataHelpCoverageTests.NewSubcommands_HaveHelp` | ❌ |
 | AC-61 | All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, `remove-statusreason`) accept a positional `<entity>`; `--entity` still works (#1208) | `MetadataEntityCommandTests.AuthoringVerb_ParsesPositionalEntity` + `AuthoringVerb_StillAcceptsEntityFlag` | ✅ |
 | AC-62 | When both the positional `<entity>` and `--entity` are supplied they must agree (case-insensitive) or the parse fails with a "disagree" error; supplying neither is a parse error (#1208) | `MetadataEntityCommandTests.AuthoringVerb_PositionalAndFlagAgreeing_HasNoErrors` + `AuthoringVerb_PositionalAndFlagDisagreeing_HasErrors` + `AuthoringVerb_MissingEntity_HasErrors` | ✅ |
+| AC-63 | `optionset remove-option` targets a global option by `--value` or `--label` (exactly one; service-side resolution against unpublished metadata; `OPTION_NOT_FOUND` when unresolved) | `MetadataGlobalOptionServiceTests.DeleteOptionValue_ByLabel_ResolvesAndDeletes`, `DeleteOptionValue_ValueNotFound_ThrowsOptionNotFound`, `DeleteOptionValue_Resolution_RetrievesAsIfPublished` | ✅ |
+| AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
+| AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
 ### Edge Cases
 

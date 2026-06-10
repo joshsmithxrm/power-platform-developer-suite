@@ -144,6 +144,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.SchemaName.ToLowerInvariant());
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.SchemaName.ToLowerInvariant(), ct).ConfigureAwait(false);
+
         reporter?.ReportInfo($"Table '{request.SchemaName}' created successfully.");
         _logger?.LogInformation("Created table {SchemaName} with MetadataId {MetadataId}", request.SchemaName, response.EntityId);
 
@@ -217,8 +220,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
         // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
-        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
+        reporter?.ReportInfo(request.Publish
+            ? $"Table '{request.EntityLogicalName}' updated and published."
+            : $"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
     }
 
@@ -391,8 +399,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
         // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
-        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
+        reporter?.ReportInfo(request.Publish
+            ? $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}' and published."
+            : $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
     }
 
@@ -844,6 +857,14 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
         _validator.ValidateRequiredString(request.Label, "Label");
 
+        if (request.DryRun)
+        {
+            // The SDK assigns the value at insert time, so a dry-run can only echo the
+            // requested value (0 = would be auto-assigned).
+            _logger?.LogInformation("Dry-run: AddOptionValue '{Label}' to {OptionSet} validated", request.Label, request.OptionSetName);
+            return request.Value ?? 0;
+        }
+
         var sdkRequest = new InsertOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
@@ -876,18 +897,37 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _guard.EnsureCanMutate("metadata.option.update");
 
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
-        _validator.ValidateRequiredString(request.Label, "Label");
+
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        if (request.Value.HasValue && !string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Value and Label are mutually exclusive; provide exactly one to identify the target option.", "Value");
+
+        // #1170: resolve the target by value or label; the current label is preserved when
+        // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
+        var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: UpdateOptionValue {Value} in {OptionSet} validated", target.Value, request.OptionSetName);
+            return;
+        }
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
-            Value = request.Value,
-            Label = new Label(request.Label, 1033),
+            Value = target.Value,
+            Label = new Label(request.NewLabel ?? target.Label, 1033),
             SolutionUniqueName = request.SolutionUniqueName
         };
 
         if (!string.IsNullOrEmpty(request.Description))
             sdkRequest.Description = new Label(request.Description, 1033);
+        if (!string.IsNullOrEmpty(request.Color))
+            sdkRequest["Color"] = request.Color;
         if (!string.IsNullOrEmpty(request.EntityLogicalName))
             sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
@@ -896,7 +936,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
-        _logger?.LogInformation("Updated option value {Value} in {OptionSet}", request.Value, request.OptionSetName);
+        _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
     }
 
     /// <inheritdoc />
@@ -907,10 +947,27 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
 
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        if (request.Value.HasValue && !string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Value and Label are mutually exclusive; provide exactly one to identify the target option.", "Value");
+
+        // #1169: resolve the target by value or label, mirroring the local (column) option variant.
+        var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: DeleteOptionValue {Value} from {OptionSet} validated", target.Value, request.OptionSetName);
+            return;
+        }
+
         var sdkRequest = new SdkDeleteOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
-            Value = request.Value,
+            Value = target.Value,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -922,7 +979,62 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
-        _logger?.LogInformation("Deleted option value {Value} from {OptionSet}", request.Value, request.OptionSetName);
+        _logger?.LogInformation("Deleted option value {Value} from {OptionSet}", target.Value, request.OptionSetName);
+    }
+
+    /// <summary>
+    /// Retrieves a global option set (as-if-published, so unpublished edits are visible) and
+    /// resolves the target option by value or label (#1169). Mirrors <see cref="ResolveColumnOption"/>.
+    /// </summary>
+    private async Task<(int Value, string Label)> ResolveGlobalOptionAsync(
+        string optionSetName, int? value, string? label, CancellationToken ct)
+    {
+        RetrieveOptionSetResponse retrieveResponse;
+        try
+        {
+            var retrieveRequest = new RetrieveOptionSetRequest
+            {
+                Name = optionSetName,
+                RetrieveAsIfPublished = true
+            };
+
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            retrieveResponse = (RetrieveOptionSetResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound,
+                $"Could not retrieve option set '{optionSetName}': {ex.Message}", ex);
+        }
+
+        if (retrieveResponse.OptionSetMetadata is not OptionSetMetadata optionSet || optionSet.Options == null)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"'{optionSetName}' is not an option set with option values.", "OptionSetName");
+
+        foreach (var option in optionSet.Options)
+        {
+            var optionValue = option.Value ?? 0;
+            var optionLabel = option.Label?.UserLocalizedLabel?.Label
+                ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                ?? "";
+
+            var isMatch = value.HasValue
+                ? optionValue == value.Value
+                : string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase);
+
+            if (isMatch)
+                return (optionValue, optionLabel);
+        }
+
+        throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+            value.HasValue
+                ? $"Option with value {value.Value} not found in option set '{optionSetName}'."
+                : $"Option with label '{label}' not found in option set '{optionSetName}'.",
+            value.HasValue ? "Value" : "Label");
     }
 
     /// <inheritdoc />

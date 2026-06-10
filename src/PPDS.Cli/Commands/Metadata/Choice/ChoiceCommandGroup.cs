@@ -274,7 +274,7 @@ public static class ChoiceCommandGroup
 
             DeprecationWarning.Write("ppds metadata choice add-option", "ppds metadata optionset add-option");
             return await Metadata.OptionSetCommand.ExecuteAddOptionAsync(
-                solution, name, label, value, color,
+                solution, name, label, value, color, dryRun: false,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -330,8 +330,9 @@ public static class ChoiceCommandGroup
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             DeprecationWarning.Write("ppds metadata choice update-option", "ppds metadata optionset update-option");
+            // Legacy shape: --value selects the option, --label is the NEW label (#1170).
             return await Metadata.OptionSetCommand.ExecuteUpdateOptionAsync(
-                solution, name, value, label,
+                solution, name, value, label: null, newLabel: label, color: null, dryRun: false,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -388,7 +389,7 @@ public static class ChoiceCommandGroup
 
             DeprecationWarning.Write("ppds metadata choice remove-option", "ppds metadata optionset remove-option");
             return await Metadata.OptionSetCommand.ExecuteRemoveOptionAsync(
-                solution, name, value, force,
+                solution, name, value, label: null, force, dryRun: false,
                 profile, environment, globalOptions, cancellationToken);
         });
 

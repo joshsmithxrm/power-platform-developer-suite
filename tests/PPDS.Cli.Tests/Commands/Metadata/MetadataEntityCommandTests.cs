@@ -136,6 +136,43 @@ public class MetadataEntityCommandTests
         Assert.False(opt!.Required);
     }
 
+    // ---- --publish parity on entity create/update (#1171) ----
+
+    [Fact]
+    public void EntityCreate_HasPublishOption()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "create");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--publish");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void EntityUpdate_HasPublishOption()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "update");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--publish");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void EntityCreate_ParsesWithPublish()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "create");
+        var result = sub.Parse(
+            "--solution MySol --name new_MyTable --display-name \"My Table\" --plural-name \"My Tables\" --ownership UserOwned --publish");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void EntityUpdate_ParsesWithPublish()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "update");
+        var result = sub.Parse("--solution MySol --entity new_mytable --display-name Renamed --publish");
+        Assert.Empty(result.Errors);
+    }
+
     [Theory]
     [InlineData("--entity account --label Active2 --state Active --solution MySol")]
     [InlineData("--entity account --label Active2 --state-code 0 --solution MySol")]

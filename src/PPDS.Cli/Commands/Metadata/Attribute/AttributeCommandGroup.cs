@@ -514,6 +514,12 @@ public static class AttributeCommandGroup
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after the change",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("update", "Update an existing attribute on a Dataverse table")
         {
             solutionOption,
@@ -524,6 +530,7 @@ public static class AttributeCommandGroup
             requiredLevelOption,
             maxLengthOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -540,13 +547,14 @@ public static class AttributeCommandGroup
             var requiredLevel = parseResult.GetValue(requiredLevelOption);
             var maxLength = parseResult.GetValue(maxLengthOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profileVal = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteUpdateAsync(
                 solution, entity, column, displayName, description, requiredLevel, maxLength,
-                dryRun, profileVal, environmentVal, globalOptions, cancellationToken);
+                dryRun, publish, profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
         return command;
@@ -561,6 +569,7 @@ public static class AttributeCommandGroup
         string? requiredLevel,
         int? maxLength,
         bool dryRun,
+        bool publish,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -595,7 +604,8 @@ public static class AttributeCommandGroup
                 Description = description,
                 RequiredLevel = requiredLevel,
                 MaxLength = maxLength,
-                DryRun = dryRun
+                DryRun = dryRun,
+                Publish = publish
             };
 
             await authoringService.UpdateColumnAsync(request, ct: cancellationToken);
@@ -610,13 +620,17 @@ public static class AttributeCommandGroup
                     column,
                     updated = true,
                     dryRun,
-                    requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
+                    requiresPublish = !dryRun && !publish,
+                    publishHint = dryRun || publish ? null : publishHint
                 });
             }
             else if (dryRun)
             {
                 Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+            }
+            else if (publish)
+            {
+                Console.Error.WriteLine($"Attribute '{column}' on '{entity}' updated and published.");
             }
             else
             {

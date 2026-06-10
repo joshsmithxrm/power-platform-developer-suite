@@ -83,4 +83,103 @@ public class MetadataOptionSetCommandGroupTests
         Assert.NotNull(opt);
         Assert.True(opt!.Required);
     }
+
+    // ---- update-option flag alignment (#1170) ----
+
+    [Fact]
+    public void UpdateOptionSubcommand_HasSelectorAndNewLabelOptions()
+    {
+        // #1170: (--value | --label) selects the target, --new-label carries the update,
+        // --color is optional — aligned with attribute update-option.
+        var sub = _command.Subcommands.First(c => c.Name == "update-option");
+        var names = sub.Options.Select(o => o.Name).ToList();
+        Assert.Contains("--value", names);
+        Assert.Contains("--label", names);
+        Assert.Contains("--new-label", names);
+        Assert.Contains("--color", names);
+    }
+
+    [Fact]
+    public void UpdateOptionSubcommand_SelectorOptionsAreOptional()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "update-option");
+        Assert.False(sub.Options.First(o => o.Name == "--value").Required);
+        Assert.False(sub.Options.First(o => o.Name == "--label").Required);
+    }
+
+    [Fact]
+    public void UpdateOptionSubcommand_ParsesWithValueSelector()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "update-option");
+        var result = sub.Parse("--solution MySol --name new_status --value 1 --new-label Updated");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void UpdateOptionSubcommand_ParsesWithLabelSelector()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "update-option");
+        var result = sub.Parse("--solution MySol --name new_status --label Old --new-label New --color #FF0000");
+        Assert.Empty(result.Errors);
+    }
+
+    // ---- remove-option selector parity (#1169) ----
+
+    [Fact]
+    public void RemoveOptionSubcommand_HasLabelOption()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--label");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ValueOptionIsOptional()
+    {
+        // #1169: --value is no longer required; exactly one of --value/--label is
+        // enforced at execution time (parity with attribute remove-option).
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--value");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ParsesWithValue()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var result = sub.Parse("--solution MySol --name new_status --value 1 --force");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ParsesWithLabel()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var result = sub.Parse("--solution MySol --name new_status --label Active --force");
+        Assert.Empty(result.Errors);
+    }
+
+    // ---- --dry-run parity on option mutation subcommands (#1172) ----
+
+    [Theory]
+    [InlineData("add-option")]
+    [InlineData("update-option")]
+    [InlineData("remove-option")]
+    public void OptionMutationSubcommands_HaveDryRunOption(string subcommandName)
+    {
+        var sub = _command.Subcommands.First(c => c.Name == subcommandName);
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--dry-run");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void AddOptionSubcommand_ParsesWithDryRun()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "add-option");
+        var result = sub.Parse("--solution MySol --name new_status --label Pending --dry-run");
+        Assert.Empty(result.Errors);
+    }
 }
