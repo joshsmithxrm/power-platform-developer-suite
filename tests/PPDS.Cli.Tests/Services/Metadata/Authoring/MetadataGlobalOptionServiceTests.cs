@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -16,8 +18,11 @@ using SdkUpdateOptionValueRequest = Microsoft.Xrm.Sdk.Messages.UpdateOptionValue
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
-/// Covers global (option-set-scoped) option management on the authoring service:
-/// add-option color forwarding (#1233) and value/label targeting + dry-run (#1169/#1170/#1172).
+/// Covers global (option-set-scoped) option management on the authoring service: value/label targeting +
+/// dry-run (#1169/#1170/#1172) and option color. Color is NOT carried by the Insert/Update OptionValue
+/// messages (those have no Color parameter — the platform silently drops request["Color"]); it must be
+/// applied via OptionMetadata.Color re-sent through UpdateOptionSet. These tests assert the service does
+/// exactly that and never the ignored indexer.
 /// </summary>
 [Trait("Category", "Unit")]
 public class MetadataGlobalOptionServiceTests
@@ -25,8 +30,12 @@ public class MetadataGlobalOptionServiceTests
     private readonly Mock<IDataverseConnectionPool> _pool = new();
     private readonly Mock<IPooledClient> _client = new();
     private readonly DataverseMetadataAuthoringService _service;
+
+    // Stateful backing store so the post-insert retrieve (color follow-up) sees the new option.
+    private readonly List<OptionMetadata> _options = new();
     private OrganizationRequest? _captured;
     private RetrieveOptionSetRequest? _retrieveRequest;
+    private UpdateOptionSetRequest? _capturedColorUpdate;
 
     public MetadataGlobalOptionServiceTests()
     {
@@ -34,8 +43,9 @@ public class MetadataGlobalOptionServiceTests
             .ReturnsAsync(_client.Object);
         _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
 
-        // Default mock: handles add-option (Insert). Tests that target an existing option by
-        // value/label call SetupGlobalOptions, which re-setups the client for Retrieve/Delete/Update.
+        // Default mock: stateful add-option (Insert) plus the color follow-up (Retrieve + UpdateOptionSet).
+        // Tests that target an existing option by value/label call SetupGlobalOptions, which re-setups the
+        // client with a fixed option set for Retrieve/Delete/Update.
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .Returns<OrganizationRequest, CancellationToken>((req, _) =>
             {
@@ -43,9 +53,27 @@ public class MetadataGlobalOptionServiceTests
                 {
                     case InsertOptionValueRequest insert:
                         _captured = req;
+                        var insertedValue = insert.Value ?? 0;
+                        _options.Add(new OptionMetadata(insert.Label, insertedValue));
                         var ins = new InsertOptionValueResponse();
-                        ins.Results["NewOptionValue"] = insert.Value ?? 0;
+                        ins.Results["NewOptionValue"] = insertedValue;
                         return Task.FromResult<OrganizationResponse>(ins);
+                    case SdkUpdateOptionValueRequest:
+                        _captured = req;
+                        return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
+                    case RetrieveOptionSetRequest retrieve:
+                    {
+                        _retrieveRequest = retrieve;
+                        var optionSet = new OptionSetMetadata { IsGlobal = true };
+                        foreach (var o in _options)
+                            optionSet.Options.Add(o);
+                        var resp = new RetrieveOptionSetResponse();
+                        resp.Results["OptionSetMetadata"] = optionSet;
+                        return Task.FromResult<OrganizationResponse>(resp);
+                    }
+                    case UpdateOptionSetRequest upd:
+                        _capturedColorUpdate = upd;
+                        return Task.FromResult<OrganizationResponse>(new UpdateOptionSetResponse());
                     default:
                         return Task.FromResult(new OrganizationResponse());
                 }
@@ -69,6 +97,9 @@ public class MetadataGlobalOptionServiceTests
                     case RetrieveOptionSetRequest retrieve:
                         _retrieveRequest = retrieve;
                         return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                    case UpdateOptionSetRequest upd:
+                        _capturedColorUpdate = upd;
+                        return Task.FromResult<OrganizationResponse>(new UpdateOptionSetResponse());
                     case SdkDeleteOptionValueRequest:
                         _captured = req;
                         return Task.FromResult<OrganizationResponse>(new DeleteOptionValueResponse());
@@ -79,10 +110,14 @@ public class MetadataGlobalOptionServiceTests
             });
     }
 
-    // ---- add-option color forwarding (#1233) ----
+    private string? CapturedColorFor(int value)
+        => ((_capturedColorUpdate?.OptionSet as OptionSetMetadata)?.Options)
+            ?.FirstOrDefault(o => o.Value == value)?.Color;
+
+    // ---- add/update-option color forwarding (#1233) ----
 
     [Fact]
-    public async Task AddOptionValue_WithColor_ForwardsColorToInsertRequest()
+    public async Task AddOptionValue_WithColor_AppliesColorViaUpdateOptionSet()
     {
         var assigned = await _service.AddOptionValueAsync(new AddOptionValueRequest
         {
@@ -94,9 +129,15 @@ public class MetadataGlobalOptionServiceTests
         });
 
         assigned.Should().Be(864630001);
+
+        // Color must NOT ride on the Insert message — that parameter is silently dropped by the platform.
         var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
         insert.Value.Should().Be(864630001);
-        insert["Color"].Should().Be("#FF0000");
+        insert.Parameters.ContainsKey("Color").Should().BeFalse();
+
+        // It is applied via OptionMetadata.Color + UpdateOptionSet instead.
+        _capturedColorUpdate.Should().NotBeNull();
+        CapturedColorFor(864630001).Should().Be("#FF0000");
     }
 
     [Fact]
@@ -112,6 +153,30 @@ public class MetadataGlobalOptionServiceTests
 
         var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
         insert.Parameters.ContainsKey("Color").Should().BeFalse();
+        // No color requested → no UpdateOptionSet follow-up.
+        _capturedColorUpdate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateOptionValue_WithColor_AppliesColorViaUpdateOptionSet()
+    {
+        _options.Add(new OptionMetadata(new Label("Existing", 1033), 864630000));
+
+        await _service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            OptionSetName = "hsl_severity",
+            SolutionUniqueName = "MySolution",
+            Value = 864630000,
+            NewLabel = "Renamed",
+            Color = "#112233"
+        });
+
+        // Label travels via UpdateOptionValue (without a Color parameter)...
+        var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
+        update.Parameters.ContainsKey("Color").Should().BeFalse();
+        // ...color via UpdateOptionSet.
+        _capturedColorUpdate.Should().NotBeNull();
+        CapturedColorFor(864630000).Should().Be("#112233");
     }
 
     // ---- remove-option targeting by value/label (#1169) ----
@@ -234,7 +299,7 @@ public class MetadataGlobalOptionServiceTests
     }
 
     [Fact]
-    public async Task UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor() // #1170
+    public async Task UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndAppliesColorViaUpdateOptionSet() // #1170 + #1233
     {
         SetupGlobalOptions((100000000, "Draft"));
 
@@ -246,11 +311,15 @@ public class MetadataGlobalOptionServiceTests
             Color = "#FF0000"
         });
 
+        // The label update preserves the current label and carries NO Color parameter...
         var upd = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
         upd.Value.Should().Be(100000000);
         upd.Label.LocalizedLabels.Should().ContainSingle()
             .Which.Label.Should().Be("Draft");
-        upd["Color"].Should().Be("#FF0000");
+        upd.Parameters.ContainsKey("Color").Should().BeFalse();
+        // ...color is applied via OptionMetadata.Color + UpdateOptionSet.
+        _capturedColorUpdate.Should().NotBeNull();
+        CapturedColorFor(100000000).Should().Be("#FF0000");
     }
 
     [Fact]

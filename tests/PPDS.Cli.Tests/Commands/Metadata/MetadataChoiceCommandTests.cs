@@ -280,9 +280,58 @@ public class ChoiceUpdateOptionCommandTests
     }
 
     [Fact]
+    public void UpdateOption_HasOptionalColorOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--color");
+        Assert.NotNull(option);
+        Assert.False(option!.Required);
+    }
+
+    [Fact]
     public void Parse_WithRequiredOptions_Succeeds()
     {
         var result = _command.Parse("--solution MySolution --name new_status --value 1 --label \"Updated Label\"");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithColor_Succeeds()
+    {
+        var result = _command.Parse(
+            "--solution MySolution --name new_status --value 1 --label \"Updated Label\" --color #FF0000");
+        Assert.Empty(result.Errors);
+    }
+}
+
+[Trait("Category", "Unit")]
+public class OptionSetUpdateOptionCommandTests
+{
+    private readonly Command _command;
+
+    public OptionSetUpdateOptionCommandTests()
+    {
+        _command = OptionSetCommand.CreateUpdateOptionCommand();
+    }
+
+    [Fact]
+    public void UpdateOption_HasCorrectName()
+    {
+        Assert.Equal("update-option", _command.Name);
+    }
+
+    [Fact]
+    public void UpdateOption_HasOptionalColorOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--color");
+        Assert.NotNull(option);
+        Assert.False(option!.Required);
+    }
+
+    [Fact]
+    public void Parse_WithColor_Succeeds()
+    {
+        var result = _command.Parse(
+            "--solution MySolution --name new_status --value 1 --label \"Updated Label\" --color #00FF00");
         Assert.Empty(result.Errors);
     }
 }

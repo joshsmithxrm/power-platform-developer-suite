@@ -307,12 +307,18 @@ public static class ChoiceCommandGroup
             Required = true
         };
 
+        var colorOption = new Option<string?>("--color")
+        {
+            Description = "New color for the option (hex string, e.g., #FF0000)"
+        };
+
         var command = new Command("update-option", "Update an existing option value in an option set")
         {
             solutionOption,
             nameOption,
             valueOption,
             labelOption,
+            colorOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -325,14 +331,15 @@ public static class ChoiceCommandGroup
             var name = parseResult.GetValue(nameOption)!;
             var value = parseResult.GetValue(valueOption);
             var label = parseResult.GetValue(labelOption)!;
+            var color = parseResult.GetValue(colorOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             DeprecationWarning.Write("ppds metadata choice update-option", "ppds metadata optionset update-option");
-            // Legacy shape: --value selects the option, --label is the NEW label (#1170).
+            // Legacy shape: --value selects the option, --label is the NEW label (#1170); --color sets color (#1233).
             return await Metadata.OptionSetCommand.ExecuteUpdateOptionAsync(
-                solution, name, value, label: null, newLabel: label, color: null, dryRun: false,
+                solution, name, value, label: null, newLabel: label, color: color, dryRun: false,
                 profile, environment, globalOptions, cancellationToken);
         });
 
