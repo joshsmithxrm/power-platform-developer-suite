@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Crm.Sdk.Messages;
@@ -106,6 +107,15 @@ namespace PPDS.Dataverse.Pooling
 
                 await client.ExecuteAsync(request, cancellationToken);
             }
+            catch (FaultException<OrganizationServiceFault> ex) when (IsEnvironmentLockFault(ex))
+            {
+                throw new InvalidOperationException(
+                    "Your changes were saved to Dataverse but could not be published because another operation " +
+                    $"is currently running in the environment ({ex.Detail?.Message ?? ex.Message}). " +
+                    "Wait for the conflicting operation to complete, then re-run the command with --publish " +
+                    "or run `ppds publish` to publish manually.",
+                    ex);
+            }
             finally
             {
                 semaphore.Release();
@@ -155,10 +165,32 @@ namespace PPDS.Dataverse.Pooling
                 var request = new PublishAllXmlRequest();
                 await client.ExecuteAsync(request, cancellationToken);
             }
+            catch (FaultException<OrganizationServiceFault> ex) when (IsEnvironmentLockFault(ex))
+            {
+                throw new InvalidOperationException(
+                    "Publish-all could not start because another operation is currently running in the environment " +
+                    $"({ex.Detail?.Message ?? ex.Message}). " +
+                    "Wait for the conflicting operation to complete and retry.",
+                    ex);
+            }
             finally
             {
                 semaphore.Release();
             }
+        }
+
+        /// <summary>
+        /// Returns true when a Dataverse fault indicates the environment is locked by another
+        /// concurrent operation (e.g. an active import or publish).
+        /// Dataverse surfaces this as "Cannot start the requested operation [X] because there is
+        /// another [Y] running at this moment" — match on that message pattern since the error
+        /// code is not publicly documented.
+        /// </summary>
+        private static bool IsEnvironmentLockFault(FaultException<OrganizationServiceFault> ex)
+        {
+            var msg = ex.Detail?.Message ?? ex.Message ?? string.Empty;
+            return msg.Contains("Cannot start the requested operation", StringComparison.OrdinalIgnoreCase)
+                && msg.Contains("running at this moment", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
