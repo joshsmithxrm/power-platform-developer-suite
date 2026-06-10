@@ -918,10 +918,14 @@ public static class OptionSetCommand
             Required = true
         };
 
-        var valueOption = new Option<int>("--value")
+        var valueOption = new Option<int?>("--value")
         {
-            Description = "Numeric value of the option to remove",
-            Required = true
+            Description = "Target option by value (mutually exclusive with --label)"
+        };
+
+        var labelOption = new Option<string?>("--label")
+        {
+            Description = "Target option by label (mutually exclusive with --value)"
         };
 
         var forceOption = new Option<bool>("--force")
@@ -935,6 +939,7 @@ public static class OptionSetCommand
             solutionOption,
             nameOption,
             valueOption,
+            labelOption,
             forceOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
@@ -947,13 +952,28 @@ public static class OptionSetCommand
             var solution = parseResult.GetValue(solutionOption)!;
             var name = parseResult.GetValue(nameOption)!;
             var value = parseResult.GetValue(valueOption);
+            var label = parseResult.GetValue(labelOption);
             var force = parseResult.GetValue(forceOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
+            var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
+            // #1169: --value or --label as selector, parity with attribute remove-option.
+            if (!value.HasValue && string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Exactly one of --value or --label is required to identify the option."));
+                return ExitCodes.ValidationError;
+            }
+            if (value.HasValue && !string.IsNullOrEmpty(label))
+            {
+                writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteRemoveOptionAsync(
-                solution, name, value, force,
+                solution, name, value, label, force,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -963,7 +983,8 @@ public static class OptionSetCommand
     internal static async Task<int> ExecuteRemoveOptionAsync(
         string solution,
         string name,
-        int value,
+        int? value,
+        string? label,
         bool force,
         string? profile,
         string? environment,
@@ -971,6 +992,7 @@ public static class OptionSetCommand
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var target = value.HasValue ? $"value {value}" : $"label '{label}'";
 
         try
         {
@@ -995,7 +1017,7 @@ public static class OptionSetCommand
                 if (!Console.IsInputRedirected)
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will remove option value {value} from '{name}'.");
+                    Console.Error.WriteLine($"WARNING: This will remove the option ({target}) from '{name}'.");
                     Console.Error.WriteLine("         Records using this value will lose their selection.");
                     Console.ResetColor();
                     Console.Error.WriteLine();
@@ -1022,25 +1044,26 @@ public static class OptionSetCommand
 
             if (!globalOptions.IsJsonMode)
             {
-                Console.Error.WriteLine($"Removing option value {value} from '{name}'...");
+                Console.Error.WriteLine($"Removing option ({target}) from '{name}'...");
             }
 
             var request = new DeleteOptionValueRequest
             {
                 SolutionUniqueName = solution,
                 OptionSetName = name,
-                Value = value
+                Value = value,
+                Label = label
             };
 
             await authoringService.DeleteOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, value, removed = true });
+                writer.WriteSuccess(new { optionSetName = name, removed = true });
             }
             else
             {
-                Console.Error.WriteLine($"Option value {value} removed from '{name}'.");
+                Console.Error.WriteLine($"Option ({target}) removed from '{name}'.");
             }
 
             return ExitCodes.Success;

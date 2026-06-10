@@ -1,0 +1,160 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
+using Moq;
+using PPDS.Cli.Services.Metadata.Authoring;
+using PPDS.Cli.Tests.Services.Shared;
+using PPDS.Dataverse.Metadata.Authoring;
+using PPDS.Dataverse.Pooling;
+using Xunit;
+using SdkDeleteOptionValueRequest = Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest;
+
+namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
+
+/// <summary>
+/// Covers global option-value targeting by value/label on the authoring service (#1169)
+/// — the global counterpart of the local (column) option tests.
+/// </summary>
+[Trait("Category", "Unit")]
+public class MetadataGlobalOptionServiceTests
+{
+    private readonly Mock<IDataverseConnectionPool> _pool = new();
+    private readonly Mock<IPooledClient> _client = new();
+    private readonly DataverseMetadataAuthoringService _service;
+    private OrganizationRequest? _captured;
+    private RetrieveOptionSetRequest? _retrieveRequest;
+
+    public MetadataGlobalOptionServiceTests()
+    {
+        _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_client.Object);
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+    }
+
+    /// <summary>Sets up the global option set returned by RetrieveOptionSet, and captures mutations.</summary>
+    private void SetupGlobalOptions(params (int value, string label)[] options)
+    {
+        var optionSet = new OptionSetMetadata { Name = "new_mystatus", IsGlobal = true };
+        foreach (var (value, label) in options)
+            optionSet.Options.Add(new OptionMetadata(new Label(label, 1033), value));
+        var retrieveResponse = new RetrieveOptionSetResponse();
+        retrieveResponse.Results["OptionSetMetadata"] = optionSet;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                switch (req)
+                {
+                    case RetrieveOptionSetRequest retrieve:
+                        _retrieveRequest = retrieve;
+                        return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                    case SdkDeleteOptionValueRequest:
+                        _captured = req;
+                        return Task.FromResult<OrganizationResponse>(new DeleteOptionValueResponse());
+                    default:
+                        _captured = req;
+                        return Task.FromResult(new OrganizationResponse());
+                }
+            });
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_ByLabel_ResolvesAndDeletes() // #1169
+    {
+        SetupGlobalOptions((100000000, "Draft"), (100000001, "Approved"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Approved"
+        });
+
+        var del = _captured.Should().BeOfType<SdkDeleteOptionValueRequest>().Subject;
+        del.Value.Should().Be(100000001);
+        del.OptionSetName.Should().Be("new_mystatus");
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_ByLabel_IsCaseInsensitive() // #1169
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "dRaFt"
+        });
+
+        _captured.Should().BeOfType<SdkDeleteOptionValueRequest>()
+            .Which.Value.Should().Be(100000000);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_LabelNotFound_ThrowsOptionNotFound() // #1169
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Label = "Nope"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.OptionNotFound);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_ValueNotFound_ThrowsOptionNotFound() // #1169
+    {
+        SetupGlobalOptions((100000000, "Draft"));
+
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 999999
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.OptionNotFound);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_NeitherValueNorLabel_ThrowsMissingRequiredField() // #1169
+    {
+        var act = () => _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus"
+        });
+
+        await act.Should().ThrowAsync<MetadataValidationException>()
+            .Where(e => e.ErrorCode == MetadataErrorCodes.MissingRequiredField);
+    }
+
+    [Fact]
+    public async Task DeleteOptionValue_Resolution_RetrievesAsIfPublished() // #1169
+    {
+        // A just-added option is unpublished; resolution must see unpublished metadata
+        // or value/label targeting regresses for the add-then-remove flow.
+        SetupGlobalOptions((100000000, "Draft"));
+
+        await _service.DeleteOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.DeleteOptionValueRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            OptionSetName = "new_mystatus",
+            Value = 100000000
+        });
+
+        _retrieveRequest.Should().NotBeNull();
+        _retrieveRequest!.RetrieveAsIfPublished.Should().BeTrue();
+    }
+}

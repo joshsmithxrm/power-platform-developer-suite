@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ppds api request`** — authenticated raw Web API calls to Dataverse (GET/POST/PATCH/DELETE) with default OData headers and production write protection (#1164).
 - **`ppds api request --profile|-p`** — target a specific authentication profile, consistent with the other commands (previously `api request` could only switch the environment, not the profile).
 - **Local Choice columns** — `ppds metadata attribute create --type Choice` with inline --option/--options-file, plus `ppds metadata attribute add-option|update-option|remove-option` for column-scoped option sets (#1161).
+- **`ppds metadata optionset remove-option --label`** — target an option on a global option set by label as an alternative to `--value` (mutually exclusive), matching `attribute remove-option`. Resolution happens in the authoring service against unpublished metadata (so just-added options are targetable before publish); unresolved targets report `OPTION_NOT_FOUND` (#1169).
 
 ### Changed
 - **`ppds metadata entity` authoring verbs accept a positional `<entity>`** — `update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, and `remove-statusreason` now take the entity logical name positionally (`ppds metadata entity update hsl_veterinarian --solution …`), matching how the parent `entity <name>` read lookup is typed. `--entity` keeps working as a fully equivalent flag; if both are supplied they must agree or the command errors clearly instead of silently picking one (#1208).

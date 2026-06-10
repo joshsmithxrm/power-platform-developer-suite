@@ -905,10 +905,17 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
 
+        if (!request.Value.HasValue && string.IsNullOrEmpty(request.Label))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Provide --value or --label to identify the target option.", "Value");
+
+        // #1169: resolve the target by value or label, mirroring the local (column) option variant.
+        var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
+
         var sdkRequest = new SdkDeleteOptionValueRequest
         {
             OptionSetName = request.OptionSetName,
-            Value = request.Value,
+            Value = target.Value,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -920,7 +927,62 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
-        _logger?.LogInformation("Deleted option value {Value} from {OptionSet}", request.Value, request.OptionSetName);
+        _logger?.LogInformation("Deleted option value {Value} from {OptionSet}", target.Value, request.OptionSetName);
+    }
+
+    /// <summary>
+    /// Retrieves a global option set (as-if-published, so unpublished edits are visible) and
+    /// resolves the target option by value or label (#1169). Mirrors <see cref="ResolveColumnOption"/>.
+    /// </summary>
+    private async Task<(int Value, string Label)> ResolveGlobalOptionAsync(
+        string optionSetName, int? value, string? label, CancellationToken ct)
+    {
+        RetrieveOptionSetResponse retrieveResponse;
+        try
+        {
+            var retrieveRequest = new RetrieveOptionSetRequest
+            {
+                Name = optionSetName,
+                RetrieveAsIfPublished = true
+            };
+
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            retrieveResponse = (RetrieveOptionSetResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // R2: cancellation must propagate
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound,
+                $"Could not retrieve option set '{optionSetName}': {ex.Message}", ex);
+        }
+
+        if (retrieveResponse.OptionSetMetadata is not OptionSetMetadata optionSet || optionSet.Options == null)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"'{optionSetName}' is not an option set with option values.", "OptionSetName");
+
+        foreach (var option in optionSet.Options)
+        {
+            var optionValue = option.Value ?? 0;
+            var optionLabel = option.Label?.UserLocalizedLabel?.Label
+                ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                ?? "";
+
+            var isMatch = value.HasValue
+                ? optionValue == value.Value
+                : string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase);
+
+            if (isMatch)
+                return (optionValue, optionLabel);
+        }
+
+        throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+            value.HasValue
+                ? $"Option with value {value.Value} not found in option set '{optionSetName}'."
+                : $"Option with label '{label}' not found in option set '{optionSetName}'.",
+            value.HasValue ? "Value" : "Label");
     }
 
     /// <inheritdoc />

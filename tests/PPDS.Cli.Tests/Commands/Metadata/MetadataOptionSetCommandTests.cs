@@ -83,4 +83,42 @@ public class MetadataOptionSetCommandGroupTests
         Assert.NotNull(opt);
         Assert.True(opt!.Required);
     }
+
+    // ---- remove-option selector parity (#1169) ----
+
+    [Fact]
+    public void RemoveOptionSubcommand_HasLabelOption()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--label");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ValueOptionIsOptional()
+    {
+        // #1169: --value is no longer required; exactly one of --value/--label is
+        // enforced at execution time (parity with attribute remove-option).
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var opt = sub.Options.FirstOrDefault(o => o.Name == "--value");
+        Assert.NotNull(opt);
+        Assert.False(opt!.Required);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ParsesWithValue()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var result = sub.Parse("--solution MySol --name new_status --value 1 --force");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void RemoveOptionSubcommand_ParsesWithLabel()
+    {
+        var sub = _command.Subcommands.First(c => c.Name == "remove-option");
+        var result = sub.Parse("--solution MySol --name new_status --label Active --force");
+        Assert.Empty(result.Errors);
+    }
 }

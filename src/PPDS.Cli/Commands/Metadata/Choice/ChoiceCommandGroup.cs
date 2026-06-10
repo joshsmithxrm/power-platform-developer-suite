@@ -388,7 +388,7 @@ public static class ChoiceCommandGroup
 
             DeprecationWarning.Write("ppds metadata choice remove-option", "ppds metadata optionset remove-option");
             return await Metadata.OptionSetCommand.ExecuteRemoveOptionAsync(
-                solution, name, value, force,
+                solution, name, value, label: null, force,
                 profile, environment, globalOptions, cancellationToken);
         });
 
