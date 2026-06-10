@@ -78,10 +78,14 @@ PPDS.Mcp reads authentication from your PPDS profile store. Create a profile bef
 ppds auth create
 
 # Device code flow (for remote/headless scenarios)
-ppds auth create --method DeviceCode
+ppds auth create --deviceCode
 
 # Service principal (for CI/CD and automation)
-ppds auth create --method ClientSecret --client-id <id> --tenant-id <tid>
+ppds auth create --name ci \
+  --applicationId <id> \
+  --clientSecret <secret> \
+  --tenant <tid> \
+  --environment https://org.crm.dynamics.com
 ```
 
 After creating a profile and selecting an environment, the MCP server automatically uses those credentials for all Dataverse operations.
