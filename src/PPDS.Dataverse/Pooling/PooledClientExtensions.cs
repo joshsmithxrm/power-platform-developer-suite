@@ -188,7 +188,8 @@ namespace PPDS.Dataverse.Pooling
         /// </summary>
         private static bool IsEnvironmentLockFault(FaultException<OrganizationServiceFault> ex)
         {
-            var msg = ex.Detail?.Message ?? ex.Message ?? string.Empty;
+            var detail = ex.Detail?.Message;
+            var msg = string.IsNullOrEmpty(detail) ? (ex.Message ?? string.Empty) : detail;
             return msg.Contains("Cannot start the requested operation", StringComparison.OrdinalIgnoreCase)
                 && msg.Contains("running at this moment", StringComparison.OrdinalIgnoreCase);
         }
