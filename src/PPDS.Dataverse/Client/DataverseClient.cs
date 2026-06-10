@@ -265,7 +265,7 @@ namespace PPDS.Dataverse.Client
         /// <inheritdoc />
         public async Task<string?> GetRawWebApiAsync(string queryString, CancellationToken ct)
         {
-            var response = await _serviceClient.ExecuteWebRequestAsync(HttpMethod.Get, queryString, string.Empty, null, "application/json", ct);
+            using var response = await _serviceClient.ExecuteWebRequestAsync(HttpMethod.Get, queryString, string.Empty, null, "application/json", ct);
             if (!response.IsSuccessStatusCode)
                 return null;
             return await response.Content.ReadAsStringAsync(ct);

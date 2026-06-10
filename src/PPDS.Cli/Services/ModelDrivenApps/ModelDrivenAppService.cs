@@ -1122,7 +1122,8 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
                 // Response: {"@odata.id":"https://org.crm.dynamics.com/api/data/v9.2/sitemaps(guid)"}
-                if (doc.RootElement.TryGetProperty("@odata.id", out var idProp))
+                if (doc.RootElement.TryGetProperty("@odata.id", out var idProp)
+                    && idProp.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     var odataId = idProp.GetString();
                     if (!string.IsNullOrEmpty(odataId))
