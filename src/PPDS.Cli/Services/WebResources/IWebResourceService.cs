@@ -30,6 +30,24 @@ public interface IWebResourceService
     Task<WebResourceInfo?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets a web resource by exact name (metadata only, no content).
+    /// </summary>
+    /// <param name="name">The web resource logical name (exact match).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<WebResourceInfo?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a new web resource. Does NOT publish.
+    /// </summary>
+    /// <param name="request">The creation request (name, type, content, optional solution binding).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The ID of the created web resource.</returns>
+    /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
+    /// Thrown with <c>WebResource.AlreadyExists</c> when a resource with the same name exists.
+    /// </exception>
+    Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the content of a web resource, optionally unpublished.
     /// </summary>
     /// <param name="id">The web resource ID.</param>
@@ -55,6 +73,16 @@ public interface IWebResourceService
     /// <param name="content">The text content (will be base64 encoded before sending).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task UpdateContentAsync(Guid id, string content, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates the content of a web resource from a raw byte payload. Unlike the text overload,
+    /// binary types (PNG/JPG/GIF/ICO/XAP) are allowed — the payload replaces the stored content
+    /// verbatim. Does NOT publish.
+    /// </summary>
+    /// <param name="id">The web resource ID.</param>
+    /// <param name="content">The raw content bytes (will be base64 encoded before sending).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task UpdateContentAsync(Guid id, byte[] content, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Publishes specific web resources via PublishXml.
@@ -89,7 +117,12 @@ public record WebResourceInfo(
     /// Human-readable type name derived from type code.
     /// Single code path for all surfaces (Constitution A2).
     /// </summary>
-    public string TypeName => WebResourceType switch
+    public string TypeName => GetTypeName(WebResourceType);
+
+    /// <summary>
+    /// Maps a webresourcetype code to its human-readable name.
+    /// </summary>
+    public static string GetTypeName(int webResourceType) => webResourceType switch
     {
         1 => "HTML",
         2 => "CSS",
@@ -103,7 +136,7 @@ public record WebResourceInfo(
         10 => "ICO",
         11 => "SVG",
         12 => "RESX",
-        _ => $"Unknown ({WebResourceType})"
+        _ => $"Unknown ({webResourceType})"
     };
 
     /// <summary>
@@ -141,3 +174,18 @@ public record WebResourceContent(
     int WebResourceType,
     string? Content,
     DateTime? ModifiedOn);
+
+/// <summary>
+/// Request to create a new web resource from raw content.
+/// </summary>
+/// <param name="Name">Logical name of the new web resource (e.g., <c>new_/icons/vet.svg</c>).</param>
+/// <param name="DisplayName">Display name; defaults to <paramref name="Name"/> when null.</param>
+/// <param name="WebResourceType">Dataverse webresourcetype code (1–12).</param>
+/// <param name="Content">Raw content bytes (base64 encoded before sending).</param>
+/// <param name="SolutionUniqueName">Optional solution to add the resource to (atomic, via CreateRequest's SolutionUniqueName parameter).</param>
+public sealed record CreateWebResourceRequest(
+    string Name,
+    string? DisplayName,
+    int WebResourceType,
+    byte[] Content,
+    string? SolutionUniqueName);

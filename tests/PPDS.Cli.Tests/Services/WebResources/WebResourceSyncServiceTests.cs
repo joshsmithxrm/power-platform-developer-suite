@@ -564,6 +564,25 @@ internal sealed class FakeWebResourceService : IWebResourceService
         return Task.FromResult<DateTime?>(_byName[name].ModifiedOn);
     }
 
+    public Task<WebResourceInfo?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var info = _byName.TryGetValue(name, out var s)
+            ? new WebResourceInfo(s.Id, s.Name, null, s.Type, false, null, DateTime.UtcNow, null, s.ModifiedOn)
+            : null;
+        return Task.FromResult(info);
+    }
+
+    public Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        AddText(request.Name, System.Text.Encoding.UTF8.GetString(request.Content), request.WebResourceType);
+        return Task.FromResult(IdOf(request.Name));
+    }
+
+    public Task UpdateContentAsync(Guid id, byte[] content, CancellationToken cancellationToken = default) =>
+        UpdateContentAsync(id, System.Text.Encoding.UTF8.GetString(content), cancellationToken);
+
     public Task UpdateContentAsync(Guid id, string content, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref UpdateContentCallCount);

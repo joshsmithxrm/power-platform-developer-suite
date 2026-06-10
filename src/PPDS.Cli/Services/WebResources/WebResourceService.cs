@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
@@ -174,6 +175,62 @@ public class WebResourceService : IWebResourceService
     }
 
     /// <inheritdoc />
+    public async Task<WebResourceInfo?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        var query = new QueryExpression(WebResource.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(ListColumns),
+            TopCount = 1
+        };
+        query.Criteria.AddCondition(WebResource.Fields.Name, ConditionOperator.Equal, name);
+
+        _logger.LogDebug("Getting web resource by name: {Name}", name);
+
+        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        return results.Entities.FirstOrDefault() is { } entity ? MapToWebResourceInfo(entity) : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
+    {
+        _guard.EnsureCanMutate("webresources.create");
+
+        var existing = await GetByNameAsync(request.Name, cancellationToken);
+        if (existing != null)
+        {
+            throw new PpdsException(
+                ErrorCodes.WebResource.AlreadyExists,
+                $"A web resource named '{request.Name}' already exists ({existing.TypeName}). " +
+                $"Use 'ppds webresources update {request.Name} <file>' to replace its content.");
+        }
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        var entity = new Entity(WebResource.EntityLogicalName)
+        {
+            [WebResource.Fields.Name] = request.Name,
+            [WebResource.Fields.DisplayName] = request.DisplayName ?? request.Name,
+            [WebResource.Fields.WebResourceType] = new OptionSetValue(request.WebResourceType),
+            [WebResource.Fields.Content] = Convert.ToBase64String(request.Content)
+        };
+
+        var createRequest = new CreateRequest { Target = entity };
+
+        // SDK equivalent of the MSCRM.SolutionUniqueName header — atomic solution association
+        if (!string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+        {
+            createRequest.Parameters["SolutionUniqueName"] = request.SolutionUniqueName;
+        }
+
+        var response = (CreateResponse)await client.ExecuteAsync(createRequest, cancellationToken);
+
+        _logger.LogInformation("Created web resource: {Name} ({Id})", request.Name, response.id);
+        return response.id;
+    }
+
+    /// <inheritdoc />
     public async Task<WebResourceContent?> GetContentAsync(
         Guid id,
         bool published = false,
@@ -282,6 +339,25 @@ public class WebResourceService : IWebResourceService
         await client.UpdateAsync(update, cancellationToken);
 
         _logger.LogInformation("Updated web resource content: {Name} ({Id})", info.Name, id);
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateContentAsync(Guid id, byte[] content, CancellationToken cancellationToken = default)
+    {
+        _guard.EnsureCanMutate("webresources.updateContent");
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        // Unlike the text overload, no text-type validation: replacing content from a local
+        // file is valid for binary types (PNG icons, etc.) — the bytes go up verbatim.
+        var update = new Entity(WebResource.EntityLogicalName, id)
+        {
+            [WebResource.Fields.Content] = Convert.ToBase64String(content)
+        };
+
+        await client.UpdateAsync(update, cancellationToken);
+
+        _logger.LogInformation("Updated web resource content from file payload: {Id}", id);
     }
 
     /// <inheritdoc />

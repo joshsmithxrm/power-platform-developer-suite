@@ -7,8 +7,10 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Solutions;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Cli.Tests.Services.Shared;
@@ -326,6 +328,185 @@ public class WebResourceServiceTests
         capturedUpdate!.LogicalName.Should().Be(WebResource.EntityLogicalName);
         capturedUpdate.Id.Should().Be(id);
         capturedUpdate[WebResource.Fields.Content].Should().Be(expectedBase64);
+    }
+
+    #endregion
+
+    #region GetByNameAsync Tests
+
+    [Fact]
+    public async Task GetByNameAsync_FiltersOnExactName()
+    {
+        // Arrange
+        var id = Guid.NewGuid();
+        var entity = CreateWebResourceEntity(id, "new_/icons/vet.svg", 11);
+
+        QueryExpression? capturedQuery = null;
+        _client
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryBase, CancellationToken>((q, _) => capturedQuery = q as QueryExpression)
+            .ReturnsAsync(new EntityCollection(new List<Entity> { entity }));
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.GetByNameAsync("new_/icons/vet.svg");
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(id);
+        result.Name.Should().Be("new_/icons/vet.svg");
+
+        capturedQuery.Should().NotBeNull();
+        capturedQuery!.Criteria.Conditions.Should().ContainSingle(c =>
+            c.AttributeName == WebResource.Fields.Name &&
+            c.Operator == ConditionOperator.Equal);
+        capturedQuery.Criteria.Conditions[0].Values[0].Should().Be("new_/icons/vet.svg");
+    }
+
+    [Fact]
+    public async Task GetByNameAsync_ReturnsNull_WhenNotFound()
+    {
+        // Arrange
+        _client
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.GetByNameAsync("new_missing.js");
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    #endregion
+
+    #region CreateAsync Tests
+
+    [Fact]
+    public async Task CreateAsync_SendsCreateRequest_WithSolutionParameter()
+    {
+        // Arrange — no existing resource with the same name
+        var newId = Guid.NewGuid();
+        _client
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        OrganizationRequest? captured = null;
+        var response = new CreateResponse();
+        response.Results["id"] = newId;
+        _client
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(response);
+
+        var service = CreateService();
+        var content = Encoding.UTF8.GetBytes("<svg xmlns='http://www.w3.org/2000/svg'/>");
+
+        // Act
+        var id = await service.CreateAsync(new CreateWebResourceRequest(
+            "hsl_vet_icon.svg", "Vet Icon", 11, content, "PawsClawsLabs"));
+
+        // Assert
+        id.Should().Be(newId);
+        captured.Should().BeOfType<CreateRequest>();
+
+        var createRequest = (CreateRequest)captured!;
+        createRequest.Parameters["SolutionUniqueName"].Should().Be("PawsClawsLabs");
+
+        var target = createRequest.Target;
+        target.LogicalName.Should().Be(WebResource.EntityLogicalName);
+        target[WebResource.Fields.Name].Should().Be("hsl_vet_icon.svg");
+        target[WebResource.Fields.DisplayName].Should().Be("Vet Icon");
+        ((OptionSetValue)target[WebResource.Fields.WebResourceType]).Value.Should().Be(11);
+        target[WebResource.Fields.Content].Should().Be(Convert.ToBase64String(content));
+    }
+
+    [Fact]
+    public async Task CreateAsync_OmitsSolutionParameter_AndDefaultsDisplayName_WhenNotProvided()
+    {
+        // Arrange
+        _client
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        OrganizationRequest? captured = null;
+        var response = new CreateResponse();
+        response.Results["id"] = Guid.NewGuid();
+        _client
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(response);
+
+        var service = CreateService();
+
+        // Act
+        await service.CreateAsync(new CreateWebResourceRequest(
+            "new_script.js", DisplayName: null, 3, [1, 2, 3], SolutionUniqueName: null));
+
+        // Assert
+        var createRequest = (CreateRequest)captured!;
+        createRequest.Parameters.ContainsKey("SolutionUniqueName").Should().BeFalse();
+        createRequest.Target[WebResource.Fields.DisplayName].Should().Be("new_script.js");
+    }
+
+    [Fact]
+    public async Task CreateAsync_Throws_WhenNameAlreadyExists()
+    {
+        // Arrange — an existing resource matches the name
+        var existing = CreateWebResourceEntity(Guid.NewGuid(), "new_script.js", 3);
+        _client
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { existing }));
+
+        var service = CreateService();
+
+        // Act
+        var act = () => service.CreateAsync(new CreateWebResourceRequest(
+            "new_script.js", null, 3, [1], null));
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.WebResource.AlreadyExists);
+
+        _client.Verify(
+            c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region UpdateContentAsync (byte[]) Tests
+
+    [Fact]
+    public async Task UpdateContentAsync_Bytes_EncodesAndSaves_WithoutTextTypeCheck()
+    {
+        // Arrange — binary payload (would be rejected by the text overload)
+        var id = Guid.NewGuid();
+        var content = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG magic bytes
+
+        Entity? capturedUpdate = null;
+        _client
+            .Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedUpdate = e)
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService();
+
+        // Act
+        await service.UpdateContentAsync(id, content);
+
+        // Assert
+        capturedUpdate.Should().NotBeNull();
+        capturedUpdate!.Id.Should().Be(id);
+        capturedUpdate[WebResource.Fields.Content].Should().Be(Convert.ToBase64String(content));
+
+        // No metadata lookup — binary types are allowed, so no type check is needed
+        _client.Verify(
+            c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion

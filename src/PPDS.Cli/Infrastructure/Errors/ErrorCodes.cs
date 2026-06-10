@@ -445,6 +445,9 @@ public static class ErrorCodes
         /// <summary>Web resource not found by ID.</summary>
         public const string NotFound = "WebResource.NotFound";
 
+        /// <summary>A web resource with the requested name already exists.</summary>
+        public const string AlreadyExists = "WebResource.AlreadyExists";
+
         /// <summary>Attempted to edit a binary web resource (PNG/JPG/GIF/ICO/XAP).</summary>
         public const string NotEditable = "WebResource.NotEditable";
 

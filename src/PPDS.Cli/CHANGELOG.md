@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ppds webresources create <file>`** — create a brand-new web resource directly from a local file: type inferred from the file extension (`--type` single-type override), `--display-name`, optional atomic `--solution` binding (SDK equivalent of the `MSCRM.SolutionUniqueName` header), and `--publish`. Fails with `WebResource.AlreadyExists` (hinting at `update`) when the name is taken (#1207).
+- **`ppds webresources update <name|id> <file>`** — replace an existing web resource's content from a local file (binary types allowed — this is file replacement, not text editing), with optional `--publish`. Resolves by exact name or GUID only, so a fuzzy match can never overwrite the wrong resource; warns when the file extension implies a different type than the stored resource (#1207).
 - **Canonical metadata nouns** `entity`, `attribute`, `optionset` replace `table`, `column`, `choice` as the primary command surface. Old nouns remain as deprecation shims that delegate to the same execute path and print a migration hint to stderr (#1159).
 - **Status reason management** — `ppds metadata entity add-statusreason|list-statusreasons|update-statusreason|remove-statusreason` for first-class statuscode option-value management (#1160).
 - **`OptionValueDeriver`** shared pure helper for publisher-prefix-based option value derivation — explicit-value wins, prefix×10000 base, gap-fill over existing values (#1160).

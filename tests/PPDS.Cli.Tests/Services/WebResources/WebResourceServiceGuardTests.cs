@@ -17,13 +17,15 @@ namespace PPDS.Cli.Tests.Services.WebResources;
 /// Guard-wiring regression test for <see cref="WebResourceService"/> — asserts
 /// that every mutation method calls <see cref="PPDS.Cli.Infrastructure.Safety.IShakedownGuard.EnsureCanMutate"/>
 /// and propagates the resulting <see cref="PpdsException"/>. Covers AC-33.
-/// The theory row count MUST equal the 3-method mutation inventory.
+/// The theory row count MUST equal the 5-method mutation inventory.
 /// </summary>
 [Trait("Category", "Unit")]
 public class WebResourceServiceGuardTests
 {
     [Theory]
     [InlineData("UpdateContentAsync")]
+    [InlineData("UpdateContentAsyncBytes")]
+    [InlineData("CreateAsync")]
     [InlineData("PublishAsync")]
     [InlineData("PublishAllAsync")]
     public async Task EveryMutationMethod_Blocks(string methodName)
@@ -43,6 +45,8 @@ public class WebResourceServiceGuardTests
     private static Task InvokeAsync(WebResourceService svc, string methodName) => methodName switch
     {
         "UpdateContentAsync" => svc.UpdateContentAsync(Guid.NewGuid(), string.Empty, CancellationToken.None),
+        "UpdateContentAsyncBytes" => svc.UpdateContentAsync(Guid.NewGuid(), Array.Empty<byte>(), CancellationToken.None),
+        "CreateAsync" => svc.CreateAsync(new CreateWebResourceRequest("new_a.js", null, 3, Array.Empty<byte>(), null), CancellationToken.None),
         "PublishAsync" => svc.PublishAsync(new List<Guid> { Guid.NewGuid() }, CancellationToken.None),
         "PublishAllAsync" => svc.PublishAllAsync(CancellationToken.None),
         _ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, null),

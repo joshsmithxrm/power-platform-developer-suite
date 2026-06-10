@@ -1,7 +1,7 @@
 # Web Resources
 
 **Status:** Implemented (pull/push: Draft)
-**Last Updated:** 2026-04-25
+**Last Updated:** 2026-06-10
 **Code:** [src/PPDS.Dataverse/Services/IWebResourceService.cs](../src/PPDS.Dataverse/Services/IWebResourceService.cs) | [src/PPDS.Extension/src/panels/WebResourcesPanel.ts](../src/PPDS.Extension/src/panels/WebResourcesPanel.ts) | [src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs](../src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs) | [src/PPDS.Cli/Commands/WebResources/](../src/PPDS.Cli/Commands/WebResources/) | [src/PPDS.Cli/Services/WebResources/IWebResourceSyncService.cs](../src/PPDS.Cli/Services/WebResources/IWebResourceSyncService.cs)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -18,11 +18,11 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 - **Publish coordination:** Prevent concurrent publish operations per environment via semaphore
 - **Multi-surface consistency:** Same data available via VS Code, TUI, MCP, and CLI (Constitution A1, A2)
 - **Pull/push workflow:** Download web resources to local folder with tracking, push back with conflict detection (#161, #162)
+- **Create/update from file:** Create a new web resource (or replace an existing one's content) directly from a local file, with type inference, solution binding, and optional publish (#1207)
 
 ### Non-Goals
 
-- Web resource creation (managed through solutions)
-- Binary content editing (PNG, JPG, GIF, ICO, XAP are view-only)
+- Binary content editing (PNG, JPG, GIF, ICO, XAP are view-only in editors; `create`/`update` upload binary files verbatim)
 - CI/CD deployment pipeline automation (pull/push is for developer workflow, not automated deployment)
 
 ---
@@ -83,6 +83,9 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | `WebResourceTrackingFile` | Model — `.ppds/webresources.json` serialization, hash computation, read/write |
 | `PullCommand.cs` | CLI command — `ppds webresources pull <folder>` |
 | `PushCommand.cs` | CLI command — `ppds webresources push <path>` |
+| `CreateCommand.cs` | CLI command — `ppds webresources create <file>` (new resource from local file) |
+| `UpdateCommand.cs` | CLI command — `ppds webresources update <name|id> <file>` (replace content from local file) |
+| `WebResourceTypeMap` | Shared type aliases — multi-type shortcuts for list/pull filters, single-code resolution for create type inference/override |
 
 ### Dependencies
 
@@ -104,7 +107,10 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | `GetAsync(id)` | Get web resource metadata |
 | `GetContentAsync(id, published?)` | Get content — uses RetrieveUnpublished for unpublished, standard query for published |
 | `GetModifiedOnAsync(id)` | Lightweight query for conflict detection (modifiedon only) |
+| `GetByNameAsync(name)` | Get web resource metadata by exact name (create-vs-update decision, update resolution) |
+| `CreateAsync(request)` | Create a new web resource via `CreateRequest`; optional atomic solution binding via the `SolutionUniqueName` parameter (SDK equivalent of the `MSCRM.SolutionUniqueName` header); fails `WebResource.AlreadyExists` if the name is taken — does NOT publish |
 | `UpdateContentAsync(id, content)` | Update content (base64 encoded) — does NOT publish |
+| `UpdateContentAsync(id, bytes)` | Update content from a raw byte payload — binary types allowed (file replacement, not text editing) — does NOT publish |
 | `PublishAsync(ids)` | Publish specific web resources via PublishXml (coordinated) |
 | `PublishAllAsync()` | Publish all customizations via PublishAllXml (coordinated) |
 
@@ -165,6 +171,29 @@ Get the Maker portal URL for a web resource. Follows existing `UrlCommand` patte
 **`ppds webresources publish <name|id>... [--solution <name>]`**
 
 Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. See [publish.md](./publish.md).
+
+**`ppds webresources create <file> --name <logicalname> [--display-name <n>] [--type <type>] [--solution <s>] [--publish]`** (#1207)
+
+Create a new web resource from a local file.
+
+- `<file>` — local file whose bytes become the resource content (text or binary). Validated before authentication.
+- `--name` (required) — logical name (e.g., `hsl_/icons/vet.svg`).
+- `--display-name` — defaults to the logical name.
+- `--type` — explicit single-type override (`html`, `css`, `js`, `xml`, `png`, `jpg`, `gif`, `xap`, `xsl`, `ico`, `svg`, `resx`). When omitted, the type is inferred from the file extension. Multi-type shortcuts (`text`, `image`, `data`) are rejected. Unknown extension without `--type` is an error.
+- `--solution` — solution unique name; bound atomically via `CreateRequest`'s `SolutionUniqueName` parameter.
+- `--publish` — publish the new resource after creation.
+
+If a resource with the same name already exists, the command fails with `WebResource.AlreadyExists` and hints at `webresources update`. Output: status to stderr; structured `{ id, name, displayName, type, typeName, solution, published }` in `--json` mode.
+
+**`ppds webresources update <name|id> <file> [--publish]`** (#1207)
+
+Replace an existing web resource's content from a local file.
+
+- `<name|id>` — exact logical name or GUID. Partial matching is intentionally **not** supported for mutations (a fuzzy match must never overwrite the wrong resource).
+- `<file>` — local file; binary types are allowed (file replacement, not text editing). If the file extension implies a different type than the stored resource, a warning is written to stderr — the stored type is immutable.
+- `--publish` — publish after the update.
+
+If the resource does not exist, fails with `WebResource.NotFound` and hints at `webresources create`.
 
 #### Pull/Push Workflow
 
@@ -384,6 +413,12 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 | AC-WR-53 | `push` skips binary types (only uploads text types) with warning | `WebResourceSyncServiceTests.PushSkipsBinaryTypes` | ✅ |
 | AC-WR-54 | `push` warns and skips tracked files that are missing from disk | `WebResourceSyncServiceTests.PushSkipsDeletedFiles` | ✅ |
 | AC-WR-55 | `pull` merges tracking file: skipped resources retain prior entries, removed resources are pruned | `WebResourceSyncServiceTests.PullMergesTrackingFile` | ✅ |
+| AC-WR-56 | `CreateAsync` sends a `CreateRequest` with name, display name, type, base64 content; `SolutionUniqueName` parameter set only when a solution is given | `WebResourceServiceTests.CreateAsync_SendsCreateRequest_WithSolutionParameter` + `CreateAsync_OmitsSolutionParameter_AndDefaultsDisplayName_WhenNotProvided` | ✅ |
+| AC-WR-57 | `create` infers the type from the file extension; `--type` overrides with a single-type alias; multi-type shortcuts and unknown extensions are rejected | `CreateCommandTests.ResolveType_*` + `WebResourceTypeMapTests.TryGetSingleCode_*` | ✅ |
+| AC-WR-58 | `create` fails with `WebResource.AlreadyExists` (hinting at `update`) when the name is taken | `WebResourceServiceTests.CreateAsync_Throws_WhenNameAlreadyExists` | ✅ |
+| AC-WR-59 | `update <name|id> <file>` resolves by exact name or GUID only (no partial matching for mutations) | `UpdateCommandTests.*` + `WebResourceServiceTests.GetByNameAsync_FiltersOnExactName` | ✅ |
+| AC-WR-60 | Byte-payload `UpdateContentAsync` accepts binary types (no text-type restriction) | `WebResourceServiceTests.UpdateContentAsync_Bytes_EncodesAndSaves_WithoutTextTypeCheck` | ✅ |
+| AC-WR-61 | `CreateAsync` and byte-payload `UpdateContentAsync` are shakedown-guarded mutations | `WebResourceServiceGuardTests.EveryMutationMethod_Blocks` | ✅ |
 
 ---
 
@@ -455,6 +490,7 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 
 | Date | Change |
 |------|--------|
+| 2026-06-10 | Added create/update from local file (#1207): `CreateAsync` with atomic solution binding, binary-capable `UpdateContentAsync(byte[])`, `GetByNameAsync`, `create`/`update` CLI commands with extension-based type inference, ACs 56–61. Dropped the "creation managed through solutions" non-goal. |
 | 2026-04-25 | Added pull/push workflow specification (#161, #162): IWebResourceSyncService, tracking file, pull/push CLI commands, ACs 34–55. Post-review fixes: path traversal protection, TOCTOU documentation, binary type scope, environment URL validation, tracking file merge semantics, deleted file handling. Dropped `--solution` from `push` because both `UpdateContentAsync` and `PublishAsync` are solution-independent — the option had nowhere to plumb through and would have been dead code. |
 | 2026-03-23 | Added CLI surface (list, get, url), name resolution, publish alias; removed "offline editing" from non-goals (deferred to post-v1) |
 | 2026-03-18 | Extracted from panel-parity.md per SL1 |
