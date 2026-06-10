@@ -51,6 +51,8 @@ ppds plugins deploy --config registrations.json
 
 Deploy reads the config and creates or updates the corresponding Dataverse plugin type, step, image, and Custom API records. Check the config into source control so registrations diff cleanly in pull requests.
 
+> **Important:** If any step sets a `secureConfiguration` value, do not commit that secret to source control. Keep secrets out of the tracked `registrations.json` and supply them at deploy time from a git-ignored file, an environment variable, or a secret manager.
+
 ## Attributes
 
 | Attribute | Applies To | Purpose |

@@ -83,10 +83,12 @@ ppds auth create --deviceCode
 # Service principal (for CI/CD and automation)
 ppds auth create --name ci \
   --applicationId <id> \
-  --clientSecret <secret> \
+  --clientSecret "$DATAVERSE_CLIENT_SECRET" \
   --tenant <tid> \
   --environment https://org.crm.dynamics.com
 ```
+
+> **Note:** Avoid hardcoding the client secret in scripts or passing a literal value on the command line, where it can leak into shell history, CI logs, or process listings. Supply it from your CI/CD system's secret store via an environment variable, as shown above.
 
 After creating a profile and selecting an environment, the MCP server automatically uses those credentials for all Dataverse operations.
 
