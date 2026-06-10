@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local Choice columns** — `ppds metadata attribute create --type Choice` with inline --option/--options-file, plus `ppds metadata attribute add-option|update-option|remove-option` for column-scoped option sets (#1161).
 
 ### Changed
+- **`ppds metadata entity` authoring verbs accept a positional `<entity>`** — `update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, and `remove-statusreason` now take the entity logical name positionally (`ppds metadata entity update hsl_veterinarian --solution …`), matching how the parent `entity <name>` read lookup is typed. `--entity` keeps working as a fully equivalent flag; if both are supplied they must agree or the command errors clearly instead of silently picking one (#1208).
 - `ppds metadata table|column|choice` are now deprecated shims; use `entity|attribute|optionset` instead.
 - **`ppds api request --path`** now detects when Git Bash/MSYS has rewritten a leading-slash path into a Windows path (e.g. `/api/data/v9.2/contacts` → `C:/Program Files/Git/api/data/v9.2/contacts`) and augments the "Path must start with '/'" error with a hint to prefix `MSYS_NO_PATHCONV=1`, set `MSYS2_ARG_CONV_EXCL='*'`, or run from PowerShell/cmd. The command help also documents the gotcha (#1204).
 
