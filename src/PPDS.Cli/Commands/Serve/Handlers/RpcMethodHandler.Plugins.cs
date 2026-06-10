@@ -22,7 +22,6 @@ using PPDS.Dataverse.Diagnostics;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using Authoring = PPDS.Dataverse.Metadata.Authoring;
-using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Security;
@@ -72,9 +71,7 @@ public partial class RpcMethodHandler
     {
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
-            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-
-            // Create registration service with pool (use NullLogger for daemon context)
+            // Resolve registration service (use NullLogger for daemon context)
             var registrationService = sp.GetRequiredService<IPluginRegistrationService>();
 
             var response = new PluginsListResponse();
