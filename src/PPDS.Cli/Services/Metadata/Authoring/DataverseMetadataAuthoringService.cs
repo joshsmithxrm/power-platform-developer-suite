@@ -1023,26 +1023,49 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 $"'{optionSetName}' is not an option set with option values.", "OptionSetName");
 
+        // Value targeting is unambiguous — option values are unique within a set — so the first match is the only match.
+        if (value.HasValue)
+        {
+            foreach (var option in optionSet.Options)
+            {
+                if ((option.Value ?? 0) == value.Value)
+                {
+                    var matchedLabel = option.Label?.UserLocalizedLabel?.Label
+                        ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
+                        ?? "";
+                    return (value.Value, matchedLabel);
+                }
+            }
+
+            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                $"Option with value {value.Value} not found in option set '{optionSetName}'.",
+                "Value");
+        }
+
+        // Label targeting: duplicate labels are legal in Dataverse. Collect every match and refuse to act when
+        // more than one matches (#1235) — silently picking the first could mutate or delete the wrong option.
+        var labelMatches = new List<(int Value, string Label)>();
         foreach (var option in optionSet.Options)
         {
-            var optionValue = option.Value ?? 0;
             var optionLabel = option.Label?.UserLocalizedLabel?.Label
                 ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                 ?? "";
-
-            var isMatch = value.HasValue
-                ? optionValue == value.Value
-                : string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase);
-
-            if (isMatch)
-                return (optionValue, optionLabel);
+            if (string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase))
+                labelMatches.Add((option.Value ?? 0, optionLabel));
         }
 
-        throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
-            value.HasValue
-                ? $"Option with value {value.Value} not found in option set '{optionSetName}'."
-                : $"Option with label '{label}' not found in option set '{optionSetName}'.",
-            value.HasValue ? "Value" : "Label");
+        if (labelMatches.Count == 0)
+            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                $"Option with label '{label}' not found in option set '{optionSetName}'.",
+                "Label");
+
+        if (labelMatches.Count > 1)
+            throw new PpdsException(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel,
+                $"Label '{label}' matches {labelMatches.Count} options in option set '{optionSetName}' " +
+                $"(values: {string.Join(", ", labelMatches.Select(m => m.Value))}). " +
+                "Select the target option with --value instead.");
+
+        return labelMatches[0];
     }
 
     /// <inheritdoc />
@@ -1717,18 +1740,35 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
     private static ColumnOptionInfo ResolveColumnOption(IReadOnlyList<ColumnOptionInfo> options, int? value, string? label, string entity, string column)
     {
-        var match = value.HasValue
-            ? options.FirstOrDefault(o => o.Value == value.Value)
-            : options.FirstOrDefault(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase));
+        // Value targeting is unambiguous — option values are unique within a column's option set.
+        if (value.HasValue)
+        {
+            var valueMatch = options.FirstOrDefault(o => o.Value == value.Value);
+            if (valueMatch == null)
+                throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                    $"Option with value {value.Value} not found on '{entity}.{column}'.",
+                    "Value");
+            return valueMatch;
+        }
 
-        if (match == null)
+        // Label targeting: duplicate labels are legal in Dataverse. Refuse to act on an ambiguous label (#1235) —
+        // silently picking the first could mutate or delete the wrong option; the caller must select with --value.
+        var labelMatches = options
+            .Where(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (labelMatches.Count == 0)
             throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
-                value.HasValue
-                    ? $"Option with value {value.Value} not found on '{entity}.{column}'."
-                    : $"Option with label '{label}' not found on '{entity}.{column}'.",
-                value.HasValue ? "Value" : "Label");
+                $"Option with label '{label}' not found on '{entity}.{column}'.",
+                "Label");
 
-        return match;
+        if (labelMatches.Count > 1)
+            throw new PpdsException(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel,
+                $"Label '{label}' matches {labelMatches.Count} options on '{entity}.{column}' " +
+                $"(values: {string.Join(", ", labelMatches.Select(m => m.Value))}). " +
+                "Select the target option with --value instead.");
+
+        return labelMatches[0];
     }
 
     #endregion

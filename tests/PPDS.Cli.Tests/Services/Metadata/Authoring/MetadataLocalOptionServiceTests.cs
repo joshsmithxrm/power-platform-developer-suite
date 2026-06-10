@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -227,5 +228,64 @@ public class MetadataLocalOptionServiceTests
         _capturedColorUpdate.Should().NotBeNull();
         _capturedColorUpdate!.EntityName.Should().Be("hsl_diagnosis");
         CapturedColorFor(864630000).Should().Be("#00FF00");
+    }
+
+    // ---- ambiguous --label resolution on duplicate labels (#1235) ----
+
+    [Fact]
+    public async Task RemoveColumnOption_DuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        // Two column options share the label "Severe" (legal in Dataverse). Removing by label must
+        // refuse to act rather than silently delete the first match.
+        SetupColumnOptions((864630000, "Severe"), (864630001, "Severe"));
+
+        var act = () => _service.RemoveColumnOptionAsync(new RemoveColumnOptionRequest
+        {
+            EntityLogicalName = "hsl_diagnosis",
+            ColumnLogicalName = "hsl_severity",
+            Label = "Severe"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("864630000").And.Contain("864630001");
+        // Nothing was mutated — resolution threw before any SDK delete.
+        _captured.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateColumnOption_DuplicateLabel_ThrowsAmbiguousListingAllValues() // #1235
+    {
+        SetupColumnOptions((864630000, "Severe"), (864630001, "Severe"));
+
+        var act = () => _service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest
+        {
+            EntityLogicalName = "hsl_diagnosis",
+            ColumnLogicalName = "hsl_severity",
+            Label = "Severe",
+            NewLabel = "Critical"
+        });
+
+        var assertion = await act.Should().ThrowAsync<PpdsException>();
+        assertion.Which.ErrorCode.Should().Be(ErrorCodes.MetadataAuthoring.AmbiguousOptionLabel);
+        assertion.Which.Message.Should().Contain("864630000").And.Contain("864630001");
+        _captured.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RemoveColumnOption_UniqueLabelAmongDuplicates_ResolvesSingleMatch() // #1235
+    {
+        // A label that matches exactly one option still resolves, even when others share a different label.
+        SetupColumnOptions((864630000, "Severe"), (864630001, "Severe"), (864630002, "Mild"));
+
+        await _service.RemoveColumnOptionAsync(new RemoveColumnOptionRequest
+        {
+            EntityLogicalName = "hsl_diagnosis",
+            ColumnLogicalName = "hsl_severity",
+            Label = "Mild"
+        });
+
+        _captured.Should().BeOfType<SdkDeleteOptionValueRequest>()
+            .Which.Value.Should().Be(864630002);
     }
 }
