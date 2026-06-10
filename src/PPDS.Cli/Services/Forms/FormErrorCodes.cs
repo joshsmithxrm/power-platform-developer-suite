@@ -34,4 +34,7 @@ public static class FormErrorCodes
 
     /// <summary>The formxml contains duplicate id or labelid attribute values.</summary>
     public const string DuplicateGuid = "Forms.DuplicateGuid";
+
+    /// <summary>The form's iscustomizable flag is false; mutations are silently ignored by Dataverse.</summary>
+    public const string FormNotCustomizable = "Forms.FormNotCustomizable";
 }

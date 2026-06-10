@@ -69,13 +69,30 @@ public class FormServiceTests
         return (poolMock, clientMock);
     }
 
-    private static Entity BuildFormEntity(string formXml, int formType = 2)
+    // systemform is a publishable entity; FetchFormRecordAsync now uses RetrieveUnpublishedMultiple
+    // so that pending draft changes are visible and not silently overwritten.
+    private static void SetupFormFetch(Mock<IPooledClient> clientMock, Entity formEntity)
+    {
+        clientMock
+            .Setup(c => c.ExecuteAsync(
+                It.IsAny<RetrieveUnpublishedMultipleRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest _, CancellationToken __) =>
+            {
+                var response = new RetrieveUnpublishedMultipleResponse();
+                response.Results["EntityCollection"] = new EntityCollection(new List<Entity> { formEntity });
+                return response;
+            });
+    }
+
+    private static Entity BuildFormEntity(string formXml, int formType = 2, bool isCustomizable = true)
         => new Entity("systemform")
         {
             ["formid"] = TestFormId,
             ["name"] = "Test Form",
             ["type"] = new OptionSetValue(formType),
             ["ismanaged"] = false,
+            ["iscustomizable"] = isCustomizable,
             ["formxml"] = formXml,
             ["description"] = null
         };
@@ -87,6 +104,41 @@ public class FormServiceTests
             pool,
             metadata ?? metaMock.Object,
             new NullLogger<FormService>());
+    }
+
+    // ── GetAsync read-default: published unless --unpublished (parity with views/web-resource) ──
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetAsync_DefaultsToPublishedRead()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        clientMock
+            .Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "systemform"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        var service = CreateService(poolMock.Object);
+
+        var detail = await service.GetAsync("contact", "Test Form");
+
+        detail.Should().NotBeNull();
+        clientMock.Verify(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()), Times.Once);
+        clientMock.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetAsync_Unpublished_ReadsDraft()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
+        var service = CreateService(poolMock.Object);
+
+        var detail = await service.GetAsync("contact", "Test Form", unpublished: true);
+
+        detail.Should().NotBeNull();
+        clientMock.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        clientMock.Verify(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── Constructor tests ─────────────────────────────────────────────────
@@ -210,11 +262,7 @@ public class FormServiceTests
         // Arrange
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         clientMock
             .Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
@@ -246,11 +294,7 @@ public class FormServiceTests
         // Arrange
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(EmptyFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(EmptyFormXml));
 
         Entity? updatedEntity = null;
         clientMock
@@ -285,11 +329,7 @@ public class FormServiceTests
         // Arrange — form has a tab with expanded=1; only Visible=false is provided
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         Entity? updatedEntity = null;
         clientMock
@@ -324,11 +364,7 @@ public class FormServiceTests
         // Arrange
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         var service = CreateService(poolMock.Object);
 
@@ -355,11 +391,7 @@ public class FormServiceTests
         // Arrange
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         Entity? updatedEntity = null;
         clientMock
@@ -397,11 +429,7 @@ public class FormServiceTests
         // Arrange — form has a section with visible=1; only Visible=false is provided
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         Entity? updatedEntity = null;
         clientMock
@@ -436,11 +464,7 @@ public class FormServiceTests
         // Arrange
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         var service = CreateService(poolMock.Object);
 
@@ -468,11 +492,7 @@ public class FormServiceTests
         var (poolMock, clientMock) = CreateMocks();
 
         // FetchFormRecordAsync returns a valid form
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         // savedquery lookup returns empty (view not found)
         clientMock
@@ -552,6 +572,36 @@ public class FormServiceTests
         ex.Which.ErrorCode.Should().Be(FormErrorCodes.InvalidMaxRows);
     }
 
+    // ── AC-55: FormNotCustomizable guard ─────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddSubgrid_NonCustomizableForm_ThrowsFormNotCustomizable()
+    {
+        // Arrange — iscustomizable=false; Dataverse silently ignores UpdateAsync on such forms
+        var (poolMock, clientMock) = CreateMocks();
+
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml, isCustomizable: false));
+
+        var service = CreateService(poolMock.Object);
+
+        var request = new AddSubgridRequest(
+            EntityLogicalName: "account",
+            FormName: "Test Form",
+            SectionLabel: "General",
+            Label: "Contacts",
+            TargetEntity: "contact",
+            DefaultViewId: Guid.NewGuid(),
+            MaxRows: 5);
+
+        // Act
+        var act = async () => await service.AddSubgridAsync(request);
+
+        // Assert — early failure with FormNotCustomizable rather than silent no-op (AC-55)
+        var ex = await act.Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(FormErrorCodes.FormNotCustomizable);
+    }
+
     // ── AC-26: Publish calls ExecuteAsync with PublishXmlRequest ─────────
 
     [Fact]
@@ -562,18 +612,15 @@ public class FormServiceTests
         var (poolMock, clientMock) = CreateMocks();
 
         clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
-
-        clientMock
             .Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         clientMock
             .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
+
+        // SetupFormFetch registered after the broad ExecuteAsync so it wins for RetrieveUnpublishedMultipleRequest.
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         clientMock.SetupGet(c => c.ConnectedOrgUniqueName).Returns("testorg");
 
@@ -606,18 +653,15 @@ public class FormServiceTests
         var (poolMock, clientMock) = CreateMocks();
 
         clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
-
-        clientMock
             .Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         clientMock
             .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
+
+        // SetupFormFetch registered after the broad ExecuteAsync so it wins for RetrieveUnpublishedMultipleRequest.
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         var service = CreateService(poolMock.Object);
 
@@ -645,11 +689,7 @@ public class FormServiceTests
         // Arrange — AddSolutionComponentRequest throws fault with error code -2147159998 (already in solution)
         var (poolMock, clientMock) = CreateMocks();
 
-        clientMock
-            .Setup(c => c.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemform"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { BuildFormEntity(SimpleTabFormXml) }));
+        SetupFormFetch(clientMock, BuildFormEntity(SimpleTabFormXml));
 
         clientMock
             .Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))

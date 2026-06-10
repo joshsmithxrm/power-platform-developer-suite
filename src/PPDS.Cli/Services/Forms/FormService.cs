@@ -80,12 +80,12 @@ public sealed class FormService : IFormService
         }
     }
 
-    public async Task<FormDetail?> GetAsync(string entityLogicalName, string formName, CancellationToken ct = default)
+    public async Task<FormDetail?> GetAsync(string entityLogicalName, string formName, bool unpublished = false, CancellationToken ct = default)
     {
         try
         {
             var (_, formXmlStr, formId, formType, isManaged, description) =
-                await FetchFormRecordAsync(entityLogicalName, formName, requireMainForm: false, ct);
+                await FetchFormRecordAsync(entityLogicalName, formName, requireMainForm: false, ct, unpublished: unpublished);
 
             if (formXmlStr is null) return null;
 
@@ -117,7 +117,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, _, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: false, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: false, ct, requireCustomizable: true);
 
             reporter?.ReportPhase("Validating", "Validating form XML");
             var doc = XDocument.Parse(request.FormXml);
@@ -152,7 +152,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.AddTab(doc, request);
@@ -179,7 +179,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.UpdateTab(doc, request);
@@ -201,7 +201,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveTab(doc, request.TabLabel);
@@ -256,7 +256,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.AddSection(doc, request);
@@ -284,7 +284,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.UpdateSection(doc, request);
@@ -306,7 +306,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveSection(doc, request.SectionLabel);
@@ -371,7 +371,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var attributes = await _metadataService.GetAttributesAsync(entityLogicalName, cancellationToken: ct);
             var attrByName = attributes.ToDictionary(a => a.LogicalName, StringComparer.OrdinalIgnoreCase);
@@ -405,7 +405,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveField(doc, request.FieldLogicalName);
@@ -430,7 +430,7 @@ public sealed class FormService : IFormService
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var attributes = await _metadataService.GetAttributesAsync(entityLogicalName, cancellationToken: ct);
             var classIdsByField = attributes
@@ -462,7 +462,7 @@ public sealed class FormService : IFormService
         try
         {
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             // Validate the view GUID corresponds to an existing savedqueries record.
             // Scope the pooled client to this lookup only — do not hold it across the
@@ -499,7 +499,7 @@ public sealed class FormService : IFormService
         try
         {
             var (entityLogicalName, formXmlStr, formId, _, _, _) =
-                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
+                await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
             FormXmlEditor.RemoveSubgrid(doc, request.Label);
@@ -517,18 +517,32 @@ public sealed class FormService : IFormService
     // ── Internals ─────────────────────────────────────────────────────────
 
     private async Task<(string entityLogicalName, string? formXml, Guid formId, int formType, bool isManaged, string? description)>
-        FetchFormRecordAsync(string entityLogicalName, string formName, bool requireMainForm, CancellationToken ct)
+        FetchFormRecordAsync(string entityLogicalName, string formName, bool requireMainForm, CancellationToken ct, bool requireCustomizable = false, bool unpublished = true)
     {
         var query = new QueryExpression("systemform")
         {
-            ColumnSet = new ColumnSet("formid", "name", "type", "formxml", "ismanaged", "description"),
+            ColumnSet = new ColumnSet("formid", "name", "type", "formxml", "ismanaged", "iscustomizable", "description"),
             TopCount = 1
         };
         query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, entityLogicalName);
         query.Criteria.AddCondition("name", ConditionOperator.Equal, formName);
 
+        // systemform is a publishable entity. Read-modify-write mutations pass unpublished=true so
+        // draft changes from a prior mutation (without --publish) are visible and compose instead of
+        // being overwritten. Read-for-display (GetAsync) defaults to the published version unless the
+        // caller opts into the draft via --unpublished.
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-        var result = await client.RetrieveMultipleAsync(query, ct);
+        EntityCollection result;
+        if (unpublished)
+        {
+            var unpubRequest = new RetrieveUnpublishedMultipleRequest { Query = query };
+            var unpubResponse = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(unpubRequest, ct);
+            result = unpubResponse.EntityCollection;
+        }
+        else
+        {
+            result = await client.RetrieveMultipleAsync(query, ct);
+        }
 
         if (result.Entities.Count == 0)
             throw new PpdsException(FormErrorCodes.FormNotFound,
@@ -540,6 +554,14 @@ public sealed class FormService : IFormService
         if (requireMainForm && formType != MainFormType)
             throw new PpdsException(FormErrorCodes.FormNotFound,
                 $"Form '{formName}' is not a Main form. Modification commands only support Main forms (type 2). Use `set-xml` to modify other form types.");
+
+        // Dataverse silently ignores UpdateAsync on forms where iscustomizable=false — the call
+        // succeeds with no error but the change does not persist. Detect this early so the user
+        // gets a clear message instead of a silent no-op.
+        if (requireCustomizable && !form.GetAttributeValue<bool>("iscustomizable"))
+            throw new PpdsException(FormErrorCodes.FormNotCustomizable,
+                $"Form '{formName}' on entity '{entityLogicalName}' is not customizable and cannot be modified by PPDS. " +
+                "To make it customizable, add it to an unmanaged solution layer in this environment, then retry.");
 
         return (
             entityLogicalName,

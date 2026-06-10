@@ -59,7 +59,7 @@ All XML parsing, manipulation, and Dataverse calls live in `ViewService`. Comman
 |-----------|----------------|
 | `ViewsCommandGroup` | Registers the `views` command and shared profile/environment options |
 | `ListCommand` | `ppds views list --entity` |
-| `GetCommand` | `ppds views get --entity --view` |
+| `GetCommand` | `ppds views get --entity --view [--unpublished]` — reads published by default; `--unpublished` shows the latest draft |
 | `AddColumnCommand` | `ppds views add-column` — direct and relationship columns |
 | `RemoveColumnCommand` | `ppds views remove-column` |
 | `UpdateColumnCommand` | `ppds views update-column --width` |

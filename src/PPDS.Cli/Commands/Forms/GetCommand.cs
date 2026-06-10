@@ -27,10 +27,16 @@ public static class GetCommand
             Required = true
         };
 
+        var unpublishedOption = new Option<bool>("--unpublished")
+        {
+            Description = "Show the unpublished (latest draft) form instead of the published version"
+        };
+
         var command = new Command("get", "Get the structure of a specific Dataverse systemform")
         {
             entityOption,
             formOption,
+            unpublishedOption,
             FormsCommandGroup.ProfileOption,
             FormsCommandGroup.EnvironmentOption
         };
@@ -41,11 +47,12 @@ public static class GetCommand
         {
             var entity = parseResult.GetValue(entityOption)!;
             var form = parseResult.GetValue(formOption)!;
+            var unpublished = parseResult.GetValue(unpublishedOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, unpublished, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -54,6 +61,7 @@ public static class GetCommand
     private static async Task<int> ExecuteAsync(
         string entity,
         string form,
+        bool unpublished,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -80,7 +88,7 @@ public static class GetCommand
                 Console.Error.WriteLine();
             }
 
-            var formDetail = await formService.GetAsync(entity, form, cancellationToken);
+            var formDetail = await formService.GetAsync(entity, form, unpublished, cancellationToken);
 
             if (formDetail == null)
             {

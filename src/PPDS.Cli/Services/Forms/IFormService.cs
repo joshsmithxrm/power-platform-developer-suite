@@ -17,7 +17,7 @@ public interface IFormService
 
     Task<ListResult<FormInfo>> ListAsync(string entityLogicalName, CancellationToken ct = default);
 
-    Task<FormDetail?> GetAsync(string entityLogicalName, string formName, CancellationToken ct = default);
+    Task<FormDetail?> GetAsync(string entityLogicalName, string formName, bool unpublished = false, CancellationToken ct = default);
 
     // ── Set XML ───────────────────────────────────────────────────────────
 

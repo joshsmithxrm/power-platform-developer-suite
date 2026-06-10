@@ -296,11 +296,16 @@ Status messages go to stderr (Constitution I1). Structured output goes to stdout
 
 ```
 ppds forms list --entity <logical-name>
-ppds forms get --entity <logical-name> --form "<name>"
+ppds forms get --entity <logical-name> --form "<name>" [--unpublished]
 ```
 
 `list` output (text mode): tabular display of form name, form type, ID, and managed status.
 `get` output (text mode): hierarchical tree of tabs → sections → fields / sub-grids.
+
+`get` reads the **published** form by default; `--unpublished` returns the latest draft (via
+`RetrieveUnpublishedMultiple`) — useful for inspecting pending edits made without `--publish`. This
+matches `views get` and `webresources get`. (Mutation commands always read unpublished so successive
+edits compose; only the read-for-display default is published.)
 
 **set-xml:**
 

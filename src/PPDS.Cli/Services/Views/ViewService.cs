@@ -89,6 +89,7 @@ public class ViewService : IViewService
     public async Task<ViewDetail> GetAsync(
         string entityLogicalName,
         string viewName,
+        bool unpublished = false,
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default)
     {
@@ -109,10 +110,21 @@ public class ViewService : IViewService
             }
         };
 
+        // Read-for-display defaults to the published version; --unpublished opts into the draft so
+        // callers can inspect pending (not-yet-published) edits. (Mutations always read unpublished.)
         EntityCollection result;
         try
         {
-            result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            if (unpublished)
+            {
+                var unpubResponse = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(
+                    new RetrieveUnpublishedMultipleRequest { Query = query }, cancellationToken);
+                result = unpubResponse.EntityCollection;
+            }
+            else
+            {
+                result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -636,10 +648,16 @@ public class ViewService : IViewService
             }
         };
 
+        // savedquery is a publishable entity. RetrieveMultiple returns the published version,
+        // which means any pending draft changes (e.g., a prior reorder-columns without --publish)
+        // would be invisible and overwritten. RetrieveUnpublishedMultiple returns the current
+        // working state so mutating operations always compose correctly.
         EntityCollection result;
         try
         {
-            result = await client.RetrieveMultipleAsync(query, ct);
+            var unpublishedRequest = new RetrieveUnpublishedMultipleRequest { Query = query };
+            var unpublishedResponse = (RetrieveUnpublishedMultipleResponse)await client.ExecuteAsync(unpublishedRequest, ct);
+            result = unpublishedResponse.EntityCollection;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

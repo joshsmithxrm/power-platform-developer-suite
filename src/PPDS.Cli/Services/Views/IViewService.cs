@@ -21,6 +21,7 @@ public interface IViewService
     Task<ViewDetail> GetAsync(
         string entityLogicalName,
         string viewName,
+        bool unpublished = false,
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default);
 
