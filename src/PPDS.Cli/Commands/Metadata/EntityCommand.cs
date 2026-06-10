@@ -315,6 +315,12 @@ public static class EntityCommand
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after it is created",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("create", "Create a new Dataverse table (entity)")
         {
             solutionOption,
@@ -324,6 +330,7 @@ public static class EntityCommand
             ownershipOption,
             descriptionOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -339,12 +346,13 @@ public static class EntityCommand
             var ownership = parseResult.GetValue(ownershipOption)!;
             var description = parseResult.GetValue(descriptionOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteCreateAsync(
-                solution, name, displayName, pluralName, ownership, description, dryRun,
+                solution, name, displayName, pluralName, ownership, description, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -359,6 +367,7 @@ public static class EntityCommand
         string ownership,
         string? description,
         bool dryRun,
+        bool publish,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -392,7 +401,8 @@ public static class EntityCommand
                 PluralDisplayName = pluralName,
                 OwnershipType = ownership,
                 Description = description ?? "",
-                DryRun = dryRun
+                DryRun = dryRun,
+                Publish = publish
             };
 
             var result = await authoringService.CreateTableAsync(request, ct: cancellationToken);
@@ -468,6 +478,12 @@ public static class EntityCommand
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after the change",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("update", "Update an existing Dataverse table (entity)")
         {
             entityArgument,
@@ -477,6 +493,7 @@ public static class EntityCommand
             pluralNameOption,
             descriptionOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -492,12 +509,13 @@ public static class EntityCommand
             var pluralName = parseResult.GetValue(pluralNameOption);
             var description = parseResult.GetValue(descriptionOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteUpdateAsync(
-                solution, entity, displayName, pluralName, description, dryRun,
+                solution, entity, displayName, pluralName, description, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -511,6 +529,7 @@ public static class EntityCommand
         string? pluralName,
         string? description,
         bool dryRun,
+        bool publish,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -543,7 +562,8 @@ public static class EntityCommand
                 DisplayName = displayName,
                 PluralDisplayName = pluralName,
                 Description = description,
-                DryRun = dryRun
+                DryRun = dryRun,
+                Publish = publish
             };
 
             await authoringService.UpdateTableAsync(request, ct: cancellationToken);
@@ -557,13 +577,17 @@ public static class EntityCommand
                     entity,
                     updated = true,
                     dryRun,
-                    requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
+                    requiresPublish = !dryRun && !publish,
+                    publishHint = dryRun || publish ? null : publishHint
                 });
             }
             else if (dryRun)
             {
                 Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+            }
+            else if (publish)
+            {
+                Console.Error.WriteLine($"Table '{entity}' updated and published.");
             }
             else
             {

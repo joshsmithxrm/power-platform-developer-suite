@@ -67,6 +67,12 @@ public static class TableCommandGroup
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after it is created",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("create", "Create a new Dataverse table (entity)")
         {
             solutionOption,
@@ -76,6 +82,7 @@ public static class TableCommandGroup
             ownershipOption,
             descriptionOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -91,13 +98,14 @@ public static class TableCommandGroup
             var ownership = parseResult.GetValue(ownershipOption)!;
             var description = parseResult.GetValue(descriptionOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             DeprecationWarning.Write("ppds metadata table create", "ppds metadata entity create");
             return await Metadata.EntityCommand.ExecuteCreateAsync(
-                solution, name, displayName, pluralName, ownership, description, dryRun,
+                solution, name, displayName, pluralName, ownership, description, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -139,6 +147,12 @@ public static class TableCommandGroup
             DefaultValueFactory = _ => false
         };
 
+        var publishOption = new Option<bool>("--publish")
+        {
+            Description = "Publish the entity after the change",
+            DefaultValueFactory = _ => false
+        };
+
         var command = new Command("update", "Update an existing Dataverse table (entity)")
         {
             solutionOption,
@@ -147,6 +161,7 @@ public static class TableCommandGroup
             pluralNameOption,
             descriptionOption,
             dryRunOption,
+            publishOption,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption
         };
@@ -161,13 +176,14 @@ public static class TableCommandGroup
             var pluralName = parseResult.GetValue(pluralNameOption);
             var description = parseResult.GetValue(descriptionOption);
             var dryRun = parseResult.GetValue(dryRunOption);
+            var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             DeprecationWarning.Write("ppds metadata table update", "ppds metadata entity update");
             return await Metadata.EntityCommand.ExecuteUpdateAsync(
-                solution, entity, displayName, pluralName, description, dryRun,
+                solution, entity, displayName, pluralName, description, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 

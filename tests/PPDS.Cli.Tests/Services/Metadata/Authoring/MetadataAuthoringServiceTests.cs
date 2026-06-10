@@ -151,6 +151,38 @@ public class MetadataAuthoringServiceTests
         capturedRequest.Entity.OwnershipType.Should().Be(OwnershipTypes.UserOwned);
     }
 
+    [Fact]
+    public async Task CreateTableAsync_WithPublish_PublishesEntity() // #1171
+    {
+        var response = new CreateEntityResponse();
+        response.Results["EntityId"] = Guid.NewGuid();
+
+        Microsoft.Crm.Sdk.Messages.PublishXmlRequest? publishRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is Microsoft.Crm.Sdk.Messages.PublishXmlRequest pxr) publishRequest = pxr;
+                if (req is CreateEntityRequest) return Task.FromResult<OrganizationResponse>(response);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        var request = new CreateTableRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            SchemaName = "new_TestTable",
+            DisplayName = "Test Table",
+            PluralDisplayName = "Test Tables",
+            OwnershipType = "UserOwned",
+            Publish = true
+        };
+
+        await _service.CreateTableAsync(request);
+
+        publishRequest.Should().NotBeNull();
+        publishRequest!.ParameterXml.Should().Contain("<entity>new_testtable</entity>");
+    }
+
     #endregion
 
     #region UpdateTableAsync
@@ -196,6 +228,47 @@ public class MetadataAuthoringServiceTests
         await _service.UpdateTableAsync(request);
 
         _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateTableAsync_WithPublish_PublishesEntity() // #1171
+    {
+        Microsoft.Crm.Sdk.Messages.PublishXmlRequest? publishRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is Microsoft.Crm.Sdk.Messages.PublishXmlRequest pxr) publishRequest = pxr;
+            })
+            .ReturnsAsync(new OrganizationResponse());
+
+        var request = new UpdateTableRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            DisplayName = "Updated Account",
+            Publish = true
+        };
+
+        await _service.UpdateTableAsync(request);
+
+        publishRequest.Should().NotBeNull();
+        publishRequest!.ParameterXml.Should().Contain("<entity>account</entity>");
+    }
+
+    [Fact]
+    public async Task UpdateTableAsync_WithoutPublish_DoesNotPublish() // #1171
+    {
+        var request = new UpdateTableRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            DisplayName = "Updated Account"
+        };
+
+        await _service.UpdateTableAsync(request);
+
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.PublishXmlRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
@@ -407,6 +480,37 @@ public class MetadataAuthoringServiceTests
             because: "users must know publish is required for the change to take effect (#1009)");
         message.Should().NotContain("ppds ",
             because: "the service is UI-agnostic and must not embed a CLI command string (F-4)");
+    }
+
+    [Fact]
+    public async Task UpdateColumnAsync_WithPublish_PublishesEntity() // #1171
+    {
+        var existingAttr = new StringAttributeMetadata { LogicalName = "new_myfield", MaxLength = 100 };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        Microsoft.Crm.Sdk.Messages.PublishXmlRequest? publishRequest = null;
+
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is Microsoft.Crm.Sdk.Messages.PublishXmlRequest pxr) publishRequest = pxr;
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                return Task.FromResult(new OrganizationResponse());
+            });
+
+        await _service.UpdateColumnAsync(new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_myfield",
+            DisplayName = "Renamed",
+            Publish = true
+        });
+
+        publishRequest.Should().NotBeNull();
+        publishRequest!.ParameterXml.Should().Contain("<entity>account</entity>");
     }
 
     [Fact]

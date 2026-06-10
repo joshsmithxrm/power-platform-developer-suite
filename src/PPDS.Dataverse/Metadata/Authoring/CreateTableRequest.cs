@@ -61,4 +61,7 @@ public sealed class CreateTableRequest
 
     /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted).</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>Gets or sets whether to publish the entity after it is created (#1171).</summary>
+    public bool Publish { get; set; }
 }

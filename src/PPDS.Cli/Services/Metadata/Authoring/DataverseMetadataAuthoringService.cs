@@ -144,6 +144,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.SchemaName.ToLowerInvariant());
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.SchemaName.ToLowerInvariant(), ct).ConfigureAwait(false);
+
         reporter?.ReportInfo($"Table '{request.SchemaName}' created successfully.");
         _logger?.LogInformation("Created table {SchemaName} with MetadataId {MetadataId}", request.SchemaName, response.EntityId);
 
@@ -217,8 +220,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
         // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
-        reporter?.ReportInfo($"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
+        reporter?.ReportInfo(request.Publish
+            ? $"Table '{request.EntityLogicalName}' updated and published."
+            : $"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
     }
 
@@ -391,8 +399,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
+        if (request.Publish)
+            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+
         // Issue #1009: keep the message UI-agnostic. Surfaces format their own publish command.
-        reporter?.ReportInfo($"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
+        reporter?.ReportInfo(request.Publish
+            ? $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}' and published."
+            : $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
     }
 

@@ -280,7 +280,7 @@ public static class ColumnCommandGroup
             DeprecationWarning.Write("ppds metadata column update", "ppds metadata attribute update");
             return await AttributeCommandGroup.ExecuteUpdateAsync(
                 solution, entity, column, displayName, description, requiredLevel, maxLength,
-                dryRun, profileVal, environmentVal, globalOptions, cancellationToken);
+                dryRun, publish: false, profileVal, environmentVal, globalOptions, cancellationToken);
         });
 
         return command;

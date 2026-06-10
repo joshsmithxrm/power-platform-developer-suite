@@ -381,8 +381,8 @@ Canonical noun-verb subcommands under `ppds metadata`. Deprecated forms (`table`
 **Entity commands (was `table`):**
 ```bash
 ppds metadata entity <name>                                      # read lookup (unchanged)
-ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [options]
-ppds metadata entity update <entity> --solution <s> [property flags]
+ppds metadata entity create --solution <s> --name <schema> --display-name <n> --plural-name <n> --ownership <UserOwned|OrganizationOwned> [--publish] [options]
+ppds metadata entity update <entity> --solution <s> [property flags] [--publish]
 ppds metadata entity delete <entity> --solution <s> [--force] [--dry-run]
 ```
 
@@ -399,7 +399,7 @@ All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-
 **Attribute commands (was `column`):**
 ```bash
 ppds metadata attribute create --solution <s> --entity <name> --name <schema> --display-name <n> --type <type> [type-specific options]
-ppds metadata attribute update --solution <s> --entity <name> --column <name> [property flags]
+ppds metadata attribute update --solution <s> --entity <name> --column <name> [property flags] [--publish]
 ppds metadata attribute delete --solution <s> --entity <name> --column <name> [--force] [--dry-run]
 ```
 
@@ -575,7 +575,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-55 | `attribute add-option` derives the local option value via the same `OptionValueDeriver` (explicit `--value` wins; `--solution` derives; neither → `MISSING_REQUIRED_FIELD`); inserts scoped to entity+attribute | `MetadataLocalOptionServiceTests.AddColumnOption_ExplicitValue_InsertsScopedToColumn`, `AddColumnOption_NeitherValueNorSolution_Throws` | ✅ |
 | AC-56 | `attribute update-option` / `remove-option` target a local option by `--value` or `--label` (→ `OPTION_NOT_FOUND` when unresolved), scoped to the column's local set | `MetadataLocalOptionServiceTests.UpdateColumnOption_ByValue_UpdatesScoped`, `RemoveColumnOption_ByLabel_ResolvesAndDeletes`, `RemoveColumnOption_ValueNotFound_ThrowsOptionNotFound` | ✅ |
 | AC-57 | `OptionValueDeriver.Derive` is a single shared helper used by both status-reason add and local-option add; unit tests cover explicit-wins, prefix derivation, gap-fill, collision, and missing-input cases | `OptionValueDeriverTests` | ✅ |
-| AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `attribute create`/`add-/update-/remove-option` and status-reason verbs via `PublishEntityInternalAsync`) | — (wired; live-publish covered by Integration) | ❌ |
+| AC-58 | Authoring verbs that change live metadata honor `--publish`, publishing the affected entity after the change (wired on `entity create`/`update`, `attribute create`/`update`/`add-/update-/remove-option`, and status-reason verbs via `PublishEntityInternalAsync`; #1171 added the entity create/update and attribute update surfaces) | `MetadataAuthoringServiceTests.CreateTableAsync_WithPublish_PublishesEntity`, `UpdateTableAsync_WithPublish_PublishesEntity`, `UpdateColumnAsync_WithPublish_PublishesEntity` | ✅ |
 | AC-59 | `ppds metadata --help` lists the canonical nouns and marks deprecated nouns (`table`, `column`, `choice`, `choices`) `(deprecated)` in their one-line description | `MetadataDeprecationTests.MetadataHelp_MarksDeprecatedNouns` | ❌ |
 | AC-60 | `entity --help` lists the status-reason subcommands; `attribute create --help` documents `--option`/`--choice`/derivation; each new subcommand exposes accurate `--help` | `MetadataHelpCoverageTests.NewSubcommands_HaveHelp` | ❌ |
 | AC-61 | All six `entity` authoring verbs (`update`, `delete`, `add-statusreason`, `list-statusreasons`, `update-statusreason`, `remove-statusreason`) accept a positional `<entity>`; `--entity` still works (#1208) | `MetadataEntityCommandTests.AuthoringVerb_ParsesPositionalEntity` + `AuthoringVerb_StillAcceptsEntityFlag` | ✅ |
