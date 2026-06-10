@@ -1028,7 +1028,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             foreach (var option in optionSet.Options)
             {
-                if ((option.Value ?? 0) == value.Value)
+                // Compare the nullable value directly — a null option value must not collapse to 0 and
+                // false-match a requested value of 0.
+                if (option.Value == value.Value)
                 {
                     var matchedLabel = option.Label?.UserLocalizedLabel?.Label
                         ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
@@ -1047,11 +1049,15 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var labelMatches = new List<(int Value, string Label)>();
         foreach (var option in optionSet.Options)
         {
+            // An option without a concrete value can't be a selectable --value target; skip it so a null
+            // value never collapses to 0 and collides with a real value-0 option in the match set.
+            if (option.Value is not int optionValue)
+                continue;
             var optionLabel = option.Label?.UserLocalizedLabel?.Label
                 ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                 ?? "";
             if (string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase))
-                labelMatches.Add((option.Value ?? 0, optionLabel));
+                labelMatches.Add((optionValue, optionLabel));
         }
 
         if (labelMatches.Count == 0)
