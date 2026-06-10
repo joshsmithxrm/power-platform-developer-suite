@@ -163,6 +163,34 @@ public sealed class CliE2EWithCredentialsAttribute : FactAttribute
 }
 
 /// <summary>
+/// Skips the test unless client secret credentials AND a target solution + publisher prefix
+/// (PPDS_TEST_SOLUTION, PPDS_TEST_PREFIX) are configured. Use for in-process (non-CLI) live tests
+/// that create solution-scoped metadata (option sets, columns) whose schema name must satisfy a
+/// publisher prefix. Unlike <see cref="CliE2EWithSolutionAttribute"/> this carries no TFM constraint,
+/// so the test runs on every target framework.
+/// </summary>
+public sealed class SkipIfNoSolutionAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public SkipIfNoSolutionAttribute()
+    {
+        if (!Configuration.HasClientSecretCredentials)
+        {
+            Skip = "Client secret credentials not configured. Set DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, and PPDS_TEST_TENANT_ID.";
+        }
+        else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION"))
+                 || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")))
+        {
+            Skip = "Solution-scoped metadata test requires PPDS_TEST_SOLUTION (target unmanaged solution unique name) and PPDS_TEST_PREFIX (publisher customization prefix, e.g., 'new' or 'hsl').";
+        }
+    }
+}
+
+/// <summary>
 /// Fact attribute for CLI E2E tests that mutate solution-scoped metadata. Requires client secret
 /// credentials, .NET 8.0, and a configured target solution and publisher prefix
 /// (PPDS_TEST_SOLUTION, PPDS_TEST_PREFIX). Use for tests that create custom tables, columns,
