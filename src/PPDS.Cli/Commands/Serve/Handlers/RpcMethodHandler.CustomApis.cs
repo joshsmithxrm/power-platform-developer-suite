@@ -138,17 +138,36 @@ public partial class RpcMethodHandler
         if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var pluginTypeGuid))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
 
+        // Validate each nested parameter with the same rules as customApis/addParameter
+        // so a null/whitespace field is rejected up front rather than silently coerced
+        // to an empty string downstream (issue #1228).
+        if (parameters is not null)
+        {
+            for (var i = 0; i < parameters.Count; i++)
+            {
+                var p = parameters[i];
+                if (p is null)
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, $"parameter[{i}] cannot be null");
+                if (string.IsNullOrWhiteSpace(p.UniqueName))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, $"The 'uniqueName' field of parameter[{i}] is required");
+                if (string.IsNullOrWhiteSpace(p.DisplayName))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, $"The 'displayName' field of parameter[{i}] is required");
+                if (string.IsNullOrWhiteSpace(p.Type))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, $"The 'type' field of parameter[{i}] is required");
+            }
+        }
+
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<ICustomApiService>();
 
             var paramRegistrations = parameters?
                 .Select(p => new CustomApiParameterRegistration(
-                    p.UniqueName ?? "",
-                    p.DisplayName ?? "",
+                    p.UniqueName!,
+                    p.DisplayName!,
                     p.Name,
                     p.Description,
-                    p.Type ?? "",
+                    p.Type!,
                     p.LogicalEntityName,
                     p.IsOptional,
                     p.Direction ?? "Request"))
