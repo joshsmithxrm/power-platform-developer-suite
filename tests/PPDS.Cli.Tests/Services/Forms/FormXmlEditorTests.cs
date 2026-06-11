@@ -260,6 +260,46 @@ public class FormXmlEditorTests
         parameters.Should().NotBeNull();
         ((string?)parameters!.Element("RecordsPerPage")).Should().Be("5");
         ((string?)parameters.Element("EnableViewPicker")).Should().Be("false");
+
+        var cell = control.Parent!;
+        var labelDescription = (string?)cell.Element("labels")?.Element("label")?.Attribute("description");
+        labelDescription.Should().Be("My Subgrid", "the --label value must be written verbatim into the form XML");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddSubgrid_TwoSubgridsInSameSection_EachHasItsOwnLabel()
+    {
+        // Regression: a subgrid was once written with the wrong label when multiple
+        // subgrids existed in the same section (e.g. "Pet Owners" instead of "Vet Appointments").
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var viewId1 = new Guid("00000000-0000-0000-0000-000000000010");
+        var viewId2 = new Guid("00000000-0000-0000-0000-000000000011");
+
+        FormXmlEditor.AddSubgrid(formXml, new AddSubgridRequest(
+            EntityLogicalName: "hsl_pet",
+            FormName: "Information",
+            SectionLabel: "Related",
+            Label: "Pet Owners",
+            TargetEntity: "hsl_petowner",
+            DefaultViewId: viewId1));
+
+        FormXmlEditor.AddSubgrid(formXml, new AddSubgridRequest(
+            EntityLogicalName: "hsl_pet",
+            FormName: "Information",
+            SectionLabel: "Related",
+            Label: "Vet Appointments",
+            TargetEntity: "hsl_vetappointment",
+            DefaultViewId: viewId2));
+
+        var subgridCells = formXml.Descendants("control")
+            .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
+            .Select(c => (string?)c.Parent?.Element("labels")?.Element("label")?.Attribute("description"))
+            .ToList();
+
+        subgridCells.Should().HaveCount(2);
+        subgridCells.Should().Contain("Pet Owners");
+        subgridCells.Should().Contain("Vet Appointments");
     }
 
     [Theory]
