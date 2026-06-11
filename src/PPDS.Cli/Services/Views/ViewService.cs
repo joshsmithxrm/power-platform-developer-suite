@@ -189,7 +189,9 @@ public class ViewService : IViewService
             client, entityLogicalName, viewName,
             new ColumnSet("savedqueryid", "layoutxml", "fetchxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
-        var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
+        var layoutXml = entity.GetAttributeValue<string>("layoutxml");
+        GuardHasLayout(layoutXml, viewName);
+        layoutXml ??= "<grid><row /></grid>";
         var fetchXml = entity.GetAttributeValue<string>("fetchxml") ?? "<fetch><entity /></fetch>";
 
         bool isRelated = viaRelationship != null;
@@ -248,7 +250,9 @@ public class ViewService : IViewService
             client, entityLogicalName, viewName,
             new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
-        var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
+        var layoutXml = entity.GetAttributeValue<string>("layoutxml");
+        GuardHasLayout(layoutXml, viewName);
+        layoutXml ??= "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
         layoutDoc = RemoveCell(layoutDoc, attributeName);
 
@@ -277,7 +281,9 @@ public class ViewService : IViewService
             client, entityLogicalName, viewName,
             new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
-        var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
+        var layoutXml = entity.GetAttributeValue<string>("layoutxml");
+        GuardHasLayout(layoutXml, viewName);
+        layoutXml ??= "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
         layoutDoc = UpdateCellWidth(layoutDoc, attributeName, width);
 
@@ -306,7 +312,9 @@ public class ViewService : IViewService
             client, entityLogicalName, viewName,
             new ColumnSet("savedqueryid", "layoutxml", "ismanaged", "returnedtypecode"), cancellationToken);
 
-        var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
+        var layoutXml = entity.GetAttributeValue<string>("layoutxml");
+        GuardHasLayout(layoutXml, viewName);
+        layoutXml ??= "<grid><row /></grid>";
         var layoutDoc = XDocument.Parse(layoutXml);
         layoutDoc = ReorderCells(layoutDoc, orderedAttributes);
 
@@ -624,6 +632,15 @@ public class ViewService : IViewService
             throw new PpdsException(ErrorCodes.View.NotFound,
                 $"Entity '{entityLogicalName}' not found in metadata.");
         return meta.ObjectTypeCode;
+    }
+
+    private static void GuardHasLayout(string? layoutXml, string viewName)
+    {
+        if (string.IsNullOrWhiteSpace(layoutXml))
+            throw new PpdsException(ErrorCodes.View.NoLayout,
+                $"View '{viewName}' has no layout definition and cannot be modified. " +
+                "This is typical of system-generated views (e.g. auto-created 'My' views) " +
+                "that are not customizable.");
     }
 
     private async Task<(Guid SavedQueryId, Entity Entity)> FetchViewRecordAsync(
