@@ -28,7 +28,7 @@ public static class UpdateTabCommand
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Label or ID of the tab to update",
+            Description = "Label or name of the tab to update",
             Required = true
         };
 

@@ -29,7 +29,7 @@ public static class AddSectionCommand
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Label or ID of the parent tab",
+            Description = "Label or name of the parent tab",
             Required = true
         };
 

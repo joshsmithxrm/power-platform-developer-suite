@@ -29,7 +29,7 @@ public static class FindSectionCommand
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "Label or ID of the section to find",
+            Description = "Label or name of the section to find",
             Required = true
         };
 

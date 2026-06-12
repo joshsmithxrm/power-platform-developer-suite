@@ -167,7 +167,9 @@ public class ViewService : IViewService
             entityLogicalName,
             columns,
             sorts,
-            filter);
+            filter,
+            fetchXml,
+            layoutXml);
     }
 
     // ─── Column mutations ───────────────────────────────────────────────────────

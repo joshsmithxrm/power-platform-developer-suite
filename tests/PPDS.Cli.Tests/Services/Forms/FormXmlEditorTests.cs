@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
 using FluentAssertions;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Forms;
 using Xunit;
 
@@ -506,5 +507,177 @@ public class FormXmlEditorTests
         result.Descendants("control")
             .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
             .Should().ContainSingle("the sub-grid must survive a field reorder");
+    }
+
+    // ── Name-based lookup tests ───────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ElementMatches_MatchesByLabel()
+    {
+        var element = new XElement("tab",
+            new XAttribute("name", "tab_budget"),
+            new XAttribute("id", $"{{{Guid.NewGuid():D}}}"),
+            new XElement("labels", new XElement("label",
+                new XAttribute("description", "Budget"),
+                new XAttribute("languagecode", "1033"))));
+
+        FormXmlEditor.ElementMatches(element, "budget").Should().BeTrue("case-insensitive label match");
+        FormXmlEditor.ElementMatches(element, "Finance").Should().BeFalse("non-matching label returns false");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ElementMatches_MatchesByNameAttribute()
+    {
+        // Matching by name attribute works for both readable names (PPDS-generated)
+        // and GUID-valued names (Dataverse-generated legacy forms).
+        var guidName = $"{{{Guid.NewGuid():D}}}";
+        var element = new XElement("tab",
+            new XAttribute("name", "tab_general"),
+            new XAttribute("id", guidName),
+            new XElement("labels", new XElement("label",
+                new XAttribute("description", "General"),
+                new XAttribute("languagecode", "1033"))));
+
+        FormXmlEditor.ElementMatches(element, "tab_general").Should().BeTrue("readable name match");
+        FormXmlEditor.ElementMatches(element, "TAB_GENERAL").Should().BeTrue("name match is case-insensitive");
+        FormXmlEditor.ElementMatches(element, "tab_other").Should().BeFalse("non-matching name returns false");
+
+        // Legacy: Dataverse-generated forms have GUID-valued name attributes
+        var legacyElement = new XElement("section",
+            new XAttribute("name", guidName),
+            new XAttribute("id", guidName),
+            new XElement("labels", new XElement("label",
+                new XAttribute("description", "Details"),
+                new XAttribute("languagecode", "1033"))));
+
+        FormXmlEditor.ElementMatches(legacyElement, guidName).Should().BeTrue("GUID-valued name attribute matches");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddTab_GeneratesReadableName()
+    {
+        var formXml = BuildFormXml(tabLabel: "General");
+        var request = new AddTabRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            Label: "Financial Details");
+
+        var result = FormXmlEditor.AddTab(formXml, request);
+
+        var addedTab = result.Descendants("tab")
+            .First(t => (string?)t.Element("labels")?.Element("label")?.Attribute("description") == "Financial Details");
+        addedTab.Attribute("name")!.Value.Should().Be("tab_financial_details");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddSection_GeneratesReadableName()
+    {
+        var formXml = BuildFormXml(tabLabel: "General", sectionLabel: "Info");
+        var request = new AddSectionRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            TabLabel: "General",
+            Label: "Budget Details");
+
+        var result = FormXmlEditor.AddSection(formXml, request);
+
+        var addedSection = result.Descendants("section")
+            .First(s => (string?)s.Element("labels")?.Element("label")?.Attribute("description") == "Budget Details");
+        addedSection.Attribute("name")!.Value.Should().Be("section_budget_details");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddSubgrid_GeneratesReadableName()
+    {
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var request = new AddSubgridRequest(
+            EntityLogicalName: "account",
+            FormName: "Main Form",
+            SectionLabel: "Related",
+            Label: "Active Contacts",
+            TargetEntity: "contact",
+            DefaultViewId: Guid.NewGuid());
+
+        var result = FormXmlEditor.AddSubgrid(formXml, request);
+
+        var control = result.Descendants("control")
+            .Single(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId);
+        control.Attribute("id")!.Value.Should().Be("subgrid_active_contacts");
+        control.Attribute("uniqueid").Should().NotBeNull("uniqueid GUID is set for Dataverse use");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddTab_DuplicateName_Throws()
+    {
+        // BuildFormXml uses a GUID-valued name (legacy); the first AddTab creates tab_financial.
+        // The second AddTab with the same label must detect the collision and throw.
+        var formXml = BuildFormXml(tabLabel: "General");
+        FormXmlEditor.AddTab(formXml, new AddTabRequest(
+            EntityLogicalName: "account", FormName: "Main Form", Label: "Financial"));
+
+        var action = () => FormXmlEditor.AddTab(formXml, new AddTabRequest(
+            EntityLogicalName: "account", FormName: "Main Form", Label: "Financial"));
+
+        action.Should().Throw<PpdsException>()
+            .Which.ErrorCode.Should().Be(FormErrorCodes.DuplicateTabName);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddSection_DuplicateName_Throws()
+    {
+        var formXml = BuildFormXml(tabLabel: "General", sectionLabel: "Info");
+        FormXmlEditor.AddSection(formXml, new AddSectionRequest(
+            EntityLogicalName: "account", FormName: "Main Form",
+            TabLabel: "General", Label: "Budget Details"));
+
+        var action = () => FormXmlEditor.AddSection(formXml, new AddSectionRequest(
+            EntityLogicalName: "account", FormName: "Main Form",
+            TabLabel: "General", Label: "Budget Details"));
+
+        action.Should().Throw<PpdsException>()
+            .Which.ErrorCode.Should().Be(FormErrorCodes.DuplicateSectionName);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void AddSubgrid_DuplicateName_Throws()
+    {
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var request = new AddSubgridRequest(
+            EntityLogicalName: "account", FormName: "Main Form",
+            SectionLabel: "Related", Label: "Contacts",
+            TargetEntity: "contact", DefaultViewId: Guid.NewGuid());
+        FormXmlEditor.AddSubgrid(formXml, request);
+
+        var action = () => FormXmlEditor.AddSubgrid(formXml, request);
+
+        action.Should().Throw<PpdsException>()
+            .Which.ErrorCode.Should().Be(FormErrorCodes.DuplicateSubgridName);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void RemoveSubgrid_ByName_RemovesControl()
+    {
+        var formXml = BuildFormXml(sectionLabel: "Related");
+        var request = new AddSubgridRequest(
+            EntityLogicalName: "account", FormName: "Main Form",
+            SectionLabel: "Related", Label: "Contacts",
+            TargetEntity: "contact", DefaultViewId: Guid.NewGuid());
+        FormXmlEditor.AddSubgrid(formXml, request);
+
+        // Act — remove by generated control name
+        var result = FormXmlEditor.RemoveSubgrid(formXml, "subgrid_contacts");
+
+        result.Descendants("control")
+            .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)
+            .Should().BeEmpty("subgrid removed by control name");
     }
 }

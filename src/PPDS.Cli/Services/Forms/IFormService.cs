@@ -75,10 +75,12 @@ public sealed record FormDetail(
     string FormTypeName,
     bool IsManaged,
     string? Description,
-    IReadOnlyList<TabDetail> Tabs);
+    IReadOnlyList<TabDetail> Tabs,
+    string? FormXml = null);
 
 public sealed record TabDetail(
     Guid Id,
+    string Name,
     string Label,
     bool Expanded,
     bool Visible,
@@ -87,6 +89,7 @@ public sealed record TabDetail(
 
 public sealed record SectionDetail(
     Guid Id,
+    string Name,
     string Label,
     int Columns,
     IReadOnlyList<FieldDetail> Fields,
@@ -99,7 +102,7 @@ public sealed record FieldDetail(
     int RowNumber);
 
 public sealed record SubgridDetail(
-    Guid Id,
+    string Name,
     string Label,
     string TargetEntity,
     Guid ViewId,

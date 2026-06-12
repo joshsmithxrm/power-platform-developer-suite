@@ -110,7 +110,9 @@ public record ViewDetail(
     string EntityLogicalName,
     IReadOnlyList<ViewColumn> Columns,
     IReadOnlyList<ViewSortOrder> SortOrders,
-    ViewFilter? ActiveFilter);
+    ViewFilter? ActiveFilter,
+    string? FetchXml = null,
+    string? LayoutXml = null);
 
 /// <summary>
 /// A column in a view's layoutxml.

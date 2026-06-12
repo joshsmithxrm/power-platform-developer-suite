@@ -34,7 +34,7 @@ public static class RemoveFieldCommand
 
         var sectionOption = new Option<string?>("--section")
         {
-            Description = "Label or ID of the section to remove the field from. If omitted, all occurrences of the field are removed from the form."
+            Description = "Label or name of the section to remove the field from. If omitted, all occurrences of the field are removed from the form."
         };
 
         var publishOption = new Option<bool>("--publish")

@@ -99,7 +99,8 @@ public sealed class FormService : IFormService
                 FormTypeName(formType),
                 isManaged,
                 description,
-                tabs);
+                tabs,
+                formXmlStr);
         }
         catch (PpdsException) { throw; }
         catch (Exception ex)
@@ -652,12 +653,13 @@ public sealed class FormService : IFormService
         {
             var idStr = (string?)tab.Attribute("id") ?? string.Empty;
             Guid.TryParse(idStr.Trim('{', '}'), out var tabId);
+            var name = (string?)tab.Attribute("name") ?? string.Empty;
             var label = (string?)tab.Element("labels")?.Element("label")?.Attribute("description") ?? string.Empty;
             var expanded = (string?)tab.Attribute("expanded") == "1";
             var visible = (string?)tab.Attribute("visible") != "0";
             var columnCount = tab.Element("columns")?.Elements("column").Count() ?? 1;
 
-            result.Add(new TabDetail(tabId, label, expanded, visible, columnCount, ParseSections(tab)));
+            result.Add(new TabDetail(tabId, name, label, expanded, visible, columnCount, ParseSections(tab)));
         }
 
         return result;
@@ -670,6 +672,7 @@ public sealed class FormService : IFormService
         {
             var idStr = (string?)section.Attribute("id") ?? string.Empty;
             Guid.TryParse(idStr.Trim('{', '}'), out var sectionId);
+            var sectionName = (string?)section.Attribute("name") ?? string.Empty;
             var label = (string?)section.Element("labels")?.Element("label")?.Attribute("description") ?? string.Empty;
             var columns = int.TryParse((string?)section.Attribute("columns"), out var c) ? c : 1;
 
@@ -686,14 +689,13 @@ public sealed class FormService : IFormService
                 var classId = (string?)control.Attribute("classid");
                 if (string.Equals(classId, ClassIdResolver.SubgridClassId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var sgIdStr = (string?)control.Attribute("id") ?? string.Empty;
-                    Guid.TryParse(sgIdStr.Trim('{', '}'), out var sgId);
+                    var sgName = (string?)control.Attribute("id") ?? string.Empty;
                     var sgLabel = (string?)cell.Element("labels")?.Element("label")?.Attribute("description") ?? string.Empty;
                     var targetEntity = (string?)control.Element("parameters")?.Element("TargetEntityType") ?? string.Empty;
                     var viewIdStr = (string?)control.Element("parameters")?.Element("ViewId") ?? string.Empty;
                     Guid.TryParse(viewIdStr.Trim('{', '}'), out var viewId);
                     var relationship = (string?)control.Element("parameters")?.Element("RelationshipName");
-                    subgrids.Add(new SubgridDetail(sgId, sgLabel, targetEntity, viewId, relationship));
+                    subgrids.Add(new SubgridDetail(sgName, sgLabel, targetEntity, viewId, relationship));
                 }
                 else
                 {
@@ -705,7 +707,7 @@ public sealed class FormService : IFormService
                 }
             }
 
-            result.Add(new SectionDetail(sectionId, label, columns, fields, subgrids));
+            result.Add(new SectionDetail(sectionId, sectionName, label, columns, fields, subgrids));
         }
 
         return result;

@@ -31,11 +31,16 @@ internal static class FormXmlEditor
             form.Add(tabs);
         }
 
+        var tabName = $"tab_{SanitizeName(request.Label)}";
+        if (formXml.Descendants("tab").Any(t => string.Equals((string?)t.Attribute("name"), tabName, StringComparison.OrdinalIgnoreCase)))
+            throw new PpdsException(FormErrorCodes.DuplicateTabName,
+                $"A tab with name '{tabName}' already exists. Use a label with a distinct name.");
+
         var tabId = NewBraceGuid();
         var labelId = NewBraceGuid();
 
         var tab = new XElement("tab",
-            new XAttribute("name", tabId),
+            new XAttribute("name", tabName),
             new XAttribute("id", tabId),
             new XAttribute("IsUserDefined", "0"),
             new XAttribute("locklevel", "0"),
@@ -111,11 +116,16 @@ internal static class FormXmlEditor
             column.Add(sections);
         }
 
+        var sectionName = $"section_{SanitizeName(request.Label)}";
+        if (formXml.Descendants("section").Any(s => string.Equals((string?)s.Attribute("name"), sectionName, StringComparison.OrdinalIgnoreCase)))
+            throw new PpdsException(FormErrorCodes.DuplicateSectionName,
+                $"A section with name '{sectionName}' already exists. Use a label with a distinct name.");
+
         var sectionId = NewBraceGuid();
         var labelId = NewBraceGuid();
 
         var section = new XElement("section",
-            new XAttribute("name", sectionId),
+            new XAttribute("name", sectionName),
             new XAttribute("id", sectionId),
             new XAttribute("IsUserDefined", "0"),
             new XAttribute("locklevel", "0"),
@@ -247,8 +257,15 @@ internal static class FormXmlEditor
         var section = RequireSection(formXml, request.SectionLabel);
         var rows = EnsureRows(section);
 
+        var controlName = $"subgrid_{SanitizeName(request.Label)}";
+        if (formXml.Descendants("control")
+            .Where(c => string.Equals((string?)c.Attribute("classid"), ClassIdResolver.SubgridClassId, StringComparison.OrdinalIgnoreCase))
+            .Any(c => string.Equals((string?)c.Attribute("id"), controlName, StringComparison.OrdinalIgnoreCase)))
+            throw new PpdsException(FormErrorCodes.DuplicateSubgridName,
+                $"A sub-grid with name '{controlName}' already exists. Use a label with a distinct name.");
+
         var cellId = NewBraceGuid();
-        var controlId = NewBraceGuid();
+        var uniqueId = NewBraceGuid();
 
         // Parameter element names must come from the schema's allowed set
         // (FormXmlControlType/parameters). There is no MaxRowsCount/HideSearchBox;
@@ -265,7 +282,8 @@ internal static class FormXmlEditor
             parameters.Add(new XElement("RelationshipName", request.Relationship));
 
         var control = new XElement("control",
-            new XAttribute("id", controlId),
+            new XAttribute("id", controlName),
+            new XAttribute("uniqueid", uniqueId),
             new XAttribute("classid", ClassIdResolver.SubgridClassId),
             new XAttribute("indicationOfSubgrid", "true"),
             new XAttribute("disabled", "false"),
@@ -283,16 +301,20 @@ internal static class FormXmlEditor
         return formXml;
     }
 
-    internal static XDocument RemoveSubgrid(XDocument formXml, string label)
+    internal static XDocument RemoveSubgrid(XDocument formXml, string labelOrName)
     {
         foreach (var cell in formXml.Descendants("cell").ToList())
         {
             var control = cell.Element("control");
             if (control is null) continue;
-            if ((string?)control.Attribute("classid") != ClassIdResolver.SubgridClassId) continue;
+            if (!string.Equals((string?)control.Attribute("classid"), ClassIdResolver.SubgridClassId, StringComparison.OrdinalIgnoreCase)) continue;
 
             var cellLabel = (string?)cell.Element("labels")?.Element("label")?.Attribute("description");
-            if (string.Equals(cellLabel, label, StringComparison.OrdinalIgnoreCase))
+            var controlId = (string?)control.Attribute("id") ?? string.Empty;
+            var matches = string.Equals(cellLabel, labelOrName, StringComparison.OrdinalIgnoreCase)
+                       || string.Equals(controlId, labelOrName, StringComparison.OrdinalIgnoreCase);
+
+            if (matches)
             {
                 // Remove only this cell; drop the row only if it becomes empty so
                 // sibling cells in a multi-column row are preserved.
@@ -319,20 +341,41 @@ internal static class FormXmlEditor
            ?? throw new PpdsException(FormErrorCodes.SectionNotFound, $"Section '{sectionLabelOrId}' not found in form XML.");
 
     // Exported so FormService can use the same matching logic for FindTab/FindSection.
-    internal static bool ElementMatches(XElement element, string labelOrId)
+    // Tries label match first, then name attribute match — no GUID detection.
+    // Tabs and sections have both label (inside <labels>) and name attribute.
+    // Pre-existing Dataverse-generated forms have GUID-valued name attributes,
+    // so callers can still identify elements by their GUID name string.
+    internal static bool ElementMatches(XElement element, string labelOrName)
+        => LabelMatches(element, labelOrName) || NameAttributeMatches(element, labelOrName);
+
+    private static bool NameAttributeMatches(XElement element, string name)
     {
-        if (Guid.TryParse(labelOrId.Trim('{', '}'), out var targetGuid))
-        {
-            var idAttr = (string?)element.Attribute("id") ?? string.Empty;
-            return Guid.TryParse(idAttr.Trim('{', '}'), out var elemGuid) && elemGuid == targetGuid;
-        }
-        return LabelMatches(element, labelOrId);
+        var nameAttr = (string?)element.Attribute("name") ?? string.Empty;
+        return string.Equals(nameAttr, name, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LabelMatches(XElement element, string label)
     {
         var descAttr = element.Element("labels")?.Element("label")?.Attribute("description");
         return string.Equals((string?)descAttr, label, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Produces a valid identifier segment: lowercase, alphanumeric + underscores,
+    // no leading/trailing underscores, truncated to maxLength chars.
+    private static string SanitizeName(string label, int maxLength = 91)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in label.ToLowerInvariant())
+        {
+            if (sb.Length >= maxLength) break;
+            if (char.IsLetterOrDigit(c))
+                sb.Append(c);
+            else if (sb.Length > 0 && sb[sb.Length - 1] != '_')
+                sb.Append('_');
+        }
+        while (sb.Length > 0 && sb[sb.Length - 1] == '_')
+            sb.Length--;
+        return sb.Length > 0 ? sb.ToString() : "item";
     }
 
     private static void SetLabel(XElement element, string label)

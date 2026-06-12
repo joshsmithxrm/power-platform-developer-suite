@@ -297,11 +297,12 @@ Status messages go to stderr (Constitution I1). Structured output goes to stdout
 
 ```
 ppds forms list --entity <logical-name>
-ppds forms get --entity <logical-name> --form "<name-or-id>" [--unpublished]
+ppds forms get --entity <logical-name> --form "<name-or-id>" [--unpublished] [--raw]
 ```
 
 `list` output (text mode): tabular display of form name, form type, ID, and managed status.
-`get` output (text mode): hierarchical tree of tabs → sections → fields / sub-grids.
+`get` output (text mode): hierarchical tree of tabs → sections → fields / sub-grids. Each tab and section line includes the element's `name` attribute in brackets (e.g. `Tab: General [tab_general]` for PPDS-generated forms, or `Tab: General [{guid}]` for legacy Dataverse-generated forms). Sub-grid lines include the control name (the `id` attribute).
+`get --raw`: writes the raw `formxml` string directly to stdout, bypassing both the tree view and `--json` mode. Suitable for piping to `forms set-xml`.
 
 `get` reads the **published** form by default; `--unpublished` returns the latest draft (via
 `RetrieveUnpublishedMultiple`) — useful for inspecting pending edits made without `--publish`. This
@@ -359,7 +360,7 @@ ppds forms reorder-fields --entity <e> --form "<f-or-id>" --section "<s-or-id>" 
 
 ```
 ppds forms add-subgrid    --entity <e> --form "<f-or-id>" --section "<s-or-id>" --label "<l>" --target-entity <te> --default-view <guid> [--relationship <rel>] [--hide-label bool] [--hide-on-phone bool] [--max-rows <n>] [--hide-search-box bool]
-ppds forms remove-subgrid --entity <e> --form "<f-or-id>" --label "<l>"
+ppds forms remove-subgrid --entity <e> --form "<f-or-id>" --label "<l-or-id>"
 ```
 
 `--default-view` accepts a bare GUID (no braces required at CLI; `FormService` normalizes).
@@ -381,8 +382,12 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 |-------|------|------------|
 | `--entity` | Must match an existing entity logical name (validated on first Dataverse call) | `FormErrorCodes.EntityNotFound` |
 | `--form` | Accepts name or GUID. If GUID-formatted (with or without braces), queries `formid`; otherwise queries `name` | `FormErrorCodes.FormNotFound` |
-| `--tab` / `--label` (tab) | Accepts label or GUID. If GUID-formatted, matches tab `id` attribute; otherwise matches label case-insensitively | `FormErrorCodes.TabNotFound` |
-| `--section` / `--label` (section) | Accepts label or GUID. If GUID-formatted, matches section `id` attribute; otherwise matches label case-insensitively | `FormErrorCodes.SectionNotFound` |
+| `--tab` / `--label` (tab) | Accepts label or name. Tries label match first (case-insensitive), then `name` attribute match (case-insensitive). Dataverse-generated forms have GUID-valued `name` attributes, so callers can still identify tabs by their GUID name string. | `FormErrorCodes.TabNotFound` |
+| `--section` / `--label` (section) | Accepts label or name. Same label-then-name dispatch as `--tab`. | `FormErrorCodes.SectionNotFound` |
+| `--label` (subgrid) | Accepts label or name. Tries cell label match first, then `<control>` `id` attribute match (the control's unique name). | `FormErrorCodes.SubgridNotFound` |
+| tab `name` uniqueness | Each tab's generated name (`tab_<sanitized>`) must be unique within the form | `FormErrorCodes.DuplicateTabName` |
+| section `name` uniqueness | Each section's generated name (`section_<sanitized>`) must be unique within the form | `FormErrorCodes.DuplicateSectionName` |
+| subgrid `name` uniqueness | Each sub-grid's generated name (`subgrid_<sanitized>`) must be unique within the form | `FormErrorCodes.DuplicateSubgridName` |
 | `--field` | Column must exist on entity | `FormErrorCodes.ColumnNotFound` |
 | `--field` classid | Column type must be in classid table | `FormErrorCodes.UnsupportedColumnType` |
 | `--default-view` | GUID must match an existing `savedqueries` record | `FormErrorCodes.ViewNotFound` |
@@ -619,3 +624,6 @@ public static class FormErrorCodes
 | 2026-06-01 | Embedded real Dataverse schema (FormXml.xsd v9.0.0.2090 + ribbon includes) replacing placeholder; generator emits schema-valid `tabs/columns/sections/rows` hierarchy with `availableforphone` + `labelid` attribute; dropped section `--expanded` (not in schema); subgrid params use `RecordsPerPage`/`EnableQuickFind`; `<control>` `id` exempt from brace-GUID check |
 | 2026-06-12 | `--form`, `--tab`, and `--section` options now accept GUID as an alternative to name/label. GUID detection uses `Guid.TryParse` (braces optional); name lookup falls through when the value is not a valid GUID. `GetAsync` and `FetchFormRecordAsync` return the resolved form name so callers always see the display name, not the GUID. |
 | 2026-06-12 | `forms remove-field` gains an optional `--section` flag. Without it, all occurrences of the field are removed; with it, only the occurrence in the specified section is removed (no-op if absent). `RemoveFieldRequest` gets `SectionLabelOrId?`. |
+| 2026-06-12 | `forms remove-subgrid --label` now accepts a GUID (control `id`) in addition to a label. `ElementMatches` corrected: element `id` attribute is compared as a brace-normalised string rather than re-parsed as a Guid, so pre-existing forms with non-canonical `id` values can still be matched by ID. |
+| 2026-06-12 | `forms get` gains `--raw` flag (writes raw `formxml` to stdout) and now shows element names in the text-mode tree output (`Label [name]` format). `FormDetail` gains `FormXml?`, `TabDetail` gains `Name`, `SectionDetail` gains `Name`, `SubgridDetail.Id` (Guid) replaced by `Name` (string, the control `id` attribute). |
+| 2026-06-12 | Tab/section `name` attribute now generated as `tab_<sanitized_label>` / `section_<sanitized_label>` instead of a GUID (passes Dataverse designer name validation). Subgrid `control.id` now set to `subgrid_<sanitized_label>`; `uniqueid` GUID attribute added for Dataverse use. Name uniqueness enforced on add: `DuplicateTabName`, `DuplicateSectionName`, `DuplicateSubgridName`. `--tab`/`--section`/`--label` (subgrid) now match by label OR `name` attribute (no GUID detection). |

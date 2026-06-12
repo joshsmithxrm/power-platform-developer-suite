@@ -29,7 +29,7 @@ public static class UpdateSectionCommand
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Current label or ID of the section to update",
+            Description = "Current label or name of the section to update",
             Required = true
         };
 

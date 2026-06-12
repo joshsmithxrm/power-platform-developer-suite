@@ -28,7 +28,7 @@ public static class ReorderFieldsCommand
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Label or ID of the section containing the fields to reorder",
+            Description = "Label or name of the section containing the fields to reorder",
             Required = true
         };
 

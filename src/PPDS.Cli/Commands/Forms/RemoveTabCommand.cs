@@ -28,7 +28,7 @@ public static class RemoveTabCommand
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Label or ID of the tab to remove",
+            Description = "Label or name of the tab to remove",
             Required = true
         };
 

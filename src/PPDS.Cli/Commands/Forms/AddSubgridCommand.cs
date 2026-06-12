@@ -28,7 +28,7 @@ public static class AddSubgridCommand
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Label or ID of the section to add the sub-grid to",
+            Description = "Label or name of the section to add the sub-grid to",
             Required = true
         };
 

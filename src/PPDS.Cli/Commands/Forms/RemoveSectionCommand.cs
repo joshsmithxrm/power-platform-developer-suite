@@ -29,7 +29,7 @@ public static class RemoveSectionCommand
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Label or ID of the section to remove",
+            Description = "Label or name of the section to remove",
             Required = true
         };
 

@@ -28,7 +28,7 @@ public static class AddFieldCommand
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Label or ID of the section to add the field(s) to",
+            Description = "Label or name of the section to add the field(s) to",
             Required = true
         };
 

@@ -28,7 +28,7 @@ public static class FindTabCommand
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "Label or ID of the tab to find",
+            Description = "Label or name of the tab to find",
             Required = true
         };
 
