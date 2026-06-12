@@ -409,7 +409,7 @@ public sealed class FormService : IFormService
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var doc = XDocument.Parse(formXmlStr!);
-            FormXmlEditor.RemoveField(doc, request.FieldLogicalName);
+            FormXmlEditor.RemoveField(doc, request.FieldLogicalName, request.SectionLabelOrId);
 
             reporter?.ReportPhase("Writing", $"Removing field '{request.FieldLogicalName}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);

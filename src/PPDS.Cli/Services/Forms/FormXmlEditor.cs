@@ -167,16 +167,30 @@ internal static class FormXmlEditor
         return formXml;
     }
 
-    internal static XDocument RemoveField(XDocument formXml, string fieldLogicalName)
+    internal static XDocument RemoveField(XDocument formXml, string fieldLogicalName, string? sectionLabelOrId = null)
     {
-        var control = formXml.Descendants("control")
-            .FirstOrDefault(c => string.Equals(
-                (string?)c.Attribute("datafieldname"), fieldLogicalName,
-                StringComparison.OrdinalIgnoreCase));
+        if (sectionLabelOrId is not null)
+        {
+            // Scoped removal: remove the field only from the identified section.
+            var section = RequireSection(formXml, sectionLabelOrId);
+            var control = section.Descendants("control")
+                .FirstOrDefault(c => string.Equals(
+                    (string?)c.Attribute("datafieldname"), fieldLogicalName,
+                    StringComparison.OrdinalIgnoreCase));
+            RemoveCellAndPruneRow(control?.Parent);
+        }
+        else
+        {
+            // Global removal: remove every occurrence of the field from the form.
+            var controls = formXml.Descendants("control")
+                .Where(c => string.Equals(
+                    (string?)c.Attribute("datafieldname"), fieldLogicalName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var control in controls)
+                RemoveCellAndPruneRow(control.Parent);
+        }
 
-        // Remove only the target cell; drop the row only if it becomes empty.
-        // Removing the whole row would delete sibling cells in multi-column layouts.
-        RemoveCellAndPruneRow(control?.Parent);
         return formXml;
     }
 

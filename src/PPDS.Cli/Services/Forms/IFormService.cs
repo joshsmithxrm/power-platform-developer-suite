@@ -210,6 +210,7 @@ public sealed record RemoveFieldRequest(
     string EntityLogicalName,
     string FormName,
     string FieldLogicalName,
+    string? SectionLabelOrId = null,
     string? SolutionUniqueName = null,
     bool Publish = false);
 
