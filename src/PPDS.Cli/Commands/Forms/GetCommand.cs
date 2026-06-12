@@ -23,7 +23,7 @@ public static class GetCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Name of the form",
+            Description = "Name or ID of the form",
             Required = true
         };
 

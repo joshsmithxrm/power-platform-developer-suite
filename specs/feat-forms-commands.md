@@ -296,7 +296,7 @@ Status messages go to stderr (Constitution I1). Structured output goes to stdout
 
 ```
 ppds forms list --entity <logical-name>
-ppds forms get --entity <logical-name> --form "<name>" [--unpublished]
+ppds forms get --entity <logical-name> --form "<name-or-id>" [--unpublished]
 ```
 
 `list` output (text mode): tabular display of form name, form type, ID, and managed status.
@@ -310,7 +310,7 @@ edits compose; only the read-for-display default is published.)
 **set-xml:**
 
 ```
-ppds forms set-xml --entity <logical-name> --form "<name>" --xml <path-to-file>
+ppds forms set-xml --entity <logical-name> --form "<name-or-id>" --xml <path-to-file>
 ```
 
 Reads XML from the given file path, validates it, and writes it back. Works on all form types.
@@ -319,35 +319,35 @@ Help text explicitly states: schema validation is applied, brace-format GUIDs ar
 **Tab commands:**
 
 ```
-ppds forms add-tab     --entity <e> --form "<f>" --label "<l>" [--show-label bool] [--expanded bool] [--visible bool] [--available-on-phone bool] [--columns 1|2|3]
-ppds forms update-tab  --entity <e> --form "<f>" --tab "<t>" [--label "<new-label>"] [--show-label bool] [--expanded bool] [--visible bool] [--available-on-phone bool] [--columns 1|2|3]
-ppds forms remove-tab  --entity <e> --form "<f>" --tab "<t>"
-ppds forms find-tab    --entity <e> --form "<f>" --label "<l>"
+ppds forms add-tab     --entity <e> --form "<f-or-id>" --label "<l>" [--show-label bool] [--expanded bool] [--visible bool] [--available-on-phone bool] [--columns 1|2|3]
+ppds forms update-tab  --entity <e> --form "<f-or-id>" --tab "<t-or-id>" [--label "<new-label>"] [--show-label bool] [--expanded bool] [--visible bool] [--available-on-phone bool] [--columns 1|2|3]
+ppds forms remove-tab  --entity <e> --form "<f-or-id>" --tab "<t-or-id>"
+ppds forms find-tab    --entity <e> --form "<f-or-id>" --label "<l-or-id>"
 ```
 
-`update-tab`: `--tab` identifies the existing tab by its current label; `--label` optionally renames it. Only provided flags are updated — omitted flags leave the existing value unchanged (nullable `bool?` properties).
+`update-tab`: `--tab` identifies the existing tab by its current label or ID; `--label` optionally renames it. Only provided flags are updated — omitted flags leave the existing value unchanged (nullable `bool?` properties).
 
 Bool flags accept `true` / `false` (case-insensitive).
 
 **Section commands:**
 
 ```
-ppds forms add-section    --entity <e> --form "<f>" --tab "<t>" --label "<l>" [--show-label bool] [--columns 1|2] [--visible bool] [--available-on-phone bool]
-ppds forms update-section --entity <e> --form "<f>" --section "<s>" [--label "<new-label>"] [--show-label bool] [--columns 1|2] [--visible bool] [--available-on-phone bool]
-ppds forms remove-section --entity <e> --form "<f>" --section "<s>"
-ppds forms find-section   --entity <e> --form "<f>" --label "<l>"
+ppds forms add-section    --entity <e> --form "<f-or-id>" --tab "<t-or-id>" --label "<l>" [--show-label bool] [--columns 1|2] [--visible bool] [--available-on-phone bool]
+ppds forms update-section --entity <e> --form "<f-or-id>" --section "<s-or-id>" [--label "<new-label>"] [--show-label bool] [--columns 1|2] [--visible bool] [--available-on-phone bool]
+ppds forms remove-section --entity <e> --form "<f-or-id>" --section "<s-or-id>"
+ppds forms find-section   --entity <e> --form "<f-or-id>" --label "<l-or-id>"
 ```
 
 Sections have no `--expanded` flag — the Dataverse form schema does not model section expand state (only tabs do).
 
-`update-section`: `--section` identifies the existing section by its current label; `--label` optionally renames it. Only provided flags are updated.
+`update-section`: `--section` identifies the existing section by its current label or ID; `--label` optionally renames it. Only provided flags are updated.
 
 **Field commands:**
 
 ```
-ppds forms add-field      --entity <e> --form "<f>" --section "<s>" --field <col> [--field <col2> ...]
-ppds forms remove-field   --entity <e> --form "<f>" --field <col>
-ppds forms reorder-fields --entity <e> --form "<f>" --section "<s>" --fields <col1>,<col2>,...
+ppds forms add-field      --entity <e> --form "<f-or-id>" --section "<s-or-id>" --field <col> [--field <col2> ...]
+ppds forms remove-field   --entity <e> --form "<f-or-id>" --field <col>
+ppds forms reorder-fields --entity <e> --form "<f-or-id>" --section "<s-or-id>" --fields <col1>,<col2>,...
 ```
 
 `add-field`: `--field` option is repeatable (one per field); order determines append order.
@@ -356,8 +356,8 @@ ppds forms reorder-fields --entity <e> --form "<f>" --section "<s>" --fields <co
 **Sub-grid commands:**
 
 ```
-ppds forms add-subgrid    --entity <e> --form "<f>" --section "<s>" --label "<l>" --target-entity <te> --default-view <guid> [--relationship <rel>] [--hide-label bool] [--hide-on-phone bool] [--max-rows <n>] [--hide-search-box bool]
-ppds forms remove-subgrid --entity <e> --form "<f>" --label "<l>"
+ppds forms add-subgrid    --entity <e> --form "<f-or-id>" --section "<s-or-id>" --label "<l>" --target-entity <te> --default-view <guid> [--relationship <rel>] [--hide-label bool] [--hide-on-phone bool] [--max-rows <n>] [--hide-search-box bool]
+ppds forms remove-subgrid --entity <e> --form "<f-or-id>" --label "<l>"
 ```
 
 `--default-view` accepts a bare GUID (no braces required at CLI; `FormService` normalizes).
@@ -378,9 +378,9 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | Field | Rule | Error Code |
 |-------|------|------------|
 | `--entity` | Must match an existing entity logical name (validated on first Dataverse call) | `FormErrorCodes.EntityNotFound` |
-| `--form` | Must match an existing form by name | `FormErrorCodes.FormNotFound` |
-| `--tab` / `--label` (tab) | Must match exactly one tab by label | `FormErrorCodes.TabNotFound` |
-| `--section` / `--label` (section) | Must match exactly one section by label | `FormErrorCodes.SectionNotFound` |
+| `--form` | Accepts name or GUID. If GUID-formatted (with or without braces), queries `formid`; otherwise queries `name` | `FormErrorCodes.FormNotFound` |
+| `--tab` / `--label` (tab) | Accepts label or GUID. If GUID-formatted, matches tab `id` attribute; otherwise matches label case-insensitively | `FormErrorCodes.TabNotFound` |
+| `--section` / `--label` (section) | Accepts label or GUID. If GUID-formatted, matches section `id` attribute; otherwise matches label case-insensitively | `FormErrorCodes.SectionNotFound` |
 | `--field` | Column must exist on entity | `FormErrorCodes.ColumnNotFound` |
 | `--field` classid | Column type must be in classid table | `FormErrorCodes.UnsupportedColumnType` |
 | `--default-view` | GUID must match an existing `savedqueries` record | `FormErrorCodes.ViewNotFound` |
@@ -613,3 +613,4 @@ public static class FormErrorCodes
 | 2026-06-01 | Initial spec |
 | 2026-06-01 | Opus review corrections: SDK late-bound update (not Web API PATCH); `AddSolutionComponentRequest` non-idempotent fault catch; `GetAttributesAsync` (plural); `ClassIdResolver` keys off `AttributeType` string |
 | 2026-06-01 | Embedded real Dataverse schema (FormXml.xsd v9.0.0.2090 + ribbon includes) replacing placeholder; generator emits schema-valid `tabs/columns/sections/rows` hierarchy with `availableforphone` + `labelid` attribute; dropped section `--expanded` (not in schema); subgrid params use `RecordsPerPage`/`EnableQuickFind`; `<control>` `id` exempt from brace-GUID check |
+| 2026-06-12 | `--form`, `--tab`, and `--section` options now accept GUID as an alternative to name/label. GUID detection uses `Guid.TryParse` (braces optional); name lookup falls through when the value is not a valid GUID. `GetAsync` and `FetchFormRecordAsync` return the resolved form name so callers always see the display name, not the GUID. |

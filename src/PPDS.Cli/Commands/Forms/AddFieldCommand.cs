@@ -22,13 +22,13 @@ public static class AddFieldCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Section label to add the field(s) to",
+            Description = "Label or ID of the section to add the field(s) to",
             Required = true
         };
 

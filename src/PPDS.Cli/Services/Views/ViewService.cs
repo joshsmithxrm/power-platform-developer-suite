@@ -100,15 +100,13 @@ public class ViewService : IViewService
         var query = new QueryExpression("savedquery")
         {
             ColumnSet = new ColumnSet("savedqueryid", "name", "querytype", "returnedtypecode", "layoutxml", "fetchxml", "ismanaged", "modifiedon"),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression("returnedtypecode", ConditionOperator.Equal, otc),
-                    new ConditionExpression("name", ConditionOperator.Equal, viewName)
-                }
-            }
+            Criteria = new FilterExpression()
         };
+        query.Criteria.AddCondition("returnedtypecode", ConditionOperator.Equal, otc);
+        if (Guid.TryParse(viewName.Trim('{', '}'), out var viewGuid))
+            query.Criteria.AddCondition("savedqueryid", ConditionOperator.Equal, viewGuid);
+        else
+            query.Criteria.AddCondition("name", ConditionOperator.Equal, viewName);
 
         // Read-for-display defaults to the published version; --unpublished opts into the draft so
         // callers can inspect pending (not-yet-published) edits. (Mutations always read unpublished.)
@@ -141,6 +139,7 @@ public class ViewService : IViewService
 
         var entity = result.Entities[0];
         var id = entity.GetAttributeValue<Guid>("savedqueryid");
+        var resolvedName = entity.GetAttributeValue<string>("name") ?? viewName;
         var queryType = entity.GetAttributeValue<int>("querytype");
         var queryTypeLabel = GetQueryTypeLabel(queryType);
         var layoutXml = entity.GetAttributeValue<string>("layoutxml") ?? "<grid><row /></grid>";
@@ -157,12 +156,12 @@ public class ViewService : IViewService
         catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException)
         {
             throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
-                $"View '{viewName}' contains malformed XML in layoutxml or fetchxml.", ex);
+                $"View '{resolvedName}' contains malformed XML in layoutxml or fetchxml.", ex);
         }
 
         return new ViewDetail(
             id,
-            viewName,
+            resolvedName,
             queryType,
             queryTypeLabel,
             entityLogicalName,
@@ -655,15 +654,13 @@ public class ViewService : IViewService
         var query = new QueryExpression("savedquery")
         {
             ColumnSet = columnSet,
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression("returnedtypecode", ConditionOperator.Equal, otc),
-                    new ConditionExpression("name", ConditionOperator.Equal, viewName)
-                }
-            }
+            Criteria = new FilterExpression()
         };
+        query.Criteria.AddCondition("returnedtypecode", ConditionOperator.Equal, otc);
+        if (Guid.TryParse(viewName.Trim('{', '}'), out var viewGuid))
+            query.Criteria.AddCondition("savedqueryid", ConditionOperator.Equal, viewGuid);
+        else
+            query.Criteria.AddCondition("name", ConditionOperator.Equal, viewName);
 
         // savedquery is a publishable entity. RetrieveMultiple returns the published version,
         // which means any pending draft changes (e.g., a prior reorder-columns without --publish)

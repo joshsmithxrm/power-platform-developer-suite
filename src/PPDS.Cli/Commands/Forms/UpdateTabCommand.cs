@@ -22,13 +22,13 @@ public static class UpdateTabCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Current label of the tab to update",
+            Description = "Label or ID of the tab to update",
             Required = true
         };
 

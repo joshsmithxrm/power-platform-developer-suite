@@ -22,13 +22,13 @@ public static class ReorderFieldsCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Section label containing the fields to reorder",
+            Description = "Label or ID of the section containing the fields to reorder",
             Required = true
         };
 

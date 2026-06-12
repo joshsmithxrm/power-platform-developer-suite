@@ -198,14 +198,14 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 4. Return `ListResult<ViewInfo>` (I4: include total count)
 
 **Get view:**
-1. Query `savedqueries` by entity OTC + `name = viewName` using ColumnSet `{savedqueryid, name, querytype, returnedtypecode, layoutxml, fetchxml, ismanaged, modifiedon}`
+1. Query `savedqueries` by entity OTC + (`name = viewName` or `savedqueryid = viewId` when value is GUID-formatted) using ColumnSet `{savedqueryid, name, querytype, returnedtypecode, layoutxml, fetchxml, ismanaged, modifiedon}`
 2. If result count == 0: throw `PpdsException(ErrorCodes.View.NotFound)`; if count > 1: throw `PpdsException(ErrorCodes.View.Ambiguous)`
 3. Parse `layoutxml` → `ViewColumn` list
 4. Parse `fetchxml` → `ViewSortOrder` list and `ViewFilter`
 5. Return `ViewDetail`
 
 **Column mutations (add/remove/update/reorder):**
-1. Look up view: query `savedqueries` by entity OTC + `name = viewName` using ColumnSet `{savedqueryid, layoutxml, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
+1. Look up view: query `savedqueries` by entity OTC + (`name = viewName` or `savedqueryid = viewId` when value is GUID-formatted) using ColumnSet `{savedqueryid, layoutxml, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
 2. Parse `layoutxml` with `XDocument.Parse`
 3. Apply mutation to `<cell>` elements inside `<row>`; for `remove-column`: if attribute not found throw `View.ColumnNotFound`; for `add-column`: if already present, emit warning to stderr and skip (idempotent)
 4. For `add-column --via-relationship`: resolve relationship metadata via `ICachedMetadataProvider`; add/update `<link-entity>` + `<attribute>` in `fetchxml`; if relationship not found throw `View.RelationshipNotFound`
@@ -213,13 +213,13 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 6. If `--solution`: call `AddSolutionComponentRequest` (component type 26); then if `--publish`: call `PublishXmlRequest`
 
 **Sort mutations:**
-1. Look up view: query `savedqueries` by entity OTC + `name = viewName` using ColumnSet `{savedqueryid, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
+1. Look up view: query `savedqueries` by entity OTC + (`name = viewName` or `savedqueryid = viewId` when value is GUID-formatted) using ColumnSet `{savedqueryid, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
 2. Parse `fetchxml`; replace all `<order>` elements (or remove all for `clear-sort`)
 3. `UpdateAsync` with modified `fetchxml`
 4. If `--solution`: call `AddSolutionComponentRequest` (component type 26); then if `--publish`: call `PublishXmlRequest`
 
 **Filter mutations:**
-1. Look up view: query `savedqueries` by entity OTC + `name = viewName` using ColumnSet `{savedqueryid, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
+1. Look up view: query `savedqueries` by entity OTC + (`name = viewName` or `savedqueryid = viewId` when value is GUID-formatted) using ColumnSet `{savedqueryid, fetchxml}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
 2. Parse `fetchxml`; replace or remove `<filter>` child of `<entity>` (for `clear-filter`: remove)
 3. For `--filter-file`: read file, parse as `XElement`, validate root element name is `filter`; if not throw `Validation.SchemaInvalid`
 4. For `--condition`: parse `"attr:op:value"` into `<filter type="and"><condition attribute="attr" operator="op" value="value" /></filter>`
@@ -227,7 +227,7 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 6. If `--solution`: call `AddSolutionComponentRequest` (component type 26); then if `--publish`: call `PublishXmlRequest`
 
 **Set fetchxml:**
-1. Look up view: query `savedqueries` by entity OTC + `name = viewName` using ColumnSet `{savedqueryid}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
+1. Look up view: query `savedqueries` by entity OTC + (`name = viewName` or `savedqueryid = viewId` when value is GUID-formatted) using ColumnSet `{savedqueryid}`; if 0 results throw `View.NotFound`; if >1 throw `View.Ambiguous`
 2. Read file; parse as `XDocument`; validate root element name is `fetch`; if not throw `Validation.SchemaInvalid`
 3. `UpdateAsync` with the provided `fetchxml` string
 4. If `--solution`: call `AddSolutionComponentRequest` (component type 26); then if `--publish`: call `PublishXmlRequest`
@@ -245,7 +245,7 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 | Field | Rule | Error Code |
 |-------|------|------------|
 | `--entity` | Required, non-empty | `Validation.RequiredField` |
-| `--view` (mutation commands) | Required, non-empty | `Validation.RequiredField` |
+| `--view` (mutation commands) | Required, non-empty. Accepts name or GUID (with or without braces). GUID-formatted values query by `savedqueryid`; other values query by `name`. | `Validation.RequiredField` / `View.NotFound` |
 | `--column` | Format `"name"` or `"name:width"` | `Validation.InvalidValue` |
 | `--sort` | Format `"attr:asc"` or `"attr:desc"` | `Validation.InvalidValue` |
 | `--condition` | Exactly 3 colon-separated segments | `Validation.InvalidValue` |

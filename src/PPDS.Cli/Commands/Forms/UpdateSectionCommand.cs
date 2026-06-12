@@ -23,13 +23,13 @@ public static class UpdateSectionCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Section current label",
+            Description = "Current label or ID of the section to update",
             Required = true
         };
 

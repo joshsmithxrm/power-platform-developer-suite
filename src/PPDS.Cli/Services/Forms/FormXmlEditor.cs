@@ -296,13 +296,24 @@ internal static class FormXmlEditor
         => formXml.Root
            ?? throw new PpdsException(FormErrorCodes.InvalidFormXml, "Form XML has no root element.");
 
-    private static XElement RequireTab(XDocument formXml, string tabLabel)
-        => formXml.Descendants("tab").FirstOrDefault(t => LabelMatches(t, tabLabel))
-           ?? throw new PpdsException(FormErrorCodes.TabNotFound, $"Tab '{tabLabel}' not found in form XML.");
+    private static XElement RequireTab(XDocument formXml, string tabLabelOrId)
+        => formXml.Descendants("tab").FirstOrDefault(t => ElementMatches(t, tabLabelOrId))
+           ?? throw new PpdsException(FormErrorCodes.TabNotFound, $"Tab '{tabLabelOrId}' not found in form XML.");
 
-    private static XElement RequireSection(XDocument formXml, string sectionLabel)
-        => formXml.Descendants("section").FirstOrDefault(s => LabelMatches(s, sectionLabel))
-           ?? throw new PpdsException(FormErrorCodes.SectionNotFound, $"Section '{sectionLabel}' not found in form XML.");
+    private static XElement RequireSection(XDocument formXml, string sectionLabelOrId)
+        => formXml.Descendants("section").FirstOrDefault(s => ElementMatches(s, sectionLabelOrId))
+           ?? throw new PpdsException(FormErrorCodes.SectionNotFound, $"Section '{sectionLabelOrId}' not found in form XML.");
+
+    // Exported so FormService can use the same matching logic for FindTab/FindSection.
+    internal static bool ElementMatches(XElement element, string labelOrId)
+    {
+        if (Guid.TryParse(labelOrId.Trim('{', '}'), out var targetGuid))
+        {
+            var idAttr = (string?)element.Attribute("id") ?? string.Empty;
+            return Guid.TryParse(idAttr.Trim('{', '}'), out var elemGuid) && elemGuid == targetGuid;
+        }
+        return LabelMatches(element, labelOrId);
+    }
 
     private static bool LabelMatches(XElement element, string label)
     {
