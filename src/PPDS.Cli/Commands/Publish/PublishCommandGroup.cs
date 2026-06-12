@@ -91,10 +91,6 @@ public static class PublishCommandGroup
             {
                 result.AddError("--type is required with --solution. Supported types: webresource, entity");
             }
-            else if (type != null && type.Equals("entity", StringComparison.OrdinalIgnoreCase) && names.Length == 0 && solution != null)
-            {
-                result.AddError("Entity publish requires explicit logical names. --solution alone is not sufficient for entity publish. Use: ppds publish --type entity account contact");
-            }
             else if (names.Length == 0 && solution == null)
             {
                 // Bare "ppds publish" with no flags — we let it through and show help in execute
