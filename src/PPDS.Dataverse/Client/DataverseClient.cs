@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -260,6 +261,15 @@ namespace PPDS.Dataverse.Client
         }
 
         #endregion
+
+        /// <inheritdoc />
+        public async Task<string?> GetRawWebApiAsync(string queryString, CancellationToken ct)
+        {
+            using var response = await _serviceClient.ExecuteWebRequestAsync(HttpMethod.Get, queryString, string.Empty, null, "application/json", ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+            return await response.Content.ReadAsStringAsync(ct);
+        }
 
         /// <summary>
         /// Disposes of the client and releases resources.

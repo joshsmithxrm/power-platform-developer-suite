@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace PPDS.Dataverse.Client
@@ -77,5 +79,12 @@ namespace PPDS.Dataverse.Client
         /// </summary>
         /// <returns>A cloned client instance.</returns>
         IDataverseClient Clone();
+
+        /// <summary>
+        /// GETs a raw WebAPI query string and returns the response body as JSON.
+        /// Used to traverse OData navigation properties not exposed as SDK attributes.
+        /// Returns null on 404 or if the response is empty.
+        /// </summary>
+        Task<string?> GetRawWebApiAsync(string queryString, CancellationToken ct);
     }
 }

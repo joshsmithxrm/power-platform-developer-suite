@@ -82,7 +82,7 @@ CLI commands for managing model-driven app (MDA) navigation — listing apps, in
 ppds model-driven-app
 ├── list                    # List all MDAs in environment
 ├── get --app <name>        # Show app metadata + component counts
-├── sitemap --app <name>    # Display sitemap navigation structure
+├── sitemap --app <name> [--unpublished] [--raw]   # Display sitemap navigation structure (or raw XML)
 ├── set-sitemap-xml --app <name> --xml <path>   # Set sitemap from file
 ├── add-table <entities...> --app <name> [--group] [--area] [--title] [--solution] [--publish]
 ├── remove-table --app <name> --entity <name> [--solution] [--publish]
@@ -109,7 +109,7 @@ All write subcommands (`set-sitemap-xml`, `add-table`, `remove-table`, `set-form
 
 ### Core Requirements
 
-1. All read operations (`list`, `get`, `sitemap`) work against the current published state
+1. All read operations (`list`, `get`, `sitemap`) work against the current published state by default; `sitemap --unpublished` reads the latest draft (via `RetrieveUnpublishedMultiple`), and `sitemap --raw` emits the sitemap XML verbatim instead of the parsed structure (JSON mode returns `{ "xml": "…" }`)
 2. All write operations validate sitemap XML against bundled XSD before PATCH
 3. Entity additions modify sitemap XML (not `AddAppComponents` — see Design Decisions)
 4. Form/view/chart additions use `AddAppComponents` with correct `@odata.type`

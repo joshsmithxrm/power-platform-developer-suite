@@ -64,6 +64,10 @@ public class FakePooledClient : IPooledClient
 
     public IDataverseClient Clone() => new FakePooledClient(_service, _connectionName, _serviceLock);
 
+    // FakeXrmEasy has no Web API surface; raw OData traversal isn't supported in these tests.
+    public Task<string?> GetRawWebApiAsync(string queryString, CancellationToken ct) =>
+        throw new NotSupportedException("FakePooledClient does not support raw Web API requests.");
+
     // IOrganizationService implementation - delegate to FakeXrmEasy
     // All operations are serialized via _serviceLock because FakeXrmEasy's
     // in-memory store is not thread-safe for concurrent mutations.

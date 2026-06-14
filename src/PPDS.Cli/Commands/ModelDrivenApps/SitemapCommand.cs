@@ -15,9 +15,21 @@ public static class SitemapCommand
 {
     public static Command Create()
     {
+        var unpublishedOption = new Option<bool>("--unpublished")
+        {
+            Description = "Read the unpublished (latest draft) sitemap instead of the published version"
+        };
+
+        var rawOption = new Option<bool>("--raw")
+        {
+            Description = "Output the raw sitemap XML instead of the parsed navigation structure"
+        };
+
         var command = new Command("sitemap", "Display the sitemap navigation structure of an app")
         {
             ModelDrivenAppCommandGroup.AppOption,
+            unpublishedOption,
+            rawOption,
             ModelDrivenAppCommandGroup.ProfileOption,
             ModelDrivenAppCommandGroup.EnvironmentOption
         };
@@ -27,10 +39,12 @@ public static class SitemapCommand
         command.SetAction(async (parseResult, ct) =>
         {
             var app = parseResult.GetValue(ModelDrivenAppCommandGroup.AppOption);
+            var unpublished = parseResult.GetValue(unpublishedOption);
+            var raw = parseResult.GetValue(rawOption);
             var profile = parseResult.GetValue(ModelDrivenAppCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ModelDrivenAppCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(app, profile, environment, globalOptions, ct);
+            return await ExecuteAsync(app, unpublished, raw, profile, environment, globalOptions, ct);
         });
 
         return command;
@@ -38,6 +52,8 @@ public static class SitemapCommand
 
     private static async Task<int> ExecuteAsync(
         string? appName,
+        bool unpublished,
+        bool raw,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -66,7 +82,24 @@ public static class SitemapCommand
                 Console.Error.WriteLine();
             }
 
-            var sitemap = await service.GetSitemapAsync(appName, ct);
+            if (raw)
+            {
+                var xml = await service.GetSitemapXmlAsync(appName, unpublished, ct);
+
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteSuccess(new { xml });
+                }
+                else
+                {
+                    // Raw XML is the requested data — write it to stdout (Constitution I1).
+                    Console.WriteLine(xml);
+                }
+
+                return ExitCodes.Success;
+            }
+
+            var sitemap = await service.GetSitemapAsync(appName, unpublished, ct);
 
             if (globalOptions.IsJsonMode)
             {
