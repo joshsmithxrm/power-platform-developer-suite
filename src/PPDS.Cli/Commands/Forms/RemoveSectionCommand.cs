@@ -23,13 +23,13 @@ public static class RemoveSectionCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var sectionOption = new Option<string>("--section")
         {
-            Description = "Section label",
+            Description = "Label or name of the section to remove",
             Required = true
         };
 

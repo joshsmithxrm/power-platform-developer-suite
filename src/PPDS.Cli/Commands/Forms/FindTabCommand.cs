@@ -22,13 +22,13 @@ public static class FindTabCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "Label of the tab to find",
+            Description = "Label or name of the tab to find",
             Required = true
         };
 

@@ -23,13 +23,13 @@ public static class FindSectionCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "Section label to search for",
+            Description = "Label or name of the section to find",
             Required = true
         };
 

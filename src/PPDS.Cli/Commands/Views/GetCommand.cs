@@ -17,8 +17,18 @@ public static class GetCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name",
+            Description = "[Required] View name or ID",
             Required = true
+        };
+
+        var unpublishedOption = new Option<bool>("--unpublished")
+        {
+            Description = "Show the unpublished (latest draft) view instead of the published version"
+        };
+
+        var rawOption = new Option<bool>("--raw")
+        {
+            Description = "Write raw fetchxml to stdout instead of the structured summary"
         };
 
         var command = new Command("get", "Get detailed view configuration including columns, sort, and filter")
@@ -27,6 +37,8 @@ public static class GetCommand
             ViewsCommandGroup.EnvironmentOption,
             ViewsCommandGroup.EntityOption,
             viewOption,
+            unpublishedOption,
+            rawOption,
         };
 
         GlobalOptions.AddToCommand(command);
@@ -37,6 +49,8 @@ public static class GetCommand
             var environment = parseResult.GetValue(ViewsCommandGroup.EnvironmentOption);
             var entity = parseResult.GetValue(ViewsCommandGroup.EntityOption)!;
             var viewName = parseResult.GetValue(viewOption)!;
+            var unpublished = parseResult.GetValue(unpublishedOption);
+            var raw = parseResult.GetValue(rawOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
             var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -55,9 +69,13 @@ public static class GetCommand
                 }
 
                 var service = sp.GetRequiredService<IViewService>();
-                var detail = await service.GetAsync(entity, viewName, cancellationToken: cancellationToken);
+                var detail = await service.GetAsync(entity, viewName, unpublished, cancellationToken: cancellationToken);
 
-                if (globalOptions.IsJsonMode)
+                if (raw)
+                {
+                    Console.Write(detail.FetchXml);
+                }
+                else if (globalOptions.IsJsonMode)
                 {
                     writer.WriteSuccess(new ViewDetailOutput
                     {

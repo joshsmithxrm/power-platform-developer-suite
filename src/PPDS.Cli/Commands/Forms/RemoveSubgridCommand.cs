@@ -8,7 +8,7 @@ using PPDS.Cli.Services.Forms;
 namespace PPDS.Cli.Commands.Forms;
 
 /// <summary>
-/// Remove a sub-grid from a Main form by label.
+/// Remove a sub-grid from a Main form by label or name.
 /// </summary>
 public static class RemoveSubgridCommand
 {
@@ -22,13 +22,13 @@ public static class RemoveSubgridCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "Label of the sub-grid to remove",
+            Description = "Label or name of the sub-grid to remove",
             Required = true
         };
 
@@ -43,7 +43,7 @@ public static class RemoveSubgridCommand
             Description = "Solution unique name to associate the change with"
         };
 
-        var command = new Command("remove-subgrid", "Remove a sub-grid from a Main form by label")
+        var command = new Command("remove-subgrid", "Remove a sub-grid from a Main form by label or name")
         {
             entityOption,
             formOption,

@@ -34,4 +34,16 @@ public static class FormErrorCodes
 
     /// <summary>The formxml contains duplicate id or labelid attribute values.</summary>
     public const string DuplicateGuid = "Forms.DuplicateGuid";
+
+    /// <summary>The form's iscustomizable flag is false; mutations are silently ignored by Dataverse.</summary>
+    public const string FormNotCustomizable = "Forms.FormNotCustomizable";
+
+    /// <summary>A tab with the same generated name already exists in the form.</summary>
+    public const string DuplicateTabName = "Forms.DuplicateTabName";
+
+    /// <summary>A section with the same generated name already exists in the form.</summary>
+    public const string DuplicateSectionName = "Forms.DuplicateSectionName";
+
+    /// <summary>A sub-grid control with the same generated name already exists in the form.</summary>
+    public const string DuplicateSubgridName = "Forms.DuplicateSubgridName";
 }

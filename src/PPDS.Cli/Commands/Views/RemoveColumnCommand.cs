@@ -16,7 +16,7 @@ public static class RemoveColumnCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name",
+            Description = "[Required] View name or ID",
             Required = true
         };
 

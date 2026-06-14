@@ -17,7 +17,7 @@ public interface IFormService
 
     Task<ListResult<FormInfo>> ListAsync(string entityLogicalName, CancellationToken ct = default);
 
-    Task<FormDetail?> GetAsync(string entityLogicalName, string formName, CancellationToken ct = default);
+    Task<FormDetail?> GetAsync(string entityLogicalName, string formName, bool unpublished = false, CancellationToken ct = default);
 
     // ── Set XML ───────────────────────────────────────────────────────────
 
@@ -75,10 +75,12 @@ public sealed record FormDetail(
     string FormTypeName,
     bool IsManaged,
     string? Description,
-    IReadOnlyList<TabDetail> Tabs);
+    IReadOnlyList<TabDetail> Tabs,
+    string? FormXml = null);
 
 public sealed record TabDetail(
     Guid Id,
+    string Name,
     string Label,
     bool Expanded,
     bool Visible,
@@ -87,6 +89,7 @@ public sealed record TabDetail(
 
 public sealed record SectionDetail(
     Guid Id,
+    string Name,
     string Label,
     int Columns,
     IReadOnlyList<FieldDetail> Fields,
@@ -99,7 +102,7 @@ public sealed record FieldDetail(
     int RowNumber);
 
 public sealed record SubgridDetail(
-    Guid Id,
+    string Name,
     string Label,
     string TargetEntity,
     Guid ViewId,
@@ -210,6 +213,7 @@ public sealed record RemoveFieldRequest(
     string EntityLogicalName,
     string FormName,
     string FieldLogicalName,
+    string? SectionLabelOrId = null,
     string? SolutionUniqueName = null,
     bool Publish = false);
 

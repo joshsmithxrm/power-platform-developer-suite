@@ -22,13 +22,13 @@ public static class RemoveTabCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Label of the tab to remove",
+            Description = "Label or name of the tab to remove",
             Required = true
         };
 

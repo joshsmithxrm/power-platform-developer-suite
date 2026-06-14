@@ -23,14 +23,26 @@ public static class GetCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Name of the form",
+            Description = "Name or ID of the form",
             Required = true
+        };
+
+        var unpublishedOption = new Option<bool>("--unpublished")
+        {
+            Description = "Show the unpublished (latest draft) form instead of the published version"
+        };
+
+        var rawOption = new Option<bool>("--raw")
+        {
+            Description = "Write raw formxml to stdout instead of the structured summary"
         };
 
         var command = new Command("get", "Get the structure of a specific Dataverse systemform")
         {
             entityOption,
             formOption,
+            unpublishedOption,
+            rawOption,
             FormsCommandGroup.ProfileOption,
             FormsCommandGroup.EnvironmentOption
         };
@@ -41,11 +53,13 @@ public static class GetCommand
         {
             var entity = parseResult.GetValue(entityOption)!;
             var form = parseResult.GetValue(formOption)!;
+            var unpublished = parseResult.GetValue(unpublishedOption);
+            var raw = parseResult.GetValue(rawOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, unpublished, raw, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -54,6 +68,8 @@ public static class GetCommand
     private static async Task<int> ExecuteAsync(
         string entity,
         string form,
+        bool unpublished,
+        bool raw,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -80,7 +96,7 @@ public static class GetCommand
                 Console.Error.WriteLine();
             }
 
-            var formDetail = await formService.GetAsync(entity, form, cancellationToken);
+            var formDetail = await formService.GetAsync(entity, form, unpublished, cancellationToken);
 
             if (formDetail == null)
             {
@@ -93,7 +109,11 @@ public static class GetCommand
                 return ExitCodes.NotFoundError;
             }
 
-            if (globalOptions.IsJsonMode)
+            if (raw)
+            {
+                Console.Write(formDetail.FormXml);
+            }
+            else if (globalOptions.IsJsonMode)
             {
                 writer.WriteSuccess(formDetail);
             }
@@ -104,11 +124,11 @@ public static class GetCommand
 
                 foreach (var tab in formDetail.Tabs)
                 {
-                    Console.WriteLine($"  Tab: {tab.Label}");
+                    Console.WriteLine($"  Tab: {tab.Label} [{tab.Name}]");
 
                     foreach (var section in tab.Sections)
                     {
-                        Console.WriteLine($"    Section: {section.Label}");
+                        Console.WriteLine($"    Section: {section.Label} [{section.Name}]");
 
                         foreach (var field in section.Fields)
                         {
@@ -118,7 +138,7 @@ public static class GetCommand
 
                         foreach (var subgrid in section.Subgrids)
                         {
-                            Console.WriteLine($"      [SubGrid] {subgrid.Label} → {subgrid.TargetEntity}");
+                            Console.WriteLine($"      [SubGrid] {subgrid.Label} [{subgrid.Name}] → {subgrid.TargetEntity}");
                         }
                     }
                 }

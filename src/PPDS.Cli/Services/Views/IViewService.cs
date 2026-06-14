@@ -21,6 +21,7 @@ public interface IViewService
     Task<ViewDetail> GetAsync(
         string entityLogicalName,
         string viewName,
+        bool unpublished = false,
         IProgressReporter? progressReporter = null,
         CancellationToken cancellationToken = default);
 
@@ -109,7 +110,9 @@ public record ViewDetail(
     string EntityLogicalName,
     IReadOnlyList<ViewColumn> Columns,
     IReadOnlyList<ViewSortOrder> SortOrders,
-    ViewFilter? ActiveFilter);
+    ViewFilter? ActiveFilter,
+    string? FetchXml = null,
+    string? LayoutXml = null);
 
 /// <summary>
 /// A column in a view's layoutxml.

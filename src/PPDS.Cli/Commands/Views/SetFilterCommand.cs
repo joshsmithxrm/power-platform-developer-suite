@@ -26,7 +26,7 @@ public static class SetFilterCommand
     {
         var viewOption = new Option<string>("--view", "-v")
         {
-            Description = "[Required] View name"
+            Description = "[Required] View name or ID"
         };
 
         var filterFileOption = new Option<string?>("--filter-file")

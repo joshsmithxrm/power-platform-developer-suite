@@ -23,13 +23,13 @@ public static class AddSectionCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
         var tabOption = new Option<string>("--tab")
         {
-            Description = "Parent tab label",
+            Description = "Label or name of the parent tab",
             Required = true
         };
 

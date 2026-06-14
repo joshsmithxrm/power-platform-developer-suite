@@ -501,6 +501,9 @@ public static class ErrorCodes
 
         /// <summary>AddSolutionComponentRequest failed.</summary>
         public const string AddToSolutionFailed = "View.AddToSolutionFailed";
+
+        /// <summary>View has no layoutxml and cannot be modified (e.g. system-generated "My" views).</summary>
+        public const string NoLayout = "View.NoLayout";
     }
 
     /// <summary>

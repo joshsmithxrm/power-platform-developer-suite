@@ -8,7 +8,7 @@ using PPDS.Cli.Services.Forms;
 namespace PPDS.Cli.Commands.Forms;
 
 /// <summary>
-/// Remove the first occurrence of a field from a Main form.
+/// Remove a field from a Main form. Without --section, removes all occurrences.
 /// </summary>
 public static class RemoveFieldCommand
 {
@@ -22,7 +22,7 @@ public static class RemoveFieldCommand
 
         var formOption = new Option<string>("--form")
         {
-            Description = "Form name",
+            Description = "Name or ID of the form",
             Required = true
         };
 
@@ -30,6 +30,11 @@ public static class RemoveFieldCommand
         {
             Description = "Field logical name to remove",
             Required = true
+        };
+
+        var sectionOption = new Option<string?>("--section")
+        {
+            Description = "Label or name of the section to remove the field from. If omitted, all occurrences of the field are removed from the form."
         };
 
         var publishOption = new Option<bool>("--publish")
@@ -43,11 +48,13 @@ public static class RemoveFieldCommand
             Description = "Solution unique name to associate the change with"
         };
 
-        var command = new Command("remove-field", "Remove the first occurrence of a field from a Main form")
+        var command = new Command("remove-field",
+            "Remove a field from a Main form. Without --section, removes all occurrences of the field; with --section, removes only from the specified section.")
         {
             entityOption,
             formOption,
             fieldOption,
+            sectionOption,
             publishOption,
             solutionOption,
             FormsCommandGroup.ProfileOption,
@@ -61,13 +68,14 @@ public static class RemoveFieldCommand
             var entity = parseResult.GetValue(entityOption)!;
             var form = parseResult.GetValue(formOption)!;
             var field = parseResult.GetValue(fieldOption)!;
+            var section = parseResult.GetValue(sectionOption);
             var publish = parseResult.GetValue(publishOption);
             var solution = parseResult.GetValue(solutionOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, field, publish, solution, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, field, section, publish, solution, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -77,6 +85,7 @@ public static class RemoveFieldCommand
         string entity,
         string form,
         string field,
+        string? section,
         bool publish,
         string? solution,
         string? profile,
@@ -105,16 +114,20 @@ public static class RemoveFieldCommand
                 Console.Error.WriteLine();
             }
 
-            var request = new RemoveFieldRequest(entity, form, field, solution, publish);
+            var request = new RemoveFieldRequest(entity, form, field, section, solution, publish);
             await formService.RemoveFieldAsync(request, null, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { field, message = "Field removed." });
+                var msg = section is null ? "All occurrences removed." : $"Field removed from section '{section}'.";
+                writer.WriteSuccess(new { field, section, message = msg });
             }
             else
             {
-                Console.Error.WriteLine($"Field '{field}' removed.");
+                var msg = section is null
+                    ? $"All occurrences of field '{field}' removed."
+                    : $"Field '{field}' removed from section '{section}'.";
+                Console.Error.WriteLine(msg);
             }
 
             return ExitCodes.Success;

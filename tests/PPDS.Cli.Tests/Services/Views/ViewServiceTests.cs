@@ -12,6 +12,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Services.Views;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Metadata;
@@ -335,6 +336,116 @@ public class ViewServiceTests
         act.Should().Throw<ArgumentNullException>().WithParameterName("guard");
     }
 
+    // ─── ReorderColumnsAsync ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReorderColumnsAsync_UsesRetrieveUnpublishedMultiple()
+    {
+        // savedquery is publishable; reorder-columns must read the draft/current state via
+        // RetrieveUnpublishedMultiple so that pending unpublished changes are not overwritten.
+        var viewId = Guid.NewGuid();
+        var layoutXml = """<grid><row><cell name="a" width="100" /><cell name="b" width="100" /><cell name="c" width="100" /></row></grid>""";
+        // Post-write layout returned by the read-back verification (differs from the original so the
+        // honest-write read-back (#1194) sees the change as persisted).
+        var reorderedLayout = """<grid><row><cell name="c" width="100" /><cell name="a" width="100" /></row></grid>""";
+
+        var client = new Mock<IPooledClient>();
+        client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+
+        // The initial read-modify-write fetch and the read-back both use RetrieveUnpublishedMultiple;
+        // the initial fetch requests ismanaged, the read-back requests the mutated field only.
+        client.Setup(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
+            {
+                var query = (QueryExpression)((RetrieveUnpublishedMultipleRequest)req).Query;
+                var entity = query.ColumnSet.Columns.Contains("ismanaged")
+                    ? new Entity("savedquery") { ["savedqueryid"] = viewId, ["layoutxml"] = layoutXml, ["ismanaged"] = false, ["returnedtypecode"] = "account" }
+                    : new Entity("savedquery") { ["savedqueryid"] = viewId, ["layoutxml"] = reorderedLayout };
+                var result = new RetrieveUnpublishedMultipleResponse();
+                result.Results["EntityCollection"] = new EntityCollection([entity]);
+                return result;
+            });
+
+        Entity? capturedUpdate = null;
+        client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedUpdate = e);
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(client.Object);
+
+        var meta = new Mock<ICachedMetadataProvider>();
+        meta.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new EntitySummary { LogicalName = "account", DisplayName = "Account", SchemaName = "account", ObjectTypeCode = 1 }]);
+
+        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance);
+
+        await service.ReorderColumnsAsync("account", "My View", ["c", "a"]);
+
+        // Verify RetrieveUnpublishedMultiple was used (not plain RetrieveMultiple). The write path
+        // reads unpublished twice now — the initial fetch and the honest-write read-back (#1194).
+        client.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        client.Verify(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // Verify the layoutxml was updated with the requested order.
+        capturedUpdate.Should().NotBeNull();
+        var updatedDoc = XDocument.Parse(capturedUpdate!.GetAttributeValue<string>("layoutxml")!);
+        var cells = updatedDoc.Descendants("cell").Select(c => (string?)c.Attribute("name")).ToList();
+        cells.Should().ContainInOrder("c", "a");
+    }
+
+    // ─── GetAsync read-default: published unless --unpublished (parity with forms/web-resource) ──
+
+    [Fact]
+    public async Task GetAsync_DefaultsToPublishedRead()
+    {
+        var client = new Mock<IPooledClient>();
+        client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        client.Setup(c => c.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "savedquery"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection([new Entity("savedquery") { ["savedqueryid"] = Guid.NewGuid(), ["name"] = "My View" }]));
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
+        var meta = new Mock<ICachedMetadataProvider>();
+        meta.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new EntitySummary { LogicalName = "account", DisplayName = "Account", SchemaName = "account", ObjectTypeCode = 1 }]);
+        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance);
+
+        var detail = await service.GetAsync("account", "My View");
+
+        detail.Should().NotBeNull();
+        client.Verify(c => c.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "savedquery"), It.IsAny<CancellationToken>()), Times.Once);
+        client.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetAsync_Unpublished_ReadsDraft()
+    {
+        var client = new Mock<IPooledClient>();
+        client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        client.Setup(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest _, CancellationToken __) =>
+            {
+                var r = new RetrieveUnpublishedMultipleResponse();
+                r.Results["EntityCollection"] = new EntityCollection([new Entity("savedquery") { ["savedqueryid"] = Guid.NewGuid(), ["name"] = "My View" }]);
+                return r;
+            });
+
+        var pool = new Mock<IDataverseConnectionPool>();
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
+        var meta = new Mock<ICachedMetadataProvider>();
+        meta.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new EntitySummary { LogicalName = "account", DisplayName = "Account", SchemaName = "account", ObjectTypeCode = 1 }]);
+        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance);
+
+        var detail = await service.GetAsync("account", "My View", unpublished: true);
+
+        detail.Should().NotBeNull();
+        client.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveUnpublishedMultipleRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        client.Verify(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ─── Honest view writes: fault surfacing / managed guidance / read-back verify (#1190, #1194) ──
 
     private const int ContactOtc = 2;
@@ -373,7 +484,7 @@ public class ViewServiceTests
                 }
             });
 
-        // The view-fetch (RetrieveMultiple, filters by name) returns the original record.
+        // Defensive fallback only — the view write path no longer reads via RetrieveMultiple.
         client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>
             {
@@ -387,21 +498,52 @@ public class ViewServiceTests
                 }
             }));
 
-        // Read-back verification reads the UNPUBLISHED (draft) record via RetrieveUnpublishedMultiple.
-        var readBack = client.Setup(c => c.ExecuteAsync(
-            It.Is<OrganizationRequest>(r => r is RetrieveUnpublishedMultipleRequest), It.IsAny<CancellationToken>()));
-        if (readBackThrows != null)
-            readBack.ThrowsAsync(readBackThrows);
-        else
-            readBack.ReturnsAsync(new RetrieveUnpublishedMultipleResponse
+        // Both the initial read-modify-write fetch AND the read-back verification go through
+        // RetrieveUnpublishedMultiple now (unpublished initial read composes draft edits; read-back
+        // verifies against the same draft layer — #1194). Distinguish them by the column set: the
+        // initial fetch requests ismanaged (+ layout/fetch); the read-back requests the single mutated
+        // field. Initial → original record; read-back → post-write state (or throws if configured).
+        client.Setup(c => c.ExecuteAsync(
+                It.Is<OrganizationRequest>(r => r is RetrieveUnpublishedMultipleRequest), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest req, CancellationToken _) =>
             {
-                Results = new ParameterCollection
+                var query = (QueryExpression)((RetrieveUnpublishedMultipleRequest)req).Query;
+                var isInitialFetch = query.ColumnSet.Columns.Contains("ismanaged");
+
+                if (isInitialFetch)
                 {
-                    { "EntityCollection", new EntityCollection(new List<Entity>
+                    return new RetrieveUnpublishedMultipleResponse
+                    {
+                        Results = new ParameterCollection
                         {
-                            new("savedquery") { ["fetchxml"] = fetchAfterWrite, ["layoutxml"] = NewLayout }
-                        }) }
+                            { "EntityCollection", new EntityCollection(new List<Entity>
+                                {
+                                    new("savedquery")
+                                    {
+                                        ["savedqueryid"] = ViewId,
+                                        ["fetchxml"] = OriginalFetch,
+                                        ["layoutxml"] = OriginalLayout,
+                                        ["ismanaged"] = isManaged,
+                                        ["returnedtypecode"] = "contact"
+                                    }
+                                }) }
+                        }
+                    };
                 }
+
+                if (readBackThrows != null)
+                    throw readBackThrows;
+
+                return new RetrieveUnpublishedMultipleResponse
+                {
+                    Results = new ParameterCollection
+                    {
+                        { "EntityCollection", new EntityCollection(new List<Entity>
+                            {
+                                new("savedquery") { ["fetchxml"] = fetchAfterWrite, ["layoutxml"] = NewLayout }
+                            }) }
+                    }
+                };
             });
 
         if (updateThrows != null)
