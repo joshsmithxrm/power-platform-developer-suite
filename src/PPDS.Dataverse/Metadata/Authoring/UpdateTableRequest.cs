@@ -44,6 +44,15 @@ public sealed class UpdateTableRequest
     /// <summary>Gets or sets the entity color (hex string).</summary>
     public string? EntityColor { get; set; }
 
+    /// <summary>Gets or sets the 16×16 icon web resource logical name.</summary>
+    public string? IconSmallName { get; set; }
+
+    /// <summary>Gets or sets the 32×32 icon web resource logical name.</summary>
+    public string? IconMediumName { get; set; }
+
+    /// <summary>Gets or sets the SVG vector icon web resource logical name (used as primary icon in modern Dataverse).</summary>
+    public string? IconVectorName { get; set; }
+
     /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted).</summary>
     public bool DryRun { get; set; }
 

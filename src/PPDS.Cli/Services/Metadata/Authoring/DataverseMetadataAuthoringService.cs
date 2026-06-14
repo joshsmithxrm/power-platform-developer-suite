@@ -208,6 +208,15 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (!string.IsNullOrEmpty(request.EntityColor))
             entityMetadata.EntityColor = request.EntityColor;
 
+        // Icon fields must be set via UpdateEntityRequest (SDK) — Web API EntityDefinitions PATCH
+        // rejects these properties. Pass null to leave an icon unchanged; pass "" to clear it.
+        if (request.IconSmallName != null)
+            entityMetadata.IconSmallName = request.IconSmallName;
+        if (request.IconMediumName != null)
+            entityMetadata.IconMediumName = request.IconMediumName;
+        if (request.IconVectorName != null)
+            entityMetadata.IconVectorName = request.IconVectorName;
+
         var sdkRequest = new UpdateEntityRequest
         {
             Entity = entityMetadata,
@@ -1914,11 +1923,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 ImeMode = ParseImeMode(request.ImeMode)
             },
             SchemaColumnType.Boolean => BuildBooleanAttribute(request),
-            SchemaColumnType.DateTime => new DateTimeAttributeMetadata
-            {
-                DateTimeBehavior = ParseDateTimeBehavior(request.DateTimeBehavior),
-                Format = ParseDateTimeFormat(request.Format)
-            },
+            SchemaColumnType.DateTime => BuildDateTimeAttribute(request),
             SchemaColumnType.Choice => BuildChoiceAttribute(request),
             SchemaColumnType.Choices => BuildMultiSelectChoiceAttribute(request),
             SchemaColumnType.Image => new ImageAttributeMetadata
@@ -2396,6 +2401,16 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             "disabled" => ImeMode.Disabled,
             _ => null
         };
+    }
+
+    private static DateTimeAttributeMetadata BuildDateTimeAttribute(CreateColumnRequest request)
+    {
+        var behavior = ParseDateTimeBehavior(request.DateTimeBehavior);
+        // DateOnly behavior requires DateOnly format; Dataverse rejects any other combination.
+        var format = behavior == Microsoft.Xrm.Sdk.Metadata.DateTimeBehavior.DateOnly
+            ? DateTimeFormat.DateOnly
+            : ParseDateTimeFormat(request.Format);
+        return new DateTimeAttributeMetadata { DateTimeBehavior = behavior, Format = format };
     }
 
     private static DateTimeBehavior? ParseDateTimeBehavior(string? behavior)

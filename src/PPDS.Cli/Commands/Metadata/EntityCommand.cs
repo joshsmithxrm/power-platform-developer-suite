@@ -472,6 +472,21 @@ public static class EntityCommand
             Description = "Updated description"
         };
 
+        var iconSmallOption = new Option<string?>("--icon-small")
+        {
+            Description = "16×16 icon: web resource logical name (e.g. new_icons/myentity16.png). Use empty string to clear."
+        };
+
+        var iconMediumOption = new Option<string?>("--icon-medium")
+        {
+            Description = "32×32 icon: web resource logical name. Use empty string to clear."
+        };
+
+        var iconVectorOption = new Option<string?>("--icon-vector")
+        {
+            Description = "SVG vector icon: web resource logical name (primary icon in modern Dataverse). Use empty string to clear."
+        };
+
         var dryRunOption = new Option<bool>("--dry-run")
         {
             Description = "Validate only, do not persist changes",
@@ -492,6 +507,9 @@ public static class EntityCommand
             displayNameOption,
             pluralNameOption,
             descriptionOption,
+            iconSmallOption,
+            iconMediumOption,
+            iconVectorOption,
             dryRunOption,
             publishOption,
             MetadataCommandGroup.ProfileOption,
@@ -508,6 +526,9 @@ public static class EntityCommand
             var displayName = parseResult.GetValue(displayNameOption);
             var pluralName = parseResult.GetValue(pluralNameOption);
             var description = parseResult.GetValue(descriptionOption);
+            var iconSmall = parseResult.GetValue(iconSmallOption);
+            var iconMedium = parseResult.GetValue(iconMediumOption);
+            var iconVector = parseResult.GetValue(iconVectorOption);
             var dryRun = parseResult.GetValue(dryRunOption);
             var publish = parseResult.GetValue(publishOption);
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
@@ -515,7 +536,8 @@ public static class EntityCommand
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteUpdateAsync(
-                solution, entity, displayName, pluralName, description, dryRun, publish,
+                solution, entity, displayName, pluralName, description,
+                iconSmall, iconMedium, iconVector, dryRun, publish,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -528,6 +550,9 @@ public static class EntityCommand
         string? displayName,
         string? pluralName,
         string? description,
+        string? iconSmall,
+        string? iconMedium,
+        string? iconVector,
         bool dryRun,
         bool publish,
         string? profile,
@@ -562,6 +587,9 @@ public static class EntityCommand
                 DisplayName = displayName,
                 PluralDisplayName = pluralName,
                 Description = description,
+                IconSmallName = iconSmall,
+                IconMediumName = iconMedium,
+                IconVectorName = iconVector,
                 DryRun = dryRun,
                 Publish = publish
             };

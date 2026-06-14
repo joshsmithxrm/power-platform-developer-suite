@@ -231,6 +231,22 @@ public class CreateColumnTypeTests
     }
 
     [Fact]
+    public async Task DateTime_DateOnlyBehavior_ForcesDateOnlyFormat_WhenFormatOmitted()
+    {
+        // Dataverse rejects DateOnly behavior + DateAndTime format. PPDS should coerce the
+        // format to DateOnly automatically so the user doesn't have to specify it explicitly.
+        var request = MakeRequest(SchemaColumnType.DateTime);
+        request.DateTimeBehavior = "DateOnly";
+        // Format deliberately omitted — was previously defaulting to DateAndTime.
+
+        var sdkRequest = await CaptureCreateAttributeRequest(request);
+
+        var attr = sdkRequest.Attribute.Should().BeOfType<DateTimeAttributeMetadata>().Subject;
+        attr.DateTimeBehavior.Should().Be(Microsoft.Xrm.Sdk.Metadata.DateTimeBehavior.DateOnly);
+        attr.Format.Should().Be(DateTimeFormat.DateOnly);
+    }
+
+    [Fact]
     public async Task Choice_WithLocalOptions_CreatesPicklistAttributeMetadata()
     {
         var request = MakeRequest(SchemaColumnType.Choice);
