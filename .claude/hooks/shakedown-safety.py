@@ -302,6 +302,9 @@ def get_active_env_names() -> list:
             label = host.split(".", 1)[0]
             if label and label != host:
                 candidates.append(label)
+    profile_name = active.get("name")
+    if isinstance(profile_name, str) and profile_name.strip():
+        candidates.append(profile_name.strip())
     return candidates
 
 
