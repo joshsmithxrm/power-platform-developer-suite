@@ -1,4 +1,5 @@
 using System;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -130,6 +131,28 @@ public class PooledClientExtensionsTests
 
     #endregion
 
+    [Fact]
+    public async Task PublishXmlAsync_EnvironmentLockFault_WrapsWithActionableMessage()
+    {
+        // Dataverse returns this when another operation (e.g. Import) is running in the environment.
+        // The lock message pattern must trigger a user-friendly InvalidOperationException that
+        // mentions the edit was already saved.
+        var envKey = $"env-lock-{Guid.NewGuid()}";
+        var lockMessage = "Cannot start the requested operation [Publish] because there is another [Import] running at this moment";
+        var fault = new OrganizationServiceFault { Message = lockMessage };
+        var faultException = new FaultException<OrganizationServiceFault>(fault, new FaultReason(lockMessage));
+
+        _client
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(faultException);
+
+        var act = () => _client.Object.PublishXmlAsync("<xml/>", envKey);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("were saved", "user must know their edit persisted");
+        ex.Which.Message.Should().Contain("--publish", "user must know how to retry");
+    }
+
     #region PublishAllXmlAsync Tests
 
     [Fact]
@@ -156,6 +179,24 @@ public class PooledClientExtensionsTests
         // Cleanup
         tcs.SetResult(new PublishAllXmlResponse());
         await publishXmlTask;
+    }
+
+    [Fact]
+    public async Task PublishAllXmlAsync_EnvironmentLockFault_WrapsWithActionableMessage()
+    {
+        var envKey = $"env-lock-all-{Guid.NewGuid()}";
+        var lockMessage = "Cannot start the requested operation [PublishAll] because there is another [Import] running at this moment";
+        var fault = new OrganizationServiceFault { Message = lockMessage };
+        var faultException = new FaultException<OrganizationServiceFault>(fault, new FaultReason(lockMessage));
+
+        _client
+            .Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(faultException);
+
+        var act = () => _client.Object.PublishAllXmlAsync(envKey);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("conflicting operation", "user must know why publish was blocked");
     }
 
     #endregion
