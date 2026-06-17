@@ -19,10 +19,11 @@ Which keys sign which surfaces:
 | Surface | Signing input | Workflow source |
 |---------|---------------|-----------------|
 | .NET assemblies (.dll) | strong-name SNK in `pks/PPDS.snk` (committed; protected by `snk-protect.py`) | Built into csproj |
-| NuGet packages | NuGet API key from secret `NUGET_API_KEY` | `.github/workflows/publish.yml` |
-| VS Code extension | `vsce` token from secret `VSCE_TOKEN` | `.github/workflows/publish.yml` |
-| GitHub releases | GITHUB_TOKEN (auto) | `.github/workflows/publish.yml` |
-| Code-signing (Windows .exe) | Cert + password from secrets `WINSIGN_CERT`, `WINSIGN_PWD` | `.github/workflows/publish.yml` |
+| Plugins assembly strong-name | `PLUGINS_SNK_BASE64` secret (decoded at pack time, `Plugins-v*` tags only) | `.github/workflows/publish-nuget.yml` |
+| NuGet packages | `NUGET_API_KEY` secret | `.github/workflows/publish-nuget.yml` |
+| VS Code extension | `ADO_MARKETPLACE_PAT` secret (vsce PAT) | `.github/workflows/extension-publish.yml` |
+| GitHub releases / CLI binaries | `GITHUB_TOKEN` (auto) | `.github/workflows/release-cli.yml` |
+| Windows code-signing (CLI `.exe`) | **NOT IMPLEMENTED** — `release-cli.yml` ships **unsigned** `.exe`; no `WINSIGN_*` secrets or `signtool` step exist (tracked follow-up) | n/a |
 
 If a signing job fails, do NOT retag. Investigate the secret, fix it via repo settings, then re-run the workflow:
 
@@ -69,11 +70,9 @@ Example:
 
 ## §5 - Platform-specific notes
 
-### Windows code-signing
+### Windows code-signing (not yet implemented)
 
-The cert lives in repo secret `WINSIGN_CERT` (base64-encoded PFX). The password is `WINSIGN_PWD`. If signing fails with "cert not found", verify the secret is base64 and decodable. The publish workflow does the decode.
-
-If the cert expires, request a new one from the cert authority and update both secrets. Test with a manual workflow_dispatch before tagging.
+CLI `.exe` binaries (`release-cli.yml`, `win-x64`/`win-arm64`) currently ship **unsigned** — there is no `signtool` step and no `WINSIGN_CERT`/`WINSIGN_PWD` secrets. Users may see SmartScreen warnings. Wiring Authenticode signing (cert + secrets + signtool step) is a tracked follow-up; until then, do not assume a signing job exists.
 
 ### NuGet v3-flatcontainer URL casing
 
