@@ -108,7 +108,7 @@ captured CLI/MCP surface to a specific release. Once §7 confirms the new
 flag tables track the released CLI:
 
 ```bash
-gh workflow run recapture-on-release.yml --repo joshsmithxrm/ppds-skills
+gh workflow run recapture-on-release.yml --repo joshsmithxrm/ppds-skills -r main
 ```
 
 This opens a re-capture PR in `ppds-skills` (it never auto-merges, and no-ops if
