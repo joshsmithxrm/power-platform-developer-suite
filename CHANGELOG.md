@@ -11,6 +11,7 @@ This repository contains multiple packages with independent release cycles.
 - [PPDS.Cli](src/PPDS.Cli/CHANGELOG.md) - Unified CLI tool (`ppds` command)
 - [PPDS.Query](src/PPDS.Query/CHANGELOG.md) - SQL query engine for Dataverse
 - [PPDS.Mcp](src/PPDS.Mcp/CHANGELOG.md) - MCP server for AI assistant integration
+- [PPDS.Extension](src/PPDS.Extension/CHANGELOG.md) - VS Code extension (published to the Marketplace via vsce)
 
 ## GitHub Releases
 
@@ -24,13 +25,14 @@ Each package has its own tag prefix:
 
 | Package | Tag Format | Example |
 |---------|------------|---------|
-| PPDS.Plugins | `Plugins-v{version}` | `Plugins-v1.2.0` |
+| PPDS.Plugins | `Plugins-v{version}` | `Plugins-v3.0.0` |
 | PPDS.Dataverse | `Dataverse-v{version}` | `Dataverse-v1.0.0` |
 | PPDS.Migration | `Migration-v{version}` | `Migration-v1.0.0` |
 | PPDS.Auth | `Auth-v{version}` | `Auth-v1.0.0` |
 | PPDS.Cli | `Cli-v{version}` | `Cli-v1.0.0` |
 | PPDS.Query | `Query-v{version}` | `Query-v1.0.0` |
 | PPDS.Mcp | `Mcp-v{version}` | `Mcp-v1.0.0` |
+| PPDS.Extension | `Extension-v{version}` | `Extension-v1.2.0` |
 
 Pre-release versions follow SemVer:
 - Alpha: `Dataverse-v1.0.0-alpha.1`

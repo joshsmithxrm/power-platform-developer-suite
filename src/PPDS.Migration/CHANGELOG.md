@@ -44,5 +44,6 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **DI integration** — `AddDataverseMigration()` extension method.
 - **Security-first design** — Connection string redaction, no PII in logs.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.1.0...HEAD
+[1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0...Migration-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Migration-v1.0.0

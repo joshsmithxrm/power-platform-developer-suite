@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Raw Web API passthrough + draft-app sitemap resolution** — new public `IDataverseClient.GetRawWebApiAsync(queryString, ct)` returns the raw Web API JSON for a relative query, and model-driven-app sitemap resolution now handles draft (unpublished) apps ([#1242](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1242)).
 - **Metadata-authoring support for status reasons and local option sets** — `AddStatusReasonRequest`/`UpdateStatusReasonRequest`/`RemoveStatusReasonRequest`/`StatusReasonInfo` for entity status-reason management, and `AddOptionValueRequest`/`UpdateOptionValueRequest`/`DeleteOptionValueRequest` plus the shared `OptionValueDeriver` (publisher-prefix-based option value derivation) for column-scoped (local) Choice option sets ([#1167](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1167), [#1159](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1159), [#1160](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1160), [#1161](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1161)).
 - **`DeleteOptionValueRequest` targets by value or label** — `Value` is now nullable and a `Label` selector was added (exactly one required); the service resolves the target against unpublished metadata and throws `OPTION_NOT_FOUND` when unresolved ([#1169](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1169)).
 - **`UpdateOptionValueRequest` aligned with `UpdateColumnOptionRequest`** — `Value`/`Label` are now the (exactly-one) target selectors, `NewLabel` carries the updated label (current label preserved when omitted), and `Color` is now forwarded to the SDK ([#1170](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1170)).
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Actionable environment-lock errors on publish** — `PooledClientExtensions` re-throws in-progress import/publish faults as an `InvalidOperationException` with remediation guidance instead of surfacing the opaque platform fault ([#1245](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1245)).
 - **M:N relationship create** — populate `IntersectEntitySchemaName` on the create request (defaulting to the relationship schema name) so many-to-many relationship creation no longer fails with `Required field 'IntersectEntitySchemaName' is missing` ([#1018](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1018)).
 
 ## [1.0.0] - 2026-04-18
@@ -52,5 +54,5 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Default `AcquireTimeout` of 120 s** — Connection acquisition from the pool waits up to 120 s, accommodating queuing on the DOP semaphore during large imports.
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0
