@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-17
+
 ### Added
 
 - **Publish requirement surfaced on metadata column updates** — `MetadataUpdateColumnResult` now carries `RequiresPublish` and `PublishHint`, so MCP clients are told when a column change must be published and given the exact `ppds metadata publish <entity>` command ([#1016](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1016)).
@@ -32,5 +34,6 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Structured MCP error responses** — All tool exceptions now surface `errorCode`, `userMessage`, and `context`, giving MCP clients machine-readable failure details ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...HEAD
+[1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...Mcp-v1.0.1
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Mcp-v1.0.0

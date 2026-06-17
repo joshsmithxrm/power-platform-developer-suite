@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-17
+
 ### Added
 - **`ppds webresources create <file>`** — create a brand-new web resource directly from a local file: type inferred from the file extension (`--type` single-type override), `--display-name`, optional atomic `--solution` binding (SDK equivalent of the `MSCRM.SolutionUniqueName` header), and `--publish`. Fails with `WebResource.AlreadyExists` (hinting at `update`) when the name is taken (#1207).
 - **`ppds webresources update <name|id> <file>`** — replace an existing web resource's content from a local file (binary types allowed — this is file replacement, not text editing), with optional `--publish`. Resolves by exact name or GUID only, so a fuzzy match can never overwrite the wrong resource; warns when the file extension implies a different type than the stored resource (#1207).
@@ -111,6 +113,7 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`ppds flows get|url` accept GUID or unique name** — The `name` argument resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.1.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.1.0...Cli-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0...Cli-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Cli-v1.0.0

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-17
+
 ### Added
 
 - **Raw Web API passthrough + draft-app sitemap resolution** — new public `IDataverseClient.GetRawWebApiAsync(queryString, ct)` returns the raw Web API JSON for a relative query, and model-driven-app sitemap resolution now handles draft (unpublished) apps ([#1242](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1242)).
@@ -58,6 +60,7 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Default `AcquireTimeout` of 120 s** — Connection acquisition from the pool waits up to 120 s, accommodating queuing on the DOP semaphore during large imports.
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.2.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...Dataverse-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...Dataverse-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0

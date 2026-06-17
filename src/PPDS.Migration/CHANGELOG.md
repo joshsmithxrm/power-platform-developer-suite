@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-17
+
 ### Added
 - **JSON data export format** — `ExportDataFormat.Json` on `ExportOptions` alongside the default CMT XML. `JsonDataWriter` (streaming `Utf8JsonWriter`) emits a single-file PPDS-native payload mirroring the CMT structure (schema metadata, per-entity typed field values, M2M associations), with `AliasedValue` unwrapping for FetchXML-joined attributes. `ParallelExporter` selects the writer from `options.Format`. File-column binaries are not serialized in JSON v1; use CMT format for binary round-trip (#147, #1059).
 
@@ -44,6 +46,7 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **DI integration** — `AddDataverseMigration()` extension method.
 - **Security-first design** — Connection string redaction, no PII in logs.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.1.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.1.0...Migration-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0...Migration-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Migration-v1.0.0
