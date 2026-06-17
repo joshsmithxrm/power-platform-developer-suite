@@ -114,7 +114,7 @@ If any smoke check fails, file a hotfix issue and prepare a patch release. Do no
 
 ## §8 - GitHub Releases
 
-Only the CLI gets an automatic GitHub Release (`release-cli.yml`, with binaries attached). Every other released surface (NuGet libraries + Extension) needs one created by hand from its CHANGELOG section — this was forgotten in v1.2 and the Releases page showed only the CLI until backfilled.
+Only the CLI gets an automatic GitHub Release (`release-cli.yml`, with binaries attached). Every other released surface (NuGet libraries + Extension) needs one created by hand from its CHANGELOG section.
 
 For each released `<Prefix>-vX.Y.Z` **except `Cli`**:
 
@@ -130,7 +130,7 @@ gh release create <Prefix>-vX.Y.Z \
 
 `--latest=false` keeps the per-surface library releases from hijacking the "Latest" badge on a multi-package repo. Pass the notes via `--notes-file` (not inline) — CHANGELOG bodies contain `ppds ...` command examples that trip the stdout/env safety hooks when placed directly in a shell command.
 
-Then verify nothing was missed:
+Then verify every released tag has a release:
 
 ```bash
 for t in <every tag you pushed>; do

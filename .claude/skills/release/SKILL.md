@@ -126,7 +126,7 @@ python scripts/workflow-state.py set release.version <X.Y.Z>
 
 ### 10. GitHub Releases (per surface — REQUIRED, easy to forget)
 
-The CLI's GitHub Release is auto-created by `release-cli.yml`; **the NuGet libraries and the Extension are NOT** — create one per released surface from its CHANGELOG `[X.Y.Z]` section, then verify each tag has a release (missed in v1.2). Recipe: REFERENCE.md §8 "GitHub Releases". Optional: post-mortem under `.retros/release-X.Y.Z.md`.
+The CLI's GitHub Release is auto-created by `release-cli.yml`; **the NuGet libraries and the Extension are NOT** — create one per released surface from its CHANGELOG `[X.Y.Z]` section, then verify each tag has a release. Recipe: REFERENCE.md §8 "GitHub Releases". Optional: post-mortem under `.retros/release-X.Y.Z.md`.
 
 ## Continue with
 
