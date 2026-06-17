@@ -46,7 +46,7 @@
   <ItemGroup Label="RPC and MCP">
     <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.3" />
     <PackageVersion Include="Nerdbank.Streams" Version="2.13.16" />
-    <PackageVersion Include="StreamJsonRpc" Version="2.24.84" />
+    <PackageVersion Include="StreamJsonRpc" Version="2.25.29" />
   </ItemGroup>
 
   <ItemGroup Label="SQL Parsing">
