@@ -123,11 +123,18 @@ _BUMP_TITLE_RE = re.compile(
 # Regex for grouped bumps: "Bump the <group> group ..."
 _GROUP_TITLE_RE = re.compile(r"^[Bb]ump\s+the\s+(?P<group>[A-Za-z0-9_.-]+)\s+group", re.IGNORECASE)
 
+# Optional conventional-commit prefix dependabot prepends per .github/dependabot.yml
+# commit-message config, e.g. "deps: ", "deps(extension): ", "chore(deps-dev): ".
+# Stripped before matching the Bump/group patterns above, which anchor on "^Bump".
+_CC_PREFIX_RE = re.compile(r"^[A-Za-z]+(?:\([^)]*\))?:\s+")
+
 # Regex for individual member updates inside a grouped dependabot PR body.
-# Dependabot writes each member as "Updates `<pkg>` from <from> to <to>" (markdown
-# code-fenced package name) or "Updates <pkg> from <from> to <to>" (plain).
+# Dependabot enumerates each member with either tense ("Updates"/"Updated") and the
+# package name as a markdown link "[<pkg>](url)", code-fenced "`<pkg>`", or plain.
 _GROUP_MEMBER_RE = re.compile(
-    r"Updates\s+`?(?P<pkg>[@A-Za-z0-9._/-]+)`?\s+from\s+(?P<from>v?[0-9][^\s]*)\s+to\s+(?P<to>v?[0-9][^\s]*)",
+    r"Update[sd]\s+"
+    r"(?:\[(?P<pkg_link>[@A-Za-z0-9._/-]+)\]\([^)]*\)|`?(?P<pkg>[@A-Za-z0-9._/-]+)`?)"
+    r"\s+from\s+(?P<from>v?[0-9][^\s]*)\s+to\s+(?P<to>v?[0-9][^\s]*)",
 )
 
 
@@ -143,7 +150,8 @@ def parse_group_members(body: str) -> list[tuple[str, str, str]]:
     seen: set[tuple[str, str, str]] = set()
     out: list[tuple[str, str, str]] = []
     for m in _GROUP_MEMBER_RE.finditer(body):
-        key = (m.group("pkg"), m.group("from"), m.group("to"))
+        pkg = m.group("pkg_link") or m.group("pkg")
+        key = (pkg, m.group("from"), m.group("to"))
         if key in seen:
             continue
         seen.add(key)
@@ -215,10 +223,11 @@ def parse_title(title: str) -> tuple[Optional[str], Optional[str], Optional[str]
     For grouped bumps ("Bump the X group ..."), package is "group:<name>" and
     versions are None (the caller must inspect the body / files for individual bumps).
     """
-    m = _BUMP_TITLE_RE.match(title.strip())
+    stripped = _CC_PREFIX_RE.sub("", title.strip())
+    m = _BUMP_TITLE_RE.match(stripped)
     if m:
         return m.group("pkg"), m.group("from"), m.group("to")
-    g = _GROUP_TITLE_RE.match(title.strip())
+    g = _GROUP_TITLE_RE.match(stripped)
     if g:
         return f"group:{g.group('group')}", None, None
     return None, None, None
