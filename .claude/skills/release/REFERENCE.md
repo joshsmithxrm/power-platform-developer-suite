@@ -111,3 +111,29 @@ Beyond the v3-flatcontainer probe in SKILL.md Step 7:
 - Download CLI binary from GitHub releases page; run `./ppds --version`; confirm it matches the tag.
 
 If any smoke check fails, file a hotfix issue and prepare a patch release. Do not attempt to alter the existing release - just publish a new one.
+
+## §8 - GitHub Releases
+
+Only the CLI gets an automatic GitHub Release (`release-cli.yml`, with binaries attached). Every other released surface (NuGet libraries + Extension) needs one created by hand from its CHANGELOG section — this was forgotten in v1.2 and the Releases page showed only the CLI until backfilled.
+
+For each released `<Prefix>-vX.Y.Z` **except `Cli`**:
+
+1. Extract the `## [X.Y.Z]` section from `src/PPDS.<Surface>/CHANGELOG.md` (for the Extension, `src/PPDS.Extension/CHANGELOG.md`) into a notes file. The section runs from the version heading to the next `## [` heading.
+2. Create the release with that file as the body:
+
+```bash
+gh release create <Prefix>-vX.Y.Z \
+  --title "PPDS.<Surface> X.Y.Z" \
+  --notes-file <notes.md> \
+  --verify-tag --latest=false
+```
+
+`--latest=false` keeps the per-surface library releases from hijacking the "Latest" badge on a multi-package repo. Pass the notes via `--notes-file` (not inline) — CHANGELOG bodies contain `ppds ...` command examples that trip the stdout/env safety hooks when placed directly in a shell command.
+
+Then verify nothing was missed:
+
+```bash
+for t in <every tag you pushed>; do
+  gh release view "$t" >/dev/null 2>&1 && echo "$t OK" || echo "$t MISSING"
+done
+```
