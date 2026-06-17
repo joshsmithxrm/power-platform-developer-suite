@@ -564,40 +564,42 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 var selectButton = new Button("Select", is_default: true);
                 var cancelButton = new Button("Cancel");
 
-                using var dialog = new Dialog("Filter by Solution", selectButton, cancelButton)
+                using (var dialog = new Dialog("Filter by Solution", selectButton, cancelButton)
                 {
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
-                };
-                dialog.Add(listView);
-
-                var confirmed = false;
-                selectButton.Clicked += () =>
+                })
                 {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
-                cancelButton.Clicked += () => Application.RequestStop();
-                listView.OpenSelectedItem += _ =>
-                {
-                    confirmed = true;
-                    Application.RequestStop();
-                };
+                    dialog.Add(listView);
 
-                Application.Run(dialog);
+                    var confirmed = false;
+                    selectButton.Clicked += () =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
+                    cancelButton.Clicked += () => Application.RequestStop();
+                    listView.OpenSelectedItem += _ =>
+                    {
+                        confirmed = true;
+                        Application.RequestStop();
+                    };
 
-                if (confirmed)
-                {
-                    var idx = listView.SelectedItem;
-                    _solutionFilter = idx == 0 ? null : names[idx];
+                    Application.Run(dialog);
 
-                    // Persist updated filter state
-                    ErrorService.FireAndForget(
-                        Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
-                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
-                        "EnvironmentVariables.SaveState");
+                    if (confirmed)
+                    {
+                        var idx = listView.SelectedItem;
+                        _solutionFilter = idx == 0 ? null : names[idx];
 
-                    ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
+                        // Persist updated filter state
+                        ErrorService.FireAndForget(
+                            Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
+                                new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                            "EnvironmentVariables.SaveState");
+
+                        ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
+                    }
                 }
             });
         }
@@ -618,14 +620,16 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             ErrorService.ReportError("No environment URL available");
             return;
         }
-        using var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
+        using (var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
         {
             Width = 60,
             Height = 7
-        };
-        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/environmentvariables" });
-        Application.Run(dialog);
+        })
+        {
+            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/environmentvariables" });
+            Application.Run(dialog);
+        }
     }
 
     protected override void OnDispose()
