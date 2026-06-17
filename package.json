@@ -1,6 +1,9 @@
 {
   "private": true,
   "description": "PPDS workspace — root proxy scripts for extension and TUI",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "yaml": "^2.6.0",
     "pngjs": "^7.0.0"

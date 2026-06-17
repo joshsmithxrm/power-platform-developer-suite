@@ -65,6 +65,7 @@
       },
       {
         "command": "ppds.refreshProfiles",
+        "category": "PPDS",
         "title": "Refresh",
         "icon": "$(refresh)"
       },
@@ -176,11 +177,13 @@
       },
       {
         "command": "ppds.openInMaker",
+        "category": "PPDS",
         "title": "Open in Maker Portal",
         "icon": "$(link-external)"
       },
       {
         "command": "ppds.openInDynamics",
+        "category": "PPDS",
         "title": "Open in Dynamics 365",
         "icon": "$(link-external)"
       },
@@ -192,21 +195,25 @@
       },
       {
         "command": "ppds.testConnection",
+        "category": "PPDS",
         "title": "Test Connection",
         "icon": "$(plug)"
       },
       {
         "command": "ppds.setDefaultEnvironment",
+        "category": "PPDS",
         "title": "Set as Default",
         "icon": "$(star)"
       },
       {
         "command": "ppds.openDataExplorerForEnv",
+        "category": "PPDS",
         "title": "Open Data Explorer",
         "icon": "$(database)"
       },
       {
         "command": "ppds.openSolutionsForEnv",
+        "category": "PPDS",
         "title": "Open Solutions",
         "icon": "$(package)"
       },
@@ -218,6 +225,7 @@
       },
       {
         "command": "ppds.openImportJobsForEnv",
+        "category": "PPDS",
         "title": "Open Import Jobs",
         "icon": "$(history)"
       },
@@ -229,6 +237,7 @@
       },
       {
         "command": "ppds.openPluginTracesForEnv",
+        "category": "PPDS",
         "title": "Open Plugin Traces",
         "icon": "$(debug-stackframe)"
       },
@@ -251,6 +260,7 @@
       },
       {
         "command": "ppds.openConnectionReferencesForEnv",
+        "category": "PPDS",
         "title": "Open Connection References",
         "icon": "$(plug)"
       },
@@ -262,6 +272,7 @@
       },
       {
         "command": "ppds.openEnvironmentVariablesForEnv",
+        "category": "PPDS",
         "title": "Open Environment Variables",
         "icon": "$(symbol-variable)"
       },
@@ -273,6 +284,7 @@
       },
       {
         "command": "ppds.openWebResourcesForEnv",
+        "category": "PPDS",
         "title": "Open Web Resources",
         "icon": "$(file-code)"
       },
@@ -284,26 +296,31 @@
       },
       {
         "command": "ppds.openPluginsForEnv",
+        "category": "PPDS",
         "title": "Open Plugin Registration",
         "icon": "$(extensions)"
       },
       {
         "command": "ppds.copyEnvironmentUrl",
+        "category": "PPDS",
         "title": "Copy URL",
         "icon": "$(copy)"
       },
       {
         "command": "ppds.removeEnvironment",
+        "category": "PPDS",
         "title": "Remove Environment",
         "icon": "$(trash)"
       },
       {
         "command": "ppds.moveProfileUp",
+        "category": "PPDS",
         "title": "Move Up",
         "icon": "$(arrow-up)"
       },
       {
         "command": "ppds.moveProfileDown",
+        "category": "PPDS",
         "title": "Move Down",
         "icon": "$(arrow-down)"
       },
@@ -641,7 +658,7 @@
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.9.3",
     "@types/vscode": "^1.120.0",
-    "@vscode/test-electron": "^2.5.2",
+    "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.1",
     "eslint": "^10.5.0",

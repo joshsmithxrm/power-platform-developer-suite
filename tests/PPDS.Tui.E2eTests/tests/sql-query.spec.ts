@@ -81,7 +81,9 @@ test.describe('SQL Query Screen', () => {
     // load-bearing — only that the user is told an environment is
     // required.
     await expect(
-      terminal.getByText(/environment/i, { full: false })
+      // Global flag required: tui-test's matcher calls String.prototype.matchAll,
+      // which throws on a non-global RegExp under Node 22+ (was tolerated on Node 20).
+      terminal.getByText(/environment/gi, { full: false })
     ).toBeVisible();
   });
 
