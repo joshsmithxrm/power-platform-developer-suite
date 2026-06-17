@@ -100,14 +100,31 @@ curl -s https://api.nuget.org/v3-flatcontainer/ppds.auth/index.json | jq '.versi
 ppds --version  # should match the new tag
 ```
 
-### 8. Workflow State
+### 8. Hand off to the skills package (stable releases only)
+
+The [PPDS Skills](https://github.com/joshsmithxrm/ppds-skills) package pins its
+captured CLI/MCP surface to a specific release. Once §7 confirms the new
+**stable** `PPDS.Cli` is live on NuGet, trigger its re-capture so the published
+flag tables track the released CLI:
+
+```bash
+gh workflow run recapture-on-release.yml --repo joshsmithxrm/ppds-skills -r main
+```
+
+This opens a re-capture PR in `ppds-skills` (it never auto-merges, and no-ops if
+the latest stable isn't newer than what's pinned). **Skip for prereleases** — the
+workflow only acts on stable. Follow-up happens in that repo: review the capture
+diff + the PR's manual-prose checklist, resolve any review threads, and
+**close/reopen the PR** to fire its CI before merging.
+
+### 9. Workflow State
 
 ```bash
 python scripts/workflow-state.py set release.published now
 python scripts/workflow-state.py set release.version <X.Y.Z>
 ```
 
-### 9. Announce
+### 10. Announce
 
 Update GitHub release notes with CHANGELOG content. Optional: short post-mortem in the release commit if anything was tricky (file under `.retros/release-X.Y.Z.md`).
 
