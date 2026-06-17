@@ -147,6 +147,22 @@ namespace PPDS.Migration.Import
                         else if (isRoleTarget)
                         {
                             mappedId = await LookupRoleByIdAsync(targetId, ct).ConfigureAwait(false);
+
+                            // F4: surface role mapping skips so users can detect silent drops
+                            // (cross-environment role mapping is a documented limitation).
+                            // Emitted here, on the role lookup path, so the guard tracks the
+                            // actual failure rather than re-testing isRoleTarget in the shared
+                            // else branch below (which CodeQL flags as a constant condition).
+                            if (!mappedId.HasValue)
+                            {
+                                context.Warnings.AddWarning(new ImportWarning
+                                {
+                                    Code = ImportWarningCodes.RoleMappingSkipped,
+                                    Entity = entityName,
+                                    Message = $"Role {targetId} could not be mapped in target environment for relationship '{m2mData.RelationshipName}' — association skipped. Cross-environment role mapping by ID requires matching role IDs; export role names to enable mapping by name.",
+                                    Impact = $"1 role association skipped for {entityName}:{m2mData.SourceId}"
+                                });
+                            }
                         }
 
                         if (mappedId.HasValue)
@@ -157,19 +173,6 @@ namespace PPDS.Migration.Import
                         {
                             _logger?.LogDebug("Could not map target {Entity}:{Id} for relationship {Relationship}",
                                 m2mData.TargetEntityName, targetId, m2mData.RelationshipName);
-
-                            // F4: surface role mapping skips so users can detect silent drops
-                            // (cross-environment role mapping is a documented limitation).
-                            if (isRoleTarget)
-                            {
-                                context.Warnings.AddWarning(new ImportWarning
-                                {
-                                    Code = ImportWarningCodes.RoleMappingSkipped,
-                                    Entity = entityName,
-                                    Message = $"Role {targetId} could not be mapped in target environment for relationship '{m2mData.RelationshipName}' — association skipped. Cross-environment role mapping by ID requires matching role IDs; export role names to enable mapping by name.",
-                                    Impact = $"1 role association skipped for {entityName}:{m2mData.SourceId}"
-                                });
-                            }
                         }
                     }
 

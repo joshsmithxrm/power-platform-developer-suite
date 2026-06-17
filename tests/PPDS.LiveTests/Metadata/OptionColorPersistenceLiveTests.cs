@@ -49,7 +49,7 @@ public sealed class OptionColorPersistenceLiveTests : LiveTestBase
         var ct = CancellationToken.None;
 
         _source = await LiveTestHelpers.CreateConnectionSourceAsync(Configuration, "OptionColorTest", maxPoolSize: 3);
-        _pool = LiveTestHelpers.CreateConnectionPool(new[] { (IConnectionSource)_source });
+        _pool = LiveTestHelpers.CreateConnectionPool(new[] { _source });
 
         await using var client = await _pool.GetClientAsync(cancellationToken: ct);
 
