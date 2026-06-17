@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Actionable environment-lock errors on publish** — `PooledClientExtensions` re-throws in-progress import/publish faults as an `InvalidOperationException` with remediation guidance instead of surfacing the opaque platform fault ([#1245](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1245)).
 - **M:N relationship create** — populate `IntersectEntitySchemaName` on the create request (defaulting to the relationship schema name) so many-to-many relationship creation no longer fails with `Required field 'IntersectEntitySchemaName' is missing` ([#1018](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1018)).
 
+## [1.1.0] - 2026-04-26
+
+Coordinated `v1.1` release rollover ([#991](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/991)). No functional changes to `PPDS.Dataverse` since `1.0.0` — the package version was advanced for release-train parity.
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across the `1.0.0-beta.1` through `1.0.0-beta.7` series. Targets `net8.0`, `net9.0`, `net10.0`.
@@ -55,4 +59,5 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...HEAD
+[1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...Dataverse-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0
