@@ -64,6 +64,29 @@ class TestParseTitle(unittest.TestCase):
         self.assertIsNone(fv)
         self.assertIsNone(tv)
 
+    def test_conventional_commit_prefix_scoped(self):
+        # dependabot prepends "deps(extension): " per .github/dependabot.yml
+        pkg, fv, tv = classify.parse_title(
+            "deps(extension): Bump eslint from 10.4.0 to 10.5.0 in /src/PPDS.Extension"
+        )
+        self.assertEqual(pkg, "eslint")
+        self.assertEqual(fv, "10.4.0")
+        self.assertEqual(tv, "10.5.0")
+
+    def test_conventional_commit_prefix_bare(self):
+        pkg, fv, tv = classify.parse_title("deps: Bump the microsoft-extensions group with 12 updates")
+        self.assertEqual(pkg, "group:microsoft-extensions")
+        self.assertIsNone(fv)
+        self.assertIsNone(tv)
+
+    def test_conventional_commit_prefix_dev(self):
+        pkg, fv, tv = classify.parse_title(
+            "chore(deps-dev): Bump vite from 8.0.8 to 8.0.16 in /tests/PPDS.DocsGen.Extension.Tests"
+        )
+        self.assertEqual(pkg, "vite")
+        self.assertEqual(fv, "8.0.8")
+        self.assertEqual(tv, "8.0.16")
+
     def test_unparseable(self):
         pkg, fv, tv = classify.parse_title("docs: tweak readme")
         self.assertIsNone(pkg)
@@ -301,6 +324,28 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "A")
         self.assertEqual(c.update_type, "patch")
         self.assertIn("most-conservative=patch", c.reason)
+
+    def test_grouped_real_body_markdown_link_past_tense(self):
+        # Real dependabot grouped-PR body: past-tense "Updated", markdown-link
+        # package names, trailing period (regression for #1255/#1256 format).
+        pr = make_pr(
+            number=1255,
+            title="deps: Bump the microsoft-extensions group with 2 updates",
+            body=(
+                "Bumps the microsoft-extensions group with 2 updates:\n\n"
+                "Updated [Microsoft.Extensions.Configuration](https://github.com/dotnet/dotnet) from 10.0.8 to 10.0.9.\n"
+                "Updated [Microsoft.Extensions.Logging](https://github.com/dotnet/dotnet) from 10.0.8 to 10.0.9.\n"
+            ),
+            labels=["dependencies"],
+            head_ref="dependabot/nuget/microsoft-extensions-151a844973",
+            files=["Directory.Packages.props"],
+        )
+        members = classify.parse_group_members(pr["body"])
+        self.assertEqual(len(members), 2)
+        self.assertEqual(members[0][0], "Microsoft.Extensions.Configuration")
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "patch")
 
     def test_grouped_with_minor_is_group_b(self):
         # Mix of patch + minor (no major) -> Group B (verify-then-merge).
