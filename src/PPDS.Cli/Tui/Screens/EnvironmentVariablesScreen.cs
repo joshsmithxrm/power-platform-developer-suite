@@ -475,14 +475,13 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 var copyButton = new Button("Copy Path");
                 var closeButton = new Button("Close", is_default: true);
 
-                var dialog = new Dialog(
+                using (var dialog = new Dialog(
                     $"Export: {fileName}",
                     copyButton, closeButton)
                 {
                     Width = Dim.Percent(80),
                     Height = Dim.Percent(80)
-                };
-                try
+                })
                 {
                     dialog.Add(textView);
 
@@ -505,10 +504,6 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     closeButton.Clicked += () => Application.RequestStop();
 
                     Application.Run(dialog);
-                }
-                finally
-                {
-                    dialog.Dispose();
                 }
 
                 // Restore status
@@ -569,12 +564,11 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 var selectButton = new Button("Select", is_default: true);
                 var cancelButton = new Button("Cancel");
 
-                var dialog = new Dialog("Filter by Solution", selectButton, cancelButton)
+                using (var dialog = new Dialog("Filter by Solution", selectButton, cancelButton)
                 {
                     Width = Dim.Percent(60),
                     Height = Dim.Percent(70)
-                };
-                try
+                })
                 {
                     dialog.Add(listView);
 
@@ -607,10 +601,6 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                         ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
                     }
                 }
-                finally
-                {
-                    dialog.Dispose();
-                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -630,20 +620,15 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             ErrorService.ReportError("No environment URL available");
             return;
         }
-        var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
+        using (var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
         {
             Width = 60,
             Height = 7
-        };
-        try
+        })
         {
             dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
             dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/environmentvariables" });
             Application.Run(dialog);
-        }
-        finally
-        {
-            dialog.Dispose();
         }
     }
 

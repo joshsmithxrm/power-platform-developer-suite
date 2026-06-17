@@ -10,6 +10,8 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <DevelopmentDependency>true</DevelopmentDependency>
+    <!-- Consumed only as an analyzer ProjectReference; never published as a standalone NuGet package. -->
+    <IsPackable>false</IsPackable>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <!-- Disable release tracking warning until we have shipped releases -->
     <NoWarn>$(NoWarn);RS2008</NoWarn>

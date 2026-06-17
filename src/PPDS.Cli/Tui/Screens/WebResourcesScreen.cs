@@ -381,12 +381,6 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Height = Dim.Fill()
                 };
 
-                var dialog = new Dialog("Filter by Solution", new Button("Cancel"))
-                {
-                    Width = Dim.Percent(60),
-                    Height = Dim.Percent(60)
-                };
-
                 Action<ListViewItemEventArgs> openHandler = (args) =>
                 {
                     if (args.Item == 0)
@@ -405,19 +399,25 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                     Application.RequestStop();
                 };
 
-                try
+                using (var dialog = new Dialog("Filter by Solution", new Button("Cancel"))
                 {
-                    dialog.Add(listView);
-
-                    listView.OpenSelectedItem += openHandler;
-
-                    Application.Run(dialog);
-                }
-                finally
+                    Width = Dim.Percent(60),
+                    Height = Dim.Percent(60)
+                })
                 {
-                    // R3: explicitly unsubscribe before disposing.
-                    listView.OpenSelectedItem -= openHandler;
-                    dialog.Dispose();
+                    try
+                    {
+                        dialog.Add(listView);
+
+                        listView.OpenSelectedItem += openHandler;
+
+                        Application.Run(dialog);
+                    }
+                    finally
+                    {
+                        // R3: explicitly unsubscribe before disposing.
+                        listView.OpenSelectedItem -= openHandler;
+                    }
                 }
 
                 // Persist updated filter state
@@ -463,21 +463,14 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             ErrorService.ReportError("No environment URL available");
             return;
         }
-        var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
+        using var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
         {
             Width = 60,
             Height = 7
         };
-        try
-        {
-            dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
-            dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
-            Application.Run(dialog);
-        }
-        finally
-        {
-            dialog.Dispose();
-        }
+        dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
+        dialog.Add(new Label { X = 1, Y = 2, Text = EnvironmentUrl + "/WebResources" });
+        Application.Run(dialog);
     }
 
     protected override void OnDispose()

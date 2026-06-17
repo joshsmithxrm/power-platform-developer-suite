@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Publish requirement surfaced on metadata column updates** — `MetadataUpdateColumnResult` now carries `RequiresPublish` and `PublishHint`, so MCP clients are told when a column change must be published and given the exact `ppds metadata publish <entity>` command ([#1016](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1016)).
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across `1.0.0-beta.1` and `1.0.0-beta.2`.

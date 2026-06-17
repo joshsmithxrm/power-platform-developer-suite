@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **Plugin Traces "Status" Advanced filter is now honored** — the conditions switch had no `Status` case, so `Status = Exception`/`Success` silently fell through and the daemon returned all rows regardless of the selection; it now maps Equals/Not Equals against `Exception`/`Success` to the `hasException` filter. Also guards against an invalid `Created On` date (#1006, #1040).
+- **Command palette grouping** — 17 commands that previously appeared ungrouped now group under the **PPDS** category in the command palette, matching the other commands (#1263).
 
 ## [1.2.0] - 2026-04-26
 
@@ -143,3 +144,6 @@ Complete ground-up rebuild of the extension. The new architecture uses a thin VS
 ## [0.3.4] - 2026-01-01
 
 _Last stable release of the legacy architecture. See [archived repository](https://github.com/joshsmithxrm/power-platform-developer-suite/tree/archived) for full history._
+
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.2.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Extension-v1.2.0
