@@ -205,7 +205,6 @@ internal sealed class PluginTracesScreen : TuiScreenBase
             return;
         }
 
-        var formatDialog = new Dialog("Export Format", 40, 8);
         var selectedFormat = "";
         var csvBtn = new Button("CSV") { X = 4, Y = 1 };
         var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
@@ -215,36 +214,33 @@ internal sealed class PluginTracesScreen : TuiScreenBase
         Action jsonHandler = () => { selectedFormat = "json"; Application.RequestStop(); };
         Action cancelHandler = () => Application.RequestStop();
 
-        try
+        using (var formatDialog = new Dialog("Export Format", 40, 8))
         {
-            csvBtn.Clicked += csvHandler;
-            jsonBtn.Clicked += jsonHandler;
-            cancelBtn.Clicked += cancelHandler;
+            try
+            {
+                csvBtn.Clicked += csvHandler;
+                jsonBtn.Clicked += jsonHandler;
+                cancelBtn.Clicked += cancelHandler;
 
-            formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
-            Application.Run(formatDialog);
-        }
-        finally
-        {
-            // R3: explicitly unsubscribe before disposing.
-            csvBtn.Clicked -= csvHandler;
-            jsonBtn.Clicked -= jsonHandler;
-            cancelBtn.Clicked -= cancelHandler;
-            formatDialog.Dispose();
+                formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
+                Application.Run(formatDialog);
+            }
+            finally
+            {
+                // R3: explicitly unsubscribe before disposing.
+                csvBtn.Clicked -= csvHandler;
+                jsonBtn.Clicked -= jsonHandler;
+                cancelBtn.Clicked -= cancelHandler;
+            }
         }
 
         if (string.IsNullOrEmpty(selectedFormat)) return;
 
         string? filePath = null;
-        var saveDialog = new SaveDialog("Export Traces", $"traces.{selectedFormat}");
-        try
+        using (var saveDialog = new SaveDialog("Export Traces", $"traces.{selectedFormat}"))
         {
             Application.Run(saveDialog);
             filePath = saveDialog.FilePath?.ToString();
-        }
-        finally
-        {
-            saveDialog.Dispose();
         }
 
         if (string.IsNullOrEmpty(filePath)) return;

@@ -476,7 +476,8 @@ public class MetadataAuthoringServiceTests
         capturedRequest.Should().NotBeNull();
         var dtAttr = capturedRequest!.Attribute as DateTimeAttributeMetadata;
         dtAttr.Should().NotBeNull();
-        dtAttr!.Format.Should().Be(DateTimeFormat.DateOnly);
+        Assert.NotNull(dtAttr);
+        dtAttr.Format.Should().Be(DateTimeFormat.DateOnly);
     }
 
     // Issue #1009: UpdateColumnAsync executes UpdateAttributeRequest but never publishes,
@@ -678,7 +679,8 @@ public class MetadataAuthoringServiceTests
         capturedRequest.Should().NotBeNull();
         var updatedRel = capturedRequest!.Relationship as OneToManyRelationshipMetadata;
         updatedRel.Should().NotBeNull("because UpdateRelationship should send a OneToManyRelationshipMetadata");
-        updatedRel!.CascadeConfiguration.Should().NotBeNull();
+        Assert.NotNull(updatedRel);
+        updatedRel.CascadeConfiguration.Should().NotBeNull();
         updatedRel.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
         updatedRel.CascadeConfiguration.Assign.Should().Be(CascadeType.Cascade);
     }

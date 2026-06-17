@@ -42,40 +42,37 @@ For each commit, decide which section it belongs in. Drop empty sections from th
 
 ### 3. Version Bump
 
-Files to update:
+PPDS versions are **MinVer-derived from per-surface git tags** — there is NO `<Version>` property to edit. To set a .NET package's version you push its tag (Step 5); MinVer reads the nearest `<Prefix>-vX.Y.Z` tag and stamps the build. Each packable project declares its own `<MinVerTagPrefix>` (`Cli-v`, `Dataverse-v`, `Auth-v`, `Migration-v`, `Mcp-v`, `Query-v`, `Plugins-v`).
 
-- `Directory.Build.props` (Version property for all .NET projects)
-- `src/PPDS.Extension/package.json` (version field)
-- Any other manifest files containing the version
+The only manifest "bump" is documentation:
+
+- Per-surface `<surface>/CHANGELOG.md`: rename `## [Unreleased]` → `## [X.Y.Z] - <date>` and retarget the compare-link footer to the new tag range.
+- `src/PPDS.Extension/package.json` `version`: the Extension is npm/`vsce`-published (NOT MinVer); keep its `version` in sync with the `Extension-vX.Y.Z` tag you will push.
+
+Do NOT edit `Directory.Build.props` — it has no `<Version>` element; injecting one would override MinVer for every surface at once.
+
+### 4. Commit the changelog rename
 
 ```bash
-# .NET projects
-sed -i 's|<Version>.*</Version>|<Version>X.Y.Z</Version>|' Directory.Build.props
-
-# Extension
-cd src/PPDS.Extension && npm version X.Y.Z --no-git-tag-version && cd -
+git add <surface>/CHANGELOG.md   # + src/PPDS.Extension/package.json when releasing the Extension
+git commit -m "release: <surface> X.Y.Z"
 ```
 
-### 4. Commit Version Bump
+Commit from a clean `main`. The published version comes from the tag, not this commit.
+
+### 5. Tag (per surface, in dependency order)
+
+Read REFERENCE.md §2 "Signing matrix" for which surfaces sign.
+
+Each surface is tagged independently with its prefix. Packable libraries reference each other via `<ProjectReference>` (no `PrivateAssets`), so their nupkgs declare versioned inter-package dependencies — tag + publish **leaf libraries before their dependents**, else `dotnet tool install` can't restore: `Dataverse`/`Auth`/`Query` → `Migration` → `Cli` → `Mcp`. The `Extension` is independent.
 
 ```bash
-git add CHANGELOG.md Directory.Build.props src/PPDS.Extension/package.json
-git commit -m "release: X.Y.Z"
-```
-
-The commit message must start with `release:` - the publish workflow keys off this.
-
-### 5. Tag
-
-Read REFERENCE.md §2 "Signing matrix" if any signing inputs need preparation.
-
-```bash
-git tag v<X.Y.Z> -m "release: X.Y.Z"
+git tag <Prefix>-vX.Y.Z -m "release: <Prefix> X.Y.Z"   # annotated, on the exact main commit
 git push origin main
-git push origin v<X.Y.Z>
+git push origin <Prefix>-vX.Y.Z
 ```
 
-The tag push triggers `.github/workflows/publish.yml`. CI signs, packs, and uploads to NuGet, the VS Code marketplace, and the GitHub releases page.
+Tag pushes trigger publishing: NuGet surfaces via `.github/workflows/publish-nuget.yml` (keyed on each `<Prefix>-v*` tag), the Extension via `.github/workflows/extension-publish.yml` (`Extension-v*`; **even minor = stable channel, odd = pre-release**), and CLI binaries via `.github/workflows/release-cli.yml`.
 
 ### 6. Monitor CI
 

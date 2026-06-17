@@ -649,6 +649,9 @@
     "typecheck:all": "npm run typecheck && npm run typecheck:webview",
     "prepare": "cd ../.. && git config core.hooksPath scripts/hooks"
   },
+  "overrides": {
+    "dompurify": "^3.4.9"
+  },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "monaco-editor": "0.55.1",
