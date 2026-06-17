@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`UpdateOptionValueRequest` aligned with `UpdateColumnOptionRequest`** — `Value`/`Label` are now the (exactly-one) target selectors, `NewLabel` carries the updated label (current label preserved when omitted), and `Color` is now forwarded to the SDK ([#1170](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1170)).
 - **`Publish` on `CreateTableRequest`/`UpdateTableRequest`/`UpdateColumnRequest`** — opt-in publish of the affected entity after the change, matching `CreateColumnRequest` ([#1171](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1171)).
 - **`DryRun` on `AddOptionValueRequest`/`UpdateOptionValueRequest`/`DeleteOptionValueRequest`** — validation-only early exit for global option-value mutations; update/delete still resolve (and therefore validate) the target option before exiting ([#1172](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1172)).
+- **Entity icon assignment on `UpdateTableRequest`** — `IconSmallName`/`IconMediumName`/`IconVectorName` carry web-resource logical names that are applied through the SDK `UpdateEntityRequest` on `EntityMetadata` via the new `IDataverseClient.UpdateEntity`, because the Web API `EntityDefinitions` PATCH silently rejects icon updates ([#1244](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1244)).
 
 ### Fixed
 

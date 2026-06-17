@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Connection picker for connection-reference binding** — the Connection References panel detail card gains a Change/Bind button (disabled for managed CRs) that opens a modal picker filtered by connector id and supports unbind via the empty option. Backed by new `connectionReferences/bind` and `connections/list` daemon RPC endpoints and `IConnectionReferenceService.BindAsync`, which writes `connectionid` on the Dataverse `connectionreference` entity (#592, #1058).
+
+### Fixed
+- **Plugin Traces "Status" Advanced filter is now honored** — the conditions switch had no `Status` case, so `Status = Exception`/`Success` silently fell through and the daemon returned all rows regardless of the selection; it now maps Equals/Not Equals against `Exception`/`Success` to the `hasException` filter. Also guards against an invalid `Created On` date (#1006, #1040).
+
 ## [1.2.0] - 2026-04-26
 
 Stable-channel release (even minor per odd/even convention). Post-GA polish across all panels.
