@@ -68,3 +68,10 @@ updates:
       - "npm"
     commit-message:
       prefix: "deps(extension)"
+    ignore:
+      # @types/vscode must not exceed engines.vscode (vsce rejects it at publish).
+      # Bump both together, manually, when raising the supported VS Code minimum. (#1274)
+      - dependency-name: "@types/vscode"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
