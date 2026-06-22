@@ -59,7 +59,7 @@ jobs:
             filter: Category=Integration&Category!=SecureStorage&Category!=SlowIntegration&(FullyQualifiedName~PPDS.LiveTests.Cli|FullyQualifiedName~PPDS.LiveTests.LiveDataverseSmokeTests)
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
