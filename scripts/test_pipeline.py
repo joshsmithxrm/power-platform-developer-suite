@@ -18,6 +18,7 @@ import pipeline
 from pipeline import (
     STAGE_MODELS,
     _FILED_FINDING_KEYS,
+    _classify_blocked_needs,
     _finding_key,
     _get_direct_children,
     auto_commit_stranded,
@@ -143,6 +144,22 @@ class TestAutoCommitStranded(unittest.TestCase):
             logger, "converge", "AUTO_COMMIT_FAILED",
             reason="subprocess error")
 
+    @patch("pipeline.subprocess.run")
+    @patch("pipeline.log")
+    def test_none_stage_defaults_to_pipeline_scope(self, mock_log, mock_run):
+        """#1166: stage=None on a dirty worktree must not crash — it falls
+        back to a generic 'pipeline' commit scope instead of raising
+        TypeError on `"-" in None`."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=" M file.py\n", stderr=""),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        result = auto_commit_stranded("/tmp/wt", None, self._logger())
+        self.assertTrue(result)
+        commit_msg = mock_run.call_args_list[2][0][0][-1]
+        self.assertTrue(commit_msg.startswith("chore(pipeline):"))
+
 
 class TestComputeResumeStage(unittest.TestCase):
 
@@ -163,6 +180,37 @@ class TestComputeResumeStage(unittest.TestCase):
 
     def test_unknown_stage_returned_as_is(self):
         self.assertEqual(compute_resume_stage("unknown-stage"), "unknown-stage")
+
+    def test_none_stage_defaults_to_worktree(self):
+        """#1166: a missing failed_stage must not crash — defaults to the
+        first stage rather than raising TypeError on `"reconverge" in None`."""
+        self.assertEqual(compute_resume_stage(None), "worktree")
+
+    def test_empty_string_stage_defaults_to_worktree(self):
+        self.assertEqual(compute_resume_stage(""), "worktree")
+
+
+class TestClassifyBlockedNeeds(unittest.TestCase):
+    """#1166/#1175: blocked-state ``needs`` text must be classified as a
+    rate limit (not a generic "asked question") when it looks like one."""
+
+    def test_rate_limit_message_detected(self):
+        needs = ("You've hit your session limit for this account. "
+                 "It resets 1:50am (America/Chicago).")
+        self.assertTrue(_classify_blocked_needs(needs))
+
+    def test_usage_limit_message_detected(self):
+        self.assertTrue(_classify_blocked_needs("usage limit reached"))
+
+    def test_rate_limit_marker_case_insensitive(self):
+        self.assertTrue(_classify_blocked_needs("RATE LIMIT exceeded"))
+
+    def test_genuine_question_not_classified_as_rate_limit(self):
+        needs = "what environment should I deploy to?"
+        self.assertFalse(_classify_blocked_needs(needs))
+
+    def test_empty_needs_not_classified_as_rate_limit(self):
+        self.assertFalse(_classify_blocked_needs(""))
 
 
 class TestWriteResultResumeCommand(unittest.TestCase):
