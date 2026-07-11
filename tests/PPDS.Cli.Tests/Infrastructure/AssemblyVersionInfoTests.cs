@@ -25,6 +25,7 @@ public class AssemblyVersionInfoTests
         // helper must return exactly that value — no trimming, stripping, or normalization.
         var assembly = typeof(AssemblyVersionInfoTests).Assembly;
         var expected = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        Assert.NotNull(expected); // guard against a vacuous null == null pass if the attribute is absent
 
         var actual = AssemblyVersionInfo.GetInformationalVersion(assembly);
 
