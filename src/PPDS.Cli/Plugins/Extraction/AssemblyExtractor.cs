@@ -1,7 +1,9 @@
+using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Plugins;
 
@@ -12,6 +14,21 @@ namespace PPDS.Cli.Plugins.Extraction;
 /// </summary>
 public sealed class AssemblyExtractor : IDisposable
 {
+    /// <summary>
+    /// Logical name of the embedded resource holding the zipped .NET Framework 4.6.2
+    /// reference assemblies. Must stay in sync with the <c>EmbedNet462ReferenceAssemblies</c>
+    /// target in <c>PPDS.Cli.csproj</c>.
+    /// </summary>
+    private const string Net462ResourceName = "PPDS.Cli.Resources.Net462ReferenceAssemblies.zip";
+
+    /// <summary>
+    /// Directory of embedded .NET Framework 4.6.2 reference assemblies, extracted once per
+    /// process on first use. Null when the embedded resource is unavailable or extraction
+    /// failed — in which case the resolver falls back to runtime-directory seeding.
+    /// </summary>
+    private static readonly Lazy<string?> Net462ReferenceDirectory =
+        new(GetNet462ReferenceAssemblyDirectory);
+
     private readonly MetadataLoadContext _metadataLoadContext;
     private readonly string _assemblyPath;
     private bool _disposed;
@@ -26,27 +43,197 @@ public sealed class AssemblyExtractor : IDisposable
     /// Creates an extractor for the specified assembly.
     /// </summary>
     /// <param name="assemblyPath">Path to the assembly DLL.</param>
+    /// <param name="referenceDirs">
+    /// Optional additional directories to search for referenced assemblies, seeded ahead of the
+    /// embedded reference assemblies and the process runtime directory. Supplied via the
+    /// <c>--reference-dir</c> option for plugins whose dependencies live outside the target
+    /// assembly's own directory.
+    /// </param>
     /// <returns>An extractor instance that must be disposed.</returns>
-    public static AssemblyExtractor Create(string assemblyPath)
+    public static AssemblyExtractor Create(string assemblyPath, IReadOnlyList<string>? referenceDirs = null)
+        => Create(assemblyPath, referenceDirs, includeRuntimeDirectory: true);
+
+    /// <summary>
+    /// Internal factory that allows suppressing runtime-directory seeding so tests can
+    /// reproduce the single-file packaging environment — where no loose BCL DLLs exist on
+    /// disk — and prove the embedded reference assemblies alone are sufficient. See #1294.
+    /// </summary>
+    internal static AssemblyExtractor Create(
+        string assemblyPath,
+        IReadOnlyList<string>? referenceDirs,
+        bool includeRuntimeDirectory)
     {
-        var directory = Path.GetDirectoryName(assemblyPath) ?? ".";
-
-        // Collect assemblies for the resolver:
-        // 1. All DLLs in the same directory as the target assembly
-        // 2. .NET runtime assemblies for core types
-        var assemblyPaths = new List<string>();
-
-        // Add assemblies from target directory
-        assemblyPaths.AddRange(Directory.GetFiles(directory, "*.dll"));
-
-        // Add .NET runtime assemblies
-        var runtimeDir = RuntimeEnvironment.GetRuntimeDirectory();
-        assemblyPaths.AddRange(Directory.GetFiles(runtimeDir, "*.dll"));
-
+        var assemblyPaths = BuildResolverPaths(assemblyPath, referenceDirs, includeRuntimeDirectory);
         var resolver = new PathAssemblyResolver(assemblyPaths);
+
+        // Leave coreAssemblyName null: MetadataLoadContext infers the core assembly from the
+        // target assembly's own references. Dataverse plugin assemblies target .NET Framework
+        // 4.6.2, so the core resolves to mscorlib — which BuildResolverPaths seeds from the
+        // embedded reference assemblies, ordered ahead of the runtime directory so it is found
+        // even in a single-file publish (where no loose BCL DLLs exist on disk). Forcing an
+        // explicit "mscorlib" would over-constrain the core for any non-net462 input, so null
+        // is the more general choice — MLC binds whatever core the target actually references.
         var mlc = new MetadataLoadContext(resolver);
 
         return new AssemblyExtractor(mlc, assemblyPath);
+    }
+
+    /// <summary>
+    /// Builds the ordered, de-duplicated list of assembly paths used to seed the
+    /// <see cref="PathAssemblyResolver"/>. Ordering encodes priority (earlier wins):
+    /// <list type="number">
+    /// <item>the target assembly's own directory — user-local assemblies win;</item>
+    /// <item>caller-supplied <paramref name="referenceDirs"/> (<c>--reference-dir</c>);</item>
+    /// <item>the embedded .NET Framework 4.6.2 reference assemblies (fixes single-file
+    /// packaging, where no loose BCL DLLs exist on disk — #1294);</item>
+    /// <item>the process runtime directory — helps framework-dependent dev runs and
+    /// net8-targeted assemblies; empty of loose DLLs in single-file publishes.</item>
+    /// </list>
+    /// De-duping by simple assembly name (keeping the first occurrence) preserves that priority
+    /// and keeps resolution deterministic. <see cref="PathAssemblyResolver"/> tolerates
+    /// duplicate simple names, but de-duping guarantees the ordering above wins.
+    /// </summary>
+    internal static List<string> BuildResolverPaths(
+        string assemblyPath,
+        IReadOnlyList<string>? referenceDirs,
+        bool includeRuntimeDirectory)
+    {
+        var candidates = new List<string>();
+
+        // 1. Target assembly's own directory.
+        var directory = Path.GetDirectoryName(assemblyPath);
+        if (string.IsNullOrEmpty(directory))
+            directory = ".";
+        candidates.AddRange(Directory.GetFiles(directory, "*.dll"));
+
+        // 2. Caller-supplied reference directories.
+        if (referenceDirs != null)
+        {
+            foreach (var dir in referenceDirs)
+            {
+                if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+                    candidates.AddRange(Directory.GetFiles(dir, "*.dll"));
+            }
+        }
+
+        // 3. Embedded .NET Framework 4.6.2 reference assemblies.
+        var net462Dir = Net462ReferenceDirectory.Value;
+        if (net462Dir != null)
+            candidates.AddRange(Directory.GetFiles(net462Dir, "*.dll"));
+
+        // 4. Process runtime directory (empty of loose DLLs in single-file publishes).
+        if (includeRuntimeDirectory)
+        {
+            var runtimeDir = RuntimeEnvironment.GetRuntimeDirectory();
+            if (!string.IsNullOrEmpty(runtimeDir) && Directory.Exists(runtimeDir))
+                candidates.AddRange(Directory.GetFiles(runtimeDir, "*.dll"));
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>(candidates.Count);
+        foreach (var path in candidates)
+        {
+            if (seen.Add(Path.GetFileNameWithoutExtension(path)))
+                result.Add(path);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Extracts the embedded .NET Framework 4.6.2 reference assemblies to a stable, content-
+    /// addressed cache directory and returns its path, or <c>null</c> if the resource is
+    /// unavailable or extraction fails. Never throws — callers fall back to runtime-directory
+    /// seeding, so the fix can never make extraction worse than before. See #1294.
+    /// </summary>
+    internal static string? GetNet462ReferenceAssemblyDirectory()
+    {
+        try
+        {
+            var assembly = typeof(AssemblyExtractor).Assembly;
+            using var resourceStream = assembly.GetManifestResourceStream(Net462ResourceName);
+            if (resourceStream == null)
+                return null;
+
+            using var buffer = new MemoryStream();
+            resourceStream.CopyTo(buffer);
+            var zipBytes = buffer.ToArray();
+            if (zipBytes.Length == 0)
+                return null;
+
+            // Content-addressed cache key: identical content reuses the cache, while a rebuilt
+            // resource (new CLI version) lands in a fresh directory, so there is no stale cache.
+            var hash = Convert.ToHexString(SHA256.HashData(zipBytes))[..16].ToLowerInvariant();
+
+            // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
+            // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
+            // created by the first user and then throw UnauthorizedAccessException for every other
+            // account — which the outer catch swallows, silently disabling the fix for them.
+            // Isolating by user name gives each account its own cache. See #1294.
+            var rawUser = Environment.UserName;
+            var userScope = string.IsNullOrWhiteSpace(rawUser)
+                ? "default"
+                : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
+            var baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
+            var cacheDir = Path.Combine(baseDir, hash);
+
+            if (IsPopulated(cacheDir))
+                return cacheDir;
+
+            // Extract to a unique staging directory, then atomically move it into place so a
+            // concurrent extraction never observes a half-populated cache directory.
+            var stagingDir = Path.Combine(baseDir, $".staging-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(stagingDir);
+            try
+            {
+                using (var zipStream = new MemoryStream(zipBytes, writable: false))
+                using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
+                {
+                    archive.ExtractToDirectory(stagingDir);
+                }
+
+                if (IsPopulated(cacheDir))
+                    return cacheDir; // Another process won the race while we were extracting.
+
+                Directory.CreateDirectory(Path.GetDirectoryName(cacheDir)!);
+                try
+                {
+                    Directory.Move(stagingDir, cacheDir);
+                }
+                catch (IOException) when (IsPopulated(cacheDir))
+                {
+                    // Race: another process created the cache dir between our check and move.
+                    return cacheDir;
+                }
+
+                return cacheDir;
+            }
+            finally
+            {
+                TryDeleteDirectory(stagingDir);
+            }
+        }
+        catch
+        {
+            // Never make things worse — fall back to runtime-directory seeding.
+            return null;
+        }
+    }
+
+    private static bool IsPopulated(string directory)
+        => Directory.Exists(directory) && Directory.EnumerateFiles(directory, "*.dll").Any();
+
+    private static void TryDeleteDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+        catch
+        {
+            // Best-effort cleanup; a leftover staging dir is harmless.
+        }
     }
 
     /// <summary>
