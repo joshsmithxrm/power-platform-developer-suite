@@ -87,7 +87,7 @@ public static class SqlCommand
             QueryCommandGroup.CountOption
         };
 
-        GlobalOptions.AddToCommand(command);
+        GlobalOptions.AddToCommand(command, supportsCsv: true);
 
         // Validate that exactly one input source is provided
         command.Validators.Add(result =>

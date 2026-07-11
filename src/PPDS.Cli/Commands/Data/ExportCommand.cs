@@ -81,11 +81,7 @@ public static class ExportCommand
                 result.AddError("--page-parallel-threshold must be at least 1");
         });
 
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var dataFormatOption = new Option<ExportDataFormat>("--format")
         {

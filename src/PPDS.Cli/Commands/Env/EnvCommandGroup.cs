@@ -54,11 +54,7 @@ public static class EnvCommandGroup
 
     private static Command CreateListCommand()
     {
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var filterOption = new Option<string?>("--filter", "-fl")
         {
@@ -321,11 +317,7 @@ public static class EnvCommandGroup
 
     private static Command CreateWhoCommand()
     {
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var envOption = new Option<string?>("--environment", "-env")
         {

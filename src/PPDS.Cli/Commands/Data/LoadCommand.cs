@@ -131,11 +131,7 @@ public static class LoadCommand
             DefaultValueFactory = _ => false
         };
 
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-o")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption(shortAlias: "-o");
 
         var verboseOption = new Option<bool>("--verbose", "-v")
         {

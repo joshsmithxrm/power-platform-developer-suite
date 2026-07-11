@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using PPDS.Cli.Commands;
 
 namespace PPDS.Cli.Infrastructure;
@@ -44,12 +45,16 @@ public static class GlobalOptions
 
     /// <summary>
     /// Output format: text (human-readable) or json (machine-readable).
+    /// Rejects <see cref="Commands.OutputFormat.Csv"/> — most commands do not implement CSV rendering (#1078).
     /// </summary>
-    public static readonly Option<OutputFormat> OutputFormat = new("--output-format", "-f")
-    {
-        Description = "Output format",
-        DefaultValueFactory = _ => Commands.OutputFormat.Text
-    };
+    public static readonly Option<OutputFormat> OutputFormat = CreateOutputFormatOption();
+
+    /// <summary>
+    /// Output format variant for the commands that implement CSV rendering
+    /// (query sql, query fetch, query history execute, plugin traces list).
+    /// Added via <see cref="AddToCommand"/> with <c>supportsCsv: true</c>.
+    /// </summary>
+    public static readonly Option<OutputFormat> CsvCapableOutputFormat = CreateOutputFormatOption(supportsCsv: true);
 
     /// <summary>
     /// Correlation ID for distributed tracing. Auto-generated if not provided.
@@ -60,11 +65,88 @@ public static class GlobalOptions
     };
 
     /// <summary>
+    /// Creates an --output-format option with a clean parse error for invalid values (#1076)
+    /// and, unless <paramref name="supportsCsv"/> is set, a validator rejecting CSV (#1078).
+    /// </summary>
+    /// <param name="supportsCsv">Whether the owning command implements CSV rendering.</param>
+    /// <param name="shortAlias">Short alias — "-f" everywhere except data load, where -f belongs to --file.</param>
+    public static Option<OutputFormat> CreateOutputFormatOption(bool supportsCsv = false, string shortAlias = "-f")
+    {
+        var validValues = supportsCsv ? "Text, Json, Csv" : "Text, Json";
+
+        var option = new Option<OutputFormat>("--output-format", shortAlias)
+        {
+            Description = "Output format",
+            DefaultValueFactory = _ => Commands.OutputFormat.Text,
+            CustomParser = result =>
+            {
+                var token = result.Tokens[^1].Value;
+                if (Enum.TryParse<OutputFormat>(token, ignoreCase: true, out var format)
+                    && Enum.IsDefined(format))
+                {
+                    return format;
+                }
+
+                result.AddError($"Invalid value '{token}' for --output-format. Valid values: {validValues}.");
+                return Commands.OutputFormat.Text;
+            }
+        };
+
+        if (!supportsCsv)
+        {
+            option.Validators.Add(result =>
+            {
+                if (result.Tokens.Count == 0)
+                {
+                    return; // Default value (Text) — nothing to reject.
+                }
+
+                if (Enum.TryParse<OutputFormat>(result.Tokens[^1].Value, ignoreCase: true, out var format)
+                    && format == Commands.OutputFormat.Csv)
+                {
+                    result.AddError(
+                        $"CSV output is not supported for '{GetCommandPath(result)}'. Use --output-format Json or Text.");
+                }
+            });
+        }
+
+        return option;
+    }
+
+    /// <summary>
+    /// Builds the user-facing command path (e.g. "schema compare") from a parse result,
+    /// excluding the executable root.
+    /// </summary>
+    private static string GetCommandPath(OptionResult optionResult)
+    {
+        var names = new List<string>();
+        SymbolResult? current = optionResult.Parent;
+        while (current is CommandResult commandResult)
+        {
+            if (commandResult.Command is not RootCommand)
+            {
+                names.Add(commandResult.Command.Name);
+            }
+
+            current = commandResult.Parent;
+        }
+
+        if (names.Count == 0)
+        {
+            return "this command";
+        }
+
+        names.Reverse();
+        return string.Join(" ", names);
+    }
+
+    /// <summary>
     /// Adds the global options to a command.
     /// </summary>
     /// <param name="command">The command to add options to.</param>
     /// <param name="includeOutputFormat">Whether to include --output-format (skip if command has its own).</param>
-    public static void AddToCommand(Command command, bool includeOutputFormat = true)
+    /// <param name="supportsCsv">Whether the command implements CSV rendering for --output-format Csv.</param>
+    public static void AddToCommand(Command command, bool includeOutputFormat = true, bool supportsCsv = false)
     {
         command.Options.Add(Quiet);
         command.Options.Add(Verbose);
@@ -73,7 +155,7 @@ public static class GlobalOptions
 
         if (includeOutputFormat)
         {
-            command.Options.Add(OutputFormat);
+            command.Options.Add(supportsCsv ? CsvCapableOutputFormat : OutputFormat);
         }
 
         // Add validator for mutually exclusive verbosity options
@@ -103,9 +185,28 @@ public static class GlobalOptions
             Quiet = parseResult.GetValue(Quiet),
             Verbose = parseResult.GetValue(Verbose),
             Debug = parseResult.GetValue(Debug),
-            OutputFormat = parseResult.GetValue(OutputFormat),
+            OutputFormat = GetOutputFormatValue(parseResult),
             CorrelationId = parseResult.GetValue(CorrelationId)
         };
+    }
+
+    /// <summary>
+    /// Reads the output format from whichever --output-format instance the command carries
+    /// (<see cref="OutputFormat"/> or <see cref="CsvCapableOutputFormat"/>).
+    /// </summary>
+    private static OutputFormat GetOutputFormatValue(System.CommandLine.ParseResult parseResult)
+    {
+        if (parseResult.GetResult(CsvCapableOutputFormat) is { } csvCapableResult)
+        {
+            return csvCapableResult.GetValueOrDefault<OutputFormat>();
+        }
+
+        if (parseResult.GetResult(OutputFormat) is { } result)
+        {
+            return result.GetValueOrDefault<OutputFormat>();
+        }
+
+        return Commands.OutputFormat.Text;
     }
 }
 

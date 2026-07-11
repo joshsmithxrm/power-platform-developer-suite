@@ -1,0 +1,234 @@
+using System.CommandLine;
+using PPDS.Cli.Commands;
+using PPDS.Cli.Commands.Data;
+using PPDS.Cli.Commands.Env;
+using PPDS.Cli.Commands.PluginTraces;
+using PPDS.Cli.Commands.Query;
+using PPDS.Cli.Commands.Schema;
+using PPDS.Cli.Commands.Solutions;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Output;
+using PPDS.Dataverse.Query;
+using Xunit;
+
+namespace PPDS.Cli.Tests.Infrastructure;
+
+/// <summary>
+/// Covers #1076 (invalid --output-format values produce a clean error instead of leaking
+/// the CLR enum type name) and #1078 (--output-format Csv is rejected on commands without
+/// CSV rendering and still accepted on the four commands that implement it).
+/// </summary>
+[Trait("Category", "Unit")]
+public class GlobalOptionsOutputFormatTests
+{
+    private static string JoinedErrors(ParseResult result) =>
+        string.Join(" | ", result.Errors.Select(e => e.Message));
+
+    // ---- #1076: invalid values produce a clean message ----
+
+    [Fact]
+    public void InvalidValue_OnSharedOption_ProducesCleanMessage()
+    {
+        var result = SolutionsCommandGroup.Create().Parse("list --output-format Yaml");
+
+        Assert.NotEmpty(result.Errors);
+        Assert.Contains("Invalid value 'Yaml' for --output-format. Valid values: Text, Json.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void InvalidValue_DoesNotLeakClrTypeName()
+    {
+        var result = SolutionsCommandGroup.Create().Parse("list --output-format Yaml");
+
+        Assert.DoesNotContain("PPDS.Cli.Commands.OutputFormat", JoinedErrors(result));
+        Assert.DoesNotContain("Cannot parse argument", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void InvalidValue_OnLocalOption_ProducesCleanMessage()
+    {
+        // env list declares its own option instance (factory-created, not the shared one).
+        var result = EnvCommandGroup.Create().Parse("list -f Yaml");
+
+        Assert.Contains("Invalid value 'Yaml' for --output-format. Valid values: Text, Json.", JoinedErrors(result));
+        Assert.DoesNotContain("PPDS.Cli.Commands.OutputFormat", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void InvalidValue_OnCsvCapableCommand_ListsCsvAmongValidValues()
+    {
+        var result = QueryCommandGroup.Create().Parse("sql \"SELECT name FROM account\" --output-format Yaml");
+
+        Assert.Contains("Invalid value 'Yaml' for --output-format. Valid values: Text, Json, Csv.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void UndefinedNumericValue_IsRejected()
+    {
+        // Enum.TryParse would accept out-of-range numerics like 42; the parser must not.
+        var result = SolutionsCommandGroup.Create().Parse("list --output-format 42");
+
+        Assert.Contains("Invalid value '42' for --output-format", JoinedErrors(result));
+    }
+
+    // ---- #1078: Csv is rejected on commands without CSV rendering ----
+
+    [Fact]
+    public void Csv_OnSolutionsList_IsRejectedWithCommandPath()
+    {
+        var result = SolutionsCommandGroup.Create().Parse("list --output-format Csv");
+
+        Assert.NotEmpty(result.Errors);
+        Assert.Contains("CSV output is not supported for 'solutions list'. Use --output-format Json or Text.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void Csv_OnEnvList_IsRejectedWithCommandPath()
+    {
+        var result = EnvCommandGroup.Create().Parse("list -f Csv");
+
+        Assert.Contains("CSV output is not supported for 'env list'. Use --output-format Json or Text.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void Csv_IsRejectedCaseInsensitively()
+    {
+        var result = EnvCommandGroup.Create().Parse("list -f CSV");
+
+        Assert.Contains("CSV output is not supported for 'env list'.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void Csv_OnDataLoad_IsRejected_ViaOAlias()
+    {
+        var result = DataCommandGroup.Create().Parse("load --entity account --file test.csv -o Csv");
+
+        Assert.Contains("CSV output is not supported for 'data load'. Use --output-format Json or Text.", JoinedErrors(result));
+    }
+
+    [Fact]
+    public void SchemaCompare_Csv_KeepsExistingRejectionMessage()
+    {
+        // The hand-rolled #1078 rejection in CompareCommand was subsumed by the shared
+        // option validator; the message must remain byte-identical.
+        var result = SchemaCommandGroup.Create().Parse("compare --data pkg.zip --environment https://x.crm.dynamics.com -f Csv");
+
+        Assert.Contains("CSV output is not supported for 'schema compare'. Use --output-format Json or Text.", JoinedErrors(result));
+    }
+
+    // ---- #1078: the four CSV-capable commands still accept Csv ----
+
+    [Fact]
+    public void Csv_OnQuerySql_ParsesAndBindsCsv()
+    {
+        var result = QueryCommandGroup.Create().Parse("sql \"SELECT name FROM account\" --output-format Csv");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Csv, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void Csv_OnQueryFetch_Parses()
+    {
+        var result = QueryCommandGroup.Create().Parse("fetch \"<fetch><entity name='account'/></fetch>\" -f Csv");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Csv, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void Csv_OnQueryHistoryExecute_Parses()
+    {
+        var result = QueryCommandGroup.Create().Parse("history execute 1 -f Csv");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Csv, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void Csv_OnPluginTracesList_Parses()
+    {
+        var result = PluginTracesCommandGroup.Create().Parse("list --output-format Csv");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Csv, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    // ---- valid values keep parsing (case-insensitive, defaults intact) ----
+
+    [Theory]
+    [InlineData("Text", OutputFormat.Text)]
+    [InlineData("text", OutputFormat.Text)]
+    [InlineData("Json", OutputFormat.Json)]
+    [InlineData("json", OutputFormat.Json)]
+    [InlineData("JSON", OutputFormat.Json)]
+    public void ValidValues_ParseCaseInsensitively(string token, OutputFormat expected)
+    {
+        var result = SolutionsCommandGroup.Create().Parse($"list --output-format {token}");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(expected, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void OmittedOption_DefaultsToText()
+    {
+        var result = SolutionsCommandGroup.Create().Parse("list");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Text, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void DataLoad_OutputFormatKeepsOAlias_FBelongsToFile()
+    {
+        var loadCommand = LoadCommand.Create();
+        var formatOption = loadCommand.Options.First(o => o.Name == "--output-format");
+
+        Assert.Contains("-o", formatOption.Aliases);
+        Assert.DoesNotContain("-f", formatOption.Aliases);
+    }
+
+    // ---- CSV emission still works for the shared query formatter ----
+
+    [Fact]
+    public void QueryResultFormatter_WriteCsvOutput_EmitsHeaderAndEscapedRows()
+    {
+        var queryResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns =
+            [
+                new QueryColumn { LogicalName = "name" },
+                new QueryColumn { LogicalName = "revenue", Alias = "total" }
+            ],
+            Records =
+            [
+                new Dictionary<string, QueryValue>
+                {
+                    ["name"] = QueryValue.Simple("Contoso, Ltd \"HQ\""),
+                    ["total"] = QueryValue.WithFormatting(1000.50m, "$1,000.50")
+                }
+            ],
+            Count = 1,
+            MoreRecords = false
+        };
+
+        var originalOut = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            QueryResultFormatter.WriteCsvOutput(queryResult);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var csv = captured.ToString();
+        Assert.Contains("name,total", csv);
+        Assert.Contains("\"Contoso, Ltd \"\"HQ\"\"\"", csv);
+        Assert.Contains("\"$1,000.50\"", csv);
+    }
+}

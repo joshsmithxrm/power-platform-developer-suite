@@ -65,11 +65,7 @@ public static class SchemaCommand
             Description = "SQL-like filter per entity. Format: entity:expression (e.g., \"account:statecode = 0\"). Repeatable."
         };
 
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var verboseOption = new Option<bool>("--verbose", "-v")
         {
