@@ -64,6 +64,11 @@ def main():
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
+    # A non-dict root (e.g. JSON ``null`` or an array) is as unusable as a
+    # corrupt file — allow stop rather than crashing on state.get(...) below.
+    if not isinstance(state, dict):
+        sys.exit(0)
+
     # Bypass: pipeline orchestrator is actively running (AC-197)
     if state.get("pipeline", {}).get("in_flight"):
         sys.exit(0)
@@ -88,7 +93,7 @@ def main():
     # When phase=pr, require pr.monitor_launched to be set (timestamp or
     # "fallback: <reason>"). Both truthy values allow exit.
     if phase == "pr":
-        monitor_launched = state.get("pr", {}).get("monitor_launched")
+        monitor_launched = (state.get("pr") or {}).get("monitor_launched")
         if monitor_launched:
             sys.exit(0)
         output = {
@@ -132,7 +137,7 @@ def main():
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
             commits_ahead = 0
 
-        if commits_ahead > 0 and not state.get("pr", {}).get("invoked_via_skill"):
+        if commits_ahead > 0 and not (state.get("pr") or {}).get("invoked_via_skill"):
             output = {
                 "decision": "block",
                 "reason": (
@@ -256,10 +261,14 @@ def main():
     if not review.get("passed"):
         missing.append("/review")
 
-    # PR Gemini triage — if PR exists but gemini_triaged is false
-    pr = state.get("pr", {})
+    # PR review triage — if PR exists but gemini_triaged is false.
+    # Reviewer-optional mode: pr.reviewer == "none" means no external reviewer
+    # is configured for this PR — nothing to triage, gate skipped. Absent key
+    # = state written before reviewer modes existed = legacy gemini run.
+    pr = state.get("pr") or {}  # tolerate explicit "pr": null (not just missing key)
     pr_created = pr and pr.get("url")
-    if pr_created and not pr.get("gemini_triaged"):
+    pr_reviewer = pr.get("reviewer") or "gemini"
+    if pr_created and pr_reviewer != "none" and not pr.get("gemini_triaged"):
         missing.append("Gemini review triage (PR created but comments not triaged)")
 
     # Uncommitted changes
@@ -282,9 +291,12 @@ def main():
         + (f" ({review.get('findings', 0)} findings)" if review.get("passed") else "")
     )
     if pr_created:
-        triaged = "✓" if pr.get("gemini_triaged") else "✗"
         lines.append(f"  ✓ PR: {pr['url']}")
-        lines.append(f"  {triaged} Gemini review triaged")
+        if pr_reviewer == "none":
+            lines.append("  - Reviewer: none (triage gate skipped)")
+        else:
+            triaged = "✓" if pr.get("gemini_triaged") else "✗"
+            lines.append(f"  {triaged} Gemini review triaged")
     else:
         lines.append("  ⚠ PR not created")
 

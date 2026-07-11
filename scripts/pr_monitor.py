@@ -51,6 +51,16 @@ MAX_TRIAGE_ITERATIONS = 3   # max triage -> CI re-check cycles
 
 MAX_CI_FIX_ROUNDS = int(os.environ.get("PPDS_MAX_CI_FIX_ROUNDS", "3"))
 
+VALID_REVIEWERS = ("gemini", "none")
+# Committed default for real runs (resolved in main()). Flipped to "none"
+# ahead of the Gemini Code Assist sunset (July 17, 2026) — issue #1177.
+# Ride the last Gemini days with PPDS_PR_REVIEWER=gemini if desired.
+DEFAULT_REVIEWER = "none"
+# Module-import value = legacy behavior for direct-function callers and the
+# existing test suite (which is the gemini-mode regression guarantee).
+# main() overwrites this via _resolve_reviewer_mode() for every real run.
+REVIEWER_MODE = "gemini"
+
 
 def _resolve_ci_timeout_sec(flag_value):
     """Return (effective_seconds, source) with flag > env > default precedence."""
@@ -76,6 +86,20 @@ def _resolve_gemini_timeout_sec(flag_value):
         except ValueError:
             pass
     return GEMINI_MAX_WAIT, "default"
+
+
+def _resolve_reviewer_mode(flag_value, worktree=None, resume=False):
+    """Return (mode, source): flag > env > prior run (resume only) > default."""
+    if flag_value is not None:
+        return flag_value, "flag"
+    env_val = os.environ.get("PPDS_PR_REVIEWER", "").strip().lower()
+    if env_val in VALID_REVIEWERS:
+        return env_val, "env"
+    if resume and worktree:
+        prev = read_result(worktree).get("reviewer")
+        if prev in VALID_REVIEWERS:
+            return prev, "resume"
+    return DEFAULT_REVIEWER, "default"
 
 
 KNOWN_FLAKE_PATTERNS = [
@@ -304,6 +328,8 @@ def _empty_result():
         # ready-flip gate can distinguish clean-approval / declined reviews
         # from reviews that flagged issues needing replies.
         "gemini_review_body": "",
+        # Effective reviewer mode; set by run_monitor.
+        "reviewer": None,
         "timestamp": _timestamp(),
     }
 
@@ -493,6 +519,12 @@ def poll_gemini_comments(worktree, pr_number, logger):
     """
     if SHAKEDOWN:
         logger.log("gemini", "SHAKEDOWN_SKIPPED")
+        return []
+
+    if REVIEWER_MODE == "none":
+        logger.log("gemini", "SKIPPED_REVIEWER_NONE")
+        logger.last_gemini_status = "reviewer_none"
+        logger.last_gemini_review_body = ""
         return []
 
     pr_created_at = _get_pr_created_at(worktree, pr_number)
@@ -1311,6 +1343,41 @@ def _set_terminal_state_marker(worktree, terminal_state, reason, logger):
         logger.log("escalation", "STATE_MARKER_ERROR", error=str(e))
 
 
+def _persist_reviewer_state(worktree, mode, logger):
+    """Record the effective reviewer mode into ``.workflow/state.json``
+    under ``pr.reviewer`` (cross-process contract for the session-stop hook).
+
+    Direct state.json write — same pattern as ``_set_terminal_state_marker``
+    — rather than a ``workflow-state.py`` subprocess, so it works from the
+    detached monitor regardless of branch (that script blocks writes on the
+    main branch).
+    """
+    state_path = os.path.join(worktree, ".workflow", "state.json")
+    try:
+        os.makedirs(os.path.join(worktree, ".workflow"), exist_ok=True)
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            state = {}
+        # Tolerate a non-dict root (``null`` or an array parse to a non-dict,
+        # on which ``state.get(...)`` would AttributeError and abort startup).
+        if not isinstance(state, dict):
+            state = {}
+        # Tolerate an explicit ``"pr": null`` (setdefault returns None for a
+        # present-but-null key, which would then TypeError on item assignment).
+        pr_sec = state.get("pr")
+        pr_sec = pr_sec if isinstance(pr_sec, dict) else {}
+        pr_sec["reviewer"] = mode
+        state["pr"] = pr_sec
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.write("\n")
+        logger.log("monitor", "REVIEWER_STATE_SET", reviewer=mode)
+    except OSError as e:
+        logger.log("monitor", "REVIEWER_STATE_ERROR", error=str(e))
+
+
 def _notify_terminal(worktree, pr_number, logger, message):
     """Best-effort notification + escalation visibility on any non-clean exit.
 
@@ -1669,7 +1736,8 @@ def _parse_github_repo(remote_url):
 
 
 def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
-                ci_timeout_source="default", gemini_timeout_source="default"):
+                ci_timeout_source="default", gemini_timeout_source="default",
+                reviewer_source="default"):
     """Main monitor loop — state-machine orchestrator (v9.1).
 
     Args:
@@ -1697,12 +1765,15 @@ def run_monitor(worktree, pr_number, resume=False, repo=None, mode=None,
 
     result = read_result(worktree) if resume else _empty_result()
     result["status"] = "running"
+    result["reviewer"] = REVIEWER_MODE
     result["timestamp"] = _timestamp()
     write_result(worktree, result)
 
     logger.log("monitor", "START", pr=pr_number, resume=resume, pid=os.getpid())
     logger.log("monitor", "CI_TIMEOUT", ci_timeout_sec=CI_MAX_WAIT, source=ci_timeout_source)
     logger.log("monitor", "GEMINI_TIMEOUT", gemini_timeout_sec=GEMINI_MAX_WAIT, source=gemini_timeout_source)
+    logger.log("monitor", "REVIEWER", reviewer=REVIEWER_MODE, source=reviewer_source)
+    _persist_reviewer_state(worktree, REVIEWER_MODE, logger)
 
     ci_fix_rounds_used = 0
     triage_rounds_used = 0
@@ -2200,24 +2271,30 @@ def _ready_flip_gates(worktree, pr_number, result, logger):
 
     Returns (ok, failing_reasons). ok is True only when all gates pass:
       - CI green, AND
-      - Gemini dimension is satisfied — either the latest review body
-        matches a clean-approval / declined pattern
+      - the reviewer dimension is satisfied UNLESS ``REVIEWER_MODE`` is
+        ``"none"`` (in which case the review gate is skipped entirely and
+        ``gemini_review_not_posted`` is never appended). When a reviewer is
+        configured, the dimension is satisfied — either the latest review
+        body matches a clean-approval / declined pattern
         (see ``_gemini_effectively_done``), OR Gemini posted a review, AND
       - no unreplied bot comments remain from ANY reviewer (Gemini,
         CodeQL / github-advanced-security, or other aggregated sources
         returned by ``get_unreplied_comments``). A Gemini clean/declined
         review satisfies the "Gemini reviewed" dimension but does NOT
         bypass unreplied comments from other reviewers — see PR #846
-        review (gemini-code-assist HIGH, 2026-04-20).
+        review (gemini-code-assist HIGH, 2026-04-20). The unreplied-bot
+        gate is mode-independent: CodeQL findings still block the flip
+        even when ``REVIEWER_MODE`` is ``"none"``.
     """
     reasons = []
     if result.get("ci_result") != "pass":
         reasons.append(f"ci_result={result.get('ci_result')!r}")
 
-    review_body = result.get("gemini_review_body") or ""
-    gemini_done_clean = _gemini_effectively_done(review_body)
-    if not gemini_done_clean and not result.get("gemini_review_posted"):
-        reasons.append("gemini_review_not_posted")
+    if REVIEWER_MODE != "none":
+        review_body = result.get("gemini_review_body") or ""
+        gemini_done_clean = _gemini_effectively_done(review_body)
+        if not gemini_done_clean and not result.get("gemini_review_posted"):
+            reasons.append("gemini_review_not_posted")
 
     try:
         unreplied = get_unreplied_comments(
@@ -2352,9 +2429,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Background PR monitor — CI, Gemini triage, retro, notify"
     )
-    parser.add_argument("--worktree", required=True,
+    parser.add_argument("--worktree", required=False,
                         help="Path to the git worktree")
-    parser.add_argument("--pr", required=True, type=int,
+    parser.add_argument("--pr", required=False, type=int,
                         help="Pull request number")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last completed step")
@@ -2369,7 +2446,24 @@ def main():
     parser.add_argument("--gemini-timeout-sec", type=int, default=None,
                         help="Gemini review polling timeout in seconds (default: 1800). "
                              "Env: PPDS_PR_MONITOR_GEMINI_TIMEOUT. Flag takes precedence over env.")
+    parser.add_argument("--reviewer", choices=VALID_REVIEWERS, default=None,
+                        help="External reviewer mode. 'none' skips the review wait, triage, "
+                             "and review gate (CI + unreplied bot comments still gate ready-flip). "
+                             "Env: PPDS_PR_REVIEWER. Flag > env > prior run (--resume) > default.")
+    parser.add_argument("--print-reviewer", action="store_true",
+                        help="Print the effective reviewer mode to stdout and exit.")
     args = parser.parse_args()
+
+    if args.print_reviewer:
+        # Honor the resume tier too: --resume --print-reviewer must reflect the
+        # prior run's persisted mode (args.worktree may be None — the resolver
+        # guards on `resume and worktree`).
+        mode, _ = _resolve_reviewer_mode(
+            args.reviewer, worktree=args.worktree, resume=args.resume)
+        print(mode)          # stdout = data only (Constitution I1)
+        sys.exit(0)
+    if not args.worktree or args.pr is None:
+        parser.error("--worktree and --pr are required")
 
     global CI_MAX_WAIT
     ci_timeout_sec, ci_timeout_source = _resolve_ci_timeout_sec(args.ci_timeout_sec)
@@ -2386,9 +2480,15 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
+    global REVIEWER_MODE
+    reviewer_mode, reviewer_source = _resolve_reviewer_mode(
+        args.reviewer, worktree=worktree, resume=args.resume)
+    REVIEWER_MODE = reviewer_mode
+
     exit_code = run_monitor(worktree, args.pr, resume=args.resume, repo=args.repo,
                             mode=args.mode, ci_timeout_source=ci_timeout_source,
-                            gemini_timeout_source=gemini_timeout_source)
+                            gemini_timeout_source=gemini_timeout_source,
+                            reviewer_source=reviewer_source)
     sys.exit(exit_code)
 
 

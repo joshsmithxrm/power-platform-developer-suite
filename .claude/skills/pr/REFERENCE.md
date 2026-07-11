@@ -54,9 +54,11 @@ The monitor handles: CI polling, Gemini review wait (overload detection + retry)
 
 **Why the monitor exists:** Gemini review timing is unpredictable (2–10+ minutes). Inline polling with a fixed timeout creates a gap where late-arriving comments go untriaged.
 
+**Reviewer mode:** the external reviewer is configurable — values `gemini | none`. Precedence: `--reviewer` flag > `PPDS_PR_REVIEWER` env > the prior run's persisted mode (on `--resume`) > the committed default (`DEFAULT_REVIEWER` in `scripts/pr_monitor.py`, currently **`none`** ahead of the Gemini Code Assist sunset on July 17, 2026 — export `PPDS_PR_REVIEWER=gemini` to ride the last Gemini days). Mode `none` skips the review wait, triage dispatch, and the review dimension of the ready-flip gate, and never produces a `gemini-timeout` terminal state; the unreplied-bot-comments gate (CodeQL / github-advanced-security) and the CI gate always apply. `--gemini-timeout-sec` / `PPDS_PR_MONITOR_GEMINI_TIMEOUT` are still parsed but never consulted when mode is `none`. The resolved mode is recorded in `.workflow/pr-monitor-result.json` (`reviewer`) and `.workflow/state.json` (`pr.reviewer`) so the session-stop hook skips the triage gate for reviewer-less PRs. Resolve it once with `python scripts/pr_monitor.py --print-reviewer` (stdout = the mode only, Constitution I1).
+
 > **Retro-enforced (PR #868):** Agent skipped the monitor, manually replied to 3 of 9 comments via `gh api`, missed all CodeQL comments. Manual comment triage is never an acceptable substitute.
 
-Launch command: `python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number}`
+Launch command: `python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number} --reviewer "$REVIEWER"` (resolve `$REVIEWER` first — see **Reviewer mode** above)
 
 - **Windows:** `subprocess.Popen(..., creationflags=subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NEW_PROCESS_GROUP)`
 - **Unix:** `subprocess.Popen(..., start_new_session=True)`
