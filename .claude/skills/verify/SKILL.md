@@ -70,9 +70,10 @@ Per tool: valid->success shape; edge case->error handling; matches schema.
 
 ### 7. Workflow mode
 
-**Check 1 - Python tests:**
+**Check 1 - Python tests** (the full automation suite — hook behavior, skill
+content, bash portability):
 ```bash
-pytest tests/test_protect_main_branch.py tests/test_hooks.py -v
+python -m pytest tests/ scripts/ --import-mode=importlib -q
 ```
 
 **Check 2 - Hook scripts:** for each surviving `.py` in `.claude/hooks/`
@@ -90,8 +91,6 @@ pytest tests/test_protect_main_branch.py tests/test_hooks.py -v
 `Bash(pattern:*)`).
 
 **Check 6 - Skill file refs:** every referenced path exists.
-
-**Check 7 - Retro store schema:** see `REFERENCE.md` "Retro store schema".
 
 ### 8. Report
 

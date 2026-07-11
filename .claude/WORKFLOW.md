@@ -38,7 +38,7 @@ Shakedown mode guarantees no real artifacts leak from exercise runs. Violations 
 - `.claude/hooks/protect-main-branch.py` — also logs the raw value for debugging.
 
 ### Consumed by (skills)
-- Indirectly — skills that shell into hooks inherit the normalized value. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows.
+- Indirectly — skills inherit the **raw** environment value; normalization happens inside hooks, via `_pathfix.get_project_dir()`, at the moment a hook reads it. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows.
 
 ### Effect
 Portable path resolution across Windows cmd, Git Bash, and POSIX shells. In worktrees, resolves to the worktree root — hooks operating on a worktree see the worktree as the project root, not the main checkout.
@@ -86,7 +86,7 @@ Fix the path literal at write time, not the file system at read time:
 |------------|-----|
 | `python -c "open('specs\today.md')"` | `python -c "open('specs/today.md')"` (forward slashes) |
 | `python -c "open('C:\Users\foo')"` | `python -c "open(r'C:\Users\foo')"` (raw string) |
-| Inline heredoc + Windows path | Save to a `.py` file and run it — escapes go away |
+| Inline heredoc + Windows path | Save to a `.py` file — the shell-quoting layer goes away — and still use forward slashes or raw strings for the path literals (Python parses `\t`/`\U` escapes in a file too) |
 
 POSIX paths work on Windows Python — forward slashes are the correct
 default for cross-platform inline Python.

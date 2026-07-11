@@ -47,7 +47,7 @@ gh pr checks <pr-number> --watch          # CI + CodeQL status
 gh pr view <pr-number> --json reviews,comments,statusCheckRollup
 ```
 
-Review timing is unpredictable (2–10+ minutes). Poll `gh pr view <pr-number> --json reviews,comments` every ~30s until the review appears, up to a few minutes. If no reviewer is configured or it never arrives, note that and proceed — do not block indefinitely.
+Review timing is unpredictable (2–10+ minutes). Poll `gh pr view <pr-number> --json reviews,comments` every ~30s for up to **15 minutes**. If the review still has not arrived at the cap, surface that to the user and get explicit confirmation before proceeding — do not silently mark ready while a late review can still land. Skip the wait only when no reviewer app is installed on the repo.
 
 ### Step 6: Triage Every Comment
 
@@ -58,7 +58,13 @@ gh pr view <pr-number> --json reviews,comments
 gh api repos/:owner/:repo/pulls/<pr-number>/comments      # inline review comments
 ```
 
-For each comment: either fix the code (and reply noting the commit) or reply with a rationale for not changing it. Do not leave any comment unaddressed. Include CodeQL and CI-surfaced findings in the same pass.
+Reply **in-thread on each inline comment** — exactly one reply per comment, posted with `in_reply_to`:
+
+```bash
+gh api repos/:owner/:repo/pulls/<pr-number>/comments -F in_reply_to=<comment-id> -f body="Fixed in <sha> — <what changed>"
+```
+
+Reply shapes: `Fixed in <sha> — <what changed>` after committing the fix, or `Not applicable — <rationale citing the design decision or context>`. **Never post a PR-level summary comment in place of threaded replies** — a bulk "addressed everything" comment leaves every thread unanswered. Only a body-only review (no inline comments) gets a single per-point PR comment, because there is no thread to reply to. Commit and push all fixes **before** posting `Fixed in` replies (a reply referencing an unpushed SHA is a lie). Include CodeQL and CI-surfaced findings in the same pass.
 
 ### Step 7: Flip to Ready and Present Summary
 

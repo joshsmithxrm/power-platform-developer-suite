@@ -6,7 +6,8 @@ description: Execute a checked-in implementation plan end-to-end using parallel 
 # Implement Plan
 
 `/implement` — read spec and plan from `.plans/`, execute phases
-`/implement specs/my-feature.md` — explicit spec path
+`/implement .plans/<date>-<name>.md` — explicit plan path
+`/implement specs/<name>.md` — spec path: generate the plan from this spec first, save it to `.plans/`, then execute
 
 ## Prerequisites
 
@@ -14,7 +15,7 @@ Agent tool, `/review`, `/verify`, `/qa`, `/debug`, `/gates`.
 
 ## Input
 
-`$ARGUMENTS` = path to plan file. If omitted: use the most relevant spec on the branch, generate a plan, save to `.plans/`, proceed.
+`$ARGUMENTS` = path to a plan file, or a spec file to generate the plan from. If omitted: use the most relevant spec on the branch, generate a plan, save to `.plans/`, proceed.
 
 **Fallback — no spec:** check `.plans/context.md` first; if present, generate a plan from it. Otherwise: prompt the user — run `/design` or continue without spec? See REFERENCE.md §1 for the full fallback chain.
 
@@ -60,5 +61,5 @@ Read REFERENCE.md §3 for Opus vs. Sonnet guidance.
 **C. QA** — `/qa extension|cli|mcp|tui` per changed surfaces
 **D. Review** — `/review` final comprehensive review
 **E. Converge** — if critical/important findings: gates→review→fix loop (max 5 cycles)
-**F. Final State Check** — git log clean; all phases committed.
+**F. Final State Check** — `git status --porcelain` produces no output (no uncommitted or untracked files); all phases committed.
 **G. Submit** — proceed IMMEDIATELY to `/pr`; do not stop to summarize

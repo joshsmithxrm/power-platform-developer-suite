@@ -119,9 +119,11 @@ project procedures (release, testing conventions, multi-surface
 verification) and a small set of safety hooks (branch/key protection,
 delete guards). All of it is optional:
 
-- **CI is the contract.** Everything the tooling checks locally, CI checks
-  on your PR with plain `dotnet`/`npm` commands. You can contribute without
-  ever running an AI tool.
+- **CI is the contract for code quality.** The build, test, and lint gates
+  the tooling runs locally are the same plain `dotnet`/`npm` commands CI runs
+  on your PR — you can contribute without ever running an AI tool. (The
+  safety hooks — branch/key protection, delete guards — are local Claude
+  Code guards, not CI checks.)
 - The skills are plain markdown (`.claude/skills/*/SKILL.md`) — useful as
   documentation even if you never execute them.
 - **Token-cost note:** some skills (`/verify`, `/qa`, `/review`) spawn

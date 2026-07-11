@@ -2,7 +2,7 @@
 
 ## §1 - No-Spec Fallback Chain (SKILL.md Input step)
 
-When `$ARGUMENTS` is absent and no spec is found on the branch:
+When `$ARGUMENTS` is absent and no spec is found on the branch, read `specs/CONSTITUTION.md` FIRST — every fallback path below generates a plan, and a plan generated without the Constitution loaded produces non-compliant phases. Then:
 
 1. **Check `.plans/context.md`** (if present, e.g. written from an issue body): read it, generate a plan from the issue context and constraints it contains, save to `.plans/`, proceed.
 2. **No context.md**: prompt the user — "(1) Run `/design` to create a spec, or (2) describe the work for plan generation."

@@ -45,9 +45,11 @@ gh pr checks <pr-number> --watch                          # blocks until CI + Co
 gh pr view <pr-number> --json reviews,comments            # poll for the automated review
 ```
 
-Poll every ~30s until the review appears (up to a few minutes); if no reviewer is configured, note that and proceed. Late-arriving inline comments show up under `gh api repos/:owner/:repo/pulls/<pr-number>/comments` — re-fetch before flipping to ready so nothing goes untriaged.
+Poll every ~30s for up to **15 minutes**. If the review has not arrived at the cap, surface it and get the user's explicit confirmation before proceeding; skip the wait only when no reviewer app is installed. Late-arriving inline comments show up under `gh api repos/:owner/:repo/pulls/<pr-number>/comments` — re-fetch before flipping to ready so nothing goes untriaged.
 
-> **Lesson (PR #868):** an agent replied to only 3 of 9 comments and missed all CodeQL comments. Respond to **every** comment — fix the code or reply with a rationale. Partial triage is never acceptable.
+Replies go **in-thread, one per inline comment** (`gh api repos/:owner/:repo/pulls/<pr-number>/comments -F in_reply_to=<comment-id> -f body=...`), using `Fixed in <sha> — <what>` or `Not applicable — <rationale>`. A PR-level summary comment is not a substitute for threaded replies.
+
+> **Lesson (PR #868):** an agent replied to only 3 of 9 comments and missed all CodeQL comments. Respond to **every** comment, in its own thread — fix the code or reply with a rationale. Partial or bulk triage is never acceptable.
 
 ## §5 - Post-Merge Cleanup
 

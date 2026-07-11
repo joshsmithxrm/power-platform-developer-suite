@@ -97,14 +97,14 @@ Note: `.plans/` is gitignored — the plan lives in the worktree only.
 
 Present two options:
 
-```
+```text
 Spec committed. Choose next step:
 
   1. Continue interactively
      → /implement
 
   2. Defer (pick up later)
-     → Spec is committed on branch feat/<name>. Resume anytime.
+     → Spec is committed on the current feature branch. Resume anytime.
 ```
 
 If option 1: invoke `/implement` immediately.

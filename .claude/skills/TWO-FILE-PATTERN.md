@@ -97,7 +97,7 @@ keep the order even if you add new sections at the end.
 
 The same shape applies to `backlog`: the SKILL.md runs the
 triage procedure; REFERENCE.md holds the label taxonomy and
-worked examples.
+procedural rules.
 
 ---
 
