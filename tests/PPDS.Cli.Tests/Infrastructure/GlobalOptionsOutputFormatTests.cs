@@ -269,4 +269,52 @@ public class GlobalOptionsOutputFormatTests
         Assert.Contains("\"Contoso, Ltd \"\"HQ\"\"\"", csv);
         Assert.Contains("\"$1,000.50\"", csv);
     }
+
+    // ---- #1078: empty CSV results emit the header, never silent zero bytes ----
+
+    [Fact]
+    public void QueryResultFormatter_WriteCsvOutput_EmptyResult_EmitsHeaderNotZeroBytes()
+    {
+        var csv = CaptureStdout(() => QueryResultFormatter.WriteCsvOutput(EmptyResultWithColumns()));
+
+        Assert.Equal("name,total", csv.TrimEnd('\r', '\n'));
+    }
+
+    [Fact]
+    public void FetchCommand_WriteCsvOutput_EmptyResult_EmitsHeaderNotZeroBytes()
+    {
+        var csv = CaptureStdout(() => FetchCommand.WriteCsvOutput(EmptyResultWithColumns()));
+
+        Assert.Equal("name,total", csv.TrimEnd('\r', '\n'));
+    }
+
+    private static QueryResult EmptyResultWithColumns() => new()
+    {
+        EntityLogicalName = "account",
+        Columns =
+        [
+            new QueryColumn { LogicalName = "name" },
+            new QueryColumn { LogicalName = "revenue", Alias = "total" }
+        ],
+        Records = [],
+        Count = 0,
+        MoreRecords = false
+    };
+
+    private static string CaptureStdout(Action action)
+    {
+        var originalOut = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        return captured.ToString();
+    }
 }

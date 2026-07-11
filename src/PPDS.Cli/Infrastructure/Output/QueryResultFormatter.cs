@@ -112,12 +112,15 @@ public static class QueryResultFormatter
     /// <param name="result">The query result to output as CSV.</param>
     public static void WriteCsvOutput(QueryResult result)
     {
-        if (result.Count == 0)
+        // Nothing to emit without a schema. When columns are known the header is
+        // written even for zero rows, so CSV consumers still get column names
+        // rather than silent zero-byte output (#1078).
+        if (result.Columns.Count == 0)
         {
             return;
         }
 
-        // Header row
+        // Header row (emitted even when there are no records)
         var headers = result.Columns.Select(c => EscapeCsvField(c.Alias ?? c.LogicalName));
         Console.WriteLine(string.Join(",", headers));
 
