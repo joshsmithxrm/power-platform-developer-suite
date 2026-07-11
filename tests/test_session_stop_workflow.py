@@ -128,3 +128,107 @@ class TestWorkflowSurface:
                             assert "workflow" in elements, (
                                 "'workflow' must be in pr-gate valid_surfaces"
                             )
+
+
+# ---------------------------------------------------------------------------
+# #1177 — reviewer-optional mode: the triage gate respects pr.reviewer
+# ---------------------------------------------------------------------------
+
+
+def _base_state():
+    """Workflow state that passes every gate EXCEPT (optionally) PR triage."""
+    return {
+        "gates": {"passed": True, "commit_ref": "abc123"},
+        "verify": {"workflow": "x"},
+        "qa": {"workflow": "x"},
+        "review": {"passed": True},
+        "pr": {
+            "url": "https://github.com/o/r/pull/1",
+            "invoked_via_skill": True,
+        },
+    }
+
+
+def _run_hook(tmp_path, state, monkeypatch, capsys, branch="feat/x"):
+    """Drive session_stop_workflow.main() end-to-end against a temp worktree.
+
+    Mocks git so the hook sees a feature branch with one code commit ahead of
+    main and a clean tree (HEAD == gates.commit_ref), so the block/allow
+    decision is driven purely by the provided state.json. Returns
+    (exit_code, combined_stdout+stderr).
+    """
+    import io as _io
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.delenv("PPDS_PIPELINE", raising=False)
+    monkeypatch.delenv("PPDS_SHAKEDOWN", raising=False)
+
+    wf = tmp_path / ".workflow"
+    wf.mkdir(parents=True, exist_ok=True)
+    (wf / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def _fake_git(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args", [])
+        if argv[:2] == ["git", "rev-parse"] and "--abbrev-ref" in argv:
+            out = branch
+        elif argv[:2] == ["git", "rev-parse"]:
+            out = "abc123"
+        elif argv[:3] == ["git", "rev-list", "--count"]:
+            out = "1"
+        elif argv[:3] == ["git", "diff", "--name-only"]:
+            out = "scripts/x.py\n"
+        elif argv[:3] == ["git", "status", "--porcelain"]:
+            out = ""
+        else:
+            out = ""
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    with patch.object(hook.subprocess, "run", side_effect=_fake_git), \
+         patch("sys.stdin", _io.StringIO("{}")):
+        with pytest.raises(SystemExit) as exc:
+            hook.main()
+
+    captured = capsys.readouterr()
+    code = exc.value.code if exc.value.code is not None else 0
+    return code, captured.out + captured.err
+
+
+class TestReviewerOptionalTriageGate:
+    """#1177: the session-stop triage gate reads pr.reviewer.
+
+    reviewer == "none"  → no external reviewer → triage gate skipped.
+    reviewer == "gemini" or ABSENT (legacy) → gate enforced.
+    """
+
+    def test_reviewer_none_allows_stop_without_triage(
+            self, tmp_path, monkeypatch, capsys):
+        state = _base_state()
+        state["pr"]["reviewer"] = "none"
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys)
+        assert code == 0
+        assert "Reviewer: none" in out
+
+    def test_reviewer_gemini_blocks_without_triage(
+            self, tmp_path, monkeypatch, capsys):
+        state = _base_state()
+        state["pr"]["reviewer"] = "gemini"
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys)
+        assert code == 2
+        assert "triage" in out.lower()
+
+    def test_reviewer_absent_defaults_to_gemini_gate(
+            self, tmp_path, monkeypatch, capsys):
+        # No reviewer key at all — legacy state written before reviewer modes.
+        state = _base_state()
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys)
+        assert code == 2
+        assert "triage" in out.lower()
+
+    def test_reviewer_gemini_triaged_allows_stop(
+            self, tmp_path, monkeypatch, capsys):
+        state = _base_state()
+        state["pr"]["reviewer"] = "gemini"
+        state["pr"]["gemini_triaged"] = True
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys)
+        assert code == 0
+        assert "Gemini review triaged" in out

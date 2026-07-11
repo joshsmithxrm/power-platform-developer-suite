@@ -1,11 +1,11 @@
 ---
 name: pr
-description: Create PR, wait for Gemini review, triage every comment, and present summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
+description: Create PR, wait for the configured reviewer (Gemini or none), triage every comment, and present summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
 ---
 
 # PR
 
-End-to-end PR lifecycle: rebase, create, wait for Gemini review, triage comments, and present a summary to the user.
+End-to-end PR lifecycle: rebase, create, wait for the configured external review, triage comments, and present a summary to the user.
 
 This skill is the ONLY sanctioned path for automated PR creation. <!-- enforcement: T1 hook:pr-gate --> See REFERENCE.md §1.
 
@@ -66,30 +66,38 @@ python scripts/workflow-state.py set pr.created now
 ### Step 5: Launch Background Monitor (MANDATORY) <!-- enforcement: T1 hook:session-stop-workflow -->
 
 ```bash
-python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number}
+REVIEWER=$(python scripts/pr_monitor.py --print-reviewer)
+python scripts/workflow-state.py set pr.reviewer "$REVIEWER"
+python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number} --reviewer "$REVIEWER"
 ```
 
-Launch as detached background process (see REFERENCE.md §4). Then:
+Reviewer mode resolves `--reviewer` flag > `PPDS_PR_REVIEWER` env > repo default; `none` disables the external-review wait and triage. Launch as detached background process (see REFERENCE.md §4). Then:
 ```bash
 cat .workflow/pr-monitor.pid
 python scripts/workflow-state.py set pr.monitor_launched now
 ```
 
-On failure: inline fallback — record reason per REFERENCE.md §4. <!-- enforcement: T2 hook:pr-monitor-fallback-record -->
+On failure: inline fallback — record reason per REFERENCE.md §4. When `$REVIEWER` is `none`, skip the "wait + triage yourself" fallback steps (there is no external reviewer); still record `pr.monitor_launched "fallback: <reason>"` and `pr.reviewer`. <!-- enforcement: T2 hook:pr-monitor-fallback-record -->
 
 ### Step 6: Completion Gate (MANDATORY) <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:session-stop-workflow -->
 
 1. **Monitor**: confirm `.workflow/pr-monitor.pid` exists and process running (`kill -0`). If missing AND no fallback recorded → fail: `"⚠ Monitor PID file missing"`.
-2. **Gemini review**: poll `gh pr view {N} --json reviews,comments` every 30s for 5 min. If absent → fail. Bypass with `--skip-gemini-check`.
+2. **Review received** — *skip this check when `$REVIEWER` is `none`* (note "Reviewer: none" in the summary instead). Otherwise poll `gh pr view {N} --json reviews,comments` every 30s for 5 min. If absent → fail. Bypass with `--skip-gemini-check`.
 
 ### Step 7: Present Summary
 
+Gemini mode:
 ```
 PR created (draft): {url}
 Monitor launched (PID {pid}) — handling CI, Gemini, CodeQL, triage, ready-flip, retro
 Gemini review: ✅ verified
 
 Check: /status   Log: .workflow/pr-monitor.log
+```
+
+When `$REVIEWER` is `none`, replace the "Gemini review" line with:
+```
+Reviewer: none — monitor gates on CI + unreplied bot comments only
 ```
 
 ### Step 8: Post-Merge Cleanup

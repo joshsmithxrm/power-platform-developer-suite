@@ -256,10 +256,14 @@ def main():
     if not review.get("passed"):
         missing.append("/review")
 
-    # PR Gemini triage — if PR exists but gemini_triaged is false
+    # PR review triage — if PR exists but gemini_triaged is false.
+    # Reviewer-optional mode: pr.reviewer == "none" means no external reviewer
+    # is configured for this PR — nothing to triage, gate skipped. Absent key
+    # = state written before reviewer modes existed = legacy gemini run.
     pr = state.get("pr", {})
     pr_created = pr and pr.get("url")
-    if pr_created and not pr.get("gemini_triaged"):
+    pr_reviewer = pr.get("reviewer") or "gemini"
+    if pr_created and pr_reviewer != "none" and not pr.get("gemini_triaged"):
         missing.append("Gemini review triage (PR created but comments not triaged)")
 
     # Uncommitted changes
@@ -282,9 +286,12 @@ def main():
         + (f" ({review.get('findings', 0)} findings)" if review.get("passed") else "")
     )
     if pr_created:
-        triaged = "✓" if pr.get("gemini_triaged") else "✗"
         lines.append(f"  ✓ PR: {pr['url']}")
-        lines.append(f"  {triaged} Gemini review triaged")
+        if pr_reviewer == "none":
+            lines.append("  - Reviewer: none (triage gate skipped)")
+        else:
+            triaged = "✓" if pr.get("gemini_triaged") else "✗"
+            lines.append(f"  {triaged} Gemini review triaged")
     else:
         lines.append("  ⚠ PR not created")
 

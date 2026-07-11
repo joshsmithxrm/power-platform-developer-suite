@@ -3309,3 +3309,368 @@ class TestPrMonitorBypassPermissions:
             "run_retro must spawn with permission_mode='bypassPermissions'"
         assert "dangerous" not in captured or not captured.get("dangerous"), \
             "run_retro must not pass legacy dangerous=True"
+
+
+# ---------------------------------------------------------------------------
+# #1177 — reviewer-optional mode (gemini | none) ahead of Gemini sunset
+# ---------------------------------------------------------------------------
+
+
+class TestReviewerModeConfig:
+    """#1177: reviewer mode resolves flag > env > prior run (--resume) >
+    default. Mirrors TestGeminiTimeoutConfig."""
+
+    def test_default_reviewer_is_none(self):
+        """Operator flip switch (#1177): the committed default is 'none' ahead
+        of the Gemini Code Assist sunset (July 17, 2026). Change deliberately
+        only — ride the last Gemini days with PPDS_PR_REVIEWER=gemini."""
+        assert pr_monitor.DEFAULT_REVIEWER == "none"
+
+    def test_module_global_initializes_gemini(self):
+        """Import-time REVIEWER_MODE stays 'gemini' so direct-call tests (the
+        gemini-mode regression suite) keep legacy behavior. main() overwrites
+        it via _resolve_reviewer_mode() for every real run."""
+        assert pr_monitor.REVIEWER_MODE == "gemini"
+
+    def test_resolve_default_when_no_override(self):
+        """No flag, no env → (DEFAULT_REVIEWER, 'default')."""
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        with patch.dict(os.environ, env, clear=True):
+            mode, source = pr_monitor._resolve_reviewer_mode(None)
+        assert mode == "none"
+        assert source == "default"
+
+    def test_resolve_env_wins_over_default(self):
+        """PPDS_PR_REVIEWER resolves when the flag is absent."""
+        with patch.dict(os.environ, {"PPDS_PR_REVIEWER": "none"}):
+            mode, source = pr_monitor._resolve_reviewer_mode(None)
+        assert mode == "none"
+        assert source == "env"
+
+    def test_resolve_flag_wins_over_env(self):
+        """--reviewer flag beats PPDS_PR_REVIEWER env."""
+        with patch.dict(os.environ, {"PPDS_PR_REVIEWER": "gemini"}):
+            mode, source = pr_monitor._resolve_reviewer_mode("none")
+        assert mode == "none"
+        assert source == "flag"
+
+    def test_resolve_invalid_env_ignored(self):
+        """Unknown env value falls through to the default (mirrors the int()
+        ValueError fall-through in the timeout resolvers)."""
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        env["PPDS_PR_REVIEWER"] = "coderabbit"
+        with patch.dict(os.environ, env, clear=True):
+            mode, source = pr_monitor._resolve_reviewer_mode(None)
+        assert mode == "none"
+        assert source == "default"
+
+    def test_resolve_resume_uses_persisted_mode(self, tmp_path):
+        """On --resume with no flag/env, the prior run's persisted reviewer
+        (from result JSON) beats the committed default. Persist 'gemini' so
+        the resolved value (not just the source) proves persistence drove it."""
+        wt = _make_worktree(tmp_path)
+        r = pr_monitor._empty_result()
+        r["reviewer"] = "gemini"
+        pr_monitor.write_result(wt, r)
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        with patch.dict(os.environ, env, clear=True):
+            mode, source = pr_monitor._resolve_reviewer_mode(
+                None, worktree=wt, resume=True)
+        assert mode == "gemini"
+        assert source == "resume"
+
+    def test_resolve_env_beats_resume_persistence(self, tmp_path):
+        """Explicit current intent (env) beats persisted history on resume."""
+        wt = _make_worktree(tmp_path)
+        r = pr_monitor._empty_result()
+        r["reviewer"] = "none"
+        pr_monitor.write_result(wt, r)
+        with patch.dict(os.environ, {"PPDS_PR_REVIEWER": "gemini"}):
+            mode, source = pr_monitor._resolve_reviewer_mode(
+                None, worktree=wt, resume=True)
+        assert mode == "gemini"
+        assert source == "env"
+
+    def test_resolve_fresh_run_ignores_persisted_mode(self, tmp_path):
+        """A fresh (non-resume) run never consults the persisted mode — the
+        persisted 'gemini' is ignored and the value falls to the default."""
+        wt = _make_worktree(tmp_path)
+        r = pr_monitor._empty_result()
+        r["reviewer"] = "gemini"
+        pr_monitor.write_result(wt, r)
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        with patch.dict(os.environ, env, clear=True):
+            mode, source = pr_monitor._resolve_reviewer_mode(
+                None, worktree=wt, resume=False)
+        assert mode == "none"
+        assert source == "default"
+
+
+class TestReviewerNoneSkipsPoll:
+    """#1177: REVIEWER_MODE='none' short-circuits poll_gemini_comments with
+    zero network I/O. Mirrors TestGeminiTimeout."""
+
+    def test_poll_gemini_comments_short_circuits(self, tmp_path):
+        """none mode returns [] immediately, makes no subprocess calls, and
+        stashes last_gemini_status='reviewer_none' on the logger."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        def _fail(*args, **kwargs):
+            pytest.fail(
+                "subprocess.run must not be called in reviewer=none mode")
+
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.subprocess.run", side_effect=_fail), \
+             patch("triage_common.subprocess.run", side_effect=_fail):
+            result = pr_monitor.poll_gemini_comments(wt, 5, logger)
+
+        assert result == []
+        assert logger.last_gemini_status == "reviewer_none"
+        assert logger.last_gemini_review_body == ""
+
+    def test_shakedown_guard_still_first(self, tmp_path):
+        """SHAKEDOWN guard precedes the reviewer guard — shakedown logging is
+        byte-for-byte unchanged even when the mode is none."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+
+        with patch("pr_monitor.SHAKEDOWN", "1"), \
+             patch("pr_monitor.REVIEWER_MODE", "none"):
+            result = pr_monitor.poll_gemini_comments(wt, 5, logger)
+
+        assert result == []
+        logger.close()
+        log_text = (tmp_path / "test.log").read_text(encoding="utf-8")
+        assert "SHAKEDOWN_SKIPPED" in log_text
+        assert "SKIPPED_REVIEWER_NONE" not in log_text
+
+
+class TestReviewerNoneEndToEnd:
+    """#1177: full run_monitor flow in none mode — ready-flips on CI green,
+    never escalates gemini-timeout, and CodeQL still blocks the flip."""
+
+    def test_none_mode_flips_ready_on_ci_green(self, tmp_path):
+        """CI green + no unreplied comments → ready flip, no triage dispatch."""
+        wt = _make_worktree(tmp_path)
+        mock_triage = MagicMock()
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True) as mock_ready, \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"), \
+             patch("pr_monitor.run_triage", mock_triage):
+            rc = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        assert rc == 0
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ready"
+        assert result["reviewer"] == "none"
+        mock_ready.assert_called_once()
+        assert result["steps_completed"]["ready"]["status"] == "done"
+        mock_triage.assert_not_called()
+
+    def test_none_mode_never_raises_gemini_timeout(self, tmp_path):
+        """gemini_review_posted stays False all run, yet no _GeminiTimeoutError
+        and no 'gemini-timeout' notification."""
+        wt = _make_worktree(tmp_path)
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify") as mock_notify:
+            rc = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        assert rc == 0
+        result = pr_monitor.read_result(wt)
+        assert result["status"] == "ready"
+        assert result.get("gemini_review_posted") is False
+        notify_args = " ".join(str(c) for c in mock_notify.call_args_list)
+        assert "gemini-timeout" not in notify_args
+
+    def test_none_mode_unreplied_codeql_blocks_flip(self, tmp_path):
+        """A CodeQL (github-advanced-security) unreplied comment blocks the
+        flip in none mode — no mark_pr_ready, no escalation, exit 0."""
+        wt = _make_worktree(tmp_path)
+        codeql = [{"id": 1, "user": "github-advanced-security[bot]",
+                   "path": "scripts/pr_monitor.py", "line": 1,
+                   "body": "Potential issue"}]
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=codeql), \
+             patch("pr_monitor._rebase_source_branch") as mock_rebase, \
+             patch("pr_monitor.mark_pr_ready") as mock_ready, \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            rc = pr_monitor.run_monitor(wt, 1, resume=False)
+
+        assert rc == 0
+        mock_ready.assert_not_called()
+        mock_rebase.assert_not_called()
+        result = pr_monitor.read_result(wt)
+        assert result["steps_completed"]["ready"]["status"] == "skipped"
+        assert any("unreplied_comments" in r
+                   for r in result["ready_skip_reasons"])
+
+    def test_none_mode_records_reviewer_in_state_json(self, tmp_path):
+        """The monitor self-persists pr.reviewer into .workflow/state.json."""
+        wt = _make_worktree(tmp_path)
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]), \
+             patch("pr_monitor._rebase_source_branch", return_value=True), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            pr_monitor.run_monitor(wt, 1, resume=False)
+
+        state_path = os.path.join(wt, ".workflow", "state.json")
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["pr"]["reviewer"] == "none"
+
+    def test_gemini_mode_records_reviewer(self, tmp_path):
+        """Additive-schema regression: gemini-mode runs record
+        result['reviewer'] == 'gemini'."""
+        wt = _make_worktree(tmp_path)
+        with patch("pr_monitor.REVIEWER_MODE", "gemini"), \
+             patch("pr_monitor.poll_ci", return_value="pass"), \
+             patch("pr_monitor.poll_gemini_comments", return_value=[]), \
+             patch("pr_monitor._ready_flip_gates", return_value=(True, [])), \
+             patch("pr_monitor.mark_pr_ready", return_value=True), \
+             patch("pr_monitor.run_retro", return_value="done"), \
+             patch("pr_monitor.run_notify"):
+            pr_monitor.run_monitor(wt, 1, resume=False)
+
+        result = pr_monitor.read_result(wt)
+        assert result["reviewer"] == "gemini"
+
+
+class TestReviewerNoneReadyFlipGates:
+    """#1177: _ready_flip_gates skips the review dimension in none mode but
+    still enforces the CI and unreplied-bot gates. Mirrors TestReadyFlipGates."""
+
+    def _base_result(self, **overrides):
+        r = pr_monitor._empty_result()
+        r["ci_result"] = "pass"
+        r.update(overrides)
+        return r
+
+    def test_gates_pass_without_review_when_none(self, tmp_path):
+        """CI pass, no review posted, empty body, no unreplied → (True, [])."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(gemini_review_posted=False,
+                                   gemini_review_body="")
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+        assert ok is True
+        assert reasons == []
+
+    def test_gates_still_block_on_ci_fail_when_none(self, tmp_path):
+        """CI is still a gate in none mode."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(ci_result="fail",
+                                   gemini_review_posted=False)
+        with patch("pr_monitor.REVIEWER_MODE", "none"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+        assert ok is False
+        assert "ci_result='fail'" in reasons
+
+    def test_gemini_mode_gate_unchanged(self, tmp_path):
+        """Gemini mode still appends gemini_review_not_posted when no review."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        result = self._base_result(gemini_review_posted=False,
+                                   gemini_review_body="")
+        with patch("pr_monitor.REVIEWER_MODE", "gemini"), \
+             patch("pr_monitor.get_unreplied_comments", return_value=[]):
+            ok, reasons = pr_monitor._ready_flip_gates(wt, 42, result, logger)
+        assert ok is False
+        assert "gemini_review_not_posted" in reasons
+
+
+class TestPrMonitorReviewerCli:
+    """#1177: --reviewer / --print-reviewer CLI surface. Mirrors
+    TestPrMonitorModeFlag."""
+
+    SCRIPT = os.path.join(REPO_ROOT, "scripts", "pr_monitor.py")
+
+    def test_help_advertises_reviewer(self):
+        """--help documents --reviewer, PPDS_PR_REVIEWER, and --print-reviewer."""
+        import io
+        argv = ["pr_monitor.py", "--help"]
+        buf = io.StringIO()
+        with patch("sys.argv", argv), patch("sys.stdout", buf):
+            with pytest.raises(SystemExit):
+                pr_monitor.main()
+        out = buf.getvalue()
+        assert "--reviewer" in out
+        assert "PPDS_PR_REVIEWER" in out
+        assert "--print-reviewer" in out
+
+    def test_print_reviewer_stdout_is_mode_only(self):
+        """PPDS_PR_REVIEWER=none → stdout is exactly the mode, one line
+        (Constitution I1: stdout = data only)."""
+        env = dict(os.environ, PPDS_PR_REVIEWER="none")
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT, "--print-reviewer"],
+            capture_output=True, text=True, env=env,
+            stdin=subprocess.DEVNULL,  # pytest replaces stdin w/ non-inheritable handle (WinError 6)
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == "none"
+        assert len(proc.stdout.strip().splitlines()) == 1
+
+    def test_print_reviewer_env_gemini(self):
+        """PPDS_PR_REVIEWER=gemini → stdout 'gemini' (env-resolution path)."""
+        env = dict(os.environ, PPDS_PR_REVIEWER="gemini")
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT, "--print-reviewer"],
+            capture_output=True, text=True, env=env,
+            stdin=subprocess.DEVNULL,  # pytest replaces stdin w/ non-inheritable handle (WinError 6)
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == "gemini"
+
+    def test_print_reviewer_needs_no_worktree(self):
+        """--print-reviewer resolves and exits 0 without --worktree/--pr."""
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT, "--print-reviewer"],
+            capture_output=True, text=True, env=env,
+            stdin=subprocess.DEVNULL,  # pytest replaces stdin w/ non-inheritable handle (WinError 6)
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == "none"
+
+    def test_missing_worktree_still_usage_error(self):
+        """No flags at all → exit 2 (guards the required=False refactor)."""
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT],
+            capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
+        )
+        assert proc.returncode == 2
+
+    def test_reviewer_flag_rejects_unknown_value(self):
+        """--reviewer with an unknown value → argparse usage error, exit 2."""
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT,
+             "--reviewer", "coderabbit", "--print-reviewer"],
+            capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
+        )
+        assert proc.returncode == 2
