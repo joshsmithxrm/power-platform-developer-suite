@@ -138,6 +138,29 @@ public class GlobalOptionsOutputFormatTests
         Assert.Equal(OutputFormat.Csv, GlobalOptions.GetValues(result).OutputFormat);
     }
 
+    [Theory]
+    [InlineData("--explain")]
+    [InlineData("--show-fetchxml")]
+    public void Csv_OnQuerySql_WithExplainOrShowFetchXml_IsRejected(string subMode)
+    {
+        // These sub-modes render a plan / FetchXML blob, not a result set, so Csv must be
+        // rejected rather than silently falling back to Text (#1078).
+        var result = QueryCommandGroup.Create().Parse($"sql \"SELECT name FROM account\" {subMode} --output-format Csv");
+
+        Assert.Contains(
+            "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text.",
+            JoinedErrors(result));
+    }
+
+    [Fact]
+    public void InvalidValue_OnQuerySql_WithExplain_StillReportsCleanMessage_NoCrash()
+    {
+        // The sub-mode validator must not throw when --output-format itself failed to parse.
+        var result = QueryCommandGroup.Create().Parse("sql \"SELECT name FROM account\" --explain --output-format Yaml");
+
+        Assert.Contains("Invalid value 'Yaml' for --output-format", JoinedErrors(result));
+    }
+
     [Fact]
     public void Csv_OnQueryFetch_Parses()
     {
@@ -252,19 +275,8 @@ public class GlobalOptionsOutputFormatTests
             MoreRecords = false
         };
 
-        var originalOut = Console.Out;
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        try
-        {
-            QueryResultFormatter.WriteCsvOutput(queryResult);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var csv = CaptureStdout(() => QueryResultFormatter.WriteCsvOutput(queryResult));
 
-        var csv = captured.ToString();
         Assert.Contains("name,total", csv);
         Assert.Contains("\"Contoso, Ltd \"\"HQ\"\"\"", csv);
         Assert.Contains("\"$1,000.50\"", csv);
@@ -304,7 +316,7 @@ public class GlobalOptionsOutputFormatTests
     private static string CaptureStdout(Action action)
     {
         var originalOut = Console.Out;
-        var captured = new StringWriter();
+        using var captured = new StringWriter();
         Console.SetOut(captured);
         try
         {

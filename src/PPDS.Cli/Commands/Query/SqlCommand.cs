@@ -110,6 +110,34 @@ public static class SqlCommand
             }
         });
 
+        // --explain and --show-fetchxml render a plan / FetchXML blob, not a result set,
+        // so CSV is not applicable. Reject it rather than silently emitting Text (#1078).
+        command.Validators.Add(result =>
+        {
+            if (!result.GetValue(showFetchXmlOption) && !result.GetValue(explainOption))
+            {
+                return;
+            }
+
+            // If --output-format itself failed to parse, that error is already reported by
+            // the option's parser; reading the value here would throw, so skip.
+            OutputFormat format;
+            try
+            {
+                format = result.GetValue(GlobalOptions.CsvCapableOutputFormat);
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+
+            if (format == OutputFormat.Csv)
+            {
+                result.AddError(
+                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text.");
+            }
+        });
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var sql = parseResult.GetValue(sqlArgument);
