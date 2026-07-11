@@ -2,15 +2,26 @@
 
 Rationale, taxonomies, and worked details for `/release`. The procedure lives in `.claude/skills/release/SKILL.md`; the channel/version/signing details live here.
 
-## §1 - Channel layout
+## §1 - Channel and tag layout
 
-PPDS ships three channels:
+PPDS publishes from **git tags**, and the tag *prefix* selects the package and the workflow —
+there is no single `v`-prefix-for-everything scheme.
 
-- **stable** (`vX.Y.Z`): production-ready. Tagged from `main`. NuGet, marketplace, GitHub releases.
-- **prerelease** (`vX.Y.Z-rc.N`): release-candidate. Tagged from `main` after stabilization. Marketplace flagged as pre-release; NuGet pushes to the `-rc` channel.
-- **preview** (`vX.Y.Z-preview.N`): early access. Tagged from a feature branch. NuGet preview channel. Not surfaced to default users.
+- **Per-package tags** are the source of truth for versions. Seven NuGet packages version via
+  MinVer from their own prefix (`Auth-v*`, `Cli-v*`, `Dataverse-v*`, `Mcp-v*`, `Migration-v*`,
+  `Plugins-v*`, `Query-v*`); the Extension versions from `package.json` (`Extension-v*`). These
+  tags trigger `publish-nuget.yml` / `release-cli.yml` / `extension-publish.yml`.
+- **Unified `v<X.Y.Z>` tag** (e.g. `v1.1.0`) is pushed once per coordinated release and only
+  triggers `docs-release.yml` (docs regen + ppds-docs PR). It does **not** version packages.
 
-Tag prefix is always `v` (semver). The publish workflow keys off the tag prefix to decide channel.
+Channels:
+
+- **stable**: plain semver on each prefix (`Auth-v1.1.0`, `Extension-v1.4.0`).
+- **prerelease**: `-beta.N` suffix (`Mcp-v1.0.0-beta.2`). The Extension pre-release channel is
+  chosen by the **odd/even minor** rule (odd minor = pre-release, even = stable), not a suffix.
+
+PPDS.Plugins is on its own lineage (it reached `1.0.0` ahead of the unified `1.x` line and is
+now `3.x`) — never regress its major to reconcile it with the other packages.
 
 ## §2 - Signing matrix
 
@@ -18,7 +29,7 @@ Which keys sign which surfaces:
 
 | Surface | Signing input | Workflow source |
 |---------|---------------|-----------------|
-| .NET assemblies (.dll) | strong-name SNK in `pks/PPDS.snk` (committed; protected by `snk-protect.py`) | Built into csproj |
+| .NET assemblies (non-Plugins) | not strong-name signed at release time | n/a |
 | Plugins assembly strong-name | `PLUGINS_SNK_BASE64` secret (decoded at pack time, `Plugins-v*` tags only) | `.github/workflows/publish-nuget.yml` |
 | NuGet packages | `NUGET_API_KEY` secret | `.github/workflows/publish-nuget.yml` |
 | VS Code extension | `ADO_MARKETPLACE_PAT` secret (vsce PAT) | `.github/workflows/extension-publish.yml` |
@@ -41,7 +52,7 @@ Rules for picking the next version:
 
 Heuristic: if any commit in the range is `feat:`, bump minor. If any commit is `feat!:` or `fix!:` (breaking marker), bump major. Otherwise patch.
 
-For prereleases, increment the `-rc.N` or `-preview.N` segment without bumping the base version - until the prerelease is promoted to stable.
+For prereleases, increment the `-beta.N` segment without bumping the base version - until the prerelease is promoted to stable.
 
 ## §4 - CHANGELOG format
 
@@ -91,23 +102,23 @@ After publish, manually verify the VS Code marketplace listing. Sometimes the `p
 
 ### macOS notarization (future)
 
-Not currently shipped. When/if added, notarization runs as a separate post-sign step in publish.yml.
+Not currently shipped. When/if added, notarization runs as a separate post-sign step in `release-cli.yml` (which builds the macOS binaries).
 
 ## §6 - NEVER list (with rationale)
 
 - NEVER manually retag a published version - it confuses package indexes and breaks consumer caches. Investigate publish failure, then re-run the workflow on the existing tag.
 - NEVER bump major without a CHANGELOG entry under "Removed" or a `feat!:` / `fix!:` commit explaining what broke. Major is a contract break with consumers.
 - NEVER skip the CI watch step. The publish workflow can succeed for one surface (NuGet) and fail for another (marketplace) - tag bump without verification leaves the channel inconsistent.
-- NEVER edit `pks/PPDS.snk` (snk-protect.py blocks it). Strong-name keys are immutable across the project lifetime.
-- NEVER cherry-pick a release commit onto a feature branch. Releases are tagged from main only - the publish workflow checks for it.
-- NEVER share `NUGET_API_KEY` or `VSCE_TOKEN` in commits, comments, or chat. They live in repo secrets only.
+- NEVER commit a strong-name `.snk` to the tree (snk-protect.py blocks it). The Plugins signing key lives only in the `PLUGINS_SNK_BASE64` secret, decoded to runner temp at pack time.
+- NEVER tag a release from a feature branch. Tag from `main` (or a `release/X.Y` stabilization branch — see SKILL.md) so the published commit is on the mainline.
+- NEVER share `NUGET_API_KEY`, `ADO_MARKETPLACE_PAT`, or `PLUGINS_SNK_BASE64` in commits, comments, or chat. They live in repo secrets only.
 
 ## §7 - Post-publish smoke checks
 
-Beyond the v3-flatcontainer probe in SKILL.md Step 7:
+Beyond the v3-flatcontainer probe in SKILL.md Section 10:
 
 - `dotnet add package PPDS.Auth --version <X.Y.Z>` in a throwaway project - verify the dependency resolves.
-- `code --install-extension joshsmithxrm.ppds@<X.Y.Z>` - verify marketplace install works.
+- `code --install-extension JoshSmithXRM.power-platform-developer-suite` (add `--pre-release` for the pre-release channel) - verify marketplace install works.
 - Download CLI binary from GitHub releases page; run `./ppds --version`; confirm it matches the tag.
 
 If any smoke check fails, file a hotfix issue and prepare a patch release. Do not attempt to alter the existing release - just publish a new one.
