@@ -21,6 +21,7 @@ from pipeline import (
     _classify_blocked_needs,
     _finding_key,
     _get_direct_children,
+    _resolve_failure_context,
     auto_commit_stranded,
     classify_activity,
     compute_resume_stage,
@@ -211,6 +212,67 @@ class TestClassifyBlockedNeeds(unittest.TestCase):
 
     def test_empty_needs_not_classified_as_rate_limit(self):
         self.assertFalse(_classify_blocked_needs(""))
+
+    def test_bare_resets_word_not_classified_as_rate_limit(self):
+        """Review finding (#1166): a genuine question containing the word
+        "resets" but no rate/session/usage-limit qualifier must NOT be
+        misclassified — "resets" alone is too generic a signal. The real
+        session-limit message ("... session limit ... resets 1:50am")
+        already matches on "session limit"; a bare "resets" only adds
+        false-positive risk."""
+        needs = ("the staging environment resets nightly — should I "
+                 "account for that in the migration?")
+        self.assertFalse(_classify_blocked_needs(needs))
+
+
+class TestResolveFailureContext(unittest.TestCase):
+    """#1166 review fix: the except PipelineFailure handler must only
+    backfill stage/log_stage/reason from the exception when
+    _pipeline_fail never ran (failed_stage is None) — not merely when
+    reason is None, since most _pipeline_fail call sites pass no reason
+    and that "no reason" state must survive unchanged."""
+
+    def test_backfills_from_exception_when_pipeline_fail_bypassed(self):
+        """Blocked path: _pipeline_fail never ran, so failed_stage is None
+        going in. Must recover stage/log_stage/reason from the exception."""
+        exc = pipeline.PipelineFailure(
+            "implement: rate limited: session limit hit", stage="implement")
+        stage, log_stage, reason = _resolve_failure_context(
+            None, None, None, exc)
+        self.assertEqual(stage, "implement")
+        self.assertEqual(log_stage, "implement")
+        self.assertEqual(reason, "implement: rate limited: session limit hit")
+
+    def test_preserves_none_reason_when_pipeline_fail_ran_with_no_reason(self):
+        """_pipeline_fail("pr") sets failed_stage="pr", failed_reason=None
+        (no reason supplied) before raising PipelineFailure("pr: None").
+        The handler must NOT backfill reason from str(exc) here — that
+        would turn a clean "no reason" into a misleading "pr: None"."""
+        exc = pipeline.PipelineFailure("pr: None", stage="pr")
+        stage, log_stage, reason = _resolve_failure_context(
+            "pr", "pr", None, exc)
+        self.assertEqual(stage, "pr")
+        self.assertEqual(log_stage, "pr")
+        self.assertIsNone(reason)
+
+    def test_preserves_explicit_reason_when_pipeline_fail_ran(self):
+        """_pipeline_fail("implement", "outcome verification failed") sets
+        a real reason before raising — must pass through unchanged."""
+        exc = pipeline.PipelineFailure(
+            "implement: outcome verification failed", stage="implement")
+        stage, log_stage, reason = _resolve_failure_context(
+            "implement", "implement", "outcome verification failed", exc)
+        self.assertEqual(stage, "implement")
+        self.assertEqual(log_stage, "implement")
+        self.assertEqual(reason, "outcome verification failed")
+
+    def test_log_stage_backfill_uses_resolved_stage_not_original_none(self):
+        """log_stage must come from the resolved stage, not stay None,
+        when _pipeline_fail was bypassed."""
+        exc = pipeline.PipelineFailure("verify: stage asked question: x",
+                                       stage="verify")
+        _, log_stage, _ = _resolve_failure_context(None, None, None, exc)
+        self.assertEqual(log_stage, "verify")
 
 
 class TestWriteResultResumeCommand(unittest.TestCase):

@@ -330,6 +330,27 @@ def compute_resume_stage(failed_stage):
     return base if base in STAGES else failed_stage
 
 
+def _resolve_failure_context(failed_stage, failed_log_stage, failed_reason, exc):
+    """Resolve (stage, log_stage, reason) for main()'s ``except
+    PipelineFailure`` handler.
+
+    Only backfills from the exception when ``failed_stage`` is still
+    ``None`` — i.e. ``_pipeline_fail`` never ran, so the exception must
+    have come from a path that bypasses its nonlocal assignment (the
+    run_claude blocked path, #1166). This is deliberately narrower than
+    guarding on ``failed_reason is None`` alone: most ``_pipeline_fail``
+    call sites pass no ``reason`` (e.g. ``_pipeline_fail("pr")``), which
+    legitimately leaves ``failed_reason`` as ``None`` — backfilling those
+    from ``str(exc)`` would turn a clean "no reason" into a misleading
+    "pr: None" in pipeline-result.json and /status output (review finding).
+    """
+    if failed_stage is None:
+        failed_stage = getattr(exc, "stage", None)
+        failed_log_stage = failed_stage
+        failed_reason = str(exc)
+    return failed_stage, failed_log_stage, failed_reason
+
+
 def find_last_completed_stage(log_path):
     """Parse pipeline.log to find the last completed stage for --resume."""
     if not os.path.exists(log_path):
@@ -995,7 +1016,15 @@ from bg_transcript import extract_text_from_jsonl, parse_outcome  # noqa: E402,F
 # Substrings (checked case-insensitively) that mark a blocked-state ``needs``
 # string as a rate/session/usage limit rather than a genuine clarifying
 # question from the worker (#1166, #1175).
-_RATE_LIMIT_MARKERS = ("rate limit", "session limit", "usage limit", "resets")
+#
+# Deliberately excludes a bare "resets" marker: it's a generic word that can
+# appear in a genuine clarifying question unrelated to rate limiting (e.g.
+# "the staging environment resets nightly — should I account for that?").
+# The real-world session-limit message ("You've hit your session limit ...
+# resets 1:50am") already matches on "session limit" alone, so a standalone
+# "resets" marker only widens the false-positive surface without adding
+# necessary coverage (review finding, #1166).
+_RATE_LIMIT_MARKERS = ("rate limit", "session limit", "usage limit")
 
 
 def _classify_blocked_needs(needs):
@@ -2194,7 +2223,13 @@ def main():
             _failed_stage = stage_name
             _failed_log_stage = log_stage or stage_name
             _failed_reason = reason
-            raise PipelineFailure(f"{stage_name}: {reason}")
+            # stage= is redundant today (the nonlocal assignment above
+            # already sets _failed_stage before this raises, so the except
+            # handler's _resolve_failure_context short-circuits past
+            # exc.stage), but attaching it keeps every PipelineFailure
+            # self-describing and avoids a latent trap if this pairing is
+            # ever refactored (review finding, #1166).
+            raise PipelineFailure(f"{stage_name}: {reason}", stage=stage_name)
 
         for i, stage in enumerate(STAGES):
             if i < start_idx:
@@ -2421,10 +2456,9 @@ def main():
         # real values even on paths that raise PipelineFailure without going
         # through the _pipeline_fail closure — e.g. the run_claude blocked
         # path, which attaches the stage to the exception itself (#1166).
-        _failed_stage = _failed_stage or getattr(exc, "stage", None)
-        _failed_log_stage = _failed_log_stage or _failed_stage
-        if _failed_reason is None:
-            _failed_reason = str(exc)
+        _failed_stage, _failed_log_stage, _failed_reason = _resolve_failure_context(
+            _failed_stage, _failed_log_stage, _failed_reason, exc
+        )
 
         duration = int(time.time() - pipeline_start)
         log(logger, "pipeline", "FAILED",
