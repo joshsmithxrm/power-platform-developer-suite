@@ -15,7 +15,6 @@ Manage GitHub issues using the label taxonomy, milestone conventions, and triage
 - "Groom issues"
 - "What should we work on next?"
 - "Review backlog priorities"
-- "Dispatch parallel worktrees", "kick off the planned waves"
 - After completing work that reveals follow-up issues
 
 ## Reference
@@ -25,45 +24,12 @@ Read REFERENCE.md §1 "Label taxonomy" before classifying any issue.
 
 ## Process
 
-### Step 0: Readiness Gate
-
-<!-- enforcement: T3 advisory — see specs/skill-routing-gates.md and issue #1023 -->
-
-Applies only to `/backlog create <description>`. Skip for `triage`, `review`, `validate`, `dispatch`, and no-arg invocations — does not apply to any other sub-verb.
-
-**Detect (case-insensitive keyword match OR judgment fallback):** fire if description contains any of `broad concept`, `think out loud`, `need to figure out`, `let's explore`, `strategic`, `not sure what`, `should we` — or lacks a concrete deliverable.
-
-**On fire** — before presenting options, emit:
-
-```bash
-python scripts/workflow-state.py bump routing_gates.backlog.fired_count
-```
-
-Then offer to run /investigate (numbered options, redirect first):
-
-> This sounds like it needs exploration first.
-> 1. Run `/investigate` with this description as input (recommended)
-> 2. Continue with `/backlog create` as-is
-
-On (1) — emit bump FIRST (Skill tool transfers execution), then invoke `/investigate` via Skill tool with original description as args:
-
-```bash
-python scripts/workflow-state.py bump routing_gates.backlog.honored_count
-```
-
-On (2) — emit bump FIRST, then proceed to Step 1:
-
-```bash
-python scripts/workflow-state.py bump routing_gates.backlog.overridden_count
-```
-
 ### 1. Parse Arguments
 
 - `/backlog create <description>` - create a new issue
 - `/backlog triage` - triage untriaged inbox
 - `/backlog review` - review backlog for promotion
 - `/backlog validate` - verify open issues are still valid
-- `/backlog dispatch` - plan and launch parallel worktrees
 - `/backlog` (no args) - show backlog summary
 
 ### 2. Read Rules
@@ -72,19 +38,7 @@ python scripts/workflow-state.py bump routing_gates.backlog.overridden_count
 cat docs/BACKLOG.md
 ```
 
-### 3. Pre-flight: In-Flight Conflict Check
-
-Before `gh issue create`, ALWAYS check whether a sibling session is already working on the same area: <!-- enforcement: T2 hook:inflight-check -->
-
-```bash
-python scripts/inflight-check.py --area <best-guess-area>
-```
-
-If exit `1`, surface the conflict to the operator and ASK before filing.
-
-The same check MUST be repeated before `gh issue close`: if a sibling session has open work referencing the issue, surface the related branch so the closer does not misattribute the fix to the wrong PR. <!-- enforcement: T2 hook:inflight-check -->
-
-### 4. Execute Operation
+### 3. Execute Operation
 
 #### Create Issue
 
@@ -117,31 +71,7 @@ Surface ready-to-promote issues from `status:backlog` based on completion criter
 
 For each open issue, verify the symptom still reproduces and the area label is still accurate. Close stale duplicates. See REFERENCE.md §5 "Validation checklist".
 
-### 5. Subverb: dispatch
-
-Dispatch plans and launches parallel worktrees from triage state. Read REFERENCE.md §6 "Dispatch heuristics" before sizing waves. Read REFERENCE.md §7 "Inline-prompt examples" for the dispatch prompt format.
-
-Hard rules (MUST in SKILL.md, not REFERENCE.md): <!-- enforcement: T3 -->
-
-- Inline prompt MUST carry the full context for the dispatched worktree - spawning without an inline prompt is what forced retrospective B3. <!-- enforcement: T3 -->
-- Launch command MUST carry an inline prompt referencing the issue and the planned scope. <!-- enforcement: T3 -->
-- Dispatch entries are written to `.claude/state/in-flight-issues.json` via `python scripts/inflight-register.py`.
-
-```bash
-python scripts/inflight-register.py --branch <branch> --area <area> --intent <intent>
-```
-
-### 6. Workflow State
-
-After any operation that creates or closes an issue:
-
-```bash
-python scripts/workflow-state.py set backlog.last_operation now
-```
-
 ## References
 
-- `.claude/skills/backlog/REFERENCE.md` - taxonomy, dispatch heuristics, conflict-resolution examples, meta-retro references, NEVER list. <!-- enforcement: T3 -->
+- `.claude/skills/backlog/REFERENCE.md` - taxonomy, conflict-resolution examples, and the never-do list.
 - `docs/BACKLOG.md` - canonical labels and milestones.
-- `scripts/inflight-check.py`, `scripts/inflight-register.py` - sibling-conflict tooling.
-- `.claude/interaction-patterns.md` §1 (lanes), §3 (DO NOW / DEFER / DROP).

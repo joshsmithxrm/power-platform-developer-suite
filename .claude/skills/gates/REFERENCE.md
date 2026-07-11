@@ -61,18 +61,13 @@ Gates are necessary but NOT sufficient. After gates pass:
 **Do not commit UI/CLI/MCP changes with only gates passing.** That is how
 bugs ship undetected.
 
-## §6 - Workflow continuation rationale
+## §6 - Gates are not the last step
 
-Gates are ONE step in the shipping pipeline - not the last one. The `/gates`
-SKILL.md ends by checking `phase` in workflow-state and either returning to
-the orchestrator (when `/implement` is driving) or executing
-`/verify` -> `/pr` itself.
-
-The #1 workflow failure mode (retro R-01, 2026-04-24) was reporting
-"all gates pass" and stopping. 3 of 9 PRs in v1.1 were never submitted because
-the AI stopped here. The chain is `/gates` -> `/verify` -> `/pr`.
-The `session-stop-workflow.py` hook (T1) blocks Stop events when gates have
-passed but verify has not yet run.
+Gates are ONE step in the shipping sequence - not the last one. Passing
+gates proves mechanical correctness only. The usual sequence is
+`/gates` -> `/verify` -> `/pr`; a common failure mode is reporting
+"all gates pass" and stopping there, so continue to verification and the
+pull request once gates are green.
 
 ## §7 - Rules (rationale)
 

@@ -57,31 +57,6 @@ Phase B trigger files: `SqlQueryService`, `RpcMethodHandler`, `QueryPanel`,
 
 ---
 
-## Empirical shakedown gate - rationale
-
-PR #1051 Phase B shipped clean from `/verify` then took seven fix commits
-because `tests/conftest.py` auto-stubs `claude_dispatch.spawn`. Unit tests
-cannot regress what they cannot exercise. The shakedown gate spawns one
-real `claude --bg` session against a throwaway prompt and asserts exit 0,
-deliberately bypassing the stub.
-
-**Allowlist source of truth:** `scripts/_shakedown_allowlist.py`. Both the
-gate (`scripts/verify_shakedown.py`) and the post-`/verify` drift detector
-(`scripts/retro_helpers.py:detect_allowlist_drift`) read it. Adding a new
-subprocess-spawning wrapper is a one-line append.
-
-**Cost bound:** the helper defaults to a 5-minute timeout. The throwaway
-prompt is `"Reply with the word OK and stop."` so a healthy session
-finishes in seconds. The gate only runs when the diff touches the allowlist
-- typical PRs skip it entirely with one log line.
-
-**Pool discipline:** uses `claude_dispatch.spawn(mode="interactive", ...)`
-- subscription pool, never `-p`. The dispatcher emits the SDK-spend
-warning when callers pick `-p`, so accidentally regressing this surfaces
-in stderr.
-
----
-
 ## Report template
 
 ```
@@ -752,7 +727,7 @@ For each tool invocation, verify:
 
 ## §workflow — Workflow Infrastructure Verify Reference
 
-How to test changes to `.claude/` infrastructure: hooks, skills, agents, settings, pipeline, state.
+How to test changes to `.claude/` infrastructure: hooks, skills, agents, settings.
 
 ### Hook Testing
 
@@ -775,58 +750,12 @@ print(f'exit={result.returncode} stderr={result.stderr[:100]}')
 
 **Exit codes:** 0 = allow, 2 = block (with stderr message shown to AI)
 
-#### SessionStart hooks
-
-SessionStart hooks write to stderr (context injection). Run standalone and check stderr output:
-
-```bash
-python .claude/hooks/session-start-workflow.py 2>&1
-```
-
-#### Stop hooks
-
-Stop hooks return JSON with `decision: "block"` or allow (exit 0). Must check `stop_hook_active` env var to prevent infinite loops.
-
 #### Notification hooks
 
 Pipe notification JSON on stdin:
 
 ```bash
 echo '{"notification_type": "idle_prompt", "message": "test", "title": "test", "cwd": "."}' | python .claude/hooks/notify.py
-```
-
-#### Compaction re-injection
-
-Run `/compact` in a session to trigger the `compact` SessionStart matcher. Verify workflow state is re-injected by checking the AI's next response references the workflow status.
-
-### Pipeline Testing
-
-#### Dry run (all stages)
-
-```bash
-mkdir -p .plans && echo "# Test\n## Phase 1\nDo something" > .plans/test-plan.md
-python scripts/pipeline.py --plan .plans/test-plan.md --branch test/dry-run --dry-run --no-retro --worktree .
-```
-
-#### Test specific stage
-
-```bash
-python scripts/pipeline.py --plan .plans/test-plan.md --branch test/dry-run --dry-run --no-retro --from implement --worktree .
-```
-
-#### Resume detection
-
-```bash
-python -c "
-import sys; sys.path.insert(0, 'scripts')
-from pipeline import find_last_completed_stage
-# Write a fake pipeline.log
-import os; os.makedirs('.workflow', exist_ok=True)
-with open('.workflow/pipeline.log', 'w') as f:
-    f.write('[implement] DONE\n[gates] DONE\n')
-print(find_last_completed_stage('.workflow/pipeline.log'))
-# Expected: 'gates'
-"
 ```
 
 ### Settings Validation
@@ -838,45 +767,6 @@ python -c "import json; json.load(open('.claude/settings.json')); print('valid J
 ```
 
 Check matcher format — matchers are regex patterns tested against tool names or notification types.
-
-### State File Testing
-
-```bash
-# Initialize
-python scripts/workflow-state.py init my-branch
-
-# Set values
-python scripts/workflow-state.py set gates.passed true
-python scripts/workflow-state.py set verify.cli now
-python scripts/workflow-state.py set review.findings 3
-
-# Read values
-python scripts/workflow-state.py get gates.passed
-python scripts/workflow-state.py show
-
-# Clear values
-python scripts/workflow-state.py set-null gates.passed
-
-# Delete state
-python scripts/workflow-state.py delete
-```
-
-### Automated Behavioral Tests
-
-Run `python scripts/verify-workflow.py` for automated behavioral scenario tests against workflow hooks and state management.
-
-```bash
-# Run all scenarios (writes verify.workflow timestamp on pass)
-python scripts/verify-workflow.py
-
-# Run a single scenario
-python scripts/verify-workflow.py hook-stop-block
-
-# List available scenarios
-python scripts/verify-workflow.py --list
-```
-
-Scenarios test: stop hook block/allow, PR gate block/allow, state invalidation, session-start completeness, resume detection. Each scenario sets up state, exercises a hook via subprocess, and asserts the result.
 
 ### Common Pitfalls
 

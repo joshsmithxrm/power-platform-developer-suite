@@ -1,11 +1,11 @@
 ---
 name: design
-description: Brainstorm ideas into specs and plans through collaborative dialogue. Use when starting a new feature, exploring an idea, or designing a system — before any implementation. Requires a worktree (run /start first).
+description: Brainstorm ideas into specs and plans through collaborative dialogue. Use when starting a new feature, exploring an idea, or designing a system — before any implementation.
 ---
 
 # Design
 
-Collaborative design sessions that produce reviewed specs and implementation plans. Brainstorm → spec → review → plan → review → handoff. Runs in a worktree, not on main.
+Collaborative design sessions that produce reviewed specs and implementation plans. Brainstorm → spec → review → plan → review → handoff. Work on a feature branch, not on main.
 
 ## When to Use
 
@@ -15,13 +15,10 @@ Collaborative design sessions that produce reviewed specs and implementation pla
 
 ## Process
 
-### Step 0: Set Phase and Check Inbox
-`python scripts/workflow-state.py set phase design` then `python scripts/supervisor_msg.py read --consume` — see REFERENCE.md §8 (abort/revise → stop before brainstorm).
-
 ### Step 1: Load Context and Search
 
 **Gate:** Check current branch. If on `main` or `master`, error immediately:
-> You're on main. Run `/start` first to create a worktree.
+> You're on main. Work on a feature branch (a worktree keeps parallel sessions isolated) before designing.
 
 Before asking any questions, read `specs/CONSTITUTION.md` and `specs/SPEC-TEMPLATE.md`.
 
@@ -39,20 +36,12 @@ If not found: continue with Step 2.
 
 **Multi-Concern Checkpoint**
 
-<!-- enforcement: T3 advisory — see specs/skill-routing-gates.md and issue #1023 -->
-
 After the clarifying questions, evaluate the clarified scope. The heuristic trips if **either** is true:
 
 - The scope contains **more than 3 sub-features**, OR
 - **Two or more sub-features could ship independently** (one does not require the other to be valuable)
 
-When the heuristic trips, emit:
-
-```bash
-python scripts/workflow-state.py bump routing_gates.design.fired_count
-```
-
-Ask the human:
+When the heuristic trips, ask the human:
 
 > You raised N concerns: {bulleted list}. Are these:
 > 1. One cohesive feature with a shared trigger event (continue the design), or
@@ -60,28 +49,14 @@ Ask the human:
 
 On (1) — cohesive (false positive): continue with "Explore approaches".
 
-```bash
-python scripts/workflow-state.py bump routing_gates.design.cohesion_confirmed_count
-```
-
 On (2) — separate features: recommend filing N issues. Ask:
 
 > (a) File issues via `/backlog` (recommended)
 > (b) Continue with this design anyway
 
-On (2)(a) — split: emit the bump FIRST (the Skill tool transfers execution, so anything after it never runs):
+On (2)(a) — split: invoke `/backlog` via Skill tool; exit `/design`; instruct the user to start a fresh branch/worktree per issue.
 
-```bash
-python scripts/workflow-state.py bump routing_gates.design.split_count
-```
-
-Then invoke `/backlog` via Skill tool; exit `/design`; instruct user to `/start` a new worktree per issue.
-
-On (2)(b) — proceed anyway: continue, flag as deliberate multi-concern design (cross-reference issue #989).
-
-```bash
-python scripts/workflow-state.py bump routing_gates.design.proceed_anyway_count
-```
+On (2)(b) — proceed anyway: continue, flag as a deliberate multi-concern design.
 
 **Explore approaches:** propose 2-3 different approaches with trade-offs; lead with your recommended option.
 
@@ -93,21 +68,17 @@ When the design is approved:
 
 **A. Write the spec** to `specs/<name>.md` using the spec template. Include numbered ACs (Constitution I3). Preserve unchanged sections if updating.
 
-**B. Review the spec (bias-isolated / design-fidelity):** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings. Restore phase: `python scripts/workflow-state.py set phase design`
-**B.2. Scope-conformance review:** see REFERENCE.md §9 for full protocol. Get issues (`workflow-state.py get issues`; skip if absent/empty), fetch body (`gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'`), spawn reviewer with issue body + spec. Block on `missing`/`reframed` items; worker revises spec or adds to `### Non-Goals` with rationale. Re-run B.2 after each revision (and re-run B if changes are substantial), until all items `covered` or `in-non-goals`.
-**C. Check inbox, then present:** Run `python scripts/supervisor_msg.py read --consume` — handle each message kind per REFERENCE.md §8. Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
+**B. Review the spec (bias-isolated / design-fidelity):** invoke `/review` — reviewer gets ONLY spec content, constitution, and spec template. Fix critical and important findings.
+**B.2. Scope-conformance review:** see REFERENCE.md §9 for full protocol. If the design traces to linked issues, fetch each body (`gh issue view <N> --json title,body --template '# {{.title}}\n\n{{.body}}'`), spawn a reviewer with the issue body + spec. Block on `missing`/`reframed` items; revise the spec or add to `### Non-Goals` with rationale. Re-run B.2 after each revision (and re-run B if changes are substantial), until all items `covered` or `in-non-goals`.
+**C. Present:** Present the spec, show review findings (fixed vs. dismissed with rationale). Wait for approval.
 
 ### Step 4: Write Plan and Review
 
 **A. Write the plan** to `.plans/<date>-<name>.md`: phased, each phase maps to spec ACs, sequential vs parallel identified, file paths and commands included.
 
-**B. Review the plan:** invoke `/review` — reviewer checks plan against spec ACs for gaps. Fix findings. Restore phase: `python scripts/workflow-state.py set phase design`
+**B. Review the plan:** invoke `/review` — reviewer checks plan against spec ACs for gaps. Fix findings.
 
 **C. Present to user:** present plan with summary table, show review findings. Wait for approval.
-
-**Step 4.D — PR-Stack Decomposition (optional):** see REFERENCE.md §7. After approval, if phases are independently shippable (disjoint ACs + separate primary files), ask "Decompose into a PR stack? (yes/no)". On decline: skip to Step 5, no artifacts written. On accept: proceed to Step 4.E.
-
-**Step 4.E — Emit PR-Stack Artifacts:** write sub-plans `.plans/<date>-<name>-pr<N>.md`, append `## PR Stack` section to parent plan (columns: `files`, `size_estimate`), write `.plans/<date>-<name>-stack.json`, validate via `python scripts/pr_stack.py validate <path>` until exit 0. Proceed to Step 5.
 
 ### Step 5: Commit
 
@@ -122,29 +93,19 @@ Co-Authored-By: {use the format from the system prompt}"
 
 Note: `.plans/` is gitignored — the plan lives in the worktree only.
 
-```bash
-python scripts/workflow-state.py set spec specs/<name>.md
-```
-
 ### Step 6: Handoff
 
-**Do NOT flip `phase` here.** The downstream skill owns its own phase transition (`/implement` sets `phase=implementing`; pipeline sets `phase=pipeline`; Defer leaves `phase=design`). Read REFERENCE.md §5 for the historical rationale.
+Present two options:
 
-Present three options:
-
-```
+```text
 Spec committed. Choose next step:
 
-  1. Launch headless pipeline (recommended)
-     → python scripts/pipeline.py --worktree <cwd> --spec specs/<name>.md --from implement
-
-  2. Continue interactively
+  1. Continue interactively
      → /implement
 
-  3. Defer (pick up later)
-     → Spec is committed on branch feat/<name>. Resume anytime.
+  2. Defer (pick up later)
+     → Spec is committed on the current feature branch. Resume anytime.
 ```
 
-If option 1: run pipeline command in background (pipeline sets its own phase).
-If option 2: invoke `/implement` immediately (it sets `phase=implementing` at Step 3.5).
-If option 3: note spec path and stop — phase stays `design`.
+If option 1: invoke `/implement` immediately.
+If option 2: note the spec path and stop.

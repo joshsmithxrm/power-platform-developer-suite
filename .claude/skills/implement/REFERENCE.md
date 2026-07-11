@@ -2,19 +2,12 @@
 
 ## §1 - No-Spec Fallback Chain (SKILL.md Input step)
 
-When `$ARGUMENTS` is absent and no spec is found via workflow state:
+When `$ARGUMENTS` is absent and no spec is found on the branch, read `specs/CONSTITUTION.md` FIRST — every fallback path below generates a plan, and a plan generated without the Constitution loaded produces non-compliant phases. Then:
 
-1. **Check `.plans/context.md`** (written by `/start` from the issue body): if it exists, read it, generate a plan from the issue context and constraints it contains, save to `.plans/`, proceed.
+1. **Check `.plans/context.md`** (if present, e.g. written from an issue body): read it, generate a plan from the issue context and constraints it contains, save to `.plans/`, proceed.
 2. **No context.md**: prompt the user — "(1) Run `/design` to create a spec, or (2) describe the work for plan generation."
 3. **User chooses `/design`**: stop; instruct user to run `/design` first.
 4. **User chooses continue**: ask user to describe the work; generate a plan from their description.
-
-## §2 - Pipeline Mode
-
-When `PPDS_PIPELINE=1` is set, the pipeline orchestrator invoked this skill.
-- Execute Steps 1–5 only; skip Step 6 (orchestrator handles gates/verify/qa/review).
-- Do NOT use `ScheduleWakeup` — pipeline monitors parent output; sleeping parent is killed.
-- Dispatch foreground agents (`run_in_background: false`) or poll background agents at ≤60 s.
 
 ## §3 - Model Selection
 
@@ -80,42 +73,6 @@ Co-Authored-By: {format from system prompt}
 ```
 
 One commit per phase. Parallel streams within a phase group share one commit.
-
-## §9 - Goal Loop (Step 5.5)
-
-After all phases committed, if spec has `**Verification:**` frontmatter:
-
-```python
-from goal_loop import read_goal_from_spec, run_until_green, GoalLoopOutcome
-goal = read_goal_from_spec(spec_path)
-result = run_until_green(goal, attempt_fix=dispatch_fix_agent)
-```
-
-Outcomes: GREEN → tail; BLOCKED_HARD → raise to operator; ITERATION_CAP/STUCK_OUTPUT → record in PR, still proceed to Step 6. Per-phase fast feedback: probe only (max_iterations=1), log RED, continue.
-
-See `specs/goal-driven-implement.md` for full contract (ACs 01–16).
-
-## §10 - Supervisor Inbox Protocol (Step 5 Phase Entry)
-
-At the start of each phase (before dispatching agents), poll for supervisor directives:
-
-```bash
-python scripts/supervisor_msg.py read --consume
-```
-
-Process messages in order:
-
-| Kind | Action |
-|------|--------|
-| `abort` | Stop immediately. Surface the abort directive to the operator. Do not dispatch agents for this phase. |
-| `revise` | Apply the feedback from `message`/`payload` to the current plan phase before dispatching. |
-| `approve` | Continue without waiting for any user confirmation gate. |
-| `note` | Log the message, continue normally. |
-
-Empty inbox → proceed with normal phase execution. The supervisor writes inbox files via:
-```bash
-python scripts/supervisor_msg.py send <worktree-abs-path> <kind> [--message "text"]
-```
 
 ## §11 - Orchestrator Rules
 

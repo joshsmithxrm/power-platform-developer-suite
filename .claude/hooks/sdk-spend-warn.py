@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse hook on Bash: warn when `claude -p` is invoked from a shell.
 
-Defence-in-depth observability layer for spec specs/dispatch-routing.md ACs
-19-20 and Core Requirement #7. The dispatcher
-(scripts/claude_dispatch.py) emits the same warning + JSONL row when it
-spawns `claude -p` from PPDS scripts; this hook catches *ad-hoc* shell
-usage by interactive sessions.
+Observability guard: `claude -p` draws from the metered Agent SDK credit
+rather than the subscription pool, so ad-hoc shell usage from interactive
+sessions gets a loud warning plus a JSONL journal row.
 
 Behaviour:
   * tool_name != "Bash"             -> exit 0 (no-op).

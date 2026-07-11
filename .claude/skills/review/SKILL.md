@@ -42,13 +42,7 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 
 ### Step 2b: Load QA Findings for Dedup
 
-Before dispatching reviewers, read existing QA findings from state:
-
-```bash
-python scripts/workflow-state.py get qa_findings
-```
-
-Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
+If `.qa-findings.json` exists at the repo root (written by `/qa`), include it in each reviewer subagent prompt as an "Already found by QA" appendix. QA findings are **permitted reviewer metadata** — the sanctioned exception to Step 3's isolation rule: they reveal prior findings, not implementation intent, and reviewers may use them ONLY for deduplication. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem. If the file is absent, skip this step.
 
 ### Step 3: Dispatch Impartial Reviewer
 For large diffs (>10 files), use per-file chunking instead of a single subagent:
@@ -60,7 +54,7 @@ For large diffs (>10 files), use per-file chunking instead of a single subagent:
 5. Merge findings from all subagents, deduplicate by file:line
 
 
-Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, and ACs. This is the bias prevention mechanism: the reviewer sees code, not intent. <!-- enforcement: T3 -->
+Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, ACs, and (when present) the Step 2b QA-findings dedup appendix. This is the bias prevention mechanism: the reviewer sees code and prior findings, never intent. <!-- enforcement: T3 -->
 
 Subagent prompt:
 
@@ -129,24 +123,6 @@ Include total counts and a clear verdict:
 - **PASS**: 0 critical, 0 important
 - **PASS WITH FINDINGS**: 0 critical, N important (reviewer judgment)
 - **FAIL**: any critical findings
-
-## Workflow State
-
-On review start, set the phase:
-
-```bash
-python scripts/workflow-state.py set phase reviewing
-```
-
-After review completes (all findings evaluated and verdict rendered), run:
-
-```bash
-python scripts/workflow-state.py set review.passed now
-python scripts/workflow-state.py set review.commit_ref "$(git rev-parse HEAD)"
-python scripts/workflow-state.py set review.findings {count}
-```
-
-Where `{count}` is the total findings (critical + important + suggestion).
 
 ## Rules
 

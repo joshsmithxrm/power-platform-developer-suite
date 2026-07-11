@@ -136,15 +136,15 @@ Skip on Linux — not meaningful in dev containers.
 
 ### Step 8: AI Tooling Check (wizard only)
 
-Verify workflow enforcement hooks are configured:
+Verify the hook layer runs — valid envelope, always-permitted path (`.claude/worktrees/` is allowlisted even on `main`), expect exit 0:
 
 ```bash
-python .claude/hooks/pr-gate.py < /dev/null
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$PWD/.claude/worktrees/probe/x.md" | python .claude/hooks/protect-main-branch.py
 ```
 
-If Python is not available, warn that workflow hooks require Python 3. The hooks enforce workflow compliance (gates, verification, QA, review) before PR creation.
+If Python is not available, warn that the `.claude/` hooks require Python 3 (a non-zero exit above means the hook layer itself is broken).
 
-Check that `.claude/settings.json` contains the hook configuration (SessionStart, PreToolUse, PostToolUse, Stop hooks).
+Check that `.claude/settings.json` contains the hook configuration (PreToolUse, PostToolUse, and any other configured hook events).
 
 ### Step 9: Developer Experience Options (wizard only)
 
@@ -290,7 +290,7 @@ Dev container: config found at .devcontainer/ — use for isolated feature work
 
 Next steps:
   - Open workspace: code "{base}/ppds.code-workspace"
-  - Restart Claude Code for hooks/status line
+  - Restart Claude Code to load hooks and the status line
   - For terminal customization: https://github.com/joshsmithxrm/dotfiles
 ```
 

@@ -18,7 +18,6 @@ file is the procedure for getting under it.
 - numbered steps with concrete commands
 - input / output contract
 - "Continue with X" pointers
-- workflow-state writes
 - skip / branch conditions
 
 `REFERENCE.md` (rationale - why and when):
@@ -84,7 +83,7 @@ keep the order even if you add new sections at the end.
 3. Run `dotnet pack` and `npm publish --dry-run`.
 4. Tag and push.
 5. Confirm CI green.
-6. Write `state.json` release block.
+6. Create the per-surface GitHub Releases.
 
 `release/REFERENCE.md` (rationale, no line cap):
 
@@ -96,10 +95,9 @@ keep the order even if you add new sections at the end.
   reproducible builds, macOS notarization)
 - §6 - NEVER list (with rationale for each)
 
-The same shape applies to `backlog` and `retro`: the SKILL.md
-runs the dispatch / phase loop; REFERENCE.md holds the label
-taxonomy, finding tiers, rule-change templates, and HTML artifact
-spec.
+The same shape applies to `backlog`: the SKILL.md runs the
+triage procedure; REFERENCE.md holds the label taxonomy and
+procedural rules.
 
 ---
 

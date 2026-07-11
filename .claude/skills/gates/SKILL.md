@@ -102,39 +102,11 @@ Grep `specs/*.md` for `**Code:**` lines. Match changed paths against code prefix
 - TS: `npx vitest run -t "{method}" --prefix src/PPDS.Extension`
 - Report which ACs pass/fail.
 
-**Gate 7: Enforcement Audit** (always)
-```bash
-python scripts/audit-enforcement.py --strict
-```
-Pass: every T1 marker references a hook that exists and is wired in `.claude/settings.json`.
-
 ### Step 3: Report
 
 Markdown table, one row per gate (PASS/FAIL/SKIP). `### Failures` block listing exact errors for any FAIL. `### Verdict: PASS|FAIL`. Binary - never "PASS with warnings."
 
-## Workflow State
-
-After all gates pass:
-```bash
-python scripts/workflow-state.py set gates.passed now
-python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
-```
-
-## Workflow Continuation - MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
-
-After gates pass, check whether `/implement` is driving:
-```bash
-python scripts/workflow-state.py get phase
-```
-
-- **If phase is `implementing`:** return results to `/implement`. It manages remaining steps.
-- **Otherwise:** continue the chain yourself. Do NOT stop after reporting gate results.
-  1. `/verify` for each affected surface
-  2. `/pr` to create the pull request
-
-`Read REFERENCE.md §5 "Post-gate reminder"` and `§6 "Workflow continuation rationale"` before stopping early.
-
-Exception: if gates FAIL, fix first, re-run `/gates`, then resume the chain.
+Typically followed by `/verify` then `/pr`. If gates FAIL, fix first and re-run `/gates` before continuing.
 
 ## Rules
 

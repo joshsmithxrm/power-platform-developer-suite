@@ -6,9 +6,8 @@ description: Execute a checked-in implementation plan end-to-end using parallel 
 # Implement Plan
 
 `/implement` — read spec and plan from `.plans/`, execute phases
-`/implement specs/my-feature.md` — explicit spec path
-
-If `PPDS_PIPELINE=1`: execute Steps 1–5 only (skip Step 6). Read REFERENCE.md §2.
+`/implement .plans/<date>-<name>.md` — explicit plan path
+`/implement specs/<name>.md` — spec path: generate the plan from this spec first, save it to `.plans/`, then execute
 
 ## Prerequisites
 
@@ -16,9 +15,9 @@ Agent tool, `/review`, `/verify`, `/qa`, `/debug`, `/gates`.
 
 ## Input
 
-`$ARGUMENTS` = path to plan file. If omitted: use spec from `.workflow/state.json`, generate plan, save to `.plans/`, proceed.
+`$ARGUMENTS` = path to a plan file, or a spec file to generate the plan from. If omitted: use the most relevant spec on the branch, generate a plan, save to `.plans/`, proceed.
 
-**Fallback — no spec:** check `.plans/context.md` first (written by `/start`); if present, generate plan from it. Otherwise: prompt user — run `/design` or continue without spec? See REFERENCE.md §1 for the full fallback chain.
+**Fallback — no spec:** check `.plans/context.md` first; if present, generate a plan from it. Otherwise: prompt the user — run `/design` or continue without spec? See REFERENCE.md §1 for the full fallback chain.
 
 ## Process
 
@@ -33,15 +32,6 @@ Read `specs/CONSTITUTION.md` + relevant specs (grep `**Code:**` frontmatter). Bu
 ### Step 3: Assess Current State
 Check git status, branch, existing worktrees, prior phase commits.
 
-### Step 3.5: Initialize Workflow State
-```bash
-python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
-python scripts/workflow-state.py set spec "{spec-path}"
-python scripts/workflow-state.py set plan "$ARGUMENTS"
-python scripts/workflow-state.py set started now
-python scripts/workflow-state.py set phase implementing
-```
-
 ### Step 4: Create Task Tracking
 Build task list from plan phases; mark already-completed work done.
 
@@ -50,37 +40,26 @@ Read REFERENCE.md §3 for Opus vs. Sonnet guidance.
 
 ### Step 5: Execute Each Phase
 
-**Phase-entry inbox check (before dispatching any agents):**
-```bash
-python scripts/supervisor_msg.py read --consume
-```
-Handle each message kind per REFERENCE.md §10. Empty inbox → proceed normally.
-
 **A. Dispatch Agents** — parallel for independent tasks; see REFERENCE.md §5.
 
 **B. Collect Results** — wait for all agents; review summaries.
 
 **B2. Cross-Agent Consistency Check** — verify cross-surface contract consistency; see REFERENCE.md §7.
 
-**C. Verify Phase Gate** — build → tests → AC coverage → surface-specific verify/qa → review. See REFERENCE.md §6. Fix before advancing. Restore phase after sub-skills: `python scripts/workflow-state.py set phase implementing`
+**C. Verify Phase Gate** — build → tests → AC coverage → surface-specific verify/qa → review. See REFERENCE.md §6. Fix before advancing.
 
-**D. Review** — invoke `/review` (reviewer sees diff + constitution + ACs only). Fix issues. Restore phase.
+**D. Review** — invoke `/review` (reviewer sees diff + constitution + ACs only). Fix issues.
 
 **E. Commit** — `git add` specific files; commit per REFERENCE.md §8.
 
 **F. Advance** — move to next phase after commit. Update task tracking.
 
-**G. Goal Verification** — per-phase fast feedback if spec has `**Verification:**` frontmatter; see REFERENCE.md §9.
-
-### Step 5.5: Pre-Tail Goal Loop
-Full goal loop with spec's `verification_max_iterations` (default 10). Driven by `scripts/goal_loop.py`. See REFERENCE.md §9.
-
-### Step 6: Mandatory Tail — Full Verification Pipeline
+### Step 6: Mandatory Tail — Full Verification Sequence
 
 **A. Gates** — `/gates`
 **B. Verify** — `/verify extension|tui|cli|mcp` per changed surfaces
 **C. QA** — `/qa extension|cli|mcp|tui` per changed surfaces
 **D. Review** — `/review` final comprehensive review
 **E. Converge** — if critical/important findings: gates→review→fix loop (max 5 cycles)
-**F. Final State Check** — git log clean; `.workflow/state.json` timestamps all post-`started`
+**F. Final State Check** — `git status --porcelain` produces no output (no uncommitted or untracked files); all phases committed.
 **G. Submit** — proceed IMMEDIATELY to `/pr`; do not stop to summarize

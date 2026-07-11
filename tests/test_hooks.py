@@ -29,7 +29,7 @@ HOOK_PATH = os.path.normpath(
 PROJECT_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 # A real hook file that we know exists (used for "valid path" tests).
-_REAL_HOOK = ".claude/hooks/pr-gate.py"
+_REAL_HOOK = ".claude/hooks/settings-json-guard.py"
 _REAL_HOOK_FULL = os.path.join(PROJECT_DIR, _REAL_HOOK)
 assert os.path.exists(_REAL_HOOK_FULL), f"Reference hook not found: {_REAL_HOOK_FULL}"
 
@@ -98,7 +98,7 @@ class TestWriteDoubledPath:
     """Hook must block a Write that contains a doubled hook path."""
 
     def test_blocks_doubled_path(self):
-        command = 'python ".claude/hooks/.claude/hooks/pr-gate.py"'
+        command = 'python ".claude/hooks/.claude/hooks/settings-json-guard.py"'
         payload = _write_payload(".claude/settings.json", _settings_with_command(command))
         code, stderr = _run(payload)
         assert code == 2
@@ -106,7 +106,7 @@ class TestWriteDoubledPath:
         assert ".claude/hooks/.claude/hooks/" in stderr
 
     def test_blocks_doubled_path_in_settings_local(self):
-        command = 'python ".claude/hooks/.claude/hooks/pr-gate.py"'
+        command = 'python ".claude/hooks/.claude/hooks/settings-json-guard.py"'
         payload = _write_payload("settings.local.json", _settings_with_command(command))
         code, stderr = _run(payload)
         assert code == 2
@@ -178,10 +178,10 @@ class TestEditDoubledPath:
     """Hook must block an Edit whose new_string introduces the doubled pattern."""
 
     def test_blocks_edit_with_doubled_pattern(self):
-        new_string = 'python ".claude/hooks/.claude/hooks/pr-gate.py"'
+        new_string = 'python ".claude/hooks/.claude/hooks/settings-json-guard.py"'
         payload = _edit_payload(
             ".claude/settings.json",
-            'python ".claude/hooks/pr-gate.py"',
+            'python ".claude/hooks/settings-json-guard.py"',
             new_string,
         )
         code, stderr = _run(payload)
@@ -194,7 +194,7 @@ class TestEditAllowedPath:
     """Hook must allow an Edit whose new_string does not contain the doubled pattern."""
 
     def test_allows_correct_edit(self):
-        new_string = 'python ".claude/hooks/pr-gate.py"'
+        new_string = 'python ".claude/hooks/settings-json-guard.py"'
         payload = _edit_payload(
             ".claude/settings.json",
             'python ".claude/hooks/old-hook.py"',

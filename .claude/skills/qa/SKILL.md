@@ -17,23 +17,6 @@ Dispatches **three specialized agents with no source code access** to verify qua
 `/qa mcp` — verify MCP changes via Inspector
 `/qa "SELECT TOP 5 should return 5 rows"` — explicit behavior description
 
-## Workflow State
-
-On QA start, set the phase:
-
-```bash
-python scripts/workflow-state.py set phase qa
-```
-
-After QA passes for a surface (verdict is PASS — all checks green), run:
-
-```bash
-python scripts/workflow-state.py set qa.{surface} now
-python scripts/workflow-state.py set qa.{surface}_commit_ref "$(git rev-parse HEAD)"
-```
-
-Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
-
 ## Process
 
 ### Step 1: Scope the Work
@@ -193,19 +176,6 @@ If Phase 1 has **Critical failures** (panels don't load, crashes, data doesn't a
 - Report and stop
 
 If Phase 1 passes or has only non-critical failures, proceed to Phase 2.
-
-### Step 5.5: Persist Partial Results
-
-Before dispatching Phase 2, write Phase 1 results to workflow state so they survive a timeout:
-
-```bash
-python scripts/workflow-state.py set qa_partial.phase1_completed now
-# Record per-surface results from Phase 1 (adjust counts to match actual results):
-python scripts/workflow-state.py set qa_partial.phase1_checks_passed <N>
-python scripts/workflow-state.py set qa_partial.phase1_checks_total <N>
-```
-
-This ensures that if Phase 2 times out, Phase 1 results are preserved in `state.json` and included in `pipeline-result.json`.
 
 ### Step 6: Dispatch Phase 2 — Consistency + UX Agents (parallel)
 
@@ -473,14 +443,10 @@ After fixing any issue found during verification:
 2. Commit immediately: `git commit -m "fix(qa): <brief description>"`
 3. Do NOT batch fixes — commit after each fix so partial results survive timeout
 
-## QA Findings State
+## QA Findings
 
-After each finding (PASS or FAIL), write findings to workflow state:
+Record each finding (PASS or FAIL) as a structured entry so the review stage can deduplicate — review will skip findings already caught and fixed by QA.
 
-```bash
-python scripts/workflow-state.py set qa_findings "<JSON array of findings>"
-```
+Each finding entry: `{"id": "QA-N", "surface": "ext|tui|mcp|cli", "result": "pass|fail", "description": "...", "file": "...", "severity": "critical|important|suggestion", "fixed": true|false, "fix_commit": "<sha>|null"}` — `result` is the check outcome; `fixed`/`fix_commit` describe remediation and apply only to `"result": "fail"` entries (`false`/`null` on pass).
 
-Each finding entry: `{"id": "QA-N", "surface": "ext|tui|mcp|cli", "description": "...", "file": "...", "severity": "critical|important|suggestion", "fixed": true|false, "fix_commit": "<sha>|null"}`
-
-This enables the review stage to deduplicate — review will skip findings already caught and fixed by QA.
+**Handoff artifact:** write the merged findings array to `.qa-findings.json` at the repo root (an untracked working file, overwritten on each `/qa` run — do not commit it). `/review` Step 2b reads this file and dedups against the `"result": "fail"` entries (pass entries are context only, never dedup grounds); if it is absent, review proceeds without dedup context.
