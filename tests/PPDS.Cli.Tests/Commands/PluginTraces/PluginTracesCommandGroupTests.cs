@@ -396,7 +396,7 @@ public class PluginTracesCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["plugintraces", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -408,7 +408,7 @@ public class PluginTracesCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["plugin-traces", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 

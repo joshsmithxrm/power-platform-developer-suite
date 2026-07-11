@@ -124,7 +124,7 @@ public class ImportJobsCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["importjobs", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -136,7 +136,7 @@ public class ImportJobsCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["import-jobs", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 

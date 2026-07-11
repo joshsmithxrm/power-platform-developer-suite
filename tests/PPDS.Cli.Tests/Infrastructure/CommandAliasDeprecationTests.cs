@@ -34,7 +34,7 @@ public sealed class CommandAliasDeprecationTests
     {
         var root = BuildRoot();
         var parseResult = root.Parse(["old-name"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -46,7 +46,7 @@ public sealed class CommandAliasDeprecationTests
     {
         var root = BuildRoot();
         var parseResult = root.Parse(["new-name"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -60,7 +60,7 @@ public sealed class CommandAliasDeprecationTests
         // command (e.g. `ppds plugintraces list` -- "list" is innermost, "plugintraces" is not).
         var root = BuildRoot();
         var parseResult = root.Parse(["old-name", "sub"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -72,7 +72,7 @@ public sealed class CommandAliasDeprecationTests
     {
         var root = BuildRoot();
         var parseResult = root.Parse(["new-name", "sub"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -84,7 +84,7 @@ public sealed class CommandAliasDeprecationTests
     {
         var root = BuildRoot();
         var parseResult = root.Parse(["plain", "sub"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -96,7 +96,7 @@ public sealed class CommandAliasDeprecationTests
     {
         var root = BuildRoot();
         var parseResult = root.Parse(["does-not-exist"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 

@@ -48,9 +48,10 @@ ppds                       (default: launches TUI)
 └── roles                  Manage security roles
 ```
 
-> **Deprecated aliases:** `plugin-traces`, `environment-variables`, `connection-references`, and `import-jobs`
-> replace the old run-together names `plugintraces`, `environmentvariables`, `connectionreferences`, and
-> `importjobs`. The old names still work but print a one-line deprecation warning to stderr (#1246).
+> **Deprecated aliases:** the old run-together names `plugintraces`, `environmentvariables`,
+> `connectionreferences`, and `importjobs` still work but print a one-line deprecation warning to stderr;
+> use the kebab-case names `plugin-traces`, `environment-variables`, `connection-references`, and
+> `import-jobs` instead (#1246).
 
 ---
 

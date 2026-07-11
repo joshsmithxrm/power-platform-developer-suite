@@ -192,7 +192,7 @@ public class ConnectionReferencesCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["connectionreferences", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
@@ -204,7 +204,7 @@ public class ConnectionReferencesCommandGroupTests
     {
         var root = new RootCommand { _command };
         var parseResult = root.Parse(["connection-references", "list"]);
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
 
         CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
 
