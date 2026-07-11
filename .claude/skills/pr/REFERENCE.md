@@ -47,6 +47,18 @@ gh pr view <pr-number> --json reviews,comments            # poll for the automat
 
 Poll every ~30s for up to **15 minutes**. If the review has not arrived at the cap, surface it and get the user's explicit confirmation before proceeding; skip the wait only when no reviewer app is installed. Late-arriving inline comments show up under `gh api repos/:owner/:repo/pulls/<pr-number>/comments` — re-fetch before flipping to ready so nothing goes untriaged.
 
+**Verifying "no reviewer is installed" — never skip by assumption.** Evidence checks:
+
+```bash
+git ls-files '.coderabbit*' '.gemini*'            # reviewer config checked into the repo
+gh pr list --state merged --limit 5 --json number --jq '.[].number' |
+  xargs -I{} gh api "repos/:owner/:repo/pulls/{}/reviews" --jq '.[].user.login' | sort -u
+```
+
+A reviewer-bot login on recent merged PRs (e.g. `coderabbitai[bot]`, `gemini-code-assist[bot]`) means a reviewer IS configured. If both checks come back empty or inconclusive, ask the user before skipping the wait.
+
+**Flip precondition for re-review-on-push reviewers (e.g. CodeRabbit):** every push triggers a fresh review round against the new head, so triaging an earlier round is not enough. Before `gh pr ready`, confirm the round for the **current head SHA** has landed and been triaged: after your final push, poll (bounded, ~10 minutes) until a review or inline comments whose `commit_id` matches `gh pr view <pr-number> --json headRefOid` appear, triage them, and only then flip. Flipping between a push and its re-review round leaves that round's comments untriaged on a ready PR. If the re-review has not landed at the cap, surface it to the user before flipping.
+
 Replies go **in-thread, one per inline comment** (`gh api repos/:owner/:repo/pulls/<pr-number>/comments -F in_reply_to=<comment-id> -f body=...`), using `Fixed in <sha> — <what>` or `Not applicable — <rationale>`. A PR-level summary comment is not a substitute for threaded replies.
 
 > **Lesson (PR #868):** an agent replied to only 3 of 9 comments and missed all CodeQL comments. Respond to **every** comment, in its own thread — fix the code or reply with a rationale. Partial or bulk triage is never acceptable.

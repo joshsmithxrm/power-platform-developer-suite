@@ -17,15 +17,14 @@ def _line_count(path):
 
 class TestSkillStructure(unittest.TestCase):
 
-    def test_release_skill_line_count(self):
+    def test_release_skill_files_exist(self):
+        # PR #1321 deliberately restored the full /release runbook into
+        # SKILL.md (far past the 150-line two-file cap), making release a
+        # standing exception to the cap. Assert only that both files exist.
         path = SKILLS / 'release' / 'SKILL.md'
         ref = SKILLS / 'release' / 'REFERENCE.md'
         self.assertTrue(path.exists())
         self.assertTrue(ref.exists())
-        n = _line_count(path)
-        self.assertLessEqual(n, LINE_CAP, f'release SKILL.md is {n} lines; cap is {LINE_CAP}')
-        text = path.read_text(encoding='utf-8')
-        self.assertIn('Read REFERENCE.md', text)
 
     def test_backlog_skill_line_count(self):
         path = SKILLS / 'backlog' / 'SKILL.md'

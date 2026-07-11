@@ -47,7 +47,7 @@ gh pr checks <pr-number> --watch          # CI + CodeQL status
 gh pr view <pr-number> --json reviews,comments,statusCheckRollup
 ```
 
-Review timing is unpredictable (2–10+ minutes). Poll `gh pr view <pr-number> --json reviews,comments` every ~30s for up to **15 minutes**. If the review still has not arrived at the cap, surface that to the user and get explicit confirmation before proceeding — do not silently mark ready while a late review can still land. Skip the wait only when no reviewer app is installed on the repo.
+Review timing is unpredictable (2–10+ minutes). Poll `gh pr view <pr-number> --json reviews,comments` every ~30s for up to **15 minutes**. If the review still has not arrived at the cap, surface that to the user and get explicit confirmation before proceeding — do not silently mark ready while a late review can still land. Skip the wait only after **verifying** no reviewer app is installed — check recent merged PRs for reviewer-bot activity and the repo for reviewer config (commands in REFERENCE.md §4); if the check is inconclusive, ask the user rather than assuming.
 
 ### Step 6: Triage Every Comment
 
@@ -68,7 +68,7 @@ Reply shapes: `Fixed in <sha> — <what changed>` after committing the fix, or `
 
 ### Step 7: Flip to Ready and Present Summary
 
-Once CI is green, the automated review is triaged, and every comment is answered:
+Once CI is green, the automated review is triaged, and every comment is answered. For reviewers that re-review on every push (e.g. CodeRabbit), one more precondition: the review round for the **current head SHA** must have landed and been triaged — after your last push, wait for the re-review (bounded, ~10 min), triage it, and only then flip (see REFERENCE.md §4):
 
 ```bash
 gh pr ready <pr-number>
@@ -86,6 +86,7 @@ CI: <status>   Review: <triaged N comments, or "no reviewer configured">
 When the PR merges, delete the branch and worktree:
 
 ```bash
+gh pr view <pr-number> --json state --jq .state   # must print MERGED — skip cleanup otherwise
 git worktree remove <path>        # if working in a dedicated worktree
 git branch -d <branch>
 git push origin --delete <branch> # if the remote branch was not auto-deleted

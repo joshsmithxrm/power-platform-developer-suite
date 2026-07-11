@@ -97,8 +97,9 @@ python -m pytest tests/ scripts/ --import-mode=importlib -q
 See `REFERENCE.md` "Report template". Include actual values.
 
 Verify is one step in the usual shipping sequence (`/gates` -> `/verify`
--> `/pr`), not the last one. On PASS, proceed to `/pr`. On FAIL, fix
-first and re-run `/verify` before continuing.
+-> `/pr`), not the last one. On PASS, proceed to `/pr`. On FAIL, run
+`/debug` to root-cause it (Rule 5: verify reports, it does not fix);
+after the fix lands, re-run `/verify` before continuing.
 
 ## Rules
 

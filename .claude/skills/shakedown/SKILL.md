@@ -34,8 +34,9 @@ active.
    `ppds env current`) and confirm the displayed env matches an allowlist
    entry. The `shakedown-safety` hook will block downstream `ppds *`
    calls otherwise.
-3. **Arm the shakedown write-block (sentinel file).** Before any other
-   Bash work, write `.claude/state/shakedown-active.json` containing at
+3. **Arm the shakedown write-block (sentinel file).** Before any
+   mutating Bash work (steps 1-2 are read-only checks and run first
+   by design), write `.claude/state/shakedown-active.json` containing at
    least `started_at` (ISO-8601 UTC timestamp string, consumed by both
    the Python `shakedown-safety` hook and the C# `IShakedownGuard`) and,
    when available, `session_id`:

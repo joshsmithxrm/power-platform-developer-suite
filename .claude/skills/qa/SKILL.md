@@ -447,6 +447,6 @@ After fixing any issue found during verification:
 
 Record each finding (PASS or FAIL) as a structured entry so the review stage can deduplicate — review will skip findings already caught and fixed by QA.
 
-Each finding entry: `{"id": "QA-N", "surface": "ext|tui|mcp|cli", "description": "...", "file": "...", "severity": "critical|important|suggestion", "fixed": true|false, "fix_commit": "<sha>|null"}`
+Each finding entry: `{"id": "QA-N", "surface": "ext|tui|mcp|cli", "result": "pass|fail", "description": "...", "file": "...", "severity": "critical|important|suggestion", "fixed": true|false, "fix_commit": "<sha>|null"}` — `result` is the check outcome; `fixed`/`fix_commit` describe remediation and apply only to `"result": "fail"` entries (`false`/`null` on pass).
 
-**Handoff artifact:** write the merged findings array to `.qa-findings.json` at the repo root (an untracked working file, overwritten on each `/qa` run — do not commit it). `/review` Step 2b reads this file; if it is absent, review proceeds without dedup context.
+**Handoff artifact:** write the merged findings array to `.qa-findings.json` at the repo root (an untracked working file, overwritten on each `/qa` run — do not commit it). `/review` Step 2b reads this file and dedups against the `"result": "fail"` entries (pass entries are context only, never dedup grounds); if it is absent, review proceeds without dedup context.
