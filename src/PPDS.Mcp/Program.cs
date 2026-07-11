@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -40,7 +39,9 @@ builder.Services.AddMcpServer(options =>
     options.ServerInfo = new Implementation
     {
         Name = "ppds-mcp-server",
-        Version = ServerVersion.Resolve(Assembly.GetExecutingAssembly())
+        // typeof(ServerVersion).Assembly is the ppds-mcp-server assembly itself, resolved
+        // statically at compile time rather than via GetExecutingAssembly() inside this lambda.
+        Version = ServerVersion.Resolve(typeof(ServerVersion).Assembly)
     };
 })
     .WithStdioServerTransport()

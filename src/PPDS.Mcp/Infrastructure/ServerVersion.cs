@@ -61,12 +61,13 @@ internal static class ServerVersion
     {
         if (!string.IsNullOrWhiteSpace(informationalVersion))
         {
-            var metadataIndex = informationalVersion.IndexOf('+');
+            var trimmed = informationalVersion.Trim();
+            var metadataIndex = trimmed.IndexOf('+');
             return metadataIndex >= 0
-                ? informationalVersion[..metadataIndex]
-                : informationalVersion;
+                ? trimmed[..metadataIndex]
+                : trimmed;
         }
 
-        return string.IsNullOrWhiteSpace(fileVersion) ? Unknown : fileVersion;
+        return string.IsNullOrWhiteSpace(fileVersion) ? Unknown : fileVersion.Trim();
     }
 }

@@ -1,4 +1,3 @@
-using System.Reflection;
 using FluentAssertions;
 using PPDS.Mcp.Infrastructure;
 using Xunit;
@@ -107,7 +106,7 @@ public sealed class ServerVersionTests
     public void Resolve_NullAssembly_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => ServerVersion.Resolve((Assembly)null!);
+        var act = () => ServerVersion.Resolve(null!);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();
