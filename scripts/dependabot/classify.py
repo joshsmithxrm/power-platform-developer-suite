@@ -360,6 +360,8 @@ def _classify_member_set(
     descriptor: str,
     members: list[tuple[str, str, str]],
     ecosystem: str,
+    body: str,
+    files: list[str],
 ) -> Classification:
     """Classify a multi-member dependabot PR (grouped or multi-package title).
 
@@ -370,6 +372,12 @@ def _classify_member_set(
     in the reason, preferring an auth-critical member in the chosen group so its
     override is surfaced. ``descriptor`` is the leading phrase of the reason
     (e.g. "grouped bump 'group:npm_and_yarn'" or "multi-package bump").
+
+    ``body`` and ``files`` are consulted so the member-set path applies the same
+    two safety guards as the single-package path: a ``BREAKING CHANGE`` marker in
+    the body forces Group C, and an auth-critical-path diff (e.g. src/PPDS.Auth)
+    escalates to at least Group B. Without this, a member-set PR could skip both
+    guards and auto-merge despite them (regression flagged in review of #1311).
     """
     # Resolve each member's update type and individual group. Null/None update
     # types are coalesced to "unknown" by resolve_member_group, which itself
@@ -408,9 +416,25 @@ def _classify_member_set(
             f"; auth-critical override "
             f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
         )
+
+    # Safety guards the single-package path also applies — a member-set PR must
+    # not skip them. Take the most conservative of the member-set group and
+    # these two signals: an auth-critical-path diff escalates to at least Group
+    # B, and a BREAKING CHANGE marker in the body forces Group C.
+    group = chosen
+    if touches_auth_critical_path(files) and _GROUP_RANK[group] < _GROUP_RANK["B"]:
+        group = "B"
+        reason += "; escalated to Group B — diff touches auth-critical path (e.g. src/PPDS.Auth)"
+    if changelog_signals_breaking(body):
+        reason += (
+            "; PR body signals BREAKING CHANGE"
+            if group == "C"
+            else "; escalated to Group C — PR body signals BREAKING CHANGE"
+        )
+        group = "C"
     return Classification(
         pr_number=number,
-        group=chosen,
+        group=group,
         reason=reason,
         ecosystem=ecosystem,
         update_type=trigger_type,
@@ -459,7 +483,7 @@ def classify_pr(pr: dict) -> Classification:
                 to_version=None,
             )
         return _classify_member_set(
-            number, pkg, f"grouped bump '{pkg}'", members, ecosystem
+            number, pkg, f"grouped bump '{pkg}'", members, ecosystem, body, files
         )
 
     # Multi-package title (e.g. "Bump X and Y", no version in the title) —
@@ -474,7 +498,7 @@ def classify_pr(pr: dict) -> Classification:
         members = parse_group_members(body)
         if members:
             return _classify_member_set(
-                number, None, "multi-package bump", members, ecosystem
+                number, None, "multi-package bump", members, ecosystem, body, files
             )
 
     # Hard exclusion — major bumps are always Group C, no exceptions (v1-prelaunch retro).

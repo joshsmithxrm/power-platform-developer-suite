@@ -591,6 +591,68 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "C")
         self.assertIn("could not classify", c.reason)
 
+    # Member-set safety guards — the grouped/multi-package path must apply the
+    # same body/path checks as the single-package path (regression from #1311
+    # review: _classify_member_set() returned before these guards ran).
+
+    def test_grouped_breaking_marker_forces_group_c(self):
+        # An all-patch group (would be Group A) whose body carries a BREAKING
+        # CHANGE marker must be forced to Group C, exactly like a single PR.
+        pr = make_pr(
+            number=1310,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n\n"
+                "> BREAKING CHANGE: the foo API was removed.\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertIn("BREAKING CHANGE", c.reason)
+
+    def test_multi_package_breaking_marker_forces_group_c(self):
+        # Same guard on the multi-package ("Bump X and Y") path.
+        pr = make_pr(
+            number=1311,
+            title="Bump Foo and Bar",
+            body=(
+                "Bumps Foo and Bar.\n\n"
+                "Updated [Foo](https://example.com/foo) from 1.0.0 to 1.0.1.\n"
+                "Updated [Bar](https://example.com/bar) from 2.3.4 to 2.3.5.\n\n"
+                "Includes a BREAKING CHANGE in Foo.\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/foo-and-bar",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertIn("BREAKING CHANGE", c.reason)
+
+    def test_member_set_auth_critical_path_escalates_to_group_b(self):
+        # An all-patch, non-critical group (would be Group A) whose diff touches
+        # an auth-critical path (src/PPDS.Auth/**) must escalate to at least B.
+        pr = make_pr(
+            number=1312,
+            title="Bump the nuget group across 1 directory with 2 updates",
+            body=(
+                "Bumps the nuget group with 2 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Bar` from 2.3.4 to 2.3.5\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props", "src/PPDS.Auth/Credentials/Foo.cs"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical path", c.reason)
+
     # Group C — manual review
 
     def test_major_npm_is_group_c(self):
