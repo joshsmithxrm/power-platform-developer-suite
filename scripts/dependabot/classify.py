@@ -59,6 +59,7 @@ TOOLING_PACKAGES = frozenset({
     "@playwright/test",
     "playwright",
     "prettier",
+    "stylelint",
     "typescript",
     "typescript-eslint",
     "@typescript-eslint/parser",
@@ -353,6 +354,72 @@ def changelog_signals_breaking(body: str) -> bool:
     return any(n in body for n in needles)
 
 
+def _classify_member_set(
+    number: int,
+    package: Optional[str],
+    descriptor: str,
+    members: list[tuple[str, str, str]],
+    ecosystem: str,
+) -> Classification:
+    """Classify a multi-member dependabot PR (grouped or multi-package title).
+
+    ``members`` is a non-empty list of (package, from_version, to_version)
+    tuples parsed from the PR body. Each member is resolved to an individual
+    group via ``resolve_member_group``; the most-conservative (C > B > A) wins
+    per docs/MERGE-POLICY.md "Grouped Dependabot PRs". A trigger member is cited
+    in the reason, preferring an auth-critical member in the chosen group so its
+    override is surfaced. ``descriptor`` is the leading phrase of the reason
+    (e.g. "grouped bump 'group:npm_and_yarn'" or "multi-package bump").
+    """
+    # Resolve each member's update type and individual group. Null/None update
+    # types are coalesced to "unknown" by resolve_member_group, which itself
+    # maps "unknown" -> Group C.
+    member_records = []
+    for p, fv, tv in members:
+        t = classify_update_type(fv, tv) or "unknown"
+        g = resolve_member_group(p, t)
+        member_records.append((p, fv, tv, t, g))
+
+    chosen = max(
+        (r[4] for r in member_records),
+        key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]),
+    )
+
+    # Pick a trigger member to cite in the reason string. Prefer a member whose
+    # individual group matches the chosen group; among those, prefer an
+    # auth-critical package (so its override is named explicitly per
+    # MERGE-POLICY.md "Auth-Critical Packages").
+    chosen_members = [r for r in member_records if r[4] == chosen]
+    auth_critical_in_chosen = next(
+        (r for r in chosen_members if is_auth_critical_package(r[0])),
+        None,
+    )
+    trigger = auth_critical_in_chosen or chosen_members[0]
+    trigger_type = trigger[3]
+
+    reason = (
+        f"{descriptor} — {len(members)} members; most-conservative={trigger_type} "
+        f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
+    )
+    # When the trigger is an auth-critical package, surface that explicitly so
+    # the operator knows why the override applied.
+    if is_auth_critical_package(trigger[0]):
+        reason += (
+            f"; auth-critical override "
+            f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
+        )
+    return Classification(
+        pr_number=number,
+        group=chosen,
+        reason=reason,
+        ecosystem=ecosystem,
+        update_type=trigger_type,
+        package=package,
+        from_version=None,
+        to_version=None,
+    )
+
+
 def classify_pr(pr: dict) -> Classification:
     """Classify a single dependabot PR.
 
@@ -391,54 +458,24 @@ def classify_pr(pr: dict) -> Classification:
                 from_version=None,
                 to_version=None,
             )
-
-        # Resolve each member's update type and individual group. Null/None
-        # update types are coalesced to "unknown" by resolve_member_group,
-        # which itself maps "unknown" -> Group C.
-        member_records = []
-        for p, fv, tv in members:
-            t = classify_update_type(fv, tv) or "unknown"
-            g = resolve_member_group(p, t)
-            member_records.append((p, fv, tv, t, g))
-
-        chosen = max(
-            (r[4] for r in member_records),
-            key=lambda g: _GROUP_RANK.get(g, _GROUP_RANK["C"]),
+        return _classify_member_set(
+            number, pkg, f"grouped bump '{pkg}'", members, ecosystem
         )
 
-        # Pick a trigger member to cite in the reason string. Prefer a member
-        # whose individual group matches the chosen group; among those, prefer
-        # an auth-critical package (so its override is named explicitly per
-        # MERGE-POLICY.md "Auth-Critical Packages").
-        chosen_members = [r for r in member_records if r[4] == chosen]
-        auth_critical_in_chosen = next(
-            (r for r in chosen_members if is_auth_critical_package(r[0])),
-            None,
-        )
-        trigger = auth_critical_in_chosen or chosen_members[0]
-        trigger_type = trigger[3]
-
-        reason = (
-            f"grouped bump '{pkg}' — {len(members)} members; most-conservative={trigger_type} "
-            f"({trigger[0]} {trigger[1]} -> {trigger[2]})"
-        )
-        # When the trigger is an auth-critical package, surface that explicitly
-        # so the operator knows why the override applied.
-        if is_auth_critical_package(trigger[0]):
-            reason += (
-                f"; auth-critical override "
-                f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
+    # Multi-package title (e.g. "Bump X and Y", no version in the title) —
+    # parse_title yields no package, so a single-package classification is
+    # impossible, but dependabot still enumerates each member in the body.
+    # Route those members through the same per-member most-conservative-wins
+    # logic as grouped PRs so auth-critical members aren't lost to the Group-C
+    # "could not classify" default (real case: PR #1299 bumping two auth-critical
+    # packages). A genuinely unparseable PR (no members) falls through to that
+    # default below.
+    if pkg is None:
+        members = parse_group_members(body)
+        if members:
+            return _classify_member_set(
+                number, None, "multi-package bump", members, ecosystem
             )
-        return Classification(
-            pr_number=number,
-            group=chosen,
-            reason=reason,
-            ecosystem=ecosystem,
-            update_type=trigger_type,
-            package=pkg,
-            from_version=None,
-            to_version=None,
-        )
 
     # Hard exclusion — major bumps are always Group C, no exceptions (v1-prelaunch retro).
     if update_type == "major":
