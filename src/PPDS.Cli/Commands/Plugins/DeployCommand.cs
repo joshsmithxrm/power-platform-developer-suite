@@ -203,7 +203,14 @@ public static class DeployCommand
         }
     }
 
-    private static async Task<DeploymentResult> DeployAssemblyAsync(
+    /// <summary>
+    /// Deploys a single assembly's types, steps, and images. Steps are matched to the environment by
+    /// functional identity (<see cref="PluginStepMatcher"/>) rather than by mutable display name, so an
+    /// environment holding two same-named steps is disambiguated instead of aborting, and each write
+    /// targets the correct row.
+    /// </summary>
+    /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
+    internal static async Task<DeploymentResult> DeployAssemblyAsync(
         IPluginRegistrationService service,
         PluginAssemblyConfig assemblyConfig,
         string configDir,
@@ -288,10 +295,6 @@ public static class DeployCommand
                 }
             }
 
-            // Track existing steps for orphan detection - use dictionary for O(1) lookup during cleanup
-            var existingStepsMap = new Dictionary<string, PluginStepInfo>();
-            var configuredStepNames = new HashSet<string>();
-
             // Get existing types and steps
             var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId);
 
@@ -328,24 +331,41 @@ public static class DeployCommand
                     $"Please disambiguate manually before re-deploying. Conflicts: {details}");
             }
 
+            // Gather existing (type, step) pairs and match them to configuration by functional
+            // identity rather than by mutable display name. Two same-named steps (e.g., a PreOp/PostOp
+            // pair the Plugin Registration Tool auto-named identically) no longer collapse or abort.
+            var existingPairs = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
             foreach (var existingType in existingTypes)
             {
-                var steps = await service.ListStepsForTypeAsync(existingType.Id);
+                var steps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
                 foreach (var step in steps)
-                {
-                    // Collision check: two existing steps in the environment sharing the same
-                    // name would silently collapse in this dictionary, causing cleanup to drop
-                    // one of them and deploy diffs to misreport existence. Surface the conflict.
-                    if (existingStepsMap.TryGetValue(step.Name, out var existingSameName))
-                    {
-                        throw new PpdsException(
-                            ErrorCodes.Operation.Duplicate,
-                            $"Environment contains duplicate plugin step name '{step.Name}' " +
-                            $"(ids: {existingSameName.Id}, {step.Id}) under assembly '{assemblyConfig.Name}'. " +
-                            "Rename or delete one of the conflicting steps in the environment before re-deploying.");
-                    }
-                    existingStepsMap[step.Name] = step;
-                }
+                    existingPairs.Add((existingType, step));
+            }
+
+            var configuredPairs = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
+            foreach (var typeConfigForPair in assemblyConfig.Types)
+                foreach (var stepConfigForPair in typeConfigForPair.Steps)
+                    configuredPairs.Add((typeConfigForPair, stepConfigForPair));
+
+            var matches = PluginStepMatcher.Match(
+                configuredPairs,
+                existingPairs,
+                onResidualCollision: (id, configCount, envCount) =>
+                    result.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount)));
+
+            if (!globalOptions.IsJsonMode)
+            {
+                foreach (var warning in result.Warnings)
+                    Console.Error.WriteLine($"  [!] Warning: {warning}");
+            }
+
+            // Map each configured step (by reference identity) to its matched environment step, if any.
+            // A configured step with no match is force-created; a paired step updates that exact row.
+            var envForConfigStep = new Dictionary<PluginStepConfig, PluginStepInfo?>(StepConfigReferenceComparer.Instance);
+            foreach (var match in matches)
+            {
+                if (match.Config is not null)
+                    envForConfigStep[match.Config] = match.Env;
             }
 
             // Deploy each type
@@ -373,10 +393,10 @@ public static class DeployCommand
                 // Deploy each step
                 foreach (var stepConfig in typeConfig.Steps)
                 {
-                    // Resolve auto-generated name if not specified
-                    stepConfig.Name ??= $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
+                    // Resolve auto-generated name if not specified. Deploy writes this name to the
+                    // matched row, so a renamed environment step converges back to the configured name.
+                    stepConfig.Name ??= PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
                     var stepName = stepConfig.Name;
-                    configuredStepNames.Add(stepName);
 
                     // Lookup message and filter
                     var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
@@ -392,12 +412,17 @@ public static class DeployCommand
                         stepConfig.Entity,
                         stepConfig.SecondaryEntity);
 
-                    var isNew = !existingStepsMap.ContainsKey(stepName);
+                    var matchedEnvStep = envForConfigStep.TryGetValue(stepConfig, out var env) ? env : null;
+                    var isNew = matchedEnvStep is null;
+
+                    // Identity-based resolution: paired -> update that exact GUID; missing -> force-create
+                    // (a null id skips the name lookup so a same-named different-identity row is never hijacked).
+                    var resolution = new StepIdentityResolution(matchedEnvStep?.Id);
 
                     Guid stepId;
                     if (dryRun)
                     {
-                        stepId = Guid.NewGuid();
+                        stepId = matchedEnvStep?.Id ?? Guid.NewGuid();
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    [Dry-Run] Would {(isNew ? "create" : "update")} step: {stepName}");
 
@@ -406,7 +431,7 @@ public static class DeployCommand
                     }
                     else
                     {
-                        stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution);
+                        stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
 
@@ -443,36 +468,55 @@ public static class DeployCommand
                 }
             }
 
-            // Handle orphan cleanup if requested
+            // Handle orphan cleanup if requested. Orphans are the environment steps the matcher could
+            // not pair to any configured step; delete exactly those rows by GUID.
             if (clean)
             {
-                var orphanedStepNames = existingStepsMap.Keys.Except(configuredStepNames).ToList();
+                var orphanedSteps = matches.Where(m => m.IsOrphaned).Select(m => m.Env!).ToList();
 
-                if (orphanedStepNames.Count > 0)
+                if (orphanedSteps.Count > 0)
                 {
                     if (!globalOptions.IsJsonMode)
-                        Console.Error.WriteLine($"  Cleaning {orphanedStepNames.Count} orphaned step(s)...");
+                        Console.Error.WriteLine($"  Cleaning {orphanedSteps.Count} orphaned step(s)...");
 
-                    foreach (var orphanName in orphanedStepNames)
+                    foreach (var orphanStep in orphanedSteps)
                     {
-                        // Use dictionary lookup instead of re-querying
-                        if (existingStepsMap.TryGetValue(orphanName, out var orphanStep))
+                        if (dryRun)
                         {
-                            if (dryRun)
-                            {
-                                if (!globalOptions.IsJsonMode)
-                                    Console.Error.WriteLine($"    [Dry-Run] Would delete step: {orphanName}");
-                                result.StepsDeleted++;
-                            }
-                            else
-                            {
-                                await service.DeleteStepAsync(orphanStep.Id);
-                                if (!globalOptions.IsJsonMode)
-                                    Console.Error.WriteLine($"    Deleted step: {orphanName}");
-                                result.StepsDeleted++;
-                            }
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"    [Dry-Run] Would delete step: {orphanStep.Name}");
+                            result.StepsDeleted++;
+                        }
+                        else
+                        {
+                            await service.DeleteStepAsync(orphanStep.Id, cancellationToken);
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"    Deleted step: {orphanStep.Name}");
+                            result.StepsDeleted++;
                         }
                     }
+                }
+            }
+            else
+            {
+                // Without --clean we must not delete anything. But because a stage/mode change is now
+                // delete+create, the old step lingers in the environment and STILL fires — with no other
+                // signal. Surface orphans loudly so the operator knows to re-run with --clean.
+                var orphanedSteps = matches.Where(m => m.IsOrphaned).Select(m => m.Env!).ToList();
+
+                if (orphanedSteps.Count > 0)
+                {
+                    var descriptions = string.Join(
+                        ", ",
+                        orphanedSteps.Select(o => $"{o.Name} ({o.Stage}, {o.Mode})"));
+                    var warning =
+                        $"{orphanedSteps.Count} step(s) in the environment no longer match the configuration and were " +
+                        $"left in place (they remain active): {descriptions}. Re-run with --clean to remove them.";
+
+                    result.Warnings.Add(warning);
+
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [!] Warning: {warning}");
                 }
             }
         }
@@ -610,7 +654,7 @@ public static class DeployCommand
 
     #region Result Models
 
-    private sealed class DeploymentResult
+    internal sealed class DeploymentResult
     {
         [JsonPropertyName("assemblyName")]
         public string AssemblyName { get; set; } = string.Empty;
@@ -638,6 +682,28 @@ public static class DeployCommand
 
         [JsonPropertyName("imagesDeleted")]
         public int ImagesDeleted { get; set; }
+
+        /// <summary>
+        /// Advisory messages (e.g., residual functional-identity collisions). Deployment still
+        /// proceeds; these surface ambiguity for the operator to resolve.
+        /// </summary>
+        [JsonPropertyName("warnings")]
+        public List<string> Warnings { get; set; } = [];
+    }
+
+    /// <summary>
+    /// Reference-identity comparer for mapping a specific <see cref="PluginStepConfig"/> instance to its
+    /// matched environment step. Two distinct config objects with identical values must remain distinct
+    /// keys (the matcher already zipped them positionally), so value equality would be wrong here.
+    /// </summary>
+    private sealed class StepConfigReferenceComparer : IEqualityComparer<PluginStepConfig>
+    {
+        public static readonly StepConfigReferenceComparer Instance = new();
+
+        public bool Equals(PluginStepConfig? x, PluginStepConfig? y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(PluginStepConfig obj) =>
+            System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
     }
 
     #endregion

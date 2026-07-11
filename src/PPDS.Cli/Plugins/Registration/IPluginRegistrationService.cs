@@ -287,6 +287,13 @@ public interface IPluginRegistrationService
     /// <param name="messageId">The SDK message ID.</param>
     /// <param name="filterId">Optional SDK message filter ID.</param>
     /// <param name="solutionName">Optional solution name.</param>
+    /// <param name="identity">
+    /// Optional identity-based resolution from <see cref="PluginStepMatcher"/>. When <c>null</c> the
+    /// step is located by <c>(EventHandler, Name)</c> (the legacy path used by ad-hoc registration and
+    /// RPC). When non-null with a step id, that exact row is updated; when non-null with a null id, the
+    /// step is force-created without any name lookup so a same-named-but-different-identity row is never
+    /// hijacked.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<Guid> UpsertStepAsync(
         Guid eventHandlerId,
@@ -295,6 +302,7 @@ public interface IPluginRegistrationService
         Guid messageId,
         Guid? filterId,
         string? solutionName = null,
+        StepIdentityResolution? identity = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -168,7 +168,13 @@ public static class CleanCommand
         }
     }
 
-    private static async Task<CleanResult> CleanAssemblyAsync(
+    /// <summary>
+    /// Removes orphaned steps (and now-empty types) for a single assembly. Orphans are identified by
+    /// functional identity (<see cref="PluginStepMatcher"/>) rather than by display name, so a
+    /// same-named step of a different stage/mode is correctly detected as an orphan.
+    /// </summary>
+    /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
+    internal static async Task<CleanResult> CleanAssemblyAsync(
         IPluginRegistrationService service,
         PluginAssemblyConfig assemblyConfig,
         bool dryRun,
@@ -192,28 +198,48 @@ public static class CleanCommand
         if (!globalOptions.IsJsonMode)
             Console.Error.WriteLine($"Checking assembly: {assemblyConfig.Name}");
 
-        // Build set of configured step names
-        var configuredStepNames = new HashSet<string>();
-        foreach (var typeConfig in assemblyConfig.Types)
+        // Get existing types and steps once, keeping a per-type list for the type-orphan pass.
+        var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id);
+        var stepsByType = new Dictionary<Guid, List<PluginStepInfo>>();
+        var existingPairs = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
+        foreach (var existingType in existingTypes)
         {
-            foreach (var stepConfig in typeConfig.Steps)
-            {
-                var stepName = stepConfig.Name ?? $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
-                configuredStepNames.Add(stepName);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var typeSteps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
+            stepsByType[existingType.Id] = typeSteps;
+            foreach (var step in typeSteps)
+                existingPairs.Add((existingType, step));
         }
 
-        // Get existing types and steps
-        var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id);
+        // Configured (type, step) pairs.
+        var configuredPairs = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
+        foreach (var typeConfig in assemblyConfig.Types)
+            foreach (var stepConfig in typeConfig.Steps)
+                configuredPairs.Add((typeConfig, stepConfig));
+
+        // Match by identity; orphans are the environment steps with no configured counterpart.
+        var matches = PluginStepMatcher.Match(
+            configuredPairs,
+            existingPairs,
+            onResidualCollision: (id, configCount, envCount) =>
+                result.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount)));
+
+        if (!globalOptions.IsJsonMode)
+        {
+            foreach (var warning in result.Warnings)
+                Console.Error.WriteLine($"  [!] Warning: {warning}");
+        }
+
+        var orphanStepIds = matches.Where(m => m.IsOrphaned).Select(m => m.Env!.Id).ToHashSet();
 
         foreach (var existingType in existingTypes)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var steps = await service.ListStepsForTypeAsync(existingType.Id);
+            var steps = stepsByType[existingType.Id];
 
             // Find orphaned steps and track count for type cleanup
-            var orphanedStepsInType = steps.Where(s => !configuredStepNames.Contains(s.Name)).ToList();
+            var orphanedStepsInType = steps.Where(s => orphanStepIds.Contains(s.Id)).ToList();
 
             foreach (var step in orphanedStepsInType)
             {
@@ -231,7 +257,7 @@ public static class CleanCommand
                 }
                 else
                 {
-                    await service.DeleteStepAsync(step.Id);
+                    await service.DeleteStepAsync(step.Id, cancellationToken);
                     result.StepsDeleted++;
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Deleted step: {step.Name}");
@@ -286,7 +312,7 @@ public static class CleanCommand
 
     #region Result Models
 
-    private sealed class CleanResult
+    internal sealed class CleanResult
     {
         [JsonPropertyName("assemblyName")]
         public string AssemblyName { get; set; } = string.Empty;
@@ -302,9 +328,15 @@ public static class CleanCommand
 
         [JsonPropertyName("typesDeleted")]
         public int TypesDeleted { get; set; }
+
+        /// <summary>
+        /// Advisory messages (e.g., residual functional-identity collisions).
+        /// </summary>
+        [JsonPropertyName("warnings")]
+        public List<string> Warnings { get; set; } = [];
     }
 
-    private sealed class OrphanedStep
+    internal sealed class OrphanedStep
     {
         [JsonPropertyName("typeName")]
         public string TypeName { get; set; } = string.Empty;
@@ -316,7 +348,7 @@ public static class CleanCommand
         public Guid StepId { get; set; }
     }
 
-    private sealed class OrphanedType
+    internal sealed class OrphanedType
     {
         [JsonPropertyName("typeName")]
         public string TypeName { get; set; } = string.Empty;

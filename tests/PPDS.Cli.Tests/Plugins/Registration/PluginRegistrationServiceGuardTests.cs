@@ -66,7 +66,7 @@ public class PluginRegistrationServiceGuardTests
             Guid.NewGuid(),
             null,
             null,
-            CancellationToken.None),
+            cancellationToken: CancellationToken.None),
         "UpsertImageAsync" => svc.UpsertImageAsync(
             Guid.NewGuid(),
             new PluginImageConfig { Name = "img", ImageType = "PostImage" },

@@ -1248,29 +1248,63 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         Guid messageId,
         Guid? filterId,
         string? solutionName = null,
+        StepIdentityResolution? identity = null,
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.step.upsert");
-        // Check if step exists by name
-        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
-        {
-            ColumnSet = new ColumnSet(
-                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
-                SdkMessageProcessingStep.Fields.StateCode,
-                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
-                }
-            }
-        };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
-        var existing = results.Entities.FirstOrDefault();
+
+        // Resolve the row to write:
+        //  - identity == null                    -> legacy behavior: locate by (EventHandler, Name).
+        //  - identity with a non-null step id     -> update exactly that GUID (never a same-named sibling).
+        //  - identity with a null step id         -> force-create: skip the lookup entirely.
+        var columns = new ColumnSet(
+            SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
+            SdkMessageProcessingStep.Fields.StateCode,
+            SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
+
+        Entity? existing;
+        if (identity is null)
+        {
+            // Check if step exists by name
+            var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+            {
+                ColumnSet = columns,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
+                    }
+                }
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+            existing = results.Entities.FirstOrDefault();
+        }
+        else if (identity.ExistingStepId is { } existingStepId)
+        {
+            var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+            {
+                ColumnSet = columns,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, existingStepId)
+                    }
+                }
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+            existing = results.Entities.FirstOrDefault();
+        }
+        else
+        {
+            existing = null;
+        }
 
         var entity = new SdkMessageProcessingStep
         {
@@ -2295,7 +2329,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return response.id;
     }
 
-    private static string MapStageFromValue(int value) => value switch
+    // internal (not private) so PluginStepIdentity can canonicalize config-side stage/mode tokens
+    // through the exact same mapping the write path uses — see PluginStepIdentity.Normalize.
+    internal static string MapStageFromValue(int value) => value switch
     {
         StagePreValidation => "PreValidation",
         StagePreOperation => "PreOperation",
@@ -2304,7 +2340,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => value.ToString()
     };
 
-    private static string MapModeFromValue(int value) => value switch
+    internal static string MapModeFromValue(int value) => value switch
     {
         0 => "Synchronous",
         1 => "Asynchronous",
@@ -2319,7 +2355,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => value.ToString()
     };
 
-    private static int MapStageToValue(string stage) => stage switch
+    internal static int MapStageToValue(string stage) => stage switch
     {
         "PreValidation" => StagePreValidation,
         "PreOperation" => StagePreOperation,
@@ -2328,7 +2364,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => int.TryParse(stage, out var v) ? v : StagePostOperation
     };
 
-    private static int MapModeToValue(string mode) => mode switch
+    internal static int MapModeToValue(string mode) => mode switch
     {
         "Synchronous" => 0,
         "Asynchronous" => 1,

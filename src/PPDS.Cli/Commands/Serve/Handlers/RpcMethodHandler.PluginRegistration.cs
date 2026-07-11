@@ -324,7 +324,7 @@ public partial class RpcMethodHandler
                 SecondaryEntity = secondaryEntity
             };
 
-            var stepId = await registrationService.UpsertStepAsync(typeId, eventHandlerType, stepConfig, messageId, filterId, solutionName, ct);
+            var stepId = await registrationService.UpsertStepAsync(typeId, eventHandlerType, stepConfig, messageId, filterId, solutionName, cancellationToken: ct);
 
             return new PluginsRegisterResponse { Id = stepId.ToString() };
         }, cancellationToken);

@@ -1,6 +1,11 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using Moq;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Plugins.Registration;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -181,6 +186,280 @@ public class DeployCommandTests : IDisposable
             "--dry-run " +
             "--output-format Json");
         Assert.Empty(result.Errors);
+    }
+
+    #endregion
+
+    #region Deployment Matching Tests (#1295)
+
+    // Environment holds two same-named steps (PreOp + PostOp); config declares the PostOp step plus a
+    // brand-new Create step. Deploy must update the exact PostOp row by GUID, force-create the new
+    // step, and (with --clean) delete the orphaned PreOp row by GUID — never abort on the duplicate name.
+    [Fact]
+    public async Task DeployAssemblyAsync_SameNamedSteps_UpdatesPaired_ForceCreatesNew_AndCleansOrphan()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+        var preId = Guid.NewGuid();
+        const string sharedName = "MyPlugin.Handler: Update of account";
+
+        // A real (empty) file so File.Exists passes for the classic-assembly path.
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginStepInfo>
+                {
+                    new() { Id = postId, Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous" },
+                    new() { Id = preId, Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PreOperation", Mode = "Synchronous" }
+                });
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.DeleteStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var assemblyConfig = new PluginAssemblyConfig
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Name = sharedName, Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" },
+                            new PluginStepConfig { Message = "Create", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            // Act
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, assemblyConfig, Path.GetTempPath(),
+                solutionOverride: null, clean: true, dryRun: false, globalOptions, CancellationToken.None);
+
+            // Assert - the assembly deployed successfully.
+            Assert.True(result.Success);
+
+            // Paired Update step updates the exact PostOperation row by GUID.
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Message == "Update"),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string?>(),
+                It.Is<StepIdentityResolution?>(r => r != null && r.ExistingStepId == postId),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // New Create step is force-created (null step id).
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Message == "Create"),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string?>(),
+                It.Is<StepIdentityResolution?>(r => r != null && r.ExistingStepId == null),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // The orphaned PreOperation row is deleted by its GUID.
+            mock.Verify(s => s.DeleteStepAsync(preId, It.IsAny<CancellationToken>()), Times.Once);
+            mock.Verify(s => s.DeleteStepAsync(postId, It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
+    }
+
+    // Fix (#1295 follow-up): a config authored with variant stage/mode tokens ("40"/"sync") must be
+    // idempotent — the second deploy updates the existing step in place rather than force-creating a
+    // duplicate. The stateful mock stores canonical stage/mode on create (as Dataverse reads them back).
+    [Fact]
+    public async Task DeployAssemblyAsync_VariantStageModeTokens_IsIdempotent_NoDuplicateOnSecondRun()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            var envSteps = new List<PluginStepInfo>();
+
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => envSteps.ToList());
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid _, string _, PluginStepConfig cfg, Guid _, Guid? _, string? _, StepIdentityResolution? res, CancellationToken _) =>
+                {
+                    if (res?.ExistingStepId is { } existingId)
+                        return existingId; // update in place
+
+                    var id = Guid.NewGuid();
+                    envSteps.Add(new PluginStepInfo
+                    {
+                        Id = id,
+                        Name = cfg.Name!,
+                        Message = cfg.Message,
+                        PrimaryEntity = cfg.Entity,
+                        // Dataverse stores an int and reads back the canonical string — mirror that.
+                        Stage = PluginRegistrationService.MapStageFromValue(PluginRegistrationService.MapStageToValue(cfg.Stage)),
+                        Mode = PluginRegistrationService.MapModeFromValue(PluginRegistrationService.MapModeToValue(cfg.Mode)),
+                        ExecutionOrder = cfg.ExecutionOrder
+                    });
+                    return id;
+                });
+
+            PluginAssemblyConfig BuildConfig() => new()
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Message = "Update", Entity = "account", Stage = "40", Mode = "sync", ExecutionOrder = 1 }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            // First deploy creates the step.
+            var first = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, BuildConfig(), Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+            Assert.True(first.Success);
+            Assert.Equal(1, first.StepsCreated);
+            Assert.Equal(0, first.StepsUpdated);
+            Assert.Single(envSteps);
+
+            // Second deploy of the SAME variant-token config must update in place — no duplicate.
+            var second = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, BuildConfig(), Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+            Assert.True(second.Success);
+            Assert.Equal(0, second.StepsCreated);
+            Assert.Equal(1, second.StepsUpdated);
+            Assert.Single(envSteps);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
+    }
+
+    // Fix (#1295 follow-up): a plain deploy (no --clean) must not silently leave the old step active
+    // after a stage/mode change (now delete+create). Orphans are surfaced as warnings, not deleted.
+    [Fact]
+    public async Task DeployAssemblyAsync_WithoutClean_ReportsOrphanedStepsAsWarnings()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var orphanId = Guid.NewGuid();
+
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            // Env holds the OLD PreOperation step; config declares the PostOperation step -> PreOp is orphaned.
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginStepInfo>
+                {
+                    new() { Id = orphanId, Name = "MyPlugin.Handler: Update of account", Message = "Update", PrimaryEntity = "account", Stage = "PreOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+                });
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.DeleteStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var assemblyConfig = new PluginAssemblyConfig
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            // Act - deploy WITHOUT --clean.
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, assemblyConfig, Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+
+            // Assert - the orphaned PreOperation step is surfaced as a warning, and nothing is deleted.
+            Assert.True(result.Success);
+            Assert.Contains(result.Warnings, w => w.Contains("--clean") && w.Contains("PreOperation"));
+            mock.Verify(s => s.DeleteStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
     }
 
     #endregion
