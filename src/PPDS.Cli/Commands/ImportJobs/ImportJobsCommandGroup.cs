@@ -24,11 +24,12 @@ public static class ImportJobsCommandGroup
     };
 
     /// <summary>
-    /// Creates the 'importjobs' command group with all subcommands.
+    /// Creates the 'import-jobs' command group with all subcommands.
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("importjobs", "Monitor solution import jobs: list, get, data, wait");
+        var command = new Command("import-jobs", "Monitor solution import jobs: list, get, data, wait");
+        command.Aliases.Add("importjobs"); // deprecated pre-#1246 name; see Infrastructure/CommandAliasDeprecation.cs
 
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());

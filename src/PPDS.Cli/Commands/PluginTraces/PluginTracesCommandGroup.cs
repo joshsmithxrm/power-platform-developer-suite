@@ -96,11 +96,12 @@ public static class PluginTracesCommandGroup
     };
 
     /// <summary>
-    /// Creates the 'plugintraces' command group with all subcommands.
+    /// Creates the 'plugin-traces' command group with all subcommands.
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("plugintraces", "Query and manage plugin trace logs: list, get, related, timeline, settings, delete");
+        var command = new Command("plugin-traces", "Query and manage plugin trace logs: list, get, related, timeline, settings, delete");
+        command.Aliases.Add("plugintraces"); // deprecated pre-#1246 name; see Infrastructure/CommandAliasDeprecation.cs
 
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());

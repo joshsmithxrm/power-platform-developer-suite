@@ -1,5 +1,7 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using PPDS.Cli.Commands.ImportJobs;
+using PPDS.Cli.Infrastructure;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.ImportJobs;
@@ -18,7 +20,7 @@ public class ImportJobsCommandGroupTests
     [Fact]
     public void Create_ReturnsCommandWithCorrectName()
     {
-        Assert.Equal("importjobs", _command.Name);
+        Assert.Equal("import-jobs", _command.Name);
     }
 
     [Fact]
@@ -94,6 +96,51 @@ public class ImportJobsCommandGroupTests
     public void EnvironmentOption_HasShortAlias()
     {
         Assert.Contains("-e", ImportJobsCommandGroup.EnvironmentOption.Aliases);
+    }
+
+    #endregion
+
+    #region Deprecated Alias Tests (#1246)
+
+    [Fact]
+    public void Create_OldNameIsRegisteredAsAlias()
+    {
+        Assert.Contains("importjobs", _command.Aliases);
+    }
+
+    [Fact]
+    public void OldAlias_SubcommandInvocation_ResolvesToSameGroup()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["importjobs", "list"]);
+
+        Assert.Empty(parseResult.Errors);
+        var groupResult = Assert.IsType<CommandResult>(parseResult.CommandResult.Parent);
+        Assert.Same(_command, groupResult.Command);
+    }
+
+    [Fact]
+    public void OldAlias_Invocation_EmitsDeprecationWarningOnStderr()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["importjobs", "list"]);
+        var writer = new StringWriter();
+
+        CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
+
+        Assert.Equal("warning: 'importjobs' is deprecated; use 'import-jobs'" + Environment.NewLine, writer.ToString());
+    }
+
+    [Fact]
+    public void NewName_Invocation_EmitsNoWarning()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["import-jobs", "list"]);
+        var writer = new StringWriter();
+
+        CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
+
+        Assert.Equal(string.Empty, writer.ToString());
     }
 
     #endregion
