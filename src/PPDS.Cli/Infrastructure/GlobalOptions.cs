@@ -196,8 +196,9 @@ public static class GlobalOptions
     }
 
     /// <summary>
-    /// Reads the output format from whichever --output-format instance the command carries
-    /// (<see cref="OutputFormat"/> or <see cref="CsvCapableOutputFormat"/>).
+    /// Reads the output format from whichever --output-format instance the command carries:
+    /// the shared <see cref="OutputFormat"/>/<see cref="CsvCapableOutputFormat"/> statics, or a
+    /// command-local instance (resolved by option name so <see cref="GetValues"/> stays correct).
     /// </summary>
     private static OutputFormat GetOutputFormatValue(System.CommandLine.ParseResult parseResult)
     {
@@ -209,6 +210,17 @@ public static class GlobalOptions
         if (parseResult.GetResult(OutputFormat) is { } result)
         {
             return result.GetValueOrDefault<OutputFormat>();
+        }
+
+        // Fallback for commands that declare their own local --output-format option
+        // instead of the shared statics — resolve it by name so we never silently
+        // fall through to Text.
+        foreach (var option in parseResult.CommandResult.Command.Options)
+        {
+            if (option.Name == "--output-format" && parseResult.GetResult(option) is { } localResult)
+            {
+                return localResult.GetValueOrDefault<OutputFormat>();
+            }
         }
 
         return Commands.OutputFormat.Text;

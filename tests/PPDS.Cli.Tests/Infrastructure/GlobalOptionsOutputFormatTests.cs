@@ -200,6 +200,33 @@ public class GlobalOptionsOutputFormatTests
         Assert.DoesNotContain("-f", formatOption.Aliases);
     }
 
+    [Fact]
+    public void GetValues_ResolvesCommandLocalOutputFormatInstance()
+    {
+        // Commands like `auth list` / `env list` declare their own --output-format instance
+        // (not the shared statics). GetValues must still resolve it — without the name-based
+        // fallback this returns the default Text (the bug Gemini flagged on GetOutputFormatValue).
+        var command = new Command("probe") { GlobalOptions.CreateOutputFormatOption() };
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
+        var result = command.Parse("--output-format Json");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Json, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    [Fact]
+    public void GetValues_LocalInstanceOmitted_DefaultsToText()
+    {
+        var command = new Command("probe") { GlobalOptions.CreateOutputFormatOption() };
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
+        var result = command.Parse("");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(OutputFormat.Text, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
     // ---- CSV emission still works for the shared query formatter ----
 
     [Fact]
