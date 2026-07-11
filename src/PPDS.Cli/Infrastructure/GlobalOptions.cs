@@ -80,6 +80,11 @@ public static class GlobalOptions
             DefaultValueFactory = _ => Commands.OutputFormat.Text,
             CustomParser = result =>
             {
+                if (result.Tokens.Count == 0)
+                {
+                    return Commands.OutputFormat.Text; // Missing value is reported by arity enforcement.
+                }
+
                 var token = result.Tokens[^1].Value;
                 if (Enum.TryParse<OutputFormat>(token, ignoreCase: true, out var format)
                     && Enum.IsDefined(format))

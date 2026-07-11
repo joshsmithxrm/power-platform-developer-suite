@@ -71,6 +71,17 @@ public class GlobalOptionsOutputFormatTests
         Assert.Contains("Invalid value '42' for --output-format", JoinedErrors(result));
     }
 
+    [Fact]
+    public void MissingValue_ReportsRequiredArgument_WithoutCrashing()
+    {
+        // --output-format with no value: arity enforcement reports the missing argument
+        // before the custom parser dereferences the (empty) token list. Must not throw.
+        var result = SolutionsCommandGroup.Create().Parse("list --output-format");
+
+        Assert.NotEmpty(result.Errors);
+        Assert.Contains("Required argument missing", JoinedErrors(result));
+    }
+
     // ---- #1078: Csv is rejected on commands without CSV rendering ----
 
     [Fact]
