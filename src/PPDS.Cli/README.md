@@ -28,25 +28,30 @@ ppds data export --schema schema.xml --output data.zip
 ## Command Structure
 
 ```
-ppds                      (default: launches TUI)
-├── interactive           Launch interactive TUI mode (also: -i, --interactive)
-├── auth                  Authentication profile management
-├── env                   Environment discovery and selection
-├── data                  Data operations (export, import, copy, load, update, delete, schema, users)
-├── plugins               Plugin registration management
-├── plugintraces          Browse and manage plugin trace logs
-├── query                 Execute FetchXML and SQL queries
-├── metadata              Browse entity and attribute metadata
-├── solutions             Manage Power Platform solutions
-├── importjobs            Monitor solution import jobs
-├── environmentvariables  Manage environment variables
-├── flows                 Manage cloud flows
-├── connections           List Power Platform connections
-├── connectionreferences  Manage connection references
-├── deployment-settings   Generate and sync deployment settings
-├── users                 Manage system users
-└── roles                 Manage security roles
+ppds                       (default: launches TUI)
+├── interactive            Launch interactive TUI mode (also: -i, --interactive)
+├── auth                   Authentication profile management
+├── env                    Environment discovery and selection
+├── data                   Data operations (export, import, copy, load, update, delete, schema, users)
+├── plugins                Plugin registration management
+├── plugin-traces          Browse and manage plugin trace logs
+├── query                  Execute FetchXML and SQL queries
+├── metadata               Browse entity and attribute metadata
+├── solutions              Manage Power Platform solutions
+├── import-jobs            Monitor solution import jobs
+├── environment-variables  Manage environment variables
+├── flows                  Manage cloud flows
+├── connections            List Power Platform connections
+├── connection-references  Manage connection references
+├── deployment-settings    Generate and sync deployment settings
+├── users                  Manage system users
+└── roles                  Manage security roles
 ```
+
+> **Deprecated aliases:** the old run-together names `plugintraces`, `environmentvariables`,
+> `connectionreferences`, and `importjobs` still work but print a one-line deprecation warning to stderr;
+> use the kebab-case names `plugin-traces`, `environment-variables`, `connection-references`, and
+> `import-jobs` instead (#1246).
 
 ---
 
@@ -621,29 +626,29 @@ Manage Power Platform solutions.
 | `ppds solutions publish` | Publish all customizations |
 | `ppds solutions url <name>` | Get Maker portal URL for a solution |
 
-### `ppds importjobs`
+### `ppds import-jobs`
 
 Monitor solution import jobs.
 
 | Command | Description |
 |---------|-------------|
-| `ppds importjobs list` | List recent import jobs (supports `--solution`, `--top`) |
-| `ppds importjobs get <id>` | Get import job details |
-| `ppds importjobs data <id>` | Get raw XML data for an import job |
-| `ppds importjobs wait <id>` | Wait for import job to complete |
-| `ppds importjobs url <id>` | Get Maker portal URL for an import job |
+| `ppds import-jobs list` | List recent import jobs (supports `--solution`, `--top`) |
+| `ppds import-jobs get <id>` | Get import job details |
+| `ppds import-jobs data <id>` | Get raw XML data for an import job |
+| `ppds import-jobs wait <id>` | Wait for import job to complete |
+| `ppds import-jobs url <id>` | Get Maker portal URL for an import job |
 
-### `ppds environmentvariables`
+### `ppds environment-variables`
 
 Manage environment variables.
 
 | Command | Description |
 |---------|-------------|
-| `ppds environmentvariables list` | List environment variables (supports `--solution`) |
-| `ppds environmentvariables get <name>` | Get environment variable details |
-| `ppds environmentvariables set <name> <value>` | Set environment variable value |
-| `ppds environmentvariables export` | Export for deployment settings (supports `--solution`, `--output`) |
-| `ppds environmentvariables url <name>` | Get Maker portal URL |
+| `ppds environment-variables list` | List environment variables (supports `--solution`) |
+| `ppds environment-variables get <name>` | Get environment variable details |
+| `ppds environment-variables set <name> <value>` | Set environment variable value |
+| `ppds environment-variables export` | Export for deployment settings (supports `--solution`, `--output`) |
+| `ppds environment-variables url <name>` | Get Maker portal URL |
 
 ### `ppds flows`
 
@@ -664,17 +669,17 @@ List Power Platform connections.
 | `ppds connections list` | List connections (supports `--connector`) |
 | `ppds connections get <id>` | Get connection details by ID |
 
-### `ppds connectionreferences`
+### `ppds connection-references`
 
 Manage connection references with orphan detection.
 
 | Command | Description |
 |---------|-------------|
-| `ppds connectionreferences list` | List connection references (supports `--solution`, `--orphaned`) |
-| `ppds connectionreferences get <name>` | Get connection reference details |
-| `ppds connectionreferences flows <name>` | List flows using a connection reference |
-| `ppds connectionreferences connections <name>` | Show bound connection details |
-| `ppds connectionreferences analyze` | Analyze flow-to-connection-reference relationships |
+| `ppds connection-references list` | List connection references (supports `--solution`, `--orphaned`) |
+| `ppds connection-references get <name>` | Get connection reference details |
+| `ppds connection-references flows <name>` | List flows using a connection reference |
+| `ppds connection-references connections <name>` | Show bound connection details |
+| `ppds connection-references analyze` | Analyze flow-to-connection-reference relationships |
 
 ### `ppds deployment-settings`
 
@@ -707,19 +712,19 @@ Manage security roles.
 | `ppds roles assign <role> --user <user>` | Assign a role to a user |
 | `ppds roles remove <role> --user <user>` | Remove a role from a user |
 
-### `ppds plugintraces`
+### `ppds plugin-traces`
 
 Browse and manage plugin trace logs for debugging plugin executions.
 
 | Command | Description |
 |---------|-------------|
-| `ppds plugintraces list` | List plugin traces with filtering |
-| `ppds plugintraces get <trace-id>` | Get full trace details |
-| `ppds plugintraces related [trace-id]` | Find related traces by correlation ID or record |
-| `ppds plugintraces timeline [trace-id]` | View hierarchical execution timeline |
-| `ppds plugintraces delete [trace-id]` | Delete plugin traces |
-| `ppds plugintraces settings get` | Get current plugin trace settings |
-| `ppds plugintraces settings set <value>` | Set plugin trace settings (Off, Exception, All) |
+| `ppds plugin-traces list` | List plugin traces with filtering |
+| `ppds plugin-traces get <trace-id>` | Get full trace details |
+| `ppds plugin-traces related [trace-id]` | Find related traces by correlation ID or record |
+| `ppds plugin-traces timeline [trace-id]` | View hierarchical execution timeline |
+| `ppds plugin-traces delete [trace-id]` | Delete plugin traces |
+| `ppds plugin-traces settings get` | Get current plugin trace settings |
+| `ppds plugin-traces settings set <value>` | Set plugin trace settings (Off, Exception, All) |
 
 #### List
 
@@ -727,36 +732,36 @@ List plugin traces with optional filtering:
 
 ```bash
 # List recent traces
-ppds plugintraces list
+ppds plugin-traces list
 
 # Filter by plugin type
-ppds plugintraces list --type "MyPlugin.AccountPlugin"
+ppds plugin-traces list --type "MyPlugin.AccountPlugin"
 
 # Filter by message
-ppds plugintraces list --message Create
+ppds plugin-traces list --message Create
 
 # Filter by entity
-ppds plugintraces list --entity account
+ppds plugin-traces list --entity account
 
 # Show only errors
-ppds plugintraces list --errors-only
+ppds plugin-traces list --errors-only
 
 # Quick time filters
-ppds plugintraces list --last-hour
-ppds plugintraces list --last-24h
+ppds plugin-traces list --last-hour
+ppds plugin-traces list --last-24h
 
 # Filter by execution mode
-ppds plugintraces list --async-only       # Only async plugins
-ppds plugintraces list --mode Synchronous # Only sync plugins
+ppds plugin-traces list --async-only       # Only async plugins
+ppds plugin-traces list --mode Synchronous # Only sync plugins
 
 # Show only nested traces (depth > 1)
-ppds plugintraces list --recursive
+ppds plugin-traces list --recursive
 
 # Filter by record (entity name)
-ppds plugintraces list --record account
+ppds plugin-traces list --record account
 
 # Combine filters
-ppds plugintraces list --entity account --errors-only --last-24h --top 50
+ppds plugin-traces list --entity account --errors-only --last-24h --top 50
 ```
 
 Options:
@@ -782,7 +787,7 @@ Options:
 Get full details for a specific trace:
 
 ```bash
-ppds plugintraces get 00000000-0000-0000-0000-000000000001
+ppds plugin-traces get 00000000-0000-0000-0000-000000000001
 ```
 
 Returns trace details including message block, exception details, configuration, and secure configuration.
@@ -793,13 +798,13 @@ Find traces related by correlation ID (same transaction) or record:
 
 ```bash
 # From a trace ID (looks up its correlation ID)
-ppds plugintraces related 00000000-0000-0000-0000-000000000001
+ppds plugin-traces related 00000000-0000-0000-0000-000000000001
 
 # By correlation ID directly
-ppds plugintraces related --correlation-id 00000000-0000-0000-0000-000000000002
+ppds plugin-traces related --correlation-id 00000000-0000-0000-0000-000000000002
 
 # By record (entity name)
-ppds plugintraces related --record account
+ppds plugin-traces related --record account
 ```
 
 Options:
@@ -813,10 +818,10 @@ View hierarchical execution timeline for correlated traces:
 
 ```bash
 # From a trace ID
-ppds plugintraces timeline 00000000-0000-0000-0000-000000000001
+ppds plugin-traces timeline 00000000-0000-0000-0000-000000000001
 
 # By correlation ID
-ppds plugintraces timeline --correlation-id 00000000-0000-0000-0000-000000000002
+ppds plugin-traces timeline --correlation-id 00000000-0000-0000-0000-000000000002
 ```
 
 Shows nested execution tree with depth indicators, timing, and status.
@@ -827,19 +832,19 @@ Delete plugin traces:
 
 ```bash
 # Single trace
-ppds plugintraces delete 00000000-0000-0000-0000-000000000001
+ppds plugin-traces delete 00000000-0000-0000-0000-000000000001
 
 # Multiple traces by ID
-ppds plugintraces delete --ids id1,id2,id3
+ppds plugin-traces delete --ids id1,id2,id3
 
 # Delete traces older than a date
-ppds plugintraces delete --older-than "2024-01-01"
+ppds plugin-traces delete --older-than "2024-01-01"
 
 # Delete all traces (requires --force)
-ppds plugintraces delete --all --force
+ppds plugin-traces delete --all --force
 
 # Preview without deleting
-ppds plugintraces delete --older-than "2024-01-01" --dry-run
+ppds plugin-traces delete --older-than "2024-01-01" --dry-run
 ```
 
 Options:
@@ -855,12 +860,12 @@ Manage plugin trace logging settings:
 
 ```bash
 # Get current setting
-ppds plugintraces settings get
+ppds plugin-traces settings get
 
 # Set trace level
-ppds plugintraces settings set Off        # Disable tracing
-ppds plugintraces settings set Exception  # Trace only exceptions
-ppds plugintraces settings set All        # Trace all executions
+ppds plugin-traces settings set Off        # Disable tracing
+ppds plugin-traces settings set Exception  # Trace only exceptions
+ppds plugin-traces settings set All        # Trace all executions
 ```
 
 ---

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Kebab-case top-level command names** — `ppds plugintraces` → `ppds plugin-traces`, `ppds environmentvariables` → `ppds environment-variables`, `ppds connectionreferences` → `ppds connection-references`, and `ppds importjobs` → `ppds import-jobs` are now the canonical names, consistent with `deployment-settings`, `service-endpoints`, and `custom-apis`. The old run-together names still work as deprecated aliases (`command.Aliases`) and print a one-line `warning: '<old>' is deprecated; use '<new>'` to stderr; `webresources` is intentionally exempt as a platform compound term (#1246).
+
 ## [1.2.0] - 2026-06-17
 
 ### Added

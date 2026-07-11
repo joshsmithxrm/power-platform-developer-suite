@@ -148,6 +148,12 @@ public static class Program
         try
         {
             var parseResult = rootCommand.Parse(args);
+
+            // Deprecated command-name aliases (#1246, e.g. `plugintraces` -> `plugin-traces`)
+            // print a one-line warning to stderr. Runs for every invocation shape (subcommands,
+            // --help, parse errors) since it only inspects the matched command chain.
+            CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult);
+
             return await parseResult.InvokeAsync();
         }
         catch (OperationCanceledException)

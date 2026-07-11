@@ -220,10 +220,10 @@ The CLI organizes 80+ commands into 18 groups:
 | `metadata` | entities, entity, attributes, keys, relationships, optionset, optionsets | Schema inspection |
 | `solutions` | list, get, export, import, publish, components, url | Solution management |
 | `import-jobs` | list, get, data, url, wait | Import monitoring |
-| `env-variables` | list, get, set, export, url | Environment variables |
+| `environment-variables` | list, get, set, export, url | Environment variables |
 | `flows` | list, get, url | Power Automate flows |
 | `connections` | list, get | Connection management |
-| `connection-refs` | list, get, analyze, connections, flows | Connection references |
+| `connection-references` | list, get, analyze, connections, flows | Connection references |
 | `deployment-settings` | generate, validate, sync | ALM settings files |
 | `users` | list, show, roles | User management |
 | `roles` | list, show, assign, remove | Security roles |

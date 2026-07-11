@@ -118,7 +118,7 @@ public static class ImportCommand
                 Console.Error.WriteLine($"Import started. Job ID: {importJobId}");
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("To monitor progress:");
-                Console.Error.WriteLine($"  ppds importjobs wait {importJobId}");
+                Console.Error.WriteLine($"  ppds import-jobs wait {importJobId}");
             }
 
             return ExitCodes.Success;

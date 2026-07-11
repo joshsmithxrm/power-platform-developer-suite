@@ -32,7 +32,7 @@ Installed via `dotnet tool install -g PPDS.Cli`. Exposes every capability the li
 - **Custom APIs and Data Providers** — `ppds custom-apis` and `ppds data-providers` for full lifecycle management, including virtual-entity providers.
 - **Solutions / Import Jobs / Environment Variables / Web Resources** — Dedicated command groups with Maker Portal URL helpers.
 - **Users and Roles** — `ppds users` and `ppds roles` for user management and role assignment.
-- **Flows, Connections, Connection References** — Including orphan detection via `ppds connectionreferences analyze`.
+- **Flows, Connections, Connection References** — Including orphan detection via `ppds connection-references analyze`.
 - **Deployment Settings** — `ppds deployment-settings generate|sync|validate` (PAC-compatible).
 - **Global options** — `--quiet`, `--verbose`, `--debug`, `--correlation-id`, `--output-format Text|Json`, `--environment` override.
 - **Self-update** — `ppds version --check` and `ppds update` query NuGet and install the latest.

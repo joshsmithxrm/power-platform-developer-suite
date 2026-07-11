@@ -1,5 +1,7 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using PPDS.Cli.Commands.PluginTraces;
+using PPDS.Cli.Infrastructure;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.PluginTraces;
@@ -18,7 +20,7 @@ public class PluginTracesCommandGroupTests
     [Fact]
     public void Create_ReturnsCommandWithCorrectName()
     {
-        Assert.Equal("plugintraces", _command.Name);
+        Assert.Equal("plugin-traces", _command.Name);
     }
 
     [Fact]
@@ -366,6 +368,51 @@ public class PluginTracesCommandGroupTests
     public void EnvironmentOption_HasShortAlias()
     {
         Assert.Contains("-e", PluginTracesCommandGroup.EnvironmentOption.Aliases);
+    }
+
+    #endregion
+
+    #region Deprecated Alias Tests (#1246)
+
+    [Fact]
+    public void Create_OldNameIsRegisteredAsAlias()
+    {
+        Assert.Contains("plugintraces", _command.Aliases);
+    }
+
+    [Fact]
+    public void OldAlias_SubcommandInvocation_ResolvesToSameGroup()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["plugintraces", "list"]);
+
+        Assert.Empty(parseResult.Errors);
+        var groupResult = Assert.IsType<CommandResult>(parseResult.CommandResult.Parent);
+        Assert.Same(_command, groupResult.Command);
+    }
+
+    [Fact]
+    public void OldAlias_Invocation_EmitsDeprecationWarningOnStderr()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["plugintraces", "list"]);
+        using var writer = new StringWriter();
+
+        CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
+
+        Assert.Equal("warning: 'plugintraces' is deprecated; use 'plugin-traces'" + Environment.NewLine, writer.ToString());
+    }
+
+    [Fact]
+    public void NewName_Invocation_EmitsNoWarning()
+    {
+        var root = new RootCommand { _command };
+        var parseResult = root.Parse(["plugin-traces", "list"]);
+        using var writer = new StringWriter();
+
+        CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult, writer);
+
+        Assert.Equal(string.Empty, writer.ToString());
     }
 
     #endregion

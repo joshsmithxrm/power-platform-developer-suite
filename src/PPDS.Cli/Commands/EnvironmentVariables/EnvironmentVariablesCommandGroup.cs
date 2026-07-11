@@ -24,11 +24,11 @@ public static class EnvironmentVariablesCommandGroup
     };
 
     /// <summary>
-    /// Creates the environmentvariables command group.
+    /// Creates the environment-variables command group.
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("environmentvariables", "Manage environment variables")
+        var command = new Command("environment-variables", "Manage environment variables")
         {
             ListCommand.Create(),
             GetCommand.Create(),
@@ -36,6 +36,7 @@ public static class EnvironmentVariablesCommandGroup
             ExportCommand.Create(),
             UrlCommand.Create()
         };
+        command.Aliases.Add("environmentvariables"); // deprecated pre-#1246 name; see Infrastructure/CommandAliasDeprecation.cs
 
         return command;
     }

@@ -26,11 +26,12 @@ public static class ConnectionReferencesCommandGroup
     };
 
     /// <summary>
-    /// Creates the connectionreferences command group.
+    /// Creates the connection-references command group.
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("connectionreferences", "Manage connection references");
+        var command = new Command("connection-references", "Manage connection references");
+        command.Aliases.Add("connectionreferences"); // deprecated pre-#1246 name; see Infrastructure/CommandAliasDeprecation.cs
 
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());

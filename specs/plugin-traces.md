@@ -94,16 +94,16 @@ VS Code panel communicates through the daemon (JSON-RPC over stdio). TUI, MCP, a
 
 **Trace Investigation:**
 
-1. **List traces**: `ppds plugintraces list --errors-only --last-hour` to find recent failures
-2. **Get details**: `ppds plugintraces get <trace-id>` to see exception and trace output
-3. **View timeline**: `ppds plugintraces timeline <trace-id>` to see full execution chain
-4. **Find related**: `ppds plugintraces related <trace-id>` to see all traces from same request
+1. **List traces**: `ppds plugin-traces list --errors-only --last-hour` to find recent failures
+2. **Get details**: `ppds plugin-traces get <trace-id>` to see exception and trace output
+3. **View timeline**: `ppds plugin-traces timeline <trace-id>` to see full execution chain
+4. **Find related**: `ppds plugin-traces related <trace-id>` to see all traces from same request
 
 **Trace Cleanup:**
 
-1. **Preview**: `ppds plugintraces delete --older-than 7d --dry-run` to count traces
-2. **Delete**: `ppds plugintraces delete --older-than 7d` to remove old traces
-3. **Delete all**: `ppds plugintraces delete --all --force` to clear all traces
+1. **Preview**: `ppds plugin-traces delete --older-than 7d --dry-run` to count traces
+2. **Delete**: `ppds plugin-traces delete --older-than 7d` to remove old traces
+3. **Delete all**: `ppds plugin-traces delete --all --force` to clear all traces
 
 ### RPC Endpoints
 
@@ -443,7 +443,7 @@ var deleted = await traceService.DeleteOlderThanAsync(
 
 All commands accept `--profile` and `--environment` options for authentication.
 
-### `ppds plugintraces list`
+### `ppds plugin-traces list`
 
 Lists traces with comprehensive filtering. Supports CSV and JSON output formats.
 
@@ -471,11 +471,11 @@ Lists traces with comprehensive filtering. Supports CSV and JSON output formats.
 | `--top, -n` | Max results (default: 100) |
 | `--order-by` | Sort field (default: createdon desc) |
 
-### `ppds plugintraces get <trace-id>`
+### `ppds plugin-traces get <trace-id>`
 
 Displays full trace details: basic info, timing, correlation, exception details, trace output, and configuration.
 
-### `ppds plugintraces related`
+### `ppds plugin-traces related`
 
 Finds all traces sharing a correlation ID.
 
@@ -485,7 +485,7 @@ Finds all traces sharing a correlation ID.
 | `--correlation-id` | Direct correlation ID filter |
 | `--record` | Filter by record (entity or entity/guid) |
 
-### `ppds plugintraces timeline`
+### `ppds plugin-traces timeline`
 
 Displays plugin execution as a hierarchical tree showing parent-child relationships and timing.
 
@@ -494,15 +494,15 @@ Displays plugin execution as a hierarchical tree showing parent-child relationsh
 | `<trace-id>` | Get correlation ID from this trace (optional) |
 | `--correlation-id` | Direct correlation ID filter |
 
-### `ppds plugintraces settings get`
+### `ppds plugin-traces settings get`
 
 Shows the current plugin trace logging setting (Off, Exception, or All).
 
-### `ppds plugintraces settings set <value>`
+### `ppds plugin-traces settings set <value>`
 
 Updates the organization-level trace logging setting. Values: `off`, `exception`, `all`.
 
-### `ppds plugintraces delete`
+### `ppds plugin-traces delete`
 
 Deletes plugin trace logs with multiple modes.
 
