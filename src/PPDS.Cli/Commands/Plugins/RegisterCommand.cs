@@ -551,7 +551,7 @@ public static class RegisterCommand
                 SecureConfiguration = secureConfig
             };
 
-            var stepId = await registrationService.UpsertStepAsync(pluginType.Id, eventHandlerType, stepConfig, messageId.Value, filterId, solution, cancellationToken);
+            var stepId = await registrationService.UpsertStepAsync(pluginType.Id, eventHandlerType, stepConfig, messageId.Value, filterId, solution, cancellationToken: cancellationToken);
 
             var result = new RegisterStepResult
             {

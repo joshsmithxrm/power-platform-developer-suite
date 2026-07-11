@@ -1,6 +1,11 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using Moq;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Plugins.Registration;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -181,6 +186,109 @@ public class DeployCommandTests : IDisposable
             "--dry-run " +
             "--output-format Json");
         Assert.Empty(result.Errors);
+    }
+
+    #endregion
+
+    #region Deployment Matching Tests (#1295)
+
+    // Environment holds two same-named steps (PreOp + PostOp); config declares the PostOp step plus a
+    // brand-new Create step. Deploy must update the exact PostOp row by GUID, force-create the new
+    // step, and (with --clean) delete the orphaned PreOp row by GUID — never abort on the duplicate name.
+    [Fact]
+    public async Task DeployAssemblyAsync_SameNamedSteps_UpdatesPaired_ForceCreatesNew_AndCleansOrphan()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+        var preId = Guid.NewGuid();
+        const string sharedName = "MyPlugin.Handler: Update of account";
+
+        // A real (empty) file so File.Exists passes for the classic-assembly path.
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginStepInfo>
+                {
+                    new() { Id = postId, Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous" },
+                    new() { Id = preId, Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PreOperation", Mode = "Synchronous" }
+                });
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.DeleteStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var assemblyConfig = new PluginAssemblyConfig
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Name = sharedName, Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" },
+                            new PluginStepConfig { Message = "Create", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            // Act
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, assemblyConfig, Path.GetTempPath(),
+                solutionOverride: null, clean: true, dryRun: false, globalOptions, CancellationToken.None);
+
+            // Assert - the assembly deployed successfully.
+            Assert.True(result.Success);
+
+            // Paired Update step updates the exact PostOperation row by GUID.
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Message == "Update"),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string?>(),
+                It.Is<StepIdentityResolution?>(r => r != null && r.ExistingStepId == postId),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // New Create step is force-created (null step id).
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Message == "Create"),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string?>(),
+                It.Is<StepIdentityResolution?>(r => r != null && r.ExistingStepId == null),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // The orphaned PreOperation row is deleted by its GUID.
+            mock.Verify(s => s.DeleteStepAsync(preId, It.IsAny<CancellationToken>()), Times.Once);
+            mock.Verify(s => s.DeleteStepAsync(postId, It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
     }
 
     #endregion

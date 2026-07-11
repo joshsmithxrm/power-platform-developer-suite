@@ -1248,29 +1248,63 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         Guid messageId,
         Guid? filterId,
         string? solutionName = null,
+        StepIdentityResolution? identity = null,
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.step.upsert");
-        // Check if step exists by name
-        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
-        {
-            ColumnSet = new ColumnSet(
-                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
-                SdkMessageProcessingStep.Fields.StateCode,
-                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
-                }
-            }
-        };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
-        var existing = results.Entities.FirstOrDefault();
+
+        // Resolve the row to write:
+        //  - identity == null                    -> legacy behavior: locate by (EventHandler, Name).
+        //  - identity with a non-null step id     -> update exactly that GUID (never a same-named sibling).
+        //  - identity with a null step id         -> force-create: skip the lookup entirely.
+        var columns = new ColumnSet(
+            SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
+            SdkMessageProcessingStep.Fields.StateCode,
+            SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
+
+        Entity? existing;
+        if (identity is null)
+        {
+            // Check if step exists by name
+            var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+            {
+                ColumnSet = columns,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, eventHandlerId),
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
+                    }
+                }
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+            existing = results.Entities.FirstOrDefault();
+        }
+        else if (identity.ExistingStepId is { } existingStepId)
+        {
+            var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+            {
+                ColumnSet = columns,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, existingStepId)
+                    }
+                }
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+            existing = results.Entities.FirstOrDefault();
+        }
+        else
+        {
+            existing = null;
+        }
 
         var entity = new SdkMessageProcessingStep
         {

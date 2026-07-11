@@ -120,7 +120,9 @@ public static class DiffCommand
             }
             else
             {
-                if (!hasDrift)
+                var hasWarnings = allDrifts.Any(d => d.Warnings.Count > 0);
+
+                if (!hasDrift && !hasWarnings)
                 {
                     Console.Error.WriteLine("No drift detected. Environment matches configuration.");
                     return ExitCodes.Success;
@@ -128,10 +130,13 @@ public static class DiffCommand
 
                 foreach (var drift in allDrifts)
                 {
-                    if (!drift.HasDrift)
+                    if (!drift.HasDrift && drift.Warnings.Count == 0)
                         continue;
 
                     Console.Error.WriteLine($"Assembly: {drift.AssemblyName}");
+
+                    foreach (var warning in drift.Warnings)
+                        Console.Error.WriteLine($"  [!] Warning: {warning}");
 
                     if (drift.AssemblyMissing)
                     {
@@ -193,7 +198,13 @@ public static class DiffCommand
         }
     }
 
-    private static async Task<AssemblyDrift> ComputeDriftAsync(
+    /// <summary>
+    /// Computes drift between the configured assembly and its environment state, matching steps by
+    /// functional identity (<see cref="PluginStepMatcher"/>) rather than by mutable display name so an
+    /// environment holding two same-named steps no longer aborts the diff.
+    /// </summary>
+    /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
+    internal static async Task<AssemblyDrift> ComputeDriftAsync(
         IPluginRegistrationService service,
         PluginAssemblyConfig config)
     {
@@ -213,171 +224,152 @@ public static class DiffCommand
         // Get all types for this assembly
         var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id);
 
-        // Build a map of all configured steps. Duplicate resolved names within a config file
-        // are blocked earlier by PluginRegistrationConfig.Validate(); if we still hit one here
-        // (e.g., Validate() was skipped), throw a PpdsException so the mismatch is visible in
-        // diff output instead of silently collapsing.
-        var configuredSteps = new Dictionary<string, (PluginTypeConfig Type, PluginStepConfig Step)>();
+        // Configured (type, step) pairs. Config-side duplicate resolved names are already blocked by
+        // PluginRegistrationConfig.Validate() (per-type name uniqueness); the matcher's zip semantics
+        // handle any residual identity collision without collapsing entries.
+        var configured = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
         foreach (var typeConfig in config.Types)
         {
             foreach (var stepConfig in typeConfig.Steps)
-            {
-                var key = stepConfig.Name ?? $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
-                if (configuredSteps.ContainsKey(key))
-                {
-                    throw new PpdsException(
-                        ErrorCodes.Operation.Duplicate,
-                        $"Assembly '{config.Name}' has multiple configured steps resolving to name '{key}'. " +
-                        "Provide unique explicit Name values so the diff output reflects every step.");
-                }
-                configuredSteps[key] = (typeConfig, stepConfig);
-            }
+                configured.Add((typeConfig, stepConfig));
         }
 
-        // Get all existing steps. Duplicate names in the environment are a real (though rare)
-        // possibility — surface them rather than letting one silently overwrite the other.
-        var existingSteps = new Dictionary<string, (PluginTypeInfo Type, PluginStepInfo Step)>();
+        // Existing (type, step) pairs. The owning type name comes from the enclosing loop so identity
+        // is attributed to the correct type. Duplicate names in the environment no longer throw.
+        var existing = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
         foreach (var existingType in existingTypes)
         {
             var steps = await service.ListStepsForTypeAsync(existingType.Id);
             foreach (var step in steps)
-            {
-                if (existingSteps.TryGetValue(step.Name, out var priorEntry))
-                {
-                    throw new PpdsException(
-                        ErrorCodes.Operation.Duplicate,
-                        $"Environment contains duplicate plugin step name '{step.Name}' " +
-                        $"(ids: {priorEntry.Step.Id}, {step.Id}) under assembly '{config.Name}'. " +
-                        "Rename or delete one of the conflicting steps in the environment before diffing.");
-                }
-                existingSteps[step.Name] = (existingType, step);
-            }
+                existing.Add((existingType, step));
         }
 
-        // Find missing steps (in config, not in environment)
-        foreach (var (stepName, (typeConfig, stepConfig)) in configuredSteps)
+        var matches = PluginStepMatcher.Match(
+            configured,
+            existing,
+            onResidualCollision: (id, configCount, envCount) =>
+                drift.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount)));
+
+        foreach (var match in matches)
         {
-            if (!existingSteps.ContainsKey(stepName))
+            if (match.IsMissing)
             {
+                var typeConfig = match.TypeConfig!;
+                var stepConfig = match.Config!;
                 drift.MissingSteps.Add(new StepDrift
                 {
                     TypeName = typeConfig.TypeName,
-                    StepName = stepName,
+                    StepName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig),
                     Message = stepConfig.Message,
                     Entity = stepConfig.Entity,
                     Stage = stepConfig.Stage,
                     Mode = stepConfig.Mode
                 });
             }
-        }
-
-        // Find orphaned steps (in environment, not in config)
-        foreach (var (stepName, (typeInfo, stepInfo)) in existingSteps)
-        {
-            if (!configuredSteps.ContainsKey(stepName))
+            else if (match.IsOrphaned)
             {
+                var typeInfo = match.EnvType!;
+                var stepInfo = match.Env!;
                 drift.OrphanedSteps.Add(new StepDrift
                 {
                     TypeName = typeInfo.TypeName,
-                    StepName = stepName,
+                    StepName = stepInfo.Name,
                     Message = stepInfo.Message,
                     Entity = stepInfo.PrimaryEntity,
                     Stage = stepInfo.Stage,
                     Mode = stepInfo.Mode
                 });
             }
-        }
-
-        // Find modified steps and check images
-        foreach (var (stepName, (typeConfig, stepConfig)) in configuredSteps)
-        {
-            if (!existingSteps.TryGetValue(stepName, out var existing))
-                continue;
-
-            var (_, stepInfo) = existing;
-
-            // Compare step properties
-            var changes = new List<PropertyChange>();
-
-            if (!string.Equals(stepConfig.Stage, stepInfo.Stage, StringComparison.OrdinalIgnoreCase))
-                changes.Add(new PropertyChange("stage", stepConfig.Stage, stepInfo.Stage));
-
-            if (!string.Equals(stepConfig.Mode, stepInfo.Mode, StringComparison.OrdinalIgnoreCase))
-                changes.Add(new PropertyChange("mode", stepConfig.Mode, stepInfo.Mode));
-
-            if (stepConfig.ExecutionOrder != stepInfo.ExecutionOrder)
-                changes.Add(new PropertyChange("executionOrder", stepConfig.ExecutionOrder.ToString(), stepInfo.ExecutionOrder.ToString()));
-
-            var configFiltering = NormalizeAttributes(stepConfig.FilteringAttributes);
-            var envFiltering = NormalizeAttributes(stepInfo.FilteringAttributes);
-            if (!string.Equals(configFiltering, envFiltering, StringComparison.OrdinalIgnoreCase))
-                changes.Add(new PropertyChange("filteringAttributes", configFiltering ?? "(none)", envFiltering ?? "(none)"));
-
-            if (changes.Count > 0)
+            else
             {
-                drift.ModifiedSteps.Add(new ModifiedStepDrift
-                {
-                    TypeName = typeConfig.TypeName,
-                    StepName = stepName,
-                    Changes = changes
-                });
-            }
+                var typeConfig = match.TypeConfig!;
+                var stepConfig = match.Config!;
+                var stepInfo = match.Env!;
+                var resolvedName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
 
-            // Compare images
-            var existingImages = await service.ListImagesForStepAsync(stepInfo.Id);
-            var existingImageMap = existingImages.ToDictionary(i => i.Name, i => i);
-            var configImageMap = stepConfig.Images.ToDictionary(i => i.Name, i => i);
+                // Compare step properties. Stage and mode are part of the identity now — a paired step
+                // shares them by construction, so they can never differ here and are no longer compared.
+                var changes = new List<PropertyChange>();
 
-            // Missing images
-            foreach (var imageConfig in stepConfig.Images)
-            {
-                if (!existingImageMap.ContainsKey(imageConfig.Name))
+                // Name is no longer identity: a rename leaves behavior intact but should still surface,
+                // and a deploy would converge the environment name to the configured one.
+                if (!string.Equals(resolvedName, stepInfo.Name, StringComparison.Ordinal))
+                    changes.Add(new PropertyChange("name", resolvedName, stepInfo.Name));
+
+                if (stepConfig.ExecutionOrder != stepInfo.ExecutionOrder)
+                    changes.Add(new PropertyChange("executionOrder", stepConfig.ExecutionOrder.ToString(), stepInfo.ExecutionOrder.ToString()));
+
+                var configFiltering = NormalizeAttributes(stepConfig.FilteringAttributes);
+                var envFiltering = NormalizeAttributes(stepInfo.FilteringAttributes);
+                if (!string.Equals(configFiltering, envFiltering, StringComparison.OrdinalIgnoreCase))
+                    changes.Add(new PropertyChange("filteringAttributes", configFiltering ?? "(none)", envFiltering ?? "(none)"));
+
+                if (changes.Count > 0)
                 {
-                    drift.MissingImages.Add(new ImageDrift
+                    drift.ModifiedSteps.Add(new ModifiedStepDrift
                     {
-                        StepName = stepName,
-                        ImageName = imageConfig.Name
+                        TypeName = typeConfig.TypeName,
+                        StepName = resolvedName,
+                        Changes = changes
                     });
                 }
-            }
 
-            // Orphaned images
-            foreach (var imageInfo in existingImages)
-            {
-                if (!configImageMap.ContainsKey(imageInfo.Name))
+                // Compare images
+                var existingImages = await service.ListImagesForStepAsync(stepInfo.Id);
+                var existingImageMap = existingImages.ToDictionary(i => i.Name, i => i);
+                var configImageMap = stepConfig.Images.ToDictionary(i => i.Name, i => i);
+
+                // Missing images
+                foreach (var imageConfig in stepConfig.Images)
                 {
-                    drift.OrphanedImages.Add(new ImageDrift
+                    if (!existingImageMap.ContainsKey(imageConfig.Name))
                     {
-                        StepName = stepName,
-                        ImageName = imageInfo.Name
-                    });
+                        drift.MissingImages.Add(new ImageDrift
+                        {
+                            StepName = resolvedName,
+                            ImageName = imageConfig.Name
+                        });
+                    }
                 }
-            }
 
-            // Modified images
-            foreach (var imageConfig in stepConfig.Images)
-            {
-                if (!existingImageMap.TryGetValue(imageConfig.Name, out var imageInfo))
-                    continue;
-
-                var imageChanges = new List<PropertyChange>();
-
-                if (!string.Equals(imageConfig.ImageType, imageInfo.ImageType, StringComparison.OrdinalIgnoreCase))
-                    imageChanges.Add(new PropertyChange("imageType", imageConfig.ImageType, imageInfo.ImageType));
-
-                var configAttrs = NormalizeAttributes(imageConfig.Attributes);
-                var envAttrs = NormalizeAttributes(imageInfo.Attributes);
-                if (!string.Equals(configAttrs, envAttrs, StringComparison.OrdinalIgnoreCase))
-                    imageChanges.Add(new PropertyChange("attributes", configAttrs ?? "(all)", envAttrs ?? "(all)"));
-
-                if (imageChanges.Count > 0)
+                // Orphaned images
+                foreach (var imageInfo in existingImages)
                 {
-                    drift.ModifiedImages.Add(new ModifiedImageDrift
+                    if (!configImageMap.ContainsKey(imageInfo.Name))
                     {
-                        StepName = stepName,
-                        ImageName = imageConfig.Name,
-                        Changes = imageChanges
-                    });
+                        drift.OrphanedImages.Add(new ImageDrift
+                        {
+                            StepName = resolvedName,
+                            ImageName = imageInfo.Name
+                        });
+                    }
+                }
+
+                // Modified images
+                foreach (var imageConfig in stepConfig.Images)
+                {
+                    if (!existingImageMap.TryGetValue(imageConfig.Name, out var imageInfo))
+                        continue;
+
+                    var imageChanges = new List<PropertyChange>();
+
+                    if (!string.Equals(imageConfig.ImageType, imageInfo.ImageType, StringComparison.OrdinalIgnoreCase))
+                        imageChanges.Add(new PropertyChange("imageType", imageConfig.ImageType, imageInfo.ImageType));
+
+                    var configAttrs = NormalizeAttributes(imageConfig.Attributes);
+                    var envAttrs = NormalizeAttributes(imageInfo.Attributes);
+                    if (!string.Equals(configAttrs, envAttrs, StringComparison.OrdinalIgnoreCase))
+                        imageChanges.Add(new PropertyChange("attributes", configAttrs ?? "(all)", envAttrs ?? "(all)"));
+
+                    if (imageChanges.Count > 0)
+                    {
+                        drift.ModifiedImages.Add(new ModifiedImageDrift
+                        {
+                            StepName = resolvedName,
+                            ImageName = imageConfig.Name,
+                            Changes = imageChanges
+                        });
+                    }
                 }
             }
         }
@@ -402,7 +394,7 @@ public static class DiffCommand
 
     #region Drift Models
 
-    private sealed class AssemblyDrift
+    internal sealed class AssemblyDrift
     {
         [JsonPropertyName("assemblyName")]
         public string AssemblyName { get; set; } = string.Empty;
@@ -428,6 +420,13 @@ public static class DiffCommand
         [JsonPropertyName("modifiedImages")]
         public List<ModifiedImageDrift> ModifiedImages { get; set; } = [];
 
+        /// <summary>
+        /// Advisory messages (e.g., residual functional-identity collisions where multiple steps
+        /// share an identity). Warnings do not by themselves constitute drift.
+        /// </summary>
+        [JsonPropertyName("warnings")]
+        public List<string> Warnings { get; set; } = [];
+
         [JsonIgnore]
         public bool HasDrift => AssemblyMissing ||
                                 MissingSteps.Count > 0 ||
@@ -438,7 +437,7 @@ public static class DiffCommand
                                 ModifiedImages.Count > 0;
     }
 
-    private sealed class StepDrift
+    internal sealed class StepDrift
     {
         [JsonPropertyName("typeName")]
         public string TypeName { get; set; } = string.Empty;
@@ -459,7 +458,7 @@ public static class DiffCommand
         public string Mode { get; set; } = string.Empty;
     }
 
-    private sealed class ModifiedStepDrift
+    internal sealed class ModifiedStepDrift
     {
         [JsonPropertyName("typeName")]
         public string TypeName { get; set; } = string.Empty;
@@ -471,7 +470,7 @@ public static class DiffCommand
         public List<PropertyChange> Changes { get; set; } = [];
     }
 
-    private sealed class ImageDrift
+    internal sealed class ImageDrift
     {
         [JsonPropertyName("stepName")]
         public string StepName { get; set; } = string.Empty;
@@ -480,7 +479,7 @@ public static class DiffCommand
         public string ImageName { get; set; } = string.Empty;
     }
 
-    private sealed class ModifiedImageDrift
+    internal sealed class ModifiedImageDrift
     {
         [JsonPropertyName("stepName")]
         public string StepName { get; set; } = string.Empty;
@@ -492,7 +491,7 @@ public static class DiffCommand
         public List<PropertyChange> Changes { get; set; } = [];
     }
 
-    private sealed class PropertyChange
+    internal sealed class PropertyChange
     {
         [JsonPropertyName("property")]
         public string Property { get; set; }

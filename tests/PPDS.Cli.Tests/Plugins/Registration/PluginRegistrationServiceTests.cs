@@ -2921,4 +2921,141 @@ public class PluginRegistrationServiceTests
     }
 
     #endregion
+
+    #region UpsertStepAsync Identity Resolution Tests (#1295)
+
+    [Fact]
+    public async Task UpsertStepAsync_WithMatchedExistingStepId_UpdatesThatExactRowByGuid()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var matchedStepId = Guid.NewGuid();
+
+        QueryExpression? capturedQuery = null;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryBase, CancellationToken>((q, _) => capturedQuery = q as QueryExpression)
+            .ReturnsAsync(() => _retrieveMultipleResult);
+
+        // The identity-based lookup (by GUID) returns the matched row.
+        var existingStep = new SdkMessageProcessingStep { Id = matchedStepId };
+        existingStep[SdkMessageProcessingStep.Fields.StateCode] =
+            new OptionSetValue((int)sdkmessageprocessingstep_statecode.Enabled);
+        _retrieveMultipleResult = new EntityCollection();
+        _retrieveMultipleResult.Entities.Add(existingStep);
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "MyPlugin: Update of account",
+            Message = "Update",
+            Entity = "account",
+            Stage = "PostOperation",
+            Mode = "Synchronous",
+            Enabled = true
+        };
+
+        // Act - identity carries the matched GUID.
+        var result = await _sut.UpsertStepAsync(
+            pluginTypeId, "pluginType", stepConfig, messageId, filterId,
+            identity: new StepIdentityResolution(matchedStepId));
+
+        // Assert - updated the exact row, resolved by SdkMessageProcessingStepId (not by Name).
+        Assert.Equal(matchedStepId, result);
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(matchedStepId, _updatedEntity!.Id);
+
+        Assert.NotNull(capturedQuery);
+        Assert.Contains(capturedQuery!.Criteria.Conditions, c =>
+            c.AttributeName == SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId
+            && c.Operator == ConditionOperator.Equal
+            && c.Values.Contains(matchedStepId));
+        Assert.DoesNotContain(capturedQuery.Criteria.Conditions, c =>
+            c.AttributeName == SdkMessageProcessingStep.Fields.Name);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_WithNullExistingStepId_ForceCreatesWithoutLookup()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var newStepId = Guid.NewGuid();
+
+        // A same-named row "exists" in the environment; force-create must ignore it and never
+        // issue the lookup, so a same-named-but-different-identity row can't be hijacked.
+        var sameNamed = new SdkMessageProcessingStep { Id = Guid.NewGuid() };
+        _retrieveMultipleResult = new EntityCollection();
+        _retrieveMultipleResult.Entities.Add(sameNamed);
+        _createResult = newStepId;
+        _updatedEntity = null;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "MyPlugin: Update of account",
+            Message = "Update",
+            Entity = "account",
+            Stage = "PostOperation",
+            Mode = "Synchronous"
+        };
+
+        // Act - identity with a null step id forces a create.
+        var result = await _sut.UpsertStepAsync(
+            pluginTypeId, "pluginType", stepConfig, messageId, filterId,
+            identity: new StepIdentityResolution(null));
+
+        // Assert - created a new row, with no existence lookup and no update.
+        Assert.Equal(newStepId, result);
+        Assert.Null(_updatedEntity);
+        _mockPooledClient.Verify(
+            s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockPooledClient.Verify(
+            s => s.CreateAsync(
+                It.Is<Entity>(e => e.LogicalName == SdkMessageProcessingStep.EntityLogicalName),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_LegacyNullIdentity_ResolvesByEventHandlerAndName()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+
+        QueryExpression? capturedQuery = null;
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryBase, CancellationToken>((q, _) => capturedQuery = q as QueryExpression)
+            .ReturnsAsync(() => _retrieveMultipleResult);
+        _retrieveMultipleResult = new EntityCollection(); // none existing -> create path
+        _createResult = Guid.NewGuid();
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "MyPlugin: Update of account",
+            Message = "Update",
+            Entity = "account",
+            Stage = "PostOperation",
+            Mode = "Synchronous"
+        };
+
+        // Act - identity omitted (defaults to null) preserves the legacy name-based resolution.
+        await _sut.UpsertStepAsync(pluginTypeId, "pluginType", stepConfig, messageId, filterId);
+
+        // Assert - resolved by (EventHandler, Name), unchanged from prior behavior.
+        Assert.NotNull(capturedQuery);
+        Assert.Contains(capturedQuery!.Criteria.Conditions, c =>
+            c.AttributeName == SdkMessageProcessingStep.Fields.EventHandler
+            && c.Values.Contains(pluginTypeId));
+        Assert.Contains(capturedQuery.Criteria.Conditions, c =>
+            c.AttributeName == SdkMessageProcessingStep.Fields.Name
+            && c.Values.Contains("MyPlugin: Update of account"));
+    }
+
+    #endregion
 }

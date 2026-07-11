@@ -1,6 +1,9 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using Moq;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Plugins.Registration;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -133,6 +136,107 @@ public class DiffCommandTests : IDisposable
             "--environment https://org.crm.dynamics.com " +
             "--output-format Json");
         Assert.Empty(result.Errors);
+    }
+
+    #endregion
+
+    #region Drift Computation Tests (#1295)
+
+    private static Mock<IPluginRegistrationService> MockServiceWithSteps(
+        Guid assemblyId,
+        Guid typeId,
+        string typeName,
+        List<PluginStepInfo> envSteps)
+    {
+        var mock = new Mock<IPluginRegistrationService>();
+        mock.Setup(s => s.GetAssemblyByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PluginAssemblyInfo { Id = assemblyId, Name = "MyPlugin" });
+        mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = typeName } });
+        mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(envSteps);
+        mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PluginImageInfo>());
+        return mock;
+    }
+
+    // Previously this threw "Environment contains duplicate plugin step name ..." — the reported bug.
+    [Fact]
+    public async Task ComputeDriftAsync_EnvHasTwoSameNamedDifferentStage_ClassifiesInsteadOfThrowing()
+    {
+        var typeId = Guid.NewGuid();
+        const string sharedName = "MyPlugin.Handler: Update of account";
+
+        // Env ranks aligned with the config default (ExecutionOrder = 1) so the paired step shows no
+        // rank drift; rank is a drift-tracked property, not part of identity.
+        var mock = MockServiceWithSteps(Guid.NewGuid(), typeId, "MyPlugin.Handler", new List<PluginStepInfo>
+        {
+            new() { Id = Guid.NewGuid(), Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous", ExecutionOrder = 1 },
+            new() { Id = Guid.NewGuid(), Name = sharedName, Message = "Update", PrimaryEntity = "account", Stage = "PreOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+        });
+
+        var config = new PluginAssemblyConfig
+        {
+            Name = "MyPlugin",
+            Types =
+            {
+                new PluginTypeConfig
+                {
+                    TypeName = "MyPlugin.Handler",
+                    Steps =
+                    {
+                        new PluginStepConfig { Name = sharedName, Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+                    }
+                }
+            }
+        };
+
+        // Act - must complete rather than throw.
+        var drift = await DiffCommand.ComputeDriftAsync(mock.Object, config);
+
+        // Assert - the PostOperation step is paired (clean); the PreOperation step is orphaned.
+        Assert.Empty(drift.MissingSteps);
+        Assert.Empty(drift.ModifiedSteps);
+        var orphan = Assert.Single(drift.OrphanedSteps);
+        Assert.Equal("PreOperation", orphan.Stage);
+    }
+
+    [Fact]
+    public async Task ComputeDriftAsync_RenamedPairedStep_ReportsNameDrift()
+    {
+        var typeId = Guid.NewGuid();
+
+        var mock = MockServiceWithSteps(Guid.NewGuid(), typeId, "MyPlugin.Handler", new List<PluginStepInfo>
+        {
+            new() { Id = Guid.NewGuid(), Name = "Old Display Name", Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+        });
+
+        var config = new PluginAssemblyConfig
+        {
+            Name = "MyPlugin",
+            Types =
+            {
+                new PluginTypeConfig
+                {
+                    TypeName = "MyPlugin.Handler",
+                    Steps =
+                    {
+                        new PluginStepConfig { Name = "New Display Name", Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous", ExecutionOrder = 1 }
+                    }
+                }
+            }
+        };
+
+        var drift = await DiffCommand.ComputeDriftAsync(mock.Object, config);
+
+        Assert.Empty(drift.MissingSteps);
+        Assert.Empty(drift.OrphanedSteps);
+        // The only drift on the paired step is the name change (behavior is unchanged).
+        var modified = Assert.Single(drift.ModifiedSteps);
+        var change = Assert.Single(modified.Changes);
+        Assert.Equal("name", change.Property);
+        Assert.Equal("New Display Name", change.Expected);
+        Assert.Equal("Old Display Name", change.Actual);
     }
 
     #endregion
