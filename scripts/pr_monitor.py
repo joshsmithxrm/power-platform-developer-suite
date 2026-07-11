@@ -1360,7 +1360,12 @@ def _persist_reviewer_state(worktree, mode, logger):
                 state = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             state = {}
-        state.setdefault("pr", {})["reviewer"] = mode
+        # Tolerate an explicit ``"pr": null`` (setdefault returns None for a
+        # present-but-null key, which would then TypeError on item assignment).
+        pr_sec = state.get("pr")
+        pr_sec = pr_sec if isinstance(pr_sec, dict) else {}
+        pr_sec["reviewer"] = mode
+        state["pr"] = pr_sec
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
             f.write("\n")
@@ -2446,7 +2451,11 @@ def main():
     args = parser.parse_args()
 
     if args.print_reviewer:
-        mode, _ = _resolve_reviewer_mode(args.reviewer)
+        # Honor the resume tier too: --resume --print-reviewer must reflect the
+        # prior run's persisted mode (args.worktree may be None — the resolver
+        # guards on `resume and worktree`).
+        mode, _ = _resolve_reviewer_mode(
+            args.reviewer, worktree=args.worktree, resume=args.resume)
         print(mode)          # stdout = data only (Constitution I1)
         sys.exit(0)
     if not args.worktree or args.pr is None:

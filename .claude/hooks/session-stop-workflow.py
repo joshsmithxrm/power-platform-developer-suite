@@ -88,7 +88,7 @@ def main():
     # When phase=pr, require pr.monitor_launched to be set (timestamp or
     # "fallback: <reason>"). Both truthy values allow exit.
     if phase == "pr":
-        monitor_launched = state.get("pr", {}).get("monitor_launched")
+        monitor_launched = (state.get("pr") or {}).get("monitor_launched")
         if monitor_launched:
             sys.exit(0)
         output = {
@@ -132,7 +132,7 @@ def main():
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
             commits_ahead = 0
 
-        if commits_ahead > 0 and not state.get("pr", {}).get("invoked_via_skill"):
+        if commits_ahead > 0 and not (state.get("pr") or {}).get("invoked_via_skill"):
             output = {
                 "decision": "block",
                 "reason": (
@@ -260,7 +260,7 @@ def main():
     # Reviewer-optional mode: pr.reviewer == "none" means no external reviewer
     # is configured for this PR — nothing to triage, gate skipped. Absent key
     # = state written before reviewer modes existed = legacy gemini run.
-    pr = state.get("pr", {})
+    pr = state.get("pr") or {}  # tolerate explicit "pr": null (not just missing key)
     pr_created = pr and pr.get("url")
     pr_reviewer = pr.get("reviewer") or "gemini"
     if pr_created and pr_reviewer != "none" and not pr.get("gemini_triaged"):

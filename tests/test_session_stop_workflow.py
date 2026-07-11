@@ -149,7 +149,8 @@ def _base_state():
     }
 
 
-def _run_hook(tmp_path, state, monkeypatch, capsys, branch="feat/x"):
+def _run_hook(tmp_path, state, monkeypatch, capsys, branch="feat/x",
+              commits_ahead="1"):
     """Drive session_stop_workflow.main() end-to-end against a temp worktree.
 
     Mocks git so the hook sees a feature branch with one code commit ahead of
@@ -174,7 +175,7 @@ def _run_hook(tmp_path, state, monkeypatch, capsys, branch="feat/x"):
         elif argv[:2] == ["git", "rev-parse"]:
             out = "abc123"
         elif argv[:3] == ["git", "rev-list", "--count"]:
-            out = "1"
+            out = commits_ahead
         elif argv[:3] == ["git", "diff", "--name-only"]:
             out = "scripts/x.py\n"
         elif argv[:3] == ["git", "status", "--porcelain"]:
@@ -232,3 +233,28 @@ class TestReviewerOptionalTriageGate:
         code, out = _run_hook(tmp_path, state, monkeypatch, capsys)
         assert code == 0
         assert "Gemini review triaged" in out
+
+    def test_pr_explicit_null_does_not_crash_triage_block(
+            self, tmp_path, monkeypatch, capsys):
+        """Regression (Gemini review of #1308): an explicit "pr": null in
+        state.json must NOT AttributeError the triage/summary block. With no
+        commits ahead the hook treats it as 'no PR' and exits cleanly."""
+        state = _base_state()
+        state["pr"] = None
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys,
+                              commits_ahead="0")
+        assert code == 0
+        assert "AttributeError" not in out and "Traceback" not in out
+        assert "PR not created" in out
+
+    def test_pr_explicit_null_does_not_crash_pr_invocation_gate(
+            self, tmp_path, monkeypatch, capsys):
+        """Regression: the pr-invocation gate (commits ahead + no
+        invoked_via_skill) must also tolerate "pr": null — it blocks (exit 2)
+        rather than crashing."""
+        state = _base_state()
+        state["pr"] = None
+        code, out = _run_hook(tmp_path, state, monkeypatch, capsys,
+                              commits_ahead="1")
+        assert code == 2
+        assert "AttributeError" not in out and "Traceback" not in out

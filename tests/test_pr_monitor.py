@@ -3553,6 +3553,25 @@ class TestReviewerNoneEndToEnd:
         result = pr_monitor.read_result(wt)
         assert result["reviewer"] == "gemini"
 
+    def test_persist_reviewer_state_handles_null_pr(self, tmp_path):
+        """Regression (Gemini review of #1308): _persist_reviewer_state must
+        tolerate an explicit "pr": null in state.json — setdefault("pr", {})
+        returns None for a present-but-null key, which would then TypeError on
+        item assignment. It replaces null with a fresh dict and preserves other
+        top-level keys."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        state_path = os.path.join(wt, ".workflow", "state.json")
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({"pr": None, "phase": "pr"}, f)
+
+        pr_monitor._persist_reviewer_state(wt, "none", logger)
+
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["pr"] == {"reviewer": "none"}
+        assert state["phase"] == "pr"  # unrelated top-level keys preserved
+
 
 class TestReviewerNoneReadyFlipGates:
     """#1177: _ready_flip_gates skips the review dimension in none mode but
@@ -3674,3 +3693,22 @@ class TestPrMonitorReviewerCli:
             stdin=subprocess.DEVNULL,
         )
         assert proc.returncode == 2
+
+    def test_print_reviewer_resume_uses_persisted_mode(self, tmp_path):
+        """Regression (CodeRabbit review of #1308): --resume --print-reviewer
+        must consult the prior run's persisted mode. Persist 'gemini' so the
+        printed value proves the resume tier was used (not flag/env/default)."""
+        wt = _make_worktree(tmp_path)
+        r = pr_monitor._empty_result()
+        r["reviewer"] = "gemini"
+        pr_monitor.write_result(wt, r)
+        env = {k: v for k, v in os.environ.items()
+               if k != "PPDS_PR_REVIEWER"}
+        proc = subprocess.run(
+            [sys.executable, self.SCRIPT, "--print-reviewer",
+             "--resume", "--worktree", wt],
+            capture_output=True, text=True, env=env,
+            stdin=subprocess.DEVNULL,
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == "gemini"
