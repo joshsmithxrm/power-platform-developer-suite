@@ -64,6 +64,11 @@
 
   <ItemGroup Label="Dataverse SDK (Plugins)">
     <PackageVersion Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" />
+    <!-- Build-asset-only: supplies .NET Framework 4.6.2 reference assemblies that PPDS.Cli
+         embeds so `plugins extract` can resolve the core assembly (mscorlib) and BCL facades
+         when running as a single-file self-contained binary (no loose BCL DLLs on disk).
+         See #1294. Consumed via GeneratePathProperty + ExcludeAssets in PPDS.Cli.csproj. -->
+    <PackageVersion Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.3" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">

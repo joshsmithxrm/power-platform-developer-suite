@@ -13,8 +13,17 @@ public static class NupkgExtractor
     /// Extracts plugin configuration from a NuGet package.
     /// </summary>
     /// <param name="nupkgPath">Path to the .nupkg file.</param>
+    /// <param name="referenceDirs">
+    /// Optional additional directories to search for referenced assemblies, forwarded to
+    /// <see cref="AssemblyExtractor.Create(string, IReadOnlyList{string})"/> for each candidate
+    /// assembly (the <c>--reference-dir</c> option).
+    /// </param>
     /// <returns>Assembly configuration from the package.</returns>
-    public static PluginAssemblyConfig Extract(string nupkgPath)
+    /// <exception cref="PpdsException">
+    /// Thrown when no plugin types could be extracted and at least one candidate assembly failed
+    /// to load, so the failure is surfaced instead of silently returning an empty configuration.
+    /// </exception>
+    public static PluginAssemblyConfig Extract(string nupkgPath, IReadOnlyList<string>? referenceDirs = null)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"ppds-extract-{Guid.NewGuid():N}");
 
@@ -66,12 +75,13 @@ public static class NupkgExtractor
             var allTypes = new List<PluginTypeConfig>();
             var allTypeNames = new List<string>();
             string? primaryAssemblyName = null;
+            var failures = new List<(string Assembly, Exception Error)>();
 
             foreach (var dllPath in dlls)
             {
                 try
                 {
-                    using var extractor = AssemblyExtractor.Create(dllPath);
+                    using var extractor = AssemblyExtractor.Create(dllPath, referenceDirs);
                     var assemblyConfig = extractor.Extract();
 
                     if (assemblyConfig.Types.Count > 0)
@@ -82,10 +92,37 @@ public static class NupkgExtractor
                         allTypeNames.AddRange(assemblyConfig.AllTypeNames);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Skip DLLs that can't be loaded (dependencies, native, etc.)
+                    // Some DLLs legitimately can't be loaded as plugin assemblies (native,
+                    // resource-only, or unrelated dependencies). Collect the failure so we can
+                    // decide whether it is fatal (nothing extracted) or merely worth a warning.
+                    failures.Add((Path.GetFileName(dllPath), ex));
                 }
+            }
+
+            // If nothing was extracted AND at least one assembly failed to load, surface the
+            // failure instead of silently returning an empty config. This is exactly the
+            // single-file "could not find core assembly" symptom that the embedded reference
+            // assemblies fix (#1294) addresses — should it recur for any reason, the user must
+            // see the cause rather than a misleading "0 plugin types" result.
+            if (allTypes.Count == 0 && failures.Count > 0)
+            {
+                var first = failures[0];
+                throw new PpdsException(
+                    ErrorCodes.Operation.Dependency,
+                    $"Could not extract plugin registrations from '{Path.GetFileName(nupkgPath)}': " +
+                    $"{failures.Count} of {dlls.Length} assembl{(dlls.Length == 1 ? "y" : "ies")} failed to " +
+                    $"load and no plugin types were found. First failure ({first.Assembly}): {first.Error.Message}",
+                    first.Error);
+            }
+
+            // Partial failure: at least one assembly yielded plugins, but others failed to load.
+            // Warn per failed assembly (stderr — stdout is reserved for data) and continue.
+            foreach (var (assemblyName, error) in failures)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: skipped assembly '{assemblyName}' during extraction: {error.Message}");
             }
 
             // Build the combined config

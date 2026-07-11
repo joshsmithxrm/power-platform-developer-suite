@@ -75,5 +75,83 @@
     <PackageReference Include="StreamJsonRpc" />
     <PackageReference Include="System.CommandLine" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" />
+    <!-- Build-asset-only. ExcludeAssets="all" stops the package's own build props/targets
+         from injecting these net462 reference assemblies as compile references (which would
+         break our net8.0+ compilation); GeneratePathProperty exposes the package location so
+         the EmbedNet462ReferenceAssemblies target below can zip the needed assemblies into an
+         embedded resource. Fixes single-file `plugins extract` (#1294). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462"
+                      PrivateAssets="all"
+                      ExcludeAssets="all"
+                      GeneratePathProperty="true" />
   </ItemGroup>
+
+  <!-- Embed .NET Framework 4.6.2 reference assemblies (mscorlib + BCL facades) into the CLI
+       assembly. Dataverse plugin assemblies target net462; when `plugins extract` runs from a
+       single-file self-contained binary there are no loose BCL DLLs on disk, so the
+       MetadataLoadContext resolver cannot find a core assembly (mscorlib). Shipping these as an
+       embedded zip (extracted lazily at runtime) makes extraction work regardless of how the
+       CLI is packaged. Zip only the assemblies needed to resolve typical Dataverse plugin
+       references to keep the binary lean. See #1294 and AssemblyExtractor.cs.
+
+       Split into two targets on purpose: zip generation is incremental (Inputs/Outputs), while
+       the EmbeddedResource item is re-added on every build so an incremental recompile that
+       skips zip generation still embeds the resource. -->
+  <Target Name="_GenerateNet462ReferenceAssembliesZip"
+          Inputs="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2\mscorlib.dll"
+          Outputs="$(IntermediateOutputPath)Net462ReferenceAssemblies.zip">
+
+    <PropertyGroup>
+      <_Net462RefRoot>$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2</_Net462RefRoot>
+      <_Net462StageDir>$(IntermediateOutputPath)net462-ref\</_Net462StageDir>
+    </PropertyGroup>
+
+    <Error Condition="'$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)' == '' Or !Exists('$(_Net462RefRoot)\mscorlib.dll')"
+           Text="Cannot locate the Microsoft.NETFramework.ReferenceAssemblies.net462 reference assemblies at '$(_Net462RefRoot)'. Ensure the package is restored with GeneratePathProperty=&quot;true&quot;." />
+
+    <ItemGroup>
+      <!-- Core + commonly-referenced BCL assemblies (metadata-only reference assemblies). -->
+      <_Net462RefFile Include="$(_Net462RefRoot)\mscorlib.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Core.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Data.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Xml.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Xml.Linq.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Runtime.Serialization.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.ServiceModel.dll" />
+      <_Net462RefFile Include="$(_Net462RefRoot)\System.Net.Http.dll" />
+      <!-- Facades hold System.Runtime.dll and the other type-forwarding contract shims that
+           net462 assemblies reference; they are tiny and prevent resolution gaps. -->
+      <_Net462RefFile Include="$(_Net462RefRoot)\Facades\*.dll" />
+    </ItemGroup>
+
+    <!-- Rebuild the stage dir deterministically each time the zip is (re)generated. -->
+    <RemoveDir Directories="$(_Net462StageDir)" />
+    <MakeDir Directories="$(_Net462StageDir)" />
+    <Copy SourceFiles="@(_Net462RefFile)"
+          DestinationFolder="$(_Net462StageDir)"
+          SkipUnchangedFiles="false" />
+
+    <ZipDirectory SourceDirectory="$(_Net462StageDir)"
+                  DestinationFile="$(IntermediateOutputPath)Net462ReferenceAssemblies.zip"
+                  Overwrite="true" />
+  </Target>
+
+  <!-- Hook AssignTargetPaths (not PrepareResourceNames): CreateManifestResourceNames, which
+       assigns each EmbeddedResource its manifest name, is a *dependency* of PrepareResourceNames
+       and therefore runs before a BeforeTargets="PrepareResourceNames" target. AssignTargetPaths
+       is the first link in that dependency chain, so adding the item here guarantees it is named
+       and embedded. No Inputs/Outputs so the item is re-added on every (incremental) build. -->
+  <Target Name="_EmbedNet462ReferenceAssemblies"
+          DependsOnTargets="_GenerateNet462ReferenceAssembliesZip"
+          BeforeTargets="AssignTargetPaths">
+    <Error Condition="!Exists('$(IntermediateOutputPath)Net462ReferenceAssemblies.zip')"
+           Text="Net462ReferenceAssemblies.zip was not generated before resource names were assigned." />
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)Net462ReferenceAssemblies.zip">
+        <LogicalName>PPDS.Cli.Resources.Net462ReferenceAssemblies.zip</LogicalName>
+        <Visible>false</Visible>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
 </Project>

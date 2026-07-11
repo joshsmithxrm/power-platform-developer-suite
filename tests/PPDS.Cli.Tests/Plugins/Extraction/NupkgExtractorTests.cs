@@ -90,4 +90,37 @@ public class NupkgExtractorTests : IDisposable
             caught is PpdsException or IOException or InvalidDataException or UnauthorizedAccessException,
             $"Expected containment-related exception, got {caught.GetType().FullName}: {caught.Message}");
     }
+
+    [Fact]
+    public void Extract_NupkgWithUnloadableAssembly_ThrowsInsteadOfReturningEmpty()
+    {
+        // A lib/net462 folder whose only DLL is not a valid assembly. Previously every
+        // per-assembly load failure was swallowed and Extract returned an empty config (a
+        // misleading "0 plugin types" result). The extractor now surfaces the failure so the
+        // user sees the real cause instead of a silent no-op (#1294).
+        var nupkgPath = Path.Combine(_scratch, "broken.nupkg");
+        using (var stream = File.Create(nupkgPath))
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
+        {
+            var nuspec = archive.CreateEntry("broken.nuspec");
+            using (var entryStream = nuspec.Open())
+            {
+                var xml = Encoding.UTF8.GetBytes("""
+                    <?xml version="1.0"?>
+                    <package><metadata><id>broken</id></metadata></package>
+                    """);
+                entryStream.Write(xml, 0, xml.Length);
+            }
+
+            // Not a valid PE image — LoadFromAssemblyPath fails for this "assembly".
+            var dll = archive.CreateEntry("lib/net462/Broken.dll");
+            using var dllStream = dll.Open();
+            var payload = Encoding.UTF8.GetBytes("this is not a PE file");
+            dllStream.Write(payload, 0, payload.Length);
+        }
+
+        var ex = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+        Assert.Equal(ErrorCodes.Operation.Dependency, ex.ErrorCode);
+        Assert.Contains("Broken.dll", ex.Message);
+    }
 }

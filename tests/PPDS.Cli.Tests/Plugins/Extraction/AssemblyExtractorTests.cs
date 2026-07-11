@@ -46,6 +46,14 @@ public sealed class AssemblyExtractorTests : IDisposable
     /// PPDS.Plugins.dll into the same temp directory as the compiled test DLL.
     /// </summary>
     private string CompileTestAssembly(string pluginClassSource)
+        => CompileTestAssembly(pluginClassSource, copyPluginsAssemblyToOutputDir: true);
+
+    /// <summary>
+    /// Overload that controls whether PPDS.Plugins.dll is copied alongside the compiled test
+    /// DLL. Pass <c>false</c> to leave the dependency out of the target directory so a test can
+    /// prove it is resolved from an explicit <c>--reference-dir</c> seed instead. See #1294.
+    /// </summary>
+    private string CompileTestAssembly(string pluginClassSource, bool copyPluginsAssemblyToOutputDir)
     {
         var pluginsAssemblyPath = typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location;
 
@@ -87,8 +95,11 @@ public sealed class AssemblyExtractorTests : IDisposable
         _tempFiles.Add(tempDir);
 
         // Copy PPDS.Plugins.dll alongside our test DLL so the MetadataLoadContext resolver finds it
-        var pluginsFileName = Path.GetFileName(pluginsAssemblyPath);
-        File.Copy(pluginsAssemblyPath, Path.Combine(tempDir, pluginsFileName), overwrite: true);
+        if (copyPluginsAssemblyToOutputDir)
+        {
+            var pluginsFileName = Path.GetFileName(pluginsAssemblyPath);
+            File.Copy(pluginsAssemblyPath, Path.Combine(tempDir, pluginsFileName), overwrite: true);
+        }
 
         var tempPath = Path.Combine(tempDir, "TestPlugin.dll");
 
@@ -760,6 +771,82 @@ public sealed class AssemblyExtractorTests : IDisposable
         Assert.NotNull(config.CustomApis);
         Assert.Single(config.CustomApis);
         Assert.Single(config.Types);
+    }
+
+    #endregion
+
+    #region Single-file / embedded reference assembly tests (#1294)
+
+    [Fact]
+    public void GetNet462ReferenceAssemblyDirectory_ReturnsPopulatedDirectory()
+    {
+        // The embedded reference assemblies must extract to a real directory containing the
+        // core assembly (mscorlib) and the System.Runtime facade — the assemblies a net462
+        // plugin needs and that a single-file publish does not carry as loose DLLs on disk.
+        var dir = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory();
+
+        Assert.NotNull(dir);
+        Assert.True(Directory.Exists(dir));
+        Assert.True(File.Exists(Path.Combine(dir!, "mscorlib.dll")),
+            "Embedded net462 reference assemblies must include mscorlib.dll (the core assembly).");
+        Assert.True(File.Exists(Path.Combine(dir!, "System.Runtime.dll")),
+            "Embedded net462 reference assemblies must include the System.Runtime facade.");
+    }
+
+    [Fact]
+    public void Extract_WithoutRuntimeDirectory_SucceedsViaEmbeddedReferenceAssemblies()
+    {
+        // Reproduces the single-file packaging bug (#1294): a self-contained single-file CLI has
+        // no loose BCL DLLs in its runtime directory, so seeding the resolver from that directory
+        // alone cannot find the core assembly. Suppressing runtime-directory seeding here proves
+        // the embedded net462 reference assemblies (plus the target directory) are sufficient on
+        // their own to extract a net462-referencing plugin assembly.
+        var dllPath = CompileTestAssembly("""
+            [PluginStep(Message = "Create", EntityLogicalName = "account", Stage = PluginStage.PostOperation)]
+            public class TestPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(
+            dllPath, referenceDirs: null, includeRuntimeDirectory: false);
+        var config = extractor.Extract();
+
+        Assert.Single(config.Types);
+        var step = config.Types[0].Steps[0];
+        Assert.Equal("Create", step.Message);
+        Assert.Equal("account", step.Entity);
+        Assert.Equal("PostOperation", step.Stage);
+    }
+
+    [Fact]
+    public void Extract_WithReferenceDir_ResolvesDependencyFromSeedDirectory()
+    {
+        // The plugin's dependency (PPDS.Plugins.dll) is deliberately NOT placed in the target
+        // assembly's directory. With runtime-directory seeding suppressed, extraction can only
+        // succeed if the explicit --reference-dir seed is honored.
+        var pluginsDir = Path.GetDirectoryName(
+            typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location)!;
+
+        var dllPath = CompileTestAssembly("""
+            [PluginStep(Message = "Update", EntityLogicalName = "contact", Stage = PluginStage.PreOperation)]
+            public class TestPlugin { }
+            """,
+            copyPluginsAssemblyToOutputDir: false);
+
+        // Sanity check: without the reference dir, the dependency is unresolvable and extraction
+        // fails — proving the success below is due to the seed, not incidental resolution.
+        Assert.ThrowsAny<Exception>(() =>
+        {
+            using var withoutSeed = AssemblyExtractor.Create(
+                dllPath, referenceDirs: null, includeRuntimeDirectory: false);
+            withoutSeed.Extract();
+        });
+
+        using var extractor = AssemblyExtractor.Create(
+            dllPath, referenceDirs: new[] { pluginsDir }, includeRuntimeDirectory: false);
+        var config = extractor.Extract();
+
+        Assert.Single(config.Types);
+        Assert.Equal("Update", config.Types[0].Steps[0].Message);
     }
 
     #endregion

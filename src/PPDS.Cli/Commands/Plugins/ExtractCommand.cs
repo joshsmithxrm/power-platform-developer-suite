@@ -45,12 +45,24 @@ public static class ExtractCommand
             Description = "Overwrite existing file without merging"
         };
 
-        var command = new Command("extract", "Extract plugin step/image attributes from assembly to JSON configuration")
+        var referenceDirOption = new Option<DirectoryInfo[]>("--reference-dir")
+        {
+            Description = "Additional directory to search for referenced assemblies (repeatable). " +
+                          "Use when a plugin's dependencies live outside the input assembly's own folder.",
+            AllowMultipleArgumentsPerToken = true
+        };
+
+        var command = new Command(
+            "extract",
+            "Extract plugin step/image attributes from an assembly (.dll) or plugin package (.nupkg) to " +
+            "JSON configuration. Works against .NET Framework 4.6.2 plugin assemblies regardless of how " +
+            "the CLI is packaged (single-file, self-contained, or framework-dependent).")
         {
             inputOption,
             outputOption,
             solutionOption,
-            forceOption
+            forceOption,
+            referenceDirOption
         };
 
         // Add global options including output format
@@ -62,9 +74,12 @@ public static class ExtractCommand
             var output = parseResult.GetValue(outputOption);
             var solution = parseResult.GetValue(solutionOption);
             var force = parseResult.GetValue(forceOption);
+            var referenceDirs = parseResult.GetValue(referenceDirOption)
+                ?.Select(d => d.FullName)
+                .ToArray();
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(input, output, solution, force, globalOptions, cancellationToken);
+            return await ExecuteAsync(input, output, solution, force, referenceDirs, globalOptions, cancellationToken);
         });
 
         return command;
@@ -75,6 +90,7 @@ public static class ExtractCommand
         FileInfo? output,
         string? solution,
         bool force,
+        IReadOnlyList<string>? referenceDirs,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -90,14 +106,14 @@ public static class ExtractCommand
                 if (!globalOptions.IsJsonMode)
                     Console.Error.WriteLine($"Extracting from NuGet package: {input.Name}");
 
-                assemblyConfig = NupkgExtractor.Extract(input.FullName);
+                assemblyConfig = NupkgExtractor.Extract(input.FullName, referenceDirs);
             }
             else if (extension == ".dll")
             {
                 if (!globalOptions.IsJsonMode)
                     Console.Error.WriteLine($"Extracting from assembly: {input.Name}");
 
-                using var extractor = AssemblyExtractor.Create(input.FullName);
+                using var extractor = AssemblyExtractor.Create(input.FullName, referenceDirs);
                 assemblyConfig = extractor.Extract();
             }
             else
