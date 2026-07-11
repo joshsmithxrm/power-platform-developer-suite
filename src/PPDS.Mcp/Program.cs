@@ -1,6 +1,8 @@
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using PPDS.Cli.Services;
 using PPDS.Dataverse.DependencyInjection;
@@ -30,7 +32,17 @@ builder.Logging.SetMinimumLevel(logLevel);
 
 // Register MCP server with stdio transport.
 // WithToolsFromAssembly() discovers all [McpServerToolType] classes automatically.
-builder.Services.AddMcpServer()
+// ServerInfo is set explicitly because the SDK's default falls back to the entry
+// assembly's AssemblyVersion, which MinVer leaves fixed at "{major}.0.0.0" — see
+// ServerVersion and #1273 for why that misreports the real package version.
+builder.Services.AddMcpServer(options =>
+{
+    options.ServerInfo = new Implementation
+    {
+        Name = "ppds-mcp-server",
+        Version = ServerVersion.Resolve(Assembly.GetExecutingAssembly())
+    };
+})
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 
