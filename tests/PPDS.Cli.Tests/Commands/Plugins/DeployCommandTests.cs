@@ -319,7 +319,7 @@ public class DeployCommandTests : IDisposable
             mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
             mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid?)Guid.NewGuid());
+                .ReturnsAsync(Guid.NewGuid());
             mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<PluginImageInfo>());
             mock.Setup(s => s.UpsertStepAsync(
@@ -417,7 +417,7 @@ public class DeployCommandTests : IDisposable
             mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
             mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid?)Guid.NewGuid());
+                .ReturnsAsync(Guid.NewGuid());
             mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<PluginImageInfo>());
             mock.Setup(s => s.UpsertStepAsync(
