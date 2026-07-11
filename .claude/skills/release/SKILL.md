@@ -110,7 +110,7 @@ After agents return, curate their drafts and insert into each CHANGELOG:
 
 #### NuGet packages (7): NO csproj edits
 
-**PPDS.Auth, PPDS.Cli, PPDS.Dataverse, PPDS.Mcp, PPDS.Migration, PPDS.Plugins, PPDS.Query** are versioned via **MinVer from git tags** — you do NOT edit `<Version>` in any csproj. Version becomes whatever tag you push at step 7.
+**PPDS.Auth, PPDS.Cli, PPDS.Dataverse, PPDS.Mcp, PPDS.Migration, PPDS.Plugins, PPDS.Query** are versioned via **MinVer from git tags** — you do NOT edit `<Version>` in any csproj. Version becomes whatever tag you push at step 8.
 
 #### Extension: bump `package.json` version manually
 
@@ -228,7 +228,7 @@ git fetch origin
 git checkout main && git pull
 
 # One tag per NuGet package (7) — versions are per-package; do NOT assume a single shared version.
-# PPDS.Plugins in particular is on a 2.x lineage (see Step 5).
+# PPDS.Plugins in particular is on its own lineage (see Step 5).
 git tag Auth-v<auth-version>
 git tag Cli-v<cli-version>
 git tag Dataverse-v<dataverse-version>
@@ -384,9 +384,9 @@ ceremony above.
 
 **Steps (abbreviated):**
 
-1. Identify the affected package from the merged PR'"'"'s changed paths (the
+1. Identify the affected package from the merged PR's changed paths (the
    `post-merge-release-check.yml` workflow does this automatically and opens an issue).
-2. Update **only that package'"'"'s CHANGELOG** — add a new `[X.Y.Z] - YYYY-MM-DD` entry under
+2. Update **only that package's CHANGELOG** — add a new `[X.Y.Z] - YYYY-MM-DD` entry under
    `[Unreleased]`. Do not touch the other 7 CHANGELOGs.
 3. Open a tiny CHANGELOG-only PR, merge it, then pull main.
 4. Push **one tag** for the affected package only:
@@ -456,17 +456,17 @@ git tag <Prefix>-v<X.Y.Z>
 git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
 ```
 
-The CI publish workflows fire from the tag — they don'"'"'t care which branch it points to.
+The CI publish workflows fire from the tag — they don't care which branch it points to.
 
 **How to merge back to main:**
 
 After the release publishes, merge the stabilization branch back into `main` so any
-fixes that were cherry-picked don'"'"'t drift:
+fixes that were cherry-picked don't drift:
 
 ```bash
 git checkout main && git pull
 git merge --no-ff release/X.Y -m "merge: release/X.Y back into main after vX.Y.Z"
-# Resolve conflicts manually — favor main'"'"'s version for files that diverged
+# Resolve conflicts manually — favor main's version for files that diverged
 git push origin main
 ```
 
@@ -482,7 +482,7 @@ git branch -d release/X.Y
 git push origin :release/X.Y
 ```
 
-Do not keep stabilization branches around indefinitely — they'"'"'re intentionally short-lived.
+Do not keep stabilization branches around indefinitely — they're intentionally short-lived.
 
 ## Known Gotchas
 
