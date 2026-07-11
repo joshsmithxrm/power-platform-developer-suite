@@ -3364,7 +3364,10 @@ class TestPipelineModeFlag:
 class TestPipelineBlockedLoudFail:
     def test_pipeline_fails_loud_on_blocked(self, tmp_path):
         """AC-18: when poll() returns blocked, run_claude calls terminate
-        and raises PipelineFailure with the needs text in the reason."""
+        and raises PipelineFailure with the needs text in the reason.
+
+        #1166: the exception must also carry the failing stage as
+        ``exc.stage`` so main()'s except handler never sees stage=None."""
         import pipeline
         import claude_dispatch
 
@@ -3390,5 +3393,42 @@ class TestPipelineBlockedLoudFail:
         msg = str(exc_info.value)
         assert "stage asked question" in msg
         assert "what environment should I deploy to?" in msg
+        assert exc_info.value.stage == "test-stage"
+        stub.terminate.assert_called_once()
+        logger.close()
+
+    def test_pipeline_fails_loud_on_rate_limit_block(self, tmp_path):
+        """#1166/#1175: a rate-limited bg session surfaces as state==blocked
+        with a session-limit ``needs`` message. It must be classified as a
+        rate limit (not mislabeled "stage asked question"), and the raised
+        PipelineFailure must carry the stage so it never resolves to None."""
+        import pipeline
+        import claude_dispatch
+
+        wf_dir = tmp_path / ".workflow" / "stages"
+        wf_dir.mkdir(parents=True)
+        logger = pipeline.open_logger(str(tmp_path / ".workflow" / "pipeline.log"))
+
+        class _RateLimitedStub(_DispatchHandleStub):
+            def needs(self):
+                return ("You've hit your session limit · "
+                         "resets 1:50am (America/Chicago)")
+
+        stub = _RateLimitedStub(transcript_path=tmp_path / "x.jsonl",
+                                poll_sequence=["blocked"])
+
+        with unittest.mock.patch.object(claude_dispatch, "spawn", return_value=stub):
+            with unittest.mock.patch("subprocess.run",
+                                     return_value=unittest.mock.MagicMock(returncode=0,
+                                                                          stdout="0",
+                                                                          stderr="")):
+                with pytest.raises(pipeline.PipelineFailure) as exc_info:
+                    pipeline.run_claude(str(tmp_path), "t", logger, "test-stage")
+
+        msg = str(exc_info.value)
+        assert "rate limited" in msg
+        assert "asked question" not in msg
+        assert "session limit" in msg
+        assert exc_info.value.stage == "test-stage"
         stub.terminate.assert_called_once()
         logger.close()

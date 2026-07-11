@@ -18,8 +18,10 @@ import pipeline
 from pipeline import (
     STAGE_MODELS,
     _FILED_FINDING_KEYS,
+    _classify_blocked_needs,
     _finding_key,
     _get_direct_children,
+    _resolve_failure_context,
     auto_commit_stranded,
     classify_activity,
     compute_resume_stage,
@@ -143,6 +145,22 @@ class TestAutoCommitStranded(unittest.TestCase):
             logger, "converge", "AUTO_COMMIT_FAILED",
             reason="subprocess error")
 
+    @patch("pipeline.subprocess.run")
+    @patch("pipeline.log")
+    def test_none_stage_defaults_to_pipeline_scope(self, mock_log, mock_run):
+        """#1166: stage=None on a dirty worktree must not crash — it falls
+        back to a generic 'pipeline' commit scope instead of raising
+        TypeError on `"-" in None`."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=" M file.py\n", stderr=""),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        result = auto_commit_stranded("/tmp/wt", None, self._logger())
+        self.assertTrue(result)
+        commit_msg = mock_run.call_args_list[2][0][0][-1]
+        self.assertTrue(commit_msg.startswith("chore(pipeline):"))
+
 
 class TestComputeResumeStage(unittest.TestCase):
 
@@ -163,6 +181,98 @@ class TestComputeResumeStage(unittest.TestCase):
 
     def test_unknown_stage_returned_as_is(self):
         self.assertEqual(compute_resume_stage("unknown-stage"), "unknown-stage")
+
+    def test_none_stage_defaults_to_worktree(self):
+        """#1166: a missing failed_stage must not crash — defaults to the
+        first stage rather than raising TypeError on `"reconverge" in None`."""
+        self.assertEqual(compute_resume_stage(None), "worktree")
+
+    def test_empty_string_stage_defaults_to_worktree(self):
+        self.assertEqual(compute_resume_stage(""), "worktree")
+
+
+class TestClassifyBlockedNeeds(unittest.TestCase):
+    """#1166/#1175: blocked-state ``needs`` text must be classified as a
+    rate limit (not a generic "asked question") when it looks like one."""
+
+    def test_rate_limit_message_detected(self):
+        needs = ("You've hit your session limit for this account. "
+                 "It resets 1:50am (America/Chicago).")
+        self.assertTrue(_classify_blocked_needs(needs))
+
+    def test_usage_limit_message_detected(self):
+        self.assertTrue(_classify_blocked_needs("usage limit reached"))
+
+    def test_rate_limit_marker_case_insensitive(self):
+        self.assertTrue(_classify_blocked_needs("RATE LIMIT exceeded"))
+
+    def test_genuine_question_not_classified_as_rate_limit(self):
+        needs = "what environment should I deploy to?"
+        self.assertFalse(_classify_blocked_needs(needs))
+
+    def test_empty_needs_not_classified_as_rate_limit(self):
+        self.assertFalse(_classify_blocked_needs(""))
+
+    def test_bare_resets_word_not_classified_as_rate_limit(self):
+        """Review finding (#1166): a genuine question containing the word
+        "resets" but no rate/session/usage-limit qualifier must NOT be
+        misclassified — "resets" alone is too generic a signal. The real
+        session-limit message ("... session limit ... resets 1:50am")
+        already matches on "session limit"; a bare "resets" only adds
+        false-positive risk."""
+        needs = ("the staging environment resets nightly — should I "
+                 "account for that in the migration?")
+        self.assertFalse(_classify_blocked_needs(needs))
+
+
+class TestResolveFailureContext(unittest.TestCase):
+    """#1166 review fix: the except PipelineFailure handler must only
+    backfill stage/log_stage/reason from the exception when
+    _pipeline_fail never ran (failed_stage is None) — not merely when
+    reason is None, since most _pipeline_fail call sites pass no reason
+    and that "no reason" state must survive unchanged."""
+
+    def test_backfills_from_exception_when_pipeline_fail_bypassed(self):
+        """Blocked path: _pipeline_fail never ran, so failed_stage is None
+        going in. Must recover stage/log_stage/reason from the exception."""
+        exc = pipeline.PipelineFailure(
+            "implement: rate limited: session limit hit", stage="implement")
+        stage, log_stage, reason = _resolve_failure_context(
+            None, None, None, exc)
+        self.assertEqual(stage, "implement")
+        self.assertEqual(log_stage, "implement")
+        self.assertEqual(reason, "implement: rate limited: session limit hit")
+
+    def test_preserves_none_reason_when_pipeline_fail_ran_with_no_reason(self):
+        """_pipeline_fail("pr") sets failed_stage="pr", failed_reason=None
+        (no reason supplied) before raising PipelineFailure("pr: None").
+        The handler must NOT backfill reason from str(exc) here — that
+        would turn a clean "no reason" into a misleading "pr: None"."""
+        exc = pipeline.PipelineFailure("pr: None", stage="pr")
+        stage, log_stage, reason = _resolve_failure_context(
+            "pr", "pr", None, exc)
+        self.assertEqual(stage, "pr")
+        self.assertEqual(log_stage, "pr")
+        self.assertIsNone(reason)
+
+    def test_preserves_explicit_reason_when_pipeline_fail_ran(self):
+        """_pipeline_fail("implement", "outcome verification failed") sets
+        a real reason before raising — must pass through unchanged."""
+        exc = pipeline.PipelineFailure(
+            "implement: outcome verification failed", stage="implement")
+        stage, log_stage, reason = _resolve_failure_context(
+            "implement", "implement", "outcome verification failed", exc)
+        self.assertEqual(stage, "implement")
+        self.assertEqual(log_stage, "implement")
+        self.assertEqual(reason, "outcome verification failed")
+
+    def test_log_stage_backfill_uses_resolved_stage_not_original_none(self):
+        """log_stage must come from the resolved stage, not stay None,
+        when _pipeline_fail was bypassed."""
+        exc = pipeline.PipelineFailure("verify: stage asked question: x",
+                                       stage="verify")
+        _, log_stage, _ = _resolve_failure_context(None, None, None, exc)
+        self.assertEqual(log_stage, "verify")
 
 
 class TestWriteResultResumeCommand(unittest.TestCase):

@@ -104,8 +104,19 @@ MODEL_OVERRIDE = None
 
 
 class PipelineFailure(Exception):
-    """Raised by _pipeline_fail to exit the stage loop without sys.exit."""
-    pass
+    """Raised by _pipeline_fail (and the run_claude blocked path) to exit
+    the stage loop without sys.exit.
+
+    ``stage`` carries the failing stage name on the exception itself so the
+    ``except PipelineFailure`` handler in main() can recover it even on
+    paths (like the blocked/rate-limit path in run_claude) that don't go
+    through the ``_pipeline_fail`` closure and its nonlocal assignment
+    (#1166).
+    """
+
+    def __init__(self, message, stage=None):
+        super().__init__(message)
+        self.stage = stage
 
 
 def timestamp():
@@ -303,13 +314,41 @@ def should_converge(state):
 
 
 def compute_resume_stage(failed_stage):
-    """Map a failed stage name to a valid ``--from`` stage for resume."""
+    """Map a failed stage name to a valid ``--from`` stage for resume.
+
+    ``failed_stage`` should always be set by the time this is called (#1166),
+    but a missing stage defaults to the first stage rather than crashing —
+    the safest fallback when we genuinely don't know where to resume.
+    """
+    if not failed_stage:
+        return "worktree"
     if failed_stage in STAGES:
         return failed_stage
     if "reconverge" in failed_stage:
         return "converge"
     base = failed_stage.split("-")[0]
     return base if base in STAGES else failed_stage
+
+
+def _resolve_failure_context(failed_stage, failed_log_stage, failed_reason, exc):
+    """Resolve (stage, log_stage, reason) for main()'s ``except
+    PipelineFailure`` handler.
+
+    Only backfills from the exception when ``failed_stage`` is still
+    ``None`` — i.e. ``_pipeline_fail`` never ran, so the exception must
+    have come from a path that bypasses its nonlocal assignment (the
+    run_claude blocked path, #1166). This is deliberately narrower than
+    guarding on ``failed_reason is None`` alone: most ``_pipeline_fail``
+    call sites pass no ``reason`` (e.g. ``_pipeline_fail("pr")``), which
+    legitimately leaves ``failed_reason`` as ``None`` — backfilling those
+    from ``str(exc)`` would turn a clean "no reason" into a misleading
+    "pr: None" in pipeline-result.json and /status output (review finding).
+    """
+    if failed_stage is None:
+        failed_stage = getattr(exc, "stage", None)
+        failed_log_stage = failed_stage
+        failed_reason = str(exc)
+    return failed_stage, failed_log_stage, failed_reason
 
 
 def find_last_completed_stage(log_path):
@@ -480,7 +519,15 @@ def auto_commit_stranded(worktree_path, stage, logger, *,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
-        scope = stage.split("-")[0] if "-" in stage else stage
+        # stage may be None on failure paths that couldn't resolve a stage
+        # name (#1166) — fall back to a generic "pipeline" scope rather
+        # than crashing on `"-" in None`.
+        if not stage:
+            scope = "pipeline"
+        elif "-" in stage:
+            scope = stage.split("-")[0]
+        else:
+            scope = stage
         msg = f"chore({scope}): auto-commit {reason}"
         commit = subprocess.run(
             ["git", "commit", "-m", msg],
@@ -966,6 +1013,27 @@ def run_stack(stack_path, *, repo_root, worktree_path, dry_run=False,
 from bg_transcript import extract_text_from_jsonl, parse_outcome  # noqa: E402,F401
 
 
+# Substrings (checked case-insensitively) that mark a blocked-state ``needs``
+# string as a rate/session/usage limit rather than a genuine clarifying
+# question from the worker (#1166, #1175).
+#
+# Deliberately excludes a bare "resets" marker: it's a generic word that can
+# appear in a genuine clarifying question unrelated to rate limiting (e.g.
+# "the staging environment resets nightly — should I account for that?").
+# The real-world session-limit message ("You've hit your session limit ...
+# resets 1:50am") already matches on "session limit" alone, so a standalone
+# "resets" marker only widens the false-positive surface without adding
+# necessary coverage (review finding, #1166).
+_RATE_LIMIT_MARKERS = ("rate limit", "session limit", "usage limit")
+
+
+def _classify_blocked_needs(needs):
+    """True if ``needs`` (from ``handle.needs()`` on a blocked poll) looks
+    like a rate/session/usage limit rather than a genuine question."""
+    lowered = str(needs).lower()
+    return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
+
 def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
                agent=None, ceiling=None, mode=None):
     """Run a claude stage via claude_dispatch.spawn. Returns (exit_code, logger).
@@ -1052,8 +1120,12 @@ def run_claude(worktree_path, prompt, logger, stage, dry_run=False,
                 needs = handle.needs() if hasattr(handle, "needs") else ""
                 log(logger, stage, "BLOCKED", needs=str(needs)[:200])
                 handle.terminate()
+                if _classify_blocked_needs(needs):
+                    raise PipelineFailure(
+                        f"{stage}: rate limited: {needs}", stage=stage
+                    )
                 raise PipelineFailure(
-                    f"{stage}: stage asked question: {needs}"
+                    f"{stage}: stage asked question: {needs}", stage=stage
                 )
             if state == "error":
                 exit_code = 1
@@ -2151,7 +2223,13 @@ def main():
             _failed_stage = stage_name
             _failed_log_stage = log_stage or stage_name
             _failed_reason = reason
-            raise PipelineFailure(f"{stage_name}: {reason}")
+            # stage= is redundant today (the nonlocal assignment above
+            # already sets _failed_stage before this raises, so the except
+            # handler's _resolve_failure_context short-circuits past
+            # exc.stage), but attaching it keeps every PipelineFailure
+            # self-describing and avoids a latent trap if this pairing is
+            # ever refactored (review finding, #1166).
+            raise PipelineFailure(f"{stage_name}: {reason}", stage=stage_name)
 
         for i, stage in enumerate(STAGES):
             if i < start_idx:
@@ -2371,7 +2449,17 @@ def main():
         if pr_url:
             print(f"PR: {pr_url}", file=sys.stderr)
 
-    except PipelineFailure:
+    except PipelineFailure as exc:
+        # Resolve stage/reason once, up front, so every downstream consumer
+        # below (auto_commit_stranded, compute_resume_stage,
+        # _read_last_lines, write_result, and the finally safety net) sees
+        # real values even on paths that raise PipelineFailure without going
+        # through the _pipeline_fail closure — e.g. the run_claude blocked
+        # path, which attaches the stage to the exception itself (#1166).
+        _failed_stage, _failed_log_stage, _failed_reason = _resolve_failure_context(
+            _failed_stage, _failed_log_stage, _failed_reason, exc
+        )
+
         duration = int(time.time() - pipeline_start)
         log(logger, "pipeline", "FAILED",
             failed_stage=_failed_stage, reason=_failed_reason,
