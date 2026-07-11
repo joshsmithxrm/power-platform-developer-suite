@@ -87,7 +87,6 @@ public sealed class ServerVersionTests
 
         // Assert
         result.Should().Be(ServerVersion.Unknown);
-        result.Should().Be("0.0.0");
     }
 
     [Fact]

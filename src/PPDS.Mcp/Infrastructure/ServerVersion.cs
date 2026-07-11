@@ -28,7 +28,7 @@ internal static class ServerVersion
     /// The assembly to read version metadata from — pass <c>Assembly.GetExecutingAssembly()</c>
     /// from Program.cs to resolve ppds-mcp-server's own MinVer-stamped version.
     /// </param>
-    public static string Resolve(Assembly assembly)
+    internal static string Resolve(Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
 
