@@ -497,6 +497,28 @@ public static class DeployCommand
                     }
                 }
             }
+            else
+            {
+                // Without --clean we must not delete anything. But because a stage/mode change is now
+                // delete+create, the old step lingers in the environment and STILL fires — with no other
+                // signal. Surface orphans loudly so the operator knows to re-run with --clean.
+                var orphanedSteps = matches.Where(m => m.IsOrphaned).Select(m => m.Env!).ToList();
+
+                if (orphanedSteps.Count > 0)
+                {
+                    var descriptions = string.Join(
+                        ", ",
+                        orphanedSteps.Select(o => $"{o.Name} ({o.Stage}, {o.Mode})"));
+                    var warning =
+                        $"{orphanedSteps.Count} step(s) in the environment no longer match the configuration and were " +
+                        $"left in place (they remain active): {descriptions}. Re-run with --clean to remove them.";
+
+                    result.Warnings.Add(warning);
+
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [!] Warning: {warning}");
+                }
+            }
         }
         catch (Exception ex)
         {

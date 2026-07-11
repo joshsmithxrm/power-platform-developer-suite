@@ -179,6 +179,21 @@ public class PluginStepMatcherTests
             Assert.Equal(pair.Config!.ExecutionOrder, pair.Env!.ExecutionOrder);
     }
 
+    // Fix (#1295 follow-up): a config authored with variant stage/mode tokens must pair with the
+    // canonical environment step, not be misclassified as Missing (which would force-create a duplicate).
+    [Fact]
+    public void VariantStageModeTokens_PairWithCanonicalEnvStep()
+    {
+        var config = Config(stage: "40", mode: "sync");
+        var env = Env(stage: "PostOperation", mode: "Synchronous");
+
+        var matches = PluginStepMatcher.Match(new[] { Cfg(config) }, new[] { Ev(env) });
+
+        Assert.Single(matches.Where(m => m.IsPaired));
+        Assert.Empty(matches.Where(m => m.IsMissing));
+        Assert.Empty(matches.Where(m => m.IsOrphaned));
+    }
+
     [Fact]
     public void EmptyInputs_ReturnEmpty()
     {

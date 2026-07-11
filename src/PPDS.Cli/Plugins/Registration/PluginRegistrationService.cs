@@ -2329,7 +2329,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return response.id;
     }
 
-    private static string MapStageFromValue(int value) => value switch
+    // internal (not private) so PluginStepIdentity can canonicalize config-side stage/mode tokens
+    // through the exact same mapping the write path uses — see PluginStepIdentity.Normalize.
+    internal static string MapStageFromValue(int value) => value switch
     {
         StagePreValidation => "PreValidation",
         StagePreOperation => "PreOperation",
@@ -2338,7 +2340,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => value.ToString()
     };
 
-    private static string MapModeFromValue(int value) => value switch
+    internal static string MapModeFromValue(int value) => value switch
     {
         0 => "Synchronous",
         1 => "Asynchronous",
@@ -2353,7 +2355,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => value.ToString()
     };
 
-    private static int MapStageToValue(string stage) => stage switch
+    internal static int MapStageToValue(string stage) => stage switch
     {
         "PreValidation" => StagePreValidation,
         "PreOperation" => StagePreOperation,
@@ -2362,7 +2364,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _ => int.TryParse(stage, out var v) ? v : StagePostOperation
     };
 
-    private static int MapModeToValue(string mode) => mode switch
+    internal static int MapModeToValue(string mode) => mode switch
     {
         "Synchronous" => 0,
         "Asynchronous" => 1,

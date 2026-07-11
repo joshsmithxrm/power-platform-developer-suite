@@ -51,6 +51,14 @@ public readonly record struct PluginStepIdentity(
     /// casing/whitespace differences between config and environment never split an identity, and
     /// collapses null/empty/"none" entities to <see cref="NoEntity"/>.
     /// </summary>
+    /// <remarks>
+    /// Stage and Mode are additionally canonicalized through the exact mappers the deploy write path
+    /// uses (<see cref="PluginRegistrationService.MapStageToValue"/> → <see cref="PluginRegistrationService.MapStageFromValue"/>,
+    /// likewise for Mode). The environment side is always canonical ("PostOperation"/"Synchronous"),
+    /// but a hand-authored config may use variant tokens ("sync", "40", or an omitted stage). Without
+    /// this, such a config would never match its environment counterpart and deploy would force-create
+    /// a duplicate step on every run.
+    /// </remarks>
     private static PluginStepIdentity Normalize(
         string? pluginTypeName,
         string? message,
@@ -63,11 +71,46 @@ public readonly record struct PluginStepIdentity(
             NormalizeComponent(message),
             NormalizeEntity(primaryEntity),
             NormalizeEntity(secondaryEntity),
-            NormalizeComponent(stage),
-            NormalizeComponent(mode));
+            NormalizeComponent(CanonicalizeStage(stage)),
+            NormalizeComponent(CanonicalizeMode(mode)));
 
     private static string NormalizeComponent(string? value) =>
         (value ?? string.Empty).Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// Canonicalizes a stage token to the form the write path persists and reads back (e.g. "40" or an
+    /// omitted stage → "PostOperation"), by round-tripping through the write path's own mappers. Never
+    /// throws — an unmappable token falls back to its raw (trimmed/lower-cased) form.
+    /// </summary>
+    private static string CanonicalizeStage(string? stage)
+    {
+        var token = (stage ?? string.Empty).Trim();
+        try
+        {
+            return PluginRegistrationService.MapStageFromValue(PluginRegistrationService.MapStageToValue(token));
+        }
+        catch
+        {
+            return token;
+        }
+    }
+
+    /// <summary>
+    /// Canonicalizes a mode token the same way as <see cref="CanonicalizeStage"/> (e.g. "sync" or an
+    /// omitted mode → "Synchronous"). Never throws.
+    /// </summary>
+    private static string CanonicalizeMode(string? mode)
+    {
+        var token = (mode ?? string.Empty).Trim();
+        try
+        {
+            return PluginRegistrationService.MapModeFromValue(PluginRegistrationService.MapModeToValue(token));
+        }
+        catch
+        {
+            return token;
+        }
+    }
 
     private static string NormalizeEntity(string? value)
     {

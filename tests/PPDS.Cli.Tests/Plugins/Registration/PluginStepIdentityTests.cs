@@ -138,6 +138,31 @@ public class PluginStepIdentityTests
         Assert.Equal(a, b);
     }
 
+    // Fix (#1295 follow-up): the environment side is always canonical, but a hand-authored config may
+    // use variant tokens the deploy write path accepts. These must canonicalize to the SAME identity so
+    // deploy updates in place instead of force-creating a duplicate every run.
+    [Theory]
+    [InlineData("40", "sync")]                 // numeric stage + short mode token
+    [InlineData("PostOperation", "Synchronous")] // canonical (sanity: canonicalization is a no-op here)
+    [InlineData("", "")]                        // omitted stage/mode default to PostOperation/Synchronous
+    public void VariantStageAndModeTokens_CanonicalizeToEnvironmentIdentity(string stageToken, string modeToken)
+    {
+        var env = PluginStepIdentity.FromEnvironment("T", Env(stage: "PostOperation", mode: "Synchronous"));
+        var config = PluginStepIdentity.FromConfig("T", Config(stage: stageToken, mode: modeToken));
+
+        Assert.Equal(env, config);
+    }
+
+    [Fact]
+    public void NumericStageToken_ForDifferentStage_StillDiffers()
+    {
+        // Guard against over-canonicalization collapsing everything to PostOperation: "20" is PreOperation.
+        var post = PluginStepIdentity.FromEnvironment("T", Env(stage: "PostOperation"));
+        var pre = PluginStepIdentity.FromConfig("T", Config(stage: "20"));
+
+        Assert.NotEqual(post, pre);
+    }
+
     [Fact]
     public void ToString_RendersReadableComponents()
     {
