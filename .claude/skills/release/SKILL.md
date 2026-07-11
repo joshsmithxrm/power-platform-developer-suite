@@ -188,11 +188,11 @@ dotnet list package --vulnerable
 For stable releases (`vX.Y.0`), verify a completed security review artifact exists:
 
 ```bash
-# Must find at least one matching file — if empty, STOP and run /security-review first
+# List candidate artifacts — the newest MUST cover the delta since the last stable tag
 ls docs/qa/security-review-*.md
 ```
 
-The security review must cover the delta since the last stable release. If no artifact exists, run `/security-review` before proceeding. **This gate is not enforced for patches or prereleases.**
+The newest `docs/qa/security-review-*.md` must **cover the delta since the last stable release** — an older artifact from a prior release does not satisfy the gate. Confirm its scope spans `<last-stable-tag>..HEAD` before proceeding; if none does, run `/security-review` first. **This gate is not enforced for patches or prereleases.**
 
 Spot-check:
 - Per-package CHANGELOGs: scan for fabricated PR numbers (`gh pr view NNN` should work for each cited PR)
@@ -205,8 +205,8 @@ Spot-check:
 ```bash
 gh pr create \
   --base main \
-  --head release/prerelease-YYYY-MM-DD \
-  --title "chore(release): prerelease bump for all packages — YYYY-MM-DD" \
+  --head <release branch from Step 1> \
+  --title "chore(release): <prerelease|stable> bump for all packages — <version/date>" \
   --body-file release-pr-body.md
 ```
 
@@ -224,8 +224,9 @@ Template: use PR #785 as reference (`gh pr view 785 --json body`).
 After the PR merges, pull main and push tags **individually** (see Gotcha 6):
 
 ```bash
+# Run from your existing main worktree — git blocks checking out `main` in the release worktree:
 git fetch origin
-git checkout main && git pull
+git pull --ff-only origin main
 
 # One tag per NuGet package (7) — versions are per-package; do NOT assume a single shared version.
 # PPDS.Plugins in particular is on its own lineage (see Step 5).
@@ -287,7 +288,7 @@ git push origin "refs/tags/v<version>"
 |---|---|---|---|
 | Minor (coordinated) | **Yes** — `vX.Y.0` | `v1.1.0` | `docs-release.yml` → regenerate reference docs, open ppds-docs PR |
 | Stable (coordinated) | **Yes** — `vX.Y.0` | `v1.0.0` | Same as minor |
-| Prerelease (coordinated) | **Optional** — `vX.Y.0-beta.N` | `v1.1.0-beta.3` | `docs-release.yml` dry-run preview only (if desired) |
+| Prerelease (coordinated) | **Skip** (or dispatch a dry-run) | — | Pushing `v*-beta.N` runs the **real** `docs-release.yml` (opens a ppds-docs PR), not a dry-run. For a preview use `gh workflow run docs-release.yml -f dry_run=true` instead. |
 | Patch (single-package) | **No** | — | Per-package tags only; docs don't regenerate for patches |
 
 The unified tag is **not used for versioning** — it is purely a trigger for `docs-release.yml`. Per-package tags (`Auth-v*`, `Cli-v*`, etc.) remain the source of truth for package versions via MinVer.
@@ -394,7 +395,7 @@ ceremony above.
    git tag <Prefix>-v<X.Y.Z>
    git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
    ```
-5. Monitor the **single** `publish-nuget.yml` workflow run that fires for that tag.
+5. Monitor the `publish-nuget.yml` workflow run that fires for that tag. **For a `PPDS.Cli` patch, `release-cli.yml` also fires on the `Cli-v*` tag** — watch both.
 6. Verify the publish on NuGet.org (see Section 10 above for the verification commands).
 
 **No release PR is required for single-package patches** — the original fix PR is the audit
@@ -594,6 +595,8 @@ After all publishes verify:
    ```
 3. **Clean up the release worktree:**
    ```bash
+   # Prerelease: .worktrees/release-YYYY-MM-DD + release/prerelease-YYYY-MM-DD
+   # Stable:     .worktrees/release-vX.Y.Z     + release/vX.Y.Z   (match the names from Step 1)
    git worktree remove .worktrees/release-YYYY-MM-DD
    git branch -d release/prerelease-YYYY-MM-DD
    ```
