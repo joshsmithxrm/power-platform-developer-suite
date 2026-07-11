@@ -98,7 +98,7 @@
        the EmbeddedResource item is re-added on every build so an incremental recompile that
        skips zip generation still embeds the resource. -->
   <Target Name="_GenerateNet462ReferenceAssembliesZip"
-          Inputs="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2\mscorlib.dll"
+          Inputs="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2\mscorlib.dll;$(MSBuildProjectFullPath)"
           Outputs="$(IntermediateOutputPath)Net462ReferenceAssemblies.zip">
 
     <PropertyGroup>

@@ -50,7 +50,7 @@ public static class ExtractCommand
             Description = "Additional directory to search for referenced assemblies (repeatable). " +
                           "Use when a plugin's dependencies live outside the input assembly's own folder.",
             AllowMultipleArgumentsPerToken = true
-        };
+        }.AcceptExistingOnly();
 
         var command = new Command(
             "extract",

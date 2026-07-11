@@ -164,15 +164,25 @@ public sealed class AssemblyExtractor : IDisposable
             // Content-addressed cache key: identical content reuses the cache, while a rebuilt
             // resource (new CLI version) lands in a fresh directory, so there is no stale cache.
             var hash = Convert.ToHexString(SHA256.HashData(zipBytes))[..16].ToLowerInvariant();
-            var cacheDir = Path.Combine(Path.GetTempPath(), "ppds", "net462-ref", hash);
+
+            // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
+            // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
+            // created by the first user and then throw UnauthorizedAccessException for every other
+            // account — which the outer catch swallows, silently disabling the fix for them.
+            // Isolating by user name gives each account its own cache. See #1294.
+            var rawUser = Environment.UserName;
+            var userScope = string.IsNullOrWhiteSpace(rawUser)
+                ? "default"
+                : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
+            var baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
+            var cacheDir = Path.Combine(baseDir, hash);
 
             if (IsPopulated(cacheDir))
                 return cacheDir;
 
             // Extract to a unique staging directory, then atomically move it into place so a
             // concurrent extraction never observes a half-populated cache directory.
-            var stagingDir = Path.Combine(
-                Path.GetTempPath(), "ppds", "net462-ref", $".staging-{Guid.NewGuid():N}");
+            var stagingDir = Path.Combine(baseDir, $".staging-{Guid.NewGuid():N}");
             Directory.CreateDirectory(stagingDir);
             try
             {
