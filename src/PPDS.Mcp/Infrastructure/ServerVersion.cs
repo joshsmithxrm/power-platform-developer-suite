@@ -1,4 +1,5 @@
 using System.Reflection;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Mcp.Infrastructure;
 
@@ -32,9 +33,7 @@ internal static class ServerVersion
     {
         ArgumentNullException.ThrowIfNull(assembly);
 
-        var informationalVersion = assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion;
+        var informationalVersion = AssemblyVersionInfo.GetInformationalVersion(assembly);
 
         var fileVersion = assembly
             .GetCustomAttribute<AssemblyFileVersionAttribute>()?

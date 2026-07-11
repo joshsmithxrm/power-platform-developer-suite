@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli.Commands;
 
@@ -56,8 +57,9 @@ public static class ErrorOutput
     /// </summary>
     private static string GetInformationalVersion(Assembly assembly)
     {
-        // InformationalVersion includes pre-release suffix and commit hash (e.g., "1.2.3-beta.1+abc1234")
-        var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        // InformationalVersion includes pre-release suffix and commit hash (e.g., "1.2.3-beta.1+abc1234").
+        // The CLI intentionally keeps the '+<sha>' build-metadata suffix for diagnostics.
+        var infoVersion = AssemblyVersionInfo.GetInformationalVersion(assembly);
         if (!string.IsNullOrEmpty(infoVersion))
         {
             return infoVersion;
