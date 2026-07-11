@@ -7,6 +7,21 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!--
+      Run the per-TFM test hosts sequentially, not in parallel. The .NET 9+ SDK runs
+      `dotnet test` on a multi-TFM project with all target frameworks in parallel by
+      default (introduced in .NET 9 Preview 2). NativeCredentialStoreInteropTests
+      exercises the real per-user OS credential vault (Windows Credential Manager,
+      macOS Keychain, libsecret), and Get/Remove enumerate the *entire* vault via
+      CredEnumerate before filtering. Three TFM host processes mutating and enumerating
+      the same shared vault concurrently race: a CredRead can observe null while a
+      concurrent CredWrite from another TFM is in flight, failing the round-trip
+      (issue #1047). Per-appId GUIDs do not prevent this — the contention is at the
+      vault/enumeration level, not on the key. Forcing sequential TFM execution removes
+      the concurrency entirely without weakening coverage: every TFM still runs its
+      platform-native round-trip, just one at a time. See #1047.
+    -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>
 
   <ItemGroup>
