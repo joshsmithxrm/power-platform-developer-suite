@@ -186,6 +186,21 @@ class TestClassifyPR(unittest.TestCase):
         # but knip is tooling, so it's still A
         self.assertIn("tooling", c.reason)
 
+    def test_minor_stylelint_is_group_a(self):
+        # stylelint is a dev-time CSS linter (same class as eslint/knip/prettier)
+        # — a minor bump must be Group A (tooling), not Group B. Real case: PR #1279.
+        pr = make_pr(
+            number=1279,
+            title="Bump stylelint from 17.11.1 to 17.14.0",
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/stylelint-17.14.0",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
     def test_patch_nuget_test_sdk_is_group_a(self):
         pr = make_pr(
             number=824,
@@ -247,6 +262,28 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "B")
         self.assertEqual(c.update_type, "minor")
         self.assertIn("auth-critical", c.reason)
+
+    def test_patch_auth_critical_is_group_b(self):
+        # Regression for real PR #1288: an auth-critical PATCH bump
+        # (System.Security.Cryptography.Pkcs 10.0.5 -> 10.0.9) must go through
+        # verify-then-merge (Group B), NOT auto-merge (Group A). Per
+        # docs/MERGE-POLICY.md, auth-critical packages route to Group B at any
+        # non-major version — patch included. Before the fix this fell through
+        # to the generic "patch bump on non-critical path" branch and became A.
+        pr = make_pr(
+            number=1288,
+            title="Bump System.Security.Cryptography.Pkcs from 10.0.5 to 10.0.9",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/System.Security.Cryptography.Pkcs-10.0.9",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("auth-critical", c.reason)
+        # Reason should reflect the actual update type, not be hard-coded to "minor".
+        self.assertIn("patch", c.reason)
+        self.assertNotIn("minor", c.reason)
 
     def test_minor_azure_identity_is_group_b(self):
         pr = make_pr(
@@ -472,6 +509,150 @@ class TestClassifyPR(unittest.TestCase):
         self.assertIn("auth-critical", c.reason)
         self.assertIn("Azure.Identity", c.reason)
 
+    # Multi-package "Bump X and Y" titles (no version in title) — issue #1299.
+    # parse_title yields no package; members are recovered from the body and run
+    # through the same most-conservative-wins logic as grouped PRs.
+
+    def test_multi_package_auth_critical_minor_is_group_b(self):
+        # Real PR #1299: title bumps two auth-critical packages with no version;
+        # the body enumerates both as minor bumps. Must classify Group B
+        # (auth-critical), NOT default to Group C "could not classify".
+        pr = make_pr(
+            number=1299,
+            title="deps: Bump Microsoft.Identity.Client and Microsoft.Identity.Client.Extensions.Msal",
+            body=(
+                "Bumps Microsoft.Identity.Client and Microsoft.Identity.Client.Extensions.Msal.\n\n"
+                "Updated [Microsoft.Identity.Client](https://github.com/AzureAD/microsoft-authentication-library-for-dotnet) from 4.84.2 to 4.85.2.\n"
+                "Updated [Microsoft.Identity.Client.Extensions.Msal](https://github.com/AzureAD/microsoft-authentication-library-for-dotnet) from 4.84.2 to 4.85.2.\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/microsoft.identity.client-and-msal",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("multi-package", c.reason)
+        self.assertIn("auth-critical", c.reason)
+        self.assertIn("Microsoft.Identity.Client", c.reason)
+
+    def test_multi_package_with_major_member_is_group_c(self):
+        # A multi-package title where one member is a major bump — most
+        # conservative wins, so the whole PR is Group C.
+        pr = make_pr(
+            number=1300,
+            title="Bump Foo and Bar",
+            body=(
+                "Bumps Foo and Bar.\n\n"
+                "Updated [Foo](https://example.com/foo) from 1.0.0 to 1.0.1.\n"
+                "Updated [Bar](https://example.com/bar) from 2.0.0 to 3.0.0.\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/foo-and-bar",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("most-conservative=major", c.reason)
+
+    def test_multi_package_all_patch_non_critical_is_group_a(self):
+        # Two non-critical patch members via a multi-package title — Group A.
+        pr = make_pr(
+            number=1301,
+            title="Bump Foo and Bar",
+            body=(
+                "Bumps Foo and Bar.\n\n"
+                "Updated [Foo](https://example.com/foo) from 1.0.0 to 1.0.1.\n"
+                "Updated [Bar](https://example.com/bar) from 2.3.4 to 2.3.5.\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/foo-and-bar",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("multi-package", c.reason)
+
+    def test_multi_package_unparseable_body_is_group_c(self):
+        # A title that parse_title can't resolve AND a body with no parseable
+        # member lines must still fall through to the Group-C "could not
+        # classify" default (guards the multi-package path from over-reaching).
+        pr = make_pr(
+            number=1302,
+            title="Bump Foo and Bar",
+            body="This body has no dependabot 'Updated pkg from A to B' lines.",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/foo-and-bar",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertIn("could not classify", c.reason)
+
+    # Member-set safety guards — the grouped/multi-package path must apply the
+    # same body/path checks as the single-package path (regression from #1311
+    # review: _classify_member_set() returned before these guards ran).
+
+    def test_grouped_breaking_marker_forces_group_c(self):
+        # An all-patch group (would be Group A) whose body carries a BREAKING
+        # CHANGE marker must be forced to Group C, exactly like a single PR.
+        pr = make_pr(
+            number=1310,
+            title="Bump the npm_and_yarn group across 1 directory with 2 updates",
+            body=(
+                "Bumps the npm_and_yarn group with 2 updates:\n\n"
+                "Updates `foo` from 1.0.0 to 1.0.1\n"
+                "Updates `bar` from 2.3.4 to 2.3.5\n\n"
+                "> BREAKING CHANGE: the foo API was removed.\n"
+            ),
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/group-update",
+            files=["src/PPDS.Extension/package.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertIn("BREAKING CHANGE", c.reason)
+
+    def test_multi_package_breaking_marker_forces_group_c(self):
+        # Same guard on the multi-package ("Bump X and Y") path.
+        pr = make_pr(
+            number=1311,
+            title="Bump Foo and Bar",
+            body=(
+                "Bumps Foo and Bar.\n\n"
+                "Updated [Foo](https://example.com/foo) from 1.0.0 to 1.0.1.\n"
+                "Updated [Bar](https://example.com/bar) from 2.3.4 to 2.3.5.\n\n"
+                "Includes a BREAKING CHANGE in Foo.\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/foo-and-bar",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertIn("BREAKING CHANGE", c.reason)
+
+    def test_member_set_auth_critical_path_escalates_to_group_b(self):
+        # An all-patch, non-critical group (would be Group A) whose diff touches
+        # an auth-critical path (src/PPDS.Auth/**) must escalate to at least B.
+        pr = make_pr(
+            number=1312,
+            title="Bump the nuget group across 1 directory with 2 updates",
+            body=(
+                "Bumps the nuget group with 2 updates:\n\n"
+                "Updates `Foo` from 1.0.0 to 1.0.1\n"
+                "Updates `Bar` from 2.3.4 to 2.3.5\n"
+            ),
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/group-update",
+            files=["Directory.Packages.props", "src/PPDS.Auth/Credentials/Foo.cs"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertIn("auth-critical path", c.reason)
+
     # Group C — manual review
 
     def test_major_npm_is_group_c(self):
@@ -498,6 +679,22 @@ class TestClassifyPR(unittest.TestCase):
         )
         c = classify.classify_pr(pr)
         self.assertEqual(c.group, "C")
+
+    def test_major_auth_critical_is_group_c(self):
+        # An auth-critical MAJOR bump must still be Group C (universal major
+        # exclusion outranks the auth-critical Group-B override). Guards against
+        # the patch/minor override broadening to swallow majors.
+        pr = make_pr(
+            number=1289,
+            title="Bump Microsoft.Identity.Client from 4.56.0 to 5.0.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Microsoft.Identity.Client-5.0.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("major", c.reason)
 
     def test_major_github_actions_is_group_c(self):
         # actions/checkout v3 -> v4 is a major and should be Group C
