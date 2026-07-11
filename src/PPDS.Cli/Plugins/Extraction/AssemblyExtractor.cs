@@ -66,12 +66,13 @@ public sealed class AssemblyExtractor : IDisposable
         var assemblyPaths = BuildResolverPaths(assemblyPath, referenceDirs, includeRuntimeDirectory);
         var resolver = new PathAssemblyResolver(assemblyPaths);
 
-        // Leave coreAssemblyName null so MetadataLoadContext infers the core assembly from the
-        // target assembly's references (it probes "mscorlib", "System.Runtime", ... in order).
-        // For a net462 plugin that resolves to mscorlib — now always available via the embedded
-        // reference assemblies — and for a net8-targeted assembly it resolves via the runtime
-        // directory. Passing an explicit "mscorlib" would force the net462 core even for net8
-        // targets, so null is the safer choice that keeps both scenarios working.
+        // Leave coreAssemblyName null: MetadataLoadContext infers the core assembly from the
+        // target assembly's own references. Dataverse plugin assemblies target .NET Framework
+        // 4.6.2, so the core resolves to mscorlib — which BuildResolverPaths seeds from the
+        // embedded reference assemblies, ordered ahead of the runtime directory so it is found
+        // even in a single-file publish (where no loose BCL DLLs exist on disk). Forcing an
+        // explicit "mscorlib" would over-constrain the core for any non-net462 input, so null
+        // is the more general choice — MLC binds whatever core the target actually references.
         var mlc = new MetadataLoadContext(resolver);
 
         return new AssemblyExtractor(mlc, assemblyPath);
