@@ -248,6 +248,28 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.update_type, "minor")
         self.assertIn("auth-critical", c.reason)
 
+    def test_patch_auth_critical_is_group_b(self):
+        # Regression for real PR #1288: an auth-critical PATCH bump
+        # (System.Security.Cryptography.Pkcs 10.0.5 -> 10.0.9) must go through
+        # verify-then-merge (Group B), NOT auto-merge (Group A). Per
+        # docs/MERGE-POLICY.md, auth-critical packages route to Group B at any
+        # non-major version — patch included. Before the fix this fell through
+        # to the generic "patch bump on non-critical path" branch and became A.
+        pr = make_pr(
+            number=1288,
+            title="Bump System.Security.Cryptography.Pkcs from 10.0.5 to 10.0.9",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/System.Security.Cryptography.Pkcs-10.0.9",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "B")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("auth-critical", c.reason)
+        # Reason should reflect the actual update type, not be hard-coded to "minor".
+        self.assertIn("patch", c.reason)
+        self.assertNotIn("minor", c.reason)
+
     def test_minor_azure_identity_is_group_b(self):
         pr = make_pr(
             number=841,
@@ -498,6 +520,22 @@ class TestClassifyPR(unittest.TestCase):
         )
         c = classify.classify_pr(pr)
         self.assertEqual(c.group, "C")
+
+    def test_major_auth_critical_is_group_c(self):
+        # An auth-critical MAJOR bump must still be Group C (universal major
+        # exclusion outranks the auth-critical Group-B override). Guards against
+        # the patch/minor override broadening to swallow majors.
+        pr = make_pr(
+            number=1289,
+            title="Bump Microsoft.Identity.Client from 4.56.0 to 5.0.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Microsoft.Identity.Client-5.0.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("major", c.reason)
 
     def test_major_github_actions_is_group_c(self):
         # actions/checkout v3 -> v4 is a major and should be Group C

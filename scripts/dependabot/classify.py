@@ -479,12 +479,16 @@ def classify_pr(pr: dict) -> Classification:
             to_version=to_v,
         )
 
-    # Auth-critical package at minor — Group B.
-    if is_auth_critical_package(pkg) and update_type == "minor":
+    # Auth-critical package at any non-major version (patch OR minor) — Group B.
+    # Per docs/MERGE-POLICY.md "Auth-Critical Packages": bumps to these packages
+    # at any non-major version go through verify-then-merge. Major bumps already
+    # returned Group C above; an "unknown" update_type falls through to the final
+    # Group-C default (manual review).
+    if is_auth_critical_package(pkg) and update_type in ("patch", "minor"):
         return Classification(
             pr_number=number,
             group="B",
-            reason=f"auth-critical package {pkg} minor bump ({from_v} -> {to_v}) — verify-then-merge",
+            reason=f"auth-critical package {pkg} {update_type} bump ({from_v} -> {to_v}) — verify-then-merge",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
