@@ -655,7 +655,7 @@
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "monaco-editor": "0.55.1",
-    "vscode-jsonrpc": "^8.2.1"
+    "vscode-jsonrpc": "^9.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
