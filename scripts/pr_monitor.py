@@ -1360,6 +1360,10 @@ def _persist_reviewer_state(worktree, mode, logger):
                 state = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             state = {}
+        # Tolerate a non-dict root (``null`` or an array parse to a non-dict,
+        # on which ``state.get(...)`` would AttributeError and abort startup).
+        if not isinstance(state, dict):
+            state = {}
         # Tolerate an explicit ``"pr": null`` (setdefault returns None for a
         # present-but-null key, which would then TypeError on item assignment).
         pr_sec = state.get("pr")

@@ -64,6 +64,11 @@ def main():
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
+    # A non-dict root (e.g. JSON ``null`` or an array) is as unusable as a
+    # corrupt file — allow stop rather than crashing on state.get(...) below.
+    if not isinstance(state, dict):
+        sys.exit(0)
+
     # Bypass: pipeline orchestrator is actively running (AC-197)
     if state.get("pipeline", {}).get("in_flight"):
         sys.exit(0)

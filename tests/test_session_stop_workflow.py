@@ -258,3 +258,14 @@ class TestReviewerOptionalTriageGate:
                               commits_ahead="1")
         assert code == 2
         assert "AttributeError" not in out and "Traceback" not in out
+
+    def test_non_dict_state_root_does_not_crash(
+            self, tmp_path, monkeypatch, capsys):
+        """Regression (CodeRabbit review of #1308): a non-dict JSON root in
+        state.json (null or an array) must not crash the hook on the
+        state.get(...) that immediately follows the load — treat it like a
+        corrupt file and allow stop (exit 0)."""
+        for raw_root in (None, []):
+            code, out = _run_hook(tmp_path, raw_root, monkeypatch, capsys)
+            assert code == 0
+            assert "AttributeError" not in out and "Traceback" not in out

@@ -3572,6 +3572,22 @@ class TestReviewerNoneEndToEnd:
         assert state["pr"] == {"reviewer": "none"}
         assert state["phase"] == "pr"  # unrelated top-level keys preserved
 
+    def test_persist_reviewer_state_handles_non_dict_root(self, tmp_path):
+        """Regression (CodeRabbit review of #1308): a non-dict state.json root
+        (JSON null or an array) must not AttributeError in
+        _persist_reviewer_state — it resets to {} and writes a clean
+        {"pr": {"reviewer": <mode>}}."""
+        wt = _make_worktree(tmp_path)
+        logger = _make_logger(tmp_path)
+        state_path = os.path.join(wt, ".workflow", "state.json")
+        for raw in ("null", "[]"):
+            with open(state_path, "w", encoding="utf-8") as f:
+                f.write(raw)
+            pr_monitor._persist_reviewer_state(wt, "none", logger)
+            with open(state_path, encoding="utf-8") as f:
+                state = json.load(f)
+            assert state == {"pr": {"reviewer": "none"}}
+
 
 class TestReviewerNoneReadyFlipGates:
     """#1177: _ready_flip_gates skips the review dimension in none mode but
