@@ -64,15 +64,6 @@ public static class CompareCommand
             var env = result.GetValue(EnvOption);
             var source = result.GetValue(SourceOption);
             var target = result.GetValue(TargetOption);
-            var format = result.GetValue(GlobalOptions.OutputFormat);
-
-            if (format == Commands.OutputFormat.Csv)
-            {
-                // CSV output is not implemented for schema compare. System-wide CSV
-                // support is tracked in #1078.
-                result.AddError("CSV output is not supported for 'schema compare'. Use --output-format Json or Text.");
-                return;
-            }
 
             var packageMode = data is not null || env is not null;
             var envMode = source is not null || target is not null;

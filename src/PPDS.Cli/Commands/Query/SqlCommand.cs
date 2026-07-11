@@ -87,7 +87,7 @@ public static class SqlCommand
             QueryCommandGroup.CountOption
         };
 
-        GlobalOptions.AddToCommand(command);
+        GlobalOptions.AddToCommand(command, supportsCsv: true);
 
         // Validate that exactly one input source is provided
         command.Validators.Add(result =>
@@ -107,6 +107,34 @@ public static class SqlCommand
             else if (sourceCount > 1)
             {
                 result.AddError("Only one SQL source allowed. Use query argument, --file, or --stdin.");
+            }
+        });
+
+        // --explain and --show-fetchxml render a plan / FetchXML blob, not a result set,
+        // so CSV is not applicable. Reject it rather than silently emitting Text (#1078).
+        command.Validators.Add(result =>
+        {
+            if (!result.GetValue(showFetchXmlOption) && !result.GetValue(explainOption))
+            {
+                return;
+            }
+
+            // If --output-format itself failed to parse, that error is already reported by
+            // the option's parser; reading the value here would throw, so skip.
+            OutputFormat format;
+            try
+            {
+                format = result.GetValue(GlobalOptions.CsvCapableOutputFormat);
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+
+            if (format == OutputFormat.Csv)
+            {
+                result.AddError(
+                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text.");
             }
         });
 

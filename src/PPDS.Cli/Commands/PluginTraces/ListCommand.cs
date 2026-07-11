@@ -158,7 +158,7 @@ public static class ListCommand
             orderByOption
         };
 
-        GlobalOptions.AddToCommand(command);
+        GlobalOptions.AddToCommand(command, supportsCsv: true);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {

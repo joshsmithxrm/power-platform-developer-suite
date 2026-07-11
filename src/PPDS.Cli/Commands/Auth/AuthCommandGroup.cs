@@ -629,11 +629,7 @@ public static class AuthCommandGroup
 
     private static Command CreateListCommand()
     {
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var command = new Command("list", "List all authentication profiles")
         {
@@ -1248,11 +1244,7 @@ public static class AuthCommandGroup
 
     private static Command CreateWhoCommand()
     {
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var command = new Command("who", "Show the current active profile")
         {

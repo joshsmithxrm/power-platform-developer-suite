@@ -56,11 +56,7 @@ public static class UsersCommand
             DefaultValueFactory = _ => false
         };
 
-        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
-        {
-            Description = "Output format",
-            DefaultValueFactory = _ => OutputFormat.Text
-        };
+        var outputFormatOption = GlobalOptions.CreateOutputFormatOption();
 
         var verboseOption = new Option<bool>("--verbose", "-v")
         {
