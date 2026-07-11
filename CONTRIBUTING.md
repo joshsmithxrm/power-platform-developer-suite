@@ -112,6 +112,22 @@ tests/PPDS.Cli.Tests/Services/AuthServiceTests.cs
 Per-area conventions (which framework to use where, trait categories) live
 in the `test-conventions` skill: `.claude/skills/test-conventions/SKILL.md`.
 
+## AI-Assisted Development (Optional)
+
+This repo ships Claude Code tooling in `.claude/` — skills that document
+project procedures (release, testing conventions, multi-surface
+verification) and a small set of safety hooks (branch/key protection,
+delete guards). All of it is optional:
+
+- **CI is the contract.** Everything the tooling checks locally, CI checks
+  on your PR with plain `dotnet`/`npm` commands. You can contribute without
+  ever running an AI tool.
+- The skills are plain markdown (`.claude/skills/*/SKILL.md`) — useful as
+  documentation even if you never execute them.
+- **Token-cost note:** some skills (`/verify`, `/qa`, `/review`) spawn
+  multiple agents and consume significant tokens. They are designed for
+  maintainer-scale budgets; nothing requires you to run them.
+
 ## Pull Request Process
 
 1. **Create a PR** targeting `main`

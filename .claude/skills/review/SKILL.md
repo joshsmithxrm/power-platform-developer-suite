@@ -42,13 +42,7 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 
 ### Step 2b: Load QA Findings for Dedup
 
-Before dispatching reviewers, read existing QA findings from state:
-
-```bash
-python scripts/workflow-state.py get qa_findings
-```
-
-Parse the output as JSON. Pass these findings to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
+If `/qa` ran earlier and produced findings, pass them to each reviewer subagent as "already found by QA" context. Reviewers should NOT re-report QA findings that were fixed (`fixed: true`) unless the fix introduced a new problem.
 
 ### Step 3: Dispatch Impartial Reviewer
 For large diffs (>10 files), use per-file chunking instead of a single subagent:
@@ -129,24 +123,6 @@ Include total counts and a clear verdict:
 - **PASS**: 0 critical, 0 important
 - **PASS WITH FINDINGS**: 0 critical, N important (reviewer judgment)
 - **FAIL**: any critical findings
-
-## Workflow State
-
-On review start, set the phase:
-
-```bash
-python scripts/workflow-state.py set phase reviewing
-```
-
-After review completes (all findings evaluated and verdict rendered), run:
-
-```bash
-python scripts/workflow-state.py set review.passed now
-python scripts/workflow-state.py set review.commit_ref "$(git rev-parse HEAD)"
-python scripts/workflow-state.py set review.findings {count}
-```
-
-Where `{count}` is the total findings (critical + important + suggestion).
 
 ## Rules
 

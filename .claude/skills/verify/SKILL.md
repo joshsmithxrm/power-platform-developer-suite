@@ -72,12 +72,12 @@ Per tool: valid->success shape; edge case->error handling; matches schema.
 
 **Check 1 - Python tests:**
 ```bash
-pytest tests/test_pipeline.py tests/test_workflow_state.py tests/test_protect_main_branch.py tests/test_session_stop_workflow.py -v
+pytest tests/test_protect_main_branch.py tests/test_hooks.py -v
 ```
 
-**Check 2 - Hook scripts:** for each `.py` in `.claude/hooks/` (except
-`_pathfix.py`): `echo '{}' | python .claude/hooks/{hook}.py`. Exit 0 or 2,
-never 1.
+**Check 2 - Hook scripts:** for each surviving `.py` in `.claude/hooks/`
+(except `_pathfix.py`): `echo '{}' | python .claude/hooks/{hook}.py`. Exit
+0 or 2, never 1.
 
 **Check 3 - settings.json:** parses; every hook `command` exists on disk.
 
@@ -93,45 +93,13 @@ never 1.
 
 **Check 7 - Retro store schema:** see `REFERENCE.md` "Retro store schema".
 
-**Check 8 - Behavioral scenarios:** `python scripts/verify-workflow.py`;
-any failed scenario fails the check.
-
-**Check 9 - Empirical shakedown gate** <!-- enforcement: T2 hook:shakedown-gate -->
-```bash
-python scripts/verify_shakedown.py
-```
-Allowlist source of truth: `scripts/_shakedown_allowlist.py`. When the
-diff touches any allowlisted file, spawn one real `claude --bg` against
-a throwaway prompt and assert exit 0; otherwise log a skip and exit 0.
-Subscription pool only (`claude --bg`), never `-p`. Rationale + how to
-add a wrapper: `REFERENCE.md` "Empirical shakedown gate". Exit codes:
-0=skipped/passed, 1=ran-and-failed, 2=setup error.
-
-**Check 10 - State write:** on all checks passing,
-`python scripts/workflow-state.py set verify.workflow now` and
-`python scripts/workflow-state.py set verify.workflow_commit_ref "$(git rev-parse HEAD)"`.
-
 ### 8. Report
 
 See `REFERENCE.md` "Report template". Include actual values.
 
-## Workflow state
-
-After PASS for a surface (`ext`/`tui`/`mcp`/`cli`/`workflow`):
-```bash
-python scripts/workflow-state.py set verify.{surface} now
-python scripts/workflow-state.py set verify.{surface}_commit_ref "$(git rev-parse HEAD)"
-```
-
-## Workflow continuation - MANDATORY <!-- enforcement: T1 hook:session-stop-workflow -->
-
-Verify is one step in the shipping pipeline, not the last one. Check
-`python scripts/workflow-state.py get phase`:
-- `implementing` -> return results to `/implement`.
-- otherwise -> proceed to `/pr` immediately. Pipeline is `/gates` ->
-  `/verify` -> `/pr`. Do not stop.
-
-Exception: on FAIL, fix first, rerun `/verify`, then `/pr`.
+Verify is one step in the usual shipping sequence (`/gates` -> `/verify`
+-> `/pr`), not the last one. On PASS, proceed to `/pr`. On FAIL, fix
+first and re-run `/verify` before continuing.
 
 ## Rules
 

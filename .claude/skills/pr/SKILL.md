@@ -1,28 +1,13 @@
 ---
 name: pr
-description: Create PR, wait for the configured reviewer (Gemini or none), triage every comment, and present summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
+description: Create PR, wait for the configured automated review, triage every comment, and present a summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
 ---
 
 # PR
 
-End-to-end PR lifecycle: rebase, create, wait for the configured external review, triage comments, and present a summary to the user.
-
-This skill is the ONLY sanctioned path for automated PR creation. <!-- enforcement: T1 hook:pr-gate --> See REFERENCE.md §1.
+End-to-end PR lifecycle: rebase, create, wait for the configured automated review, triage every comment, and present a summary to the user.
 
 ## Process
-
-```bash
-python scripts/workflow-state.py set phase pr
-python scripts/workflow-state.py set pr.invoked_via_skill true
-```
-
-### Step 0: Check Supervisor Inbox
-
-```bash
-python scripts/supervisor_msg.py read --consume
-```
-
-Handle message kinds per REFERENCE.md §7. `abort`/`revise` → stop before creating PR.
 
 ### Step 1: Rebase and Push
 
@@ -39,15 +24,11 @@ git push --force-with-lease origin HEAD
 
 ### Step 2: Linked Issues
 
-```bash
-python scripts/workflow-state.py get issues
-```
-
-Include `Closes #NNN` per issue. If empty (interactive): ask user for issue numbers.
+Include `Closes #NNN` for each issue this PR resolves. If you do not know the issue numbers (interactive), ask the user.
 
 ### Step 3: Pre-PR Self-Review
 
-Dispatch `code-reviewer` agent against `git diff origin/main...HEAD`. See REFERENCE.md §2 for inputs and finding triage. DEFECTs must be fixed before opening. Skip with `--no-self-review`.
+Dispatch the `code-reviewer` agent against `git diff origin/main...HEAD`. See REFERENCE.md §2 for inputs and finding triage. DEFECTs must be fixed before opening. Skip with `--no-self-review`.
 
 ### Step 4: Create PR (Draft)
 
@@ -57,49 +38,49 @@ Write body to temp file (see REFERENCE.md §3 for template), then:
 gh pr create --draft --title "<title>" --body-file "$PR_BODY"
 ```
 
-Immediately after creation:
-```bash
-python scripts/workflow-state.py set pr.url "{pr-url}"
-python scripts/workflow-state.py set pr.created now
-```
+### Step 5: Wait for Automated Review and CI
 
-### Step 5: Launch Background Monitor (MANDATORY) <!-- enforcement: T1 hook:session-stop-workflow -->
+Poll for the configured automated review (e.g. Gemini or CodeRabbit; some repos disable it) and check status directly:
 
 ```bash
-REVIEWER=$(python scripts/pr_monitor.py --print-reviewer)
-python scripts/workflow-state.py set pr.reviewer "$REVIEWER"
-python scripts/pr_monitor.py --worktree "$(pwd)" --pr {pr-number} --reviewer "$REVIEWER"
+gh pr checks <pr-number> --watch          # CI + CodeQL status
+gh pr view <pr-number> --json reviews,comments,statusCheckRollup
 ```
 
-Reviewer mode resolves `--reviewer` flag > `PPDS_PR_REVIEWER` env > repo default; `none` disables the external-review wait and triage. Launch as detached background process (see REFERENCE.md §4). Then:
+Review timing is unpredictable (2–10+ minutes). Poll `gh pr view <pr-number> --json reviews,comments` every ~30s until the review appears, up to a few minutes. If no reviewer is configured or it never arrives, note that and proceed — do not block indefinitely.
+
+### Step 6: Triage Every Comment
+
+Fetch review comments and respond to **every** one — this is the discipline that captures knowledge:
+
 ```bash
-cat .workflow/pr-monitor.pid
-python scripts/workflow-state.py set pr.monitor_launched now
+gh pr view <pr-number> --json reviews,comments
+gh api repos/:owner/:repo/pulls/<pr-number>/comments      # inline review comments
 ```
 
-On failure: inline fallback — record reason per REFERENCE.md §4. When `$REVIEWER` is `none`, skip the "wait + triage yourself" fallback steps (there is no external reviewer); still record `pr.monitor_launched "fallback: <reason>"` and `pr.reviewer`. <!-- enforcement: T2 hook:pr-monitor-fallback-record -->
+For each comment: either fix the code (and reply noting the commit) or reply with a rationale for not changing it. Do not leave any comment unaddressed. Include CodeQL and CI-surfaced findings in the same pass.
 
-### Step 6: Completion Gate (MANDATORY) <!-- since: PR#956 rationale --> <!-- enforcement: T1 hook:session-stop-workflow -->
+### Step 7: Flip to Ready and Present Summary
 
-1. **Monitor**: confirm `.workflow/pr-monitor.pid` exists and process running (`kill -0`). If missing AND no fallback recorded → fail: `"⚠ Monitor PID file missing"`.
-2. **Review received** — *skip this check when `$REVIEWER` is `none`* (note "Reviewer: none" in the summary instead). Otherwise poll `gh pr view {N} --json reviews,comments` every 30s for 5 min. If absent → fail. Bypass with `--skip-gemini-check`.
+Once CI is green, the automated review is triaged, and every comment is answered:
 
-### Step 7: Present Summary
-
-Gemini mode:
-```
-PR created (draft): {url}
-Monitor launched (PID {pid}) — handling CI, Gemini, CodeQL, triage, ready-flip, retro
-Gemini review: ✅ verified
-
-Check: /status   Log: .workflow/pr-monitor.log
+```bash
+gh pr ready <pr-number>
 ```
 
-When `$REVIEWER` is `none`, replace the "Gemini review" line with:
+Present:
+
 ```
-Reviewer: none — monitor gates on CI + unreplied bot comments only
+PR created: {url}
+CI: <status>   Review: <triaged N comments, or "no reviewer configured">
 ```
 
 ### Step 8: Post-Merge Cleanup
 
-Cleanup is user-initiated via `/cleanup`. See REFERENCE.md §5.
+When the PR merges, delete the branch and worktree:
+
+```bash
+git worktree remove <path>        # if working in a dedicated worktree
+git branch -d <branch>
+git push origin --delete <branch> # if the remote branch was not auto-deleted
+```

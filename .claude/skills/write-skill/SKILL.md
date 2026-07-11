@@ -1,11 +1,11 @@
 ---
 name: write-skill
-description: Author or modify skills following PPDS conventions — naming, structure, frontmatter, discoverability, workflow state integration. Use when creating, editing, or restructuring skills.
+description: Author or modify skills following PPDS conventions — naming, structure, frontmatter, discoverability. Use when creating, editing, or restructuring skills.
 ---
 
 # Write Skill
 
-Guide for authoring PPDS skills that are consistent, discoverable, and integrate with the workflow enforcement system.
+Guide for authoring PPDS skills that are consistent and discoverable.
 
 ## Naming Convention
 
@@ -55,39 +55,13 @@ description: One sentence describing when to use this skill. Write for AI discov
 - Don't describe the technology — describe the user's intent
 - Keep under 200 characters
 
-## Workflow State Integration
+## Two-File Pattern
 
-Skills that represent workflow steps should write to `.workflow/state.json` on completion.
+SKILL.md is capped at 150 lines and is the entry point loaded on demand. Move rationale, worked examples, and long tables into a sibling `REFERENCE.md` that SKILL.md references. See `.claude/skills/TWO-FILE-PATTERN.md`.
 
-**When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Surface-specific reference sections (e.g., `/verify` `REFERENCE.md §tui/§ext/§cli`) do NOT write state — the orchestrating skill that invokes them does.
+## Authoring an Agent
 
-**How to write state:** Use the utility script — never write JSON by hand:
-
-```bash
-python scripts/workflow-state.py set <dotted.key> <value>
-```
-
-Magic values: `now` → UTC ISO timestamp, `true`/`false` → boolean, digits → integer.
-
-Example for /gates:
-```bash
-python scripts/workflow-state.py set gates.passed now
-python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
-```
-
-**State fields by skill:**
-
-| Skill | Command |
-|-------|---------|
-| `/gates` | `set gates.passed now` + `set gates.commit_ref {HEAD}` |
-| `/verify` | `set verify.{surface} now` |
-| `/qa` | `set qa.{surface} now` |
-| `/review` | `set review.passed now` + `set review.findings {count}` |
-| `/implement` | `set branch {name}` + `set spec {path}` + `set plan {path}` + `set started now` |
-| `/pr` | `set pr.url {url}` + `set pr.created now` |
-
-| convergence loop (in `/implement` Step 6E) | `set-null gates.passed` + `set-null gates.commit_ref` |
-| `/cleanup --reset` | `delete` (removes state file) |
+Agents live in `.claude/agents/<name>.md` with YAML frontmatter (`name`, `description`, `tools`, optional `model`). The same discoverability rules apply to the `description`: lead with when to dispatch the agent and the words that should trigger it. Keep the `tools` list minimal — grant only what the agent needs.
 
 ## Skill Categories
 
@@ -99,7 +73,7 @@ For reference, PPDS skills fall into these categories:
 | **Verification tools** | /verify, /shakedown | Yes |
 | **Surface knowledge** | /verify (§ext, §tui, §mcp, §cli in REFERENCE.md) | AI-loaded |
 | **Development guides** | /ext-panels, /write-skill | AI-loaded |
-| **Analysis** | /retro, /debug, /status | Yes |
+| **Analysis** | /debug | Yes |
 
 ## Checklist
 
@@ -108,6 +82,6 @@ When creating a new skill:
 1. Name follows `{action}` or `{action}-{qualifier}` convention
 2. SKILL.md has frontmatter with `name` and `description`
 3. Description is written for AI discoverability (trigger words, not technology)
-4. If it represents a workflow gate, it calls `python scripts/workflow-state.py`
-5. If it references other skills, it uses current names (not old names)
-6. Directory is `.claude/skills/<name>/SKILL.md`
+4. If it references other skills, it uses current names (not old names)
+5. Directory is `.claude/skills/<name>/SKILL.md`
+6. SKILL.md is at or under 150 lines; rationale lives in REFERENCE.md

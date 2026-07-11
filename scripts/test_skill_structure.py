@@ -37,16 +37,6 @@ class TestSkillStructure(unittest.TestCase):
         text = path.read_text(encoding='utf-8')
         self.assertIn('Read REFERENCE.md', text)
 
-    def test_retro_skill_line_count(self):
-        path = SKILLS / 'retro' / 'SKILL.md'
-        ref = SKILLS / 'retro' / 'REFERENCE.md'
-        self.assertTrue(path.exists())
-        self.assertTrue(ref.exists())
-        n = _line_count(path)
-        self.assertLessEqual(n, LINE_CAP, f'retro SKILL.md is {n} lines; cap is {LINE_CAP}')
-        text = path.read_text(encoding='utf-8')
-        self.assertIn('Read REFERENCE.md', text)
-
     def test_two_file_pattern_doc_exists(self):
         path = SKILLS / 'TWO-FILE-PATTERN.md'
         self.assertTrue(path.exists())

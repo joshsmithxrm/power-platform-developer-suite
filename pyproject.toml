@@ -1,5 +1,2 @@
 [tool.pytest.ini_options]
 empty_parameter_set_mark = "fail_at_collect"
-markers = [
-    "real_dispatch_spawn: test exercises the real claude_dispatch.spawn (overrides conftest auto-stub)",
-]

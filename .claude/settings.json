@@ -237,16 +237,6 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/preuse-askuserquestion.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Edit",
         "hooks": [
           {
@@ -282,46 +272,6 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/claudemd-line-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(git commit:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-validate.py\"",
-            "timeout": 120
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(gh pr create:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pr-gate.py\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(git checkout:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/checkout-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(gh issue create:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-guard.py\"",
             "timeout": 5
           }
         ]
@@ -427,51 +377,11 @@
         ]
       },
       {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/retro-html-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash(git worktree remove:*)",
         "hooks": [
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-safety.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(dotnet test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(npm test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(npm run test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
             "timeout": 5
           }
         ]
@@ -499,16 +409,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash(git commit:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-commit-state.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Bash(git worktree remove:*)",
         "hooks": [
           {
@@ -517,99 +417,10 @@
             "timeout": 5
           }
         ]
-      },
-      {
-        "matcher": "Bash(dotnet test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(npm test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(npm run test:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/debug-first.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(gh pr merge:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(git branch -D:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(git branch -d:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/inflight-auto-deregister.py\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-workflow.py\"",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "Notification": [],
     "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-hook-watchdog.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-stop-workflow.py\"",
-            "timeout": 30
-          }
-        ]
-      },
       {
         "hooks": [
           {

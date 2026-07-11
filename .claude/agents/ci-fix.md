@@ -15,7 +15,7 @@ tools:
 Fix CI failures on a pull request. You receive a payload (via stdin or prompt) containing:
 - `failure_summary`: excerpt from the failed CI job log
 - `diff`: output of `git diff main...HEAD`
-- `branch_acs`: branch acceptance criteria from `.workflow/state.json`
+- `branch_acs`: acceptance criteria for the linked issue(s) (e.g. from `gh issue view <N>`)
 - `gemini_comments`: Gemini review comments (context-only — do not reply)
 - `constitution`: path to `specs/CONSTITUTION.md`
 - `commit_sha`: current HEAD SHA

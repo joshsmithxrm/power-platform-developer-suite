@@ -2,7 +2,7 @@
 
 Rationale, taxonomies, and worked examples for `/backlog`. The procedure lives in `.claude/skills/backlog/SKILL.md`; the "why" lives here.
 
-Always re-read `docs/BACKLOG.md` first - it is the canonical label and milestone reference. This file documents the *interpretation* and the dispatch heuristics that don't fit there.
+Always re-read `docs/BACKLOG.md` first - it is the canonical label and milestone reference. This file documents the *interpretation* that doesn't fit there.
 
 ## §1 - Label taxonomy
 
@@ -30,7 +30,7 @@ If a single issue genuinely spans two areas, apply both labels - but consider wh
 ### status:
 
 - `status:backlog` - identified, not yet milestoned. The triage queue lives here.
-- `status:in-progress` - actively being worked. Pairs with an in-flight registry entry.
+- `status:in-progress` - actively being worked.
 - `status:blocked` - external dependency or upstream change required.
 - `status:needs-repro` - reported, but maintainer cannot reproduce locally.
 
@@ -50,9 +50,8 @@ Before presenting ANY issue to the user during triage:
 2. Verify the symptom still reproduces (or note "needs repro" for issues older than the last milestone).
 3. Match the area label against the actual code path. If wrong, propose the correct label.
 4. Check if a duplicate exists: `gh issue list --search "in:title <keyword>"`.
-5. Check the in-flight registry for a sibling working on the same area.
 
-Skipping verification produces stale or duplicate issues - retrospective B3 / #802 documents the cost.
+Skipping verification produces stale or duplicate issues.
 
 ## §3 - Triage decision rules
 
@@ -84,68 +83,7 @@ Periodically (or on `/backlog validate`):
 - Detect duplicates added since last validation pass.
 - Close stale issues that have been in `status:backlog` for >180 days with no consumer.
 
-## §6 - Dispatch heuristics
-
-When and how to spawn parallel worktrees:
-
-- Group by `area:` to maximize parallelism without merge conflicts.
-- Each dispatched worktree gets a single issue (not a batch). One issue, one PR, one merge.
-- Inline-prompt requirement: every dispatch carries the issue text, the AC list, and the worktree branch name in the prompt body. Spawning without an inline prompt is what forced retrospective B3.
-- Register every dispatch in `.claude/state/in-flight-issues.json` via `scripts/inflight-register.py`. The auto-deregister hook (PR-4) clears the entry on PR merge.
-
-## §7 - Inline-prompt examples
-
-### Dispatch a single-issue worktree
-
-```
-/start <branch-name>
-issue: #NNN
-title: <title>
-area: <area>
-acs:
-  - AC-NN: <text>
-  - AC-NN: <text>
-intent: <one-line intent>
-```
-
-The receiving Claude session reads this from the launch script, registers itself in the in-flight registry, and runs `/design -> /implement -> /pr` on the issue.
-
-### Dispatch a parallel wave
-
-```
-/backlog dispatch
-issues: #NNN, #NNN, #NNN
-wave: 1 of 1
-```
-
-Backlog skill plans the wave, generates one inline prompt per issue, and spawns one worktree per issue.
-
-## §8 - Conflict-resolution examples
-
-### Sibling session detected on `gh issue create`
-
-```
-$ python scripts/inflight-check.py --area extension
-Session abc123 (branch feat/ext-data-explorer) is actively working on
-area:extension with intent "data explorer monaco editor"
-```
-
-Action: ASK the user before filing. Decisions: file anyway and link the sibling work, coordinate with the sibling and add to their PR, or drop the new issue.
-
-### Sibling session detected on `gh issue close`
-
-If the closer is not in the registry but a sibling is, the closer must surface the sibling branch and ask whether the close should attribute the fix to that PR (set `closed-by` reference correctly) or whether the issue is actually being addressed elsewhere.
-
-## §9 - Meta-retro references
-
-Backlog operations have produced these retros worth re-reading:
-
-- B3 / #802 - duplicate issue creation due to skipped sibling check; led to T2 enforcement marker.
-- B7 - issues closed without reading the in-flight registry; led to second sibling check on close.
-
-## §10 - NEVER list (with rationale)
+## §6 - NEVER list (with rationale)
 
 - NEVER create an issue without `type:` + `area:` labels (orphan issues are unfindable in triage).
-- NEVER close an issue without checking the in-flight registry (misattributes fixes).
 - NEVER skip the `cat docs/BACKLOG.md` step (label rules drift; the file is the source of truth).
-- NEVER dispatch a worktree without an inline prompt (retrospective B3).
