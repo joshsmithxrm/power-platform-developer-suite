@@ -117,6 +117,19 @@ public sealed class AssemblyExtractorTests : IDisposable
         return tempPath;
     }
 
+    /// <summary>
+    /// Creates a unique, tracked cache base directory so self-heal tests never touch the
+    /// real per-user reference-assembly cache in the temp directory and never observe
+    /// state left behind by other tests. See #1326.
+    /// </summary>
+    private string CreateIsolatedCacheBaseDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"ppds-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        _tempFiles.Add(dir);
+        return dir;
+    }
+
     #endregion
 
     #region Deployment extraction tests
@@ -847,6 +860,81 @@ public sealed class AssemblyExtractorTests : IDisposable
 
         Assert.Single(config.Types);
         Assert.Equal("Update", config.Types[0].Steps[0].Message);
+    }
+
+    #endregion
+
+    #region Cache self-healing tests (#1326)
+
+    [Fact]
+    public void GetNet462ReferenceAssemblyDirectory_CacheMissingSentinel_SelfHealsAndReExtracts()
+    {
+        // A temp cleaner can delete individual cache files while leaving the directory and
+        // other DLLs behind. The cache key is fixed per CLI version, so a corrupt directory
+        // that still passed validation would break every subsequent run. A cache without the
+        // completion sentinel must be treated as invalid, deleted, and re-extracted.
+        var baseDir = CreateIsolatedCacheBaseDir();
+
+        var first = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+        Assert.NotNull(first);
+        Assert.True(File.Exists(Path.Combine(first!, AssemblyExtractor.CompletionSentinelFileName)),
+            "A freshly extracted cache must contain the completion sentinel.");
+
+        File.Delete(Path.Combine(first!, AssemblyExtractor.CompletionSentinelFileName));
+        File.Delete(Path.Combine(first!, "mscorlib.dll"));
+        Assert.True(Directory.EnumerateFiles(first!, "*.dll").Any(),
+            "Corruption setup must leave at least one DLL so the old any-DLL check would have passed.");
+
+        var healed = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+
+        Assert.Equal(first, healed);
+        Assert.True(File.Exists(Path.Combine(healed!, "mscorlib.dll")),
+            "Self-healed cache must contain the core assembly again.");
+        Assert.True(File.Exists(Path.Combine(healed!, AssemblyExtractor.CompletionSentinelFileName)),
+            "Self-healed cache must contain the completion sentinel.");
+    }
+
+    [Fact]
+    public void GetNet462ReferenceAssemblyDirectory_CacheMissingCoreAssembly_SelfHealsAndReExtracts()
+    {
+        // Failure mode 1 of #1326: a cleaner deletes mscorlib.dll but leaves other DLLs (and
+        // even the sentinel). The old "any *.dll" validation accepted such a cache forever,
+        // permanently reproducing the #1294 "could not find core assembly" failure.
+        var baseDir = CreateIsolatedCacheBaseDir();
+
+        var first = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+        Assert.NotNull(first);
+
+        File.Delete(Path.Combine(first!, "mscorlib.dll"));
+
+        var healed = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+
+        Assert.Equal(first, healed);
+        Assert.True(File.Exists(Path.Combine(healed!, "mscorlib.dll")),
+            "Self-healed cache must contain the core assembly again.");
+    }
+
+    [Fact]
+    public void GetNet462ReferenceAssemblyDirectory_EmptyCacheDirectory_SelfHealsAndReExtracts()
+    {
+        // Failure mode 2 of #1326: a cleaner deletes every file but keeps the directory.
+        // Before self-healing, Directory.Move into the existing-but-empty destination threw
+        // IOException on every run, silently disabling the embedded reference assemblies.
+        var baseDir = CreateIsolatedCacheBaseDir();
+
+        var first = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+        Assert.NotNull(first);
+
+        Directory.Delete(first!, recursive: true);
+        Directory.CreateDirectory(first!);
+
+        var healed = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(baseDir);
+
+        Assert.Equal(first, healed);
+        Assert.True(File.Exists(Path.Combine(healed!, "mscorlib.dll")),
+            "Self-healed cache must contain the core assembly.");
+        Assert.True(File.Exists(Path.Combine(healed!, AssemblyExtractor.CompletionSentinelFileName)),
+            "Self-healed cache must contain the completion sentinel.");
     }
 
     #endregion
