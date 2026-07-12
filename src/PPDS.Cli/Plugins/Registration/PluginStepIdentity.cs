@@ -119,6 +119,14 @@ public readonly record struct PluginStepIdentity(
     }
 
     /// <summary>
+    /// True when the value names a real entity — i.e. it does not normalize to the
+    /// <see cref="NoEntity"/> sentinel (null, empty, whitespace, or "none" in any casing).
+    /// Callers use this to distinguish an intentionally global step (no entity, null filter is
+    /// legitimate) from a configured entity that failed to resolve an SDK message filter (error).
+    /// </summary>
+    public static bool IsEntitySpecified(string? entity) => NormalizeEntity(entity) != NoEntity;
+
+    /// <summary>
     /// Human-readable rendering for warnings and drift reporting, e.g.
     /// <c>myplugin.type: update of account (postoperation, synchronous)</c>. Components are shown in
     /// their normalized (lower-cased) form because that is what identity is compared on.

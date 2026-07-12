@@ -337,6 +337,9 @@ public static class ErrorCodes
         /// <summary>Specified user for impersonation was not found.</summary>
         public const string UserNotFound = "Plugin.UserNotFound";
 
+        /// <summary>No SDK message filter exists for the requested message/entity combination.</summary>
+        public const string MessageFilterNotFound = "Plugin.MessageFilterNotFound";
+
         /// <summary>Failed to enable or disable a plugin processing step.</summary>
         public const string SetStateFailed = "Plugin.SetStateFailed";
     }

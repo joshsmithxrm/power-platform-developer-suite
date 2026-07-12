@@ -538,6 +538,19 @@ public static class RegisterCommand
             // Get message filter ID
             var filterId = await registrationService.GetSdkMessageFilterIdAsync(messageId.Value, entity, null, cancellationToken);
 
+            // A specified entity with no SDK message filter is a configuration error (typo, or
+            // unsupported message/entity combo) — registering anyway would silently create a GLOBAL
+            // step that fires on every occurrence of the message (#1332). Only an intentionally
+            // global step (--entity none) may proceed with a null filter.
+            if (filterId == null && PluginStepIdentity.IsEntitySpecified(entity))
+            {
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Plugin.MessageFilterNotFound,
+                    PluginRegistrationService.DescribeMissingMessageFilter(message, entity),
+                    Target: entity));
+                return ExitCodes.NotFoundError;
+            }
+
             // Build step config
             var stepConfig = new PluginStepConfig
             {

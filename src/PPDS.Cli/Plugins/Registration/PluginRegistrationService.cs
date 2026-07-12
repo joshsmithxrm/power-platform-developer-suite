@@ -951,6 +951,22 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return results.Entities.FirstOrDefault()?.Id;
     }
 
+    /// <summary>
+    /// Formats the error for a message/entity combination that has no SDK message filter row —
+    /// i.e. <see cref="GetSdkMessageFilterIdAsync"/> returned null although an entity was specified.
+    /// Registering the step anyway would silently create a GLOBAL step (no filter) that fires on
+    /// every occurrence of the message. Shared by deploy/diff/register/RPC so the failure reads
+    /// identically on every surface.
+    /// </summary>
+    public static string DescribeMissingMessageFilter(string message, string primaryEntity, string? secondaryEntity = null)
+    {
+        var combination = PluginStepIdentity.IsEntitySpecified(secondaryEntity)
+            ? $"entity '{primaryEntity}' with secondary entity '{secondaryEntity}'"
+            : $"entity '{primaryEntity}'";
+        return $"No SDK message filter exists for message '{message}' on {combination}. " +
+               "Check the entity logical name; if the step is meant to be global, set entity to 'none'.";
+    }
+
     #endregion
 
     #region Create Operations
