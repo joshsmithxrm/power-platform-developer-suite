@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP `initialize` handshake now reports the real package version** — `serverInfo.version` previously reported the fixed `AssemblyVersion` (`1.0.0.0`) regardless of the installed package; it now reports the MinVer-stamped package version (e.g. `1.0.2-alpha.0.5`) with the `+<sha>` build-metadata suffix stripped ([#1273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1273)).
+
 ## [1.0.1] - 2026-06-17
 
 ### Added
