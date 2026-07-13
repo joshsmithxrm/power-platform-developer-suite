@@ -48,8 +48,12 @@ public sealed class McpSessionOptions
     /// server startup entirely: Program.cs prints the resolved version to stdout and
     /// exits instead of hosting, so <see cref="Parse"/> semantics never apply.
     /// </summary>
-    public static bool IsVersionRequested(string[] args) =>
-        args.Contains("--version", StringComparer.Ordinal);
+    public static bool IsVersionRequested(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return args.Contains("--version", StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// Parses command-line arguments into session options.

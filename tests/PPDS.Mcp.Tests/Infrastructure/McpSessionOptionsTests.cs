@@ -170,6 +170,16 @@ public sealed class McpSessionOptionsTests
         result.Should().BeFalse();
     }
 
+    [Fact]
+    public void IsVersionRequested_NullArgs_ThrowsArgumentNullException()
+    {
+        // Act
+        var act = () => McpSessionOptions.IsVersionRequested(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+
     #endregion
 
     #region IsEnvironmentAllowed Tests
