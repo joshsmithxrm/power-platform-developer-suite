@@ -1,4 +1,4 @@
-"""Tests for .claude/hooks/sdk-spend-warn.py. See specs/dispatch-routing.md ACs 19-20.
+"""Tests for .claude/hooks/sdk-spend-warn.py.
 
 The hook is invoked the way Claude Code invokes it in production: as a
 subprocess that receives a JSON envelope on stdin. Each test uses

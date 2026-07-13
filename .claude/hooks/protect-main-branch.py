@@ -147,10 +147,14 @@ def main() -> None:
 
     print(
         "BLOCKED: You are on the main branch. "
-        "Use /start to create a feature worktree.",
+        "Create a feature worktree or branch first.",
         file=sys.stderr,
     )
-    print("  Run /start from your Claude session on main.", file=sys.stderr)
+    print(
+        "  e.g. git worktree add .worktrees/<name> -b feat/<name> "
+        "(see CONTRIBUTING.md 'Branch Strategy').",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 

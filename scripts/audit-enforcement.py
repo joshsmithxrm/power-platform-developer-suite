@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit enforcement harness for workflow-enforcement v9.0.
+"""Audit enforcement harness for CLAUDE.md/SKILL.md `enforcement:` markers.
 
 Three modes:
 
@@ -21,7 +21,8 @@ Three modes:
                  - per-file unmarked count
                  - top 5 longest SKILL.md files
 
-ACs: 165, 166, 167, 168, 172, 177.
+ACs: 165, 166, 167, 168, 172, 177 (from the retired workflow-enforcement
+spec, extracted with the personal automation harness in #1315).
 """
 from __future__ import annotations
 

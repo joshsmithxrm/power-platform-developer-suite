@@ -76,18 +76,6 @@ Phase B trigger files: `SqlQueryService`, `RpcMethodHandler`, `QueryPanel`,
 
 ---
 
-## Retro store schema (Check 7)
-
-If `.retros/summary.json` exists:
-- Parse as JSON
-- Required keys: `schema_version`, `last_updated`, `total_retros`,
-  `findings_by_category`, `metrics`
-- `schema_version == 1`
-
-Missing file passes (the store is optional until first retro).
-
----
-
 ## §tui — TUI Verify Reference
 
 Interact with the PPDS TUI (`ppds interactive`) running in a PTY. Read terminal text to verify what's rendered, send keystrokes to navigate, wait for specific content to appear. Text-based verification — the AI reads terminal rows directly instead of interpreting screenshots.
@@ -749,14 +737,6 @@ print(f'exit={result.returncode} stderr={result.stderr[:100]}')
 ```
 
 **Exit codes:** 0 = allow, 2 = block (with stderr message shown to AI)
-
-#### Notification hooks
-
-Pipe notification JSON on stdin:
-
-```bash
-echo '{"notification_type": "idle_prompt", "message": "test", "title": "test", "cwd": "."}' | python .claude/hooks/notify.py
-```
 
 ### Settings Validation
 

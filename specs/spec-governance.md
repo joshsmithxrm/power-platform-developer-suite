@@ -82,7 +82,6 @@ This spec establishes governance rules, updates the template, adds a reconciliat
 
 - Depends on: [CONSTITUTION.md](./CONSTITUTION.md) — new laws added here
 - Depends on: [SPEC-TEMPLATE.md](./SPEC-TEMPLATE.md) — template updated
-- Related: [workflow-enforcement.md](./workflow-enforcement.md) — pipeline that consumes specs
 
 ---
 
@@ -312,7 +311,6 @@ Session 2 applies the governance rules to restructure the existing specs. Not al
 |------|--------|
 | `architecture.md` | System-wide spec, already well-structured |
 | `per-panel-environment-scoping.md` | Cross-cutting pattern, legitimate standalone spec |
-| `workflow-enforcement.md` | Separate restructure planned on different branch |
 | `setup-command.md` | Already named correctly, domain concept |
 
 ---
@@ -426,7 +424,6 @@ Session 2 applies the governance rules to restructure the existing specs. Not al
 ## Related Specs
 
 - [CONSTITUTION.md](./CONSTITUTION.md) — Receives new Spec Laws section
-- [workflow-enforcement.md](./workflow-enforcement.md) — Pipeline that consumes specs; restructure planned separately
 
 ---
 
@@ -435,3 +432,4 @@ Session 2 applies the governance rules to restructure the existing specs. Not al
 | Date | Change |
 |------|--------|
 | 2026-03-18 | Initial spec from /design session |
+| 2026-07-13 | Removed references to `workflow-enforcement.md` — that spec was deleted with the personal automation harness extraction (#1315). |
