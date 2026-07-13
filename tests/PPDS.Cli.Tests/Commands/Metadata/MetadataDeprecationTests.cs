@@ -5,6 +5,7 @@ using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Cli.Commands.Metadata.Choice;
 using PPDS.Cli.Commands.Metadata.Column;
 using PPDS.Cli.Commands.Metadata.Table;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Metadata;
@@ -13,8 +14,11 @@ namespace PPDS.Cli.Tests.Commands.Metadata;
 /// Covers AC-41 (deprecated noun warns to stderr with canonical name),
 /// AC-42 (stdout clean — warning goes to stderr, not stdout),
 /// AC-43 (shared execute path — deprecated commands delegate to canonical execute methods).
+/// In the console-capture collection because <see cref="DeprecationWarning"/> writes directly to
+/// the console, so these tests swap the process-global <see cref="Console.Out"/>/<see cref="Console.Error"/>.
 /// </summary>
 [Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
 public class DeprecationWarningTests
 {
     [Fact]

@@ -8,6 +8,7 @@ using PPDS.Cli.Commands.Schema;
 using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Query;
 using Xunit;
 
@@ -15,10 +16,14 @@ namespace PPDS.Cli.Tests.Infrastructure;
 
 /// <summary>
 /// Covers #1076 (invalid --output-format values produce a clean error instead of leaking
-/// the CLR enum type name) and #1078 (--output-format Csv is rejected on commands without
-/// CSV rendering and still accepted on the four commands that implement it).
+/// the CLR enum type name), #1078 (--output-format Csv is rejected on commands without
+/// CSV rendering and still accepted on the four commands that implement it), and #1336
+/// (help usage label and completions advertise only the values each instance accepts).
+/// In the console-capture collection because <see cref="CaptureStdout"/> swaps the
+/// process-global <see cref="Console.Out"/>.
 /// </summary>
 [Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
 public class GlobalOptionsOutputFormatTests
 {
     private static string JoinedErrors(ParseResult result) =>
@@ -248,6 +253,60 @@ public class GlobalOptionsOutputFormatTests
 
         Assert.Empty(result.Errors);
         Assert.Equal(OutputFormat.Text, GlobalOptions.GetValues(result).OutputFormat);
+    }
+
+    // ---- #1336: help + completions advertise only the values each instance accepts ----
+
+    [Fact]
+    public void Help_OnCsvRejectingCommand_DoesNotAdvertiseCsv()
+    {
+        var help = RenderHelp(SolutionsCommandGroup.Create(), "solutions list --help");
+
+        Assert.Contains("--output-format <Text|Json>", help);
+        Assert.DoesNotContain("Csv", help);
+    }
+
+    [Fact]
+    public void Help_OnCsvCapableCommand_AdvertisesCsv()
+    {
+        var help = RenderHelp(QueryCommandGroup.Create(), "query sql --help");
+
+        Assert.Contains("--output-format <Text|Json|Csv>", help);
+    }
+
+    [Fact]
+    public void Completions_OnCsvRejectingCommand_OmitCsv()
+    {
+        const string commandLine = "list --output-format ";
+        var completions = SolutionsCommandGroup.Create().Parse(commandLine).GetCompletions(commandLine.Length);
+
+        Assert.Equal(new[] { "Json", "Text" }, completions.Select(c => c.Label));
+    }
+
+    [Fact]
+    public void Completions_OnCsvCapableCommand_IncludeCsv()
+    {
+        const string commandLine = "sql --output-format ";
+        var completions = QueryCommandGroup.Create().Parse(commandLine).GetCompletions(commandLine.Length);
+
+        Assert.Equal(new[] { "Csv", "Json", "Text" }, completions.Select(c => c.Label));
+    }
+
+    /// <summary>
+    /// Renders --help for a command in-process. The command group is mounted on a
+    /// <see cref="RootCommand"/> because --help is the root's recursive <c>HelpOption</c>
+    /// (mirroring Program.cs); standalone command groups have no help option.
+    /// </summary>
+    private static string RenderHelp(Command commandGroup, string commandLine)
+    {
+        var root = new RootCommand();
+        root.Subcommands.Add(commandGroup);
+
+        using var output = new StringWriter();
+        var exitCode = root.Parse(commandLine).Invoke(new InvocationConfiguration { Output = output });
+
+        Assert.Equal(0, exitCode);
+        return output.ToString();
     }
 
     // ---- CSV emission still works for the shared query formatter ----

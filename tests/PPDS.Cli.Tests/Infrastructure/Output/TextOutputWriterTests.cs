@@ -1,9 +1,15 @@
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Infrastructure.Output;
 
+/// <summary>
+/// In the console-capture collection because <see cref="TextOutputWriter"/> writes directly to
+/// the console, so these tests swap the process-global <see cref="Console.Out"/>/<see cref="Console.Error"/>.
+/// </summary>
+[Collection(nameof(ConsoleCaptureCollection))]
 public class TextOutputWriterTests
 {
     [Fact]
