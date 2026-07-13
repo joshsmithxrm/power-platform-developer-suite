@@ -151,7 +151,7 @@ def main() -> None:
         file=sys.stderr,
     )
     print(
-        "  e.g. git worktree add .worktrees/<name> -b feat/<name> "
+        "  e.g. git worktree add -b feat/<name> .worktrees/<name> "
         "(see CONTRIBUTING.md 'Branch Strategy').",
         file=sys.stderr,
     )
