@@ -64,9 +64,13 @@ TOOLING_PACKAGES = frozenset({
     "typescript-eslint",
     "@typescript-eslint/parser",
     "@typescript-eslint/eslint-plugin",
+    "@vscode/test-electron",
     "microsoft.net.test.sdk",
+    "microsoft.codeanalysis.analyzers",
+    "microsoft.codeanalysis.publicapianalyzers",
     "xunit",
     "xunit.runner.visualstudio",
+    "xunit.skippablefact",
     "coverlet.collector",
     "moq",
     "fluentassertions",
@@ -79,6 +83,8 @@ TOOLING_PACKAGES = frozenset({
 TOOLING_PREFIXES = (
     "@types/",
     "fakexrmeasy",
+    "eslint-plugin-",  # ESLint plugins — dev-only lint tooling by naming convention
+    "stylelint-config-",  # stylelint shareable configs — lint config by naming convention
 )
 
 # Paths that elevate any bump to at least Group B.

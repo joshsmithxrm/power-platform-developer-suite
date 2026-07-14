@@ -201,6 +201,101 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.update_type, "minor")
         self.assertIn("tooling", c.reason)
 
+    def test_minor_eslint_plugin_import_x_is_group_a(self):
+        # eslint-plugin-import-x is a dev-only ESLint plugin (devDependencies in
+        # src/PPDS.Extension) — definitionally lint tooling, never runtime. Real
+        # case: PR #1342 (4.16.2 -> 4.17.1) misclassified as Group B "verify-
+        # then-merge for runtime change" (issue #1350). Covered by the
+        # "eslint-plugin-" prefix: ESLint resolves plugins by that naming
+        # convention, so any eslint-plugin-* package is lint tooling.
+        pr = make_pr(
+            number=1342,
+            title="deps(extension): Bump eslint-plugin-import-x from 4.16.2 to 4.17.1 in /src/PPDS.Extension",
+            labels=["dependencies"],
+            head_ref="dependabot/npm_and_yarn/src/PPDS.Extension/eslint-plugin-import-x-4.17.1",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
+    def test_minor_stylelint_config_standard_is_group_a(self):
+        # stylelint shareable configs are named stylelint-config-* by stylelint's
+        # resolution convention — pure lint configuration, dev-only (issue #1350).
+        pr = make_pr(
+            number=1343,
+            title="deps(extension): Bump stylelint-config-standard from 40.0.0 to 40.1.0 in /src/PPDS.Extension",
+            labels=["dependencies"],
+            head_ref="dependabot/npm_and_yarn/src/PPDS.Extension/stylelint-config-standard-40.1.0",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
+    def test_minor_vscode_test_electron_is_group_a(self):
+        # @vscode/test-electron downloads VS Code and runs extension tests —
+        # test-harness tooling only, never packaged into the VSIX (issue #1350).
+        pr = make_pr(
+            number=1344,
+            title="deps(extension): Bump @vscode/test-electron from 3.0.0 to 3.1.0 in /src/PPDS.Extension",
+            labels=["dependencies"],
+            head_ref="dependabot/npm_and_yarn/src/PPDS.Extension/vscode/test-electron-3.1.0",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
+    def test_minor_xunit_skippablefact_is_group_a(self):
+        # Xunit.SkippableFact is an xunit extension referenced only by test
+        # projects (tests/PPDS.Auth.IntegrationTests) — test tooling (issue #1350).
+        pr = make_pr(
+            number=1345,
+            title="deps: Bump Xunit.SkippableFact from 1.5.61 to 1.6.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Xunit.SkippableFact-1.6.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
+    def test_minor_codeanalysis_analyzers_is_group_a(self):
+        # Microsoft.CodeAnalysis.Analyzers is a compile-time analyzer consumed
+        # with PrivateAssets=all (src/PPDS.Analyzers) — a C# linter; it ships no
+        # runtime bytes, and a bad bump fails the build (CI-visible). Issue #1350.
+        pr = make_pr(
+            number=1346,
+            title="deps: Bump Microsoft.CodeAnalysis.Analyzers from 3.11.0 to 3.12.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Microsoft.CodeAnalysis.Analyzers-3.12.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
+    def test_minor_publicapi_analyzers_is_group_a(self):
+        # Microsoft.CodeAnalysis.PublicApiAnalyzers gates PublicAPI.*.txt at
+        # compile time, PrivateAssets=all — analyzer/linter tooling (issue #1350).
+        pr = make_pr(
+            number=1347,
+            title="deps: Bump Microsoft.CodeAnalysis.PublicApiAnalyzers from 3.11.0 to 3.12.0",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Microsoft.CodeAnalysis.PublicApiAnalyzers-3.12.0",
+            files=["Directory.Packages.props"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("tooling", c.reason)
+
     def test_patch_nuget_test_sdk_is_group_a(self):
         pr = make_pr(
             number=824,
@@ -665,6 +760,22 @@ class TestClassifyPR(unittest.TestCase):
         )
         c = classify.classify_pr(pr)
         # Even though eslint is tooling, MAJOR is universal exclusion.
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("major", c.reason)
+
+    def test_major_eslint_plugin_is_group_c(self):
+        # The "eslint-plugin-" tooling prefix must not swallow majors — the
+        # universal major exclusion outranks the tooling allowlist, exactly as
+        # it does for exact-name tooling entries like eslint itself.
+        pr = make_pr(
+            number=1348,
+            title="deps(extension): Bump eslint-plugin-import-x from 4.17.1 to 5.0.0 in /src/PPDS.Extension",
+            labels=["dependencies"],
+            head_ref="dependabot/npm_and_yarn/src/PPDS.Extension/eslint-plugin-import-x-5.0.0",
+            files=["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json"],
+        )
+        c = classify.classify_pr(pr)
         self.assertEqual(c.group, "C")
         self.assertEqual(c.update_type, "major")
         self.assertIn("major", c.reason)
