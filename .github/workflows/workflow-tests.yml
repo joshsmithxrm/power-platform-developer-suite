@@ -1,28 +1,42 @@
-name: Workflow Tests
+name: Python Tests
 
-# Runs the Python regression tests that protect `.claude/` workflow
-# infrastructure — hook command paths, settings-json-guard, hook envelopes.
+# Runs the repository's pure-Python regression suite (`pytest tests/`) on any
+# change that could affect it. These tests guard `.claude/` workflow
+# infrastructure, CI helper scripts (`scripts/ci/`, `scripts/dependabot/`),
+# hook behavior, and skill/spec/CLAUDE.md content.
 #
-# Existed before this workflow: `tests/test_hook_paths.py` (added by PR #907)
-# asserted every hook in `.claude/settings.json` uses `$CLAUDE_PROJECT_DIR/`.
-# It was correct and would have failed on PR #973, which silently regressed
-# all 39 entries back to bare-relative paths — but nothing in CI invoked it.
-# This workflow closes that gap so the regression can't happen a third time.
+# History of the gap this closes — the same failure has now recurred twice:
+#   * `tests/test_hook_paths.py` (PR #907) asserted every hook in
+#     `.claude/settings.json` uses `$CLAUDE_PROJECT_DIR/`. It was correct and
+#     would have caught PR #973 silently regressing all 39 entries back to
+#     bare-relative paths — but nothing in CI invoked it. This workflow was
+#     created to run that file (plus `tests/test_hooks.py`).
+#   * `tests/scripts/dependabot/test_classify.py` guards `classify.py` — the
+#     module deciding which dependabot PRs auto-merge — yet no `pull_request`
+#     workflow ran it, so a regression could merge with green CI (found while
+#     shipping PR #1351; see issue #1353).
+#
+# Rather than enumerate individual files a third time, this workflow now runs
+# the ENTIRE `tests/` Python suite, so any future test file added under
+# `tests/` is covered automatically. (The .NET test projects under `tests/`
+# have no Python test files, so pytest simply skips them.)
 
 on:
   pull_request:
     paths:
+      - 'tests/**'
+      - 'scripts/**'
       - '.claude/**'
-      - 'tests/test_hook_paths.py'
-      - 'tests/test_hooks.py'
+      - 'CLAUDE.md'
       - '.github/workflows/workflow-tests.yml'
   push:
     branches:
       - main
     paths:
+      - 'tests/**'
+      - 'scripts/**'
       - '.claude/**'
-      - 'tests/test_hook_paths.py'
-      - 'tests/test_hooks.py'
+      - 'CLAUDE.md'
       - '.github/workflows/workflow-tests.yml'
   workflow_dispatch: {}
 
@@ -43,8 +57,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install pytest + pyyaml
+        run: pip install pytest pyyaml
 
-      - name: Run hook-path regression tests
-        run: pytest tests/test_hook_paths.py tests/test_hooks.py -v
+      - name: Run Python regression suite
+        run: python -m pytest tests/ -q
