@@ -123,7 +123,7 @@ def main() -> None:
         f"Detected changes: {files_line}. Revert or explain."
     )
 
-    # Stop-hook block envelope (matches session-stop-workflow.py).
+    # Stop-hook block envelope: {"decision": "block", "reason": ...}.
     print(json.dumps({"decision": "block", "reason": reason}))
     sys.exit(2)
 

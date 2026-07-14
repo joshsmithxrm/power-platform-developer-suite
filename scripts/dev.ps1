@@ -10,7 +10,6 @@
     dev cmt                 # cd to worktree matching prefix "cmt"
     dev cmt -tab            # Open in new terminal tab
     dev status cmt-parity   # Detailed status
-    dev run cmt-parity      # Start pipeline
     dev pr cmt-parity       # Open PR in browser
     dev clean               # Remove merged worktrees
     dev up                  # Devcontainer: start
@@ -31,7 +30,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Constants ---
 
-$ReservedSubcommands = @('status', 'run', 'pr', 'clean', 'help', 'up', 'shell', 'claude', 'down', 'sync', 'reset', 'push')
+$ReservedSubcommands = @('status', 'pr', 'clean', 'help', 'up', 'shell', 'claude', 'down', 'sync', 'reset', 'push')
 $DevcontainerCommands = @('up', 'shell', 'claude', 'down', 'sync', 'reset', 'push')
 
 # --- Repo Root Resolution ---
@@ -764,59 +763,6 @@ function Invoke-WorktreeJump {
 
 # --- Action Commands ---
 
-function Invoke-Pipeline {
-    param([string]$Root, [string]$Name)
-
-    if (-not $Name) {
-        Write-Host "  Usage: dev run <worktree-name>" -ForegroundColor Red
-        return
-    }
-
-    $wtPath = Resolve-WorktreePath -Root $Root -Prefix $Name
-    if (-not $wtPath) { return }
-
-    $pipelineScript = Join-Path $Root 'scripts' 'pipeline.py'
-    if (-not (Test-Path $pipelineScript)) {
-        Write-Host "  No pipeline script found in this repo." -ForegroundColor Red
-        return
-    }
-
-    # Check for existing pipeline
-    $lockPath = Join-Path $wtPath '.workflow' 'pipeline.lock'
-    if (Test-Path $lockPath) {
-        $pidStr = (Get-Content $lockPath -Raw).Trim()
-        $pid_ = 0
-        if ([int]::TryParse($pidStr, [ref]$pid_)) {
-            $proc = Get-Process -Id $pid_ -ErrorAction SilentlyContinue
-            if ($proc) {
-                Write-Host "  Pipeline already running (PID $pid_). Use 'dev status $(Split-Path $wtPath -Leaf)' to monitor." -ForegroundColor Red
-                return
-            }
-        }
-    }
-
-    # Get spec from state.json
-    $spec = $null
-    $statePath = Join-Path $wtPath '.workflow' 'state.json'
-    if (Test-Path $statePath) {
-        try {
-            $state = Get-Content $statePath -Raw | ConvertFrom-Json
-            $spec = $state.spec
-            $branch = $state.branch
-        } catch { Write-Host "  Warning: failed to read state: $_" -ForegroundColor DarkYellow }
-    }
-
-    $args_ = @($pipelineScript, '--worktree', $wtPath)
-    if ($spec) { $args_ += @('--spec', $spec) }
-    if ($branch) { $args_ += @('--branch', $branch) }
-
-    $proc = Start-Process python -ArgumentList $args_ -PassThru -WorkingDirectory $Root
-    $procId = $proc.Id
-    $proc.Dispose()
-    Write-Host "  Pipeline started (PID $procId)." -ForegroundColor Green
-    Write-Host "  Monitor: dev status $(Split-Path $wtPath -Leaf)" -ForegroundColor DarkGray
-}
-
 function Open-PullRequest {
     param([string]$Root, [string]$Name)
 
@@ -931,7 +877,6 @@ function Show-Help {
     Write-Host "    dev <name>              cd to worktree (prefix match)" -ForegroundColor DarkGray
     Write-Host "    dev <name> -tab         Open in new terminal tab" -ForegroundColor DarkGray
     Write-Host "    dev status [name]       Detailed status" -ForegroundColor DarkGray
-    Write-Host "    dev run <name>          Start pipeline" -ForegroundColor DarkGray
     Write-Host "    dev pr <name>           Open PR in browser" -ForegroundColor DarkGray
     Write-Host "    dev clean [--dry-run]   Remove merged worktrees" -ForegroundColor DarkGray
     Write-Host ""
@@ -976,11 +921,6 @@ switch ($command) {
     'status' {
         $target = if ($restArgs.Count -gt 0) { $restArgs[0] } else { $null }
         Show-WorktreeStatus -Root $root -Name $target
-        return
-    }
-    'run' {
-        $target = if ($restArgs.Count -gt 0) { $restArgs[0] } else { $null }
-        Invoke-Pipeline -Root $root -Name $target
         return
     }
     'pr' {

@@ -23,7 +23,7 @@ A service-layer safety primitive that refuses Dataverse mutations while a `/shak
 
 - **Does not replace the Bash hook.** Hook and guard are complementary. Removing the hook costs defense in depth and the early-block UX for obvious CLI misuse.
 - **Does not expose a bypass other than `unset PPDS_SHAKEDOWN` + sentinel expiry.** Matching the hook: there is no softer bypass. If a write is genuinely needed, that takes deliberate action.
-- **Does not write or delete the sentinel file.** Writing is owned by the `/shakedown` skill's Phase 0. Cleanup is owned by `.claude/hooks/session-start-workflow.py`. Guard is read-only.
+- **Does not write or delete the sentinel file.** Writing is owned by the `/shakedown` skill's Phase 0. No proactive sweep exists — the session-start hook that owned it was extracted with the personal automation harness (#1315); reassigning that ownership is an open question tracked in #1337. Lazy cleanup remains: the `shakedown-safety.py` Bash gate deletes a stale or malformed sentinel the next time it fires, and the guard treats any >24h sentinel as absent. Guard is read-only.
 - **Does not analyze or block non-mutating reads.** The guard's scope is strictly writes; reads, metadata lookups, and pooled connection checkouts are unaffected.
 - **Does not unify with MCP's existing `--read-only` mode.** Different activation intent (per-process launch flag vs. session-wide sentinel). Both checks fire independently; guard wins at the service layer.
 
@@ -93,7 +93,7 @@ The guard is the single choke point at the domain layer. The hook remains a fast
 ### Dependencies
 
 - Reads from: sentinel format defined by `.claude/skills/shakedown/SKILL.md` Phase 0 (written by the shakedown skill).
-- Read-cleanup owned by: `.claude/hooks/session-start-workflow.py` (stale-sentinel sweep).
+- Stale-sentinel cleanup: no proactive sweep — the session-start hook that owned it was extracted with the personal automation harness (#1315), ownership tracked in #1337; `.claude/hooks/shakedown-safety.py` still deletes stale/malformed sentinels lazily when its gate fires.
 - Complements: `.claude/hooks/shakedown-safety.py` (PreToolUse Bash gate, unchanged).
 - Related to: [architecture.md](./architecture.md) (A1/A2 layering), [query.md](./query.md) (DML safety; guard fires in addition to `DmlSafetyGuard`).
 
@@ -161,7 +161,7 @@ Descriptors are informational — they populate `PpdsException.UserMessage` and 
    - Environment variable `PPDS_SHAKEDOWN=1` (any other value, including unset, treated as inactive).
    - Sentinel file `.claude/state/shakedown-active.json` exists, parses as JSON, contains an ISO-8601 `started_at` string, AND the parsed timestamp is within 24h of `DateTimeOffset.UtcNow`.
 3. **Project root resolution.** Guard looks for the sentinel at `{project_root}/.claude/state/shakedown-active.json`. Project root is resolved in this order: (a) `CLAUDE_PROJECT_DIR` environment variable, **if set to a non-empty string AND the directory exists**; otherwise (b) `Directory.GetCurrentDirectory()`. The existence check on (a) is deliberate: a stale `CLAUDE_PROJECT_DIR` pointing at a deleted worktree must not suppress sentinel detection in the current CWD. This mirrors the Bash hook's `_project_dir()` intent (the hook uses `normalize_msys_path` which silently returns the input for nonexistent paths — the C# port makes the fallback explicit).
-4. **Stale-sentinel self-heal.** A sentinel with `started_at` older than 24h is treated as absent. Guard does NOT delete the file (that is the session-start hook's job); it just ignores it. This prevents a forgotten sentinel from permanently locking mutations.
+4. **Stale-sentinel self-heal.** A sentinel with `started_at` older than 24h is treated as absent. Guard does NOT delete the file (deleting it is currently a manual cleanup step; see Non-Goals); it just ignores it. This prevents a forgotten sentinel from permanently locking mutations.
 5. **Corrupt-sentinel handling.** A sentinel file that fails to parse as JSON, is missing `started_at`, or has an unparseable timestamp is treated as absent — fail-open. Rationale: a corrupt file is more likely an unrelated project artifact than an active shakedown, and the env-var path still catches a genuinely-active shakedown. The guard logs a `Warning` level message when this occurs so operators can investigate.
 6. **Thread-safety and caching.** Guard is registered as a singleton. Activation state is cached for up to 5 seconds. Rationale: real call-site patterns today invoke the guard roughly once per user action (one `DeleteAllAsync` call drives a bulk delete underneath) so the stat cost is already small — the cache exists primarily to keep the guard cheap for future call sites that may call it more frequently (e.g., per-record DML validation) without forcing every consumer to reason about amortization. The 5s TTL stays far shorter than any human-mediated state change: an operator opting in or out of a shakedown is a deliberate multi-second action. Cache granularity is coarse — any env var change or sentinel mtime change within the TTL window is ignored. Thread safety is enforced via a single `object`-monitor around cache resolution; no torn reads.
 
@@ -199,13 +199,13 @@ Descriptors are informational — they populate `PpdsException.UserMessage` and 
 5. `EnsureCanMutate` returns normally.
 6. Service delegates to PPDS.Dataverse infrastructure (pool, bulk executor, etc.). Mutation proceeds.
 
-**Stale sentinel self-heal on session start:**
+**Stale sentinel cleanup (lazy self-heal; no proactive sweep):**
 
-1. Claude Code session starts.
-2. `.claude/hooks/session-start-workflow.py` runs. Reads the sentinel; if `started_at` > 24h old, deletes the file.
-3. Guard, in its next call, reads no sentinel. Inactive.
+1. A sentinel is orphaned (crashed session, closed terminal, forgotten cleanup).
+2. No proactive sweep exists — the session-start hook that deleted >24h sentinels at session start was extracted with the personal automation harness (#1315). The `shakedown-safety.py` Bash gate deletes a stale or malformed sentinel the next time it fires; failing that, the operator deletes the file by hand.
+3. Guard, in its next call, treats any >24h sentinel as absent. Inactive either way.
 
-(Guard itself never deletes. This flow is owned by the session-start hook — noted here for completeness.)
+(Guard itself never deletes — noted here for completeness. Cleanup ownership is an open question tracked in #1337.)
 
 ### Surface-Specific Behavior
 
@@ -614,7 +614,7 @@ public sealed class PluginTraceService : IPluginTraceService
 
 **Rationale:**
 - Realistic shakedown durations run from ~30 minutes (quick single-surface kick) to ~4 hours (full multi-surface product validation across Extension/TUI/MCP/CLI with parity audit). 24h is 6× the upper bound — comfortable margin for a genuinely long session that spans a coffee break, a debugging detour, or a lunch — while still self-healing within one working day.
-- The threshold is paired with the session-start hook's active cleanup: a fresh Claude Code session sees any >24h sentinel and deletes it. Guard's own 24h check is the safety net for processes that don't go through session-start (a long-lived daemon launched on Monday and still running Tuesday).
+- The threshold was originally paired with a session-start hook's active cleanup (a fresh Claude Code session deleted any >24h sentinel); that hook was extracted with the personal automation harness (#1315); the `shakedown-safety.py` Bash gate still deletes >24h sentinels when it fires, and the guard's own 24h check self-heals every other process (including a long-lived daemon launched on Monday and still running Tuesday).
 - Shorter thresholds (1h, 4h, 8h) would false-positive on normal long shakedowns. Longer thresholds (7d, 30d) would leave a write-block hole open across a long weekend.
 
 **Alternatives considered:**
@@ -666,7 +666,6 @@ public sealed class PluginTraceService : IPluginTraceService
 
 - [architecture.md](./architecture.md) — A1/A2 layering that this spec realizes.
 - [query.md](./query.md) — `DmlSafetyGuard` pattern that `IShakedownGuard` echoes. DML path calls both.
-- [retro-filing.md](./retro-filing.md) — different consumer of `PPDS_SHAKEDOWN=1` (suppresses issue filing during shakedown). No interaction with the guard; documented here so readers know the env var has multiple observers.
 - [metadata-authoring.md](./metadata-authoring.md) — home of the 18 noun-verb-noun forms that finding #6 identified as gaps.
 - [plugin-traces.md](./plugin-traces.md), [web-resources.md](./web-resources.md), [plugins.md](./plugins.md), [solutions.md](./solutions.md), [import-jobs.md](./import-jobs.md), [environment-variables.md](./environment-variables.md) — domain specs whose services gain guard calls (and whose six are relocated).
 
@@ -680,6 +679,7 @@ public sealed class PluginTraceService : IPluginTraceService
 | 2026-04-20 | Revised per first-pass review: added Mutation Method Inventory with concrete per-service method lists + counts; dropped `IsActive()` from the interface contract; moved live re-validation checks out of ACs into a separate Re-validation Plan; rewrote relocation ACs as assembly-reflection architecture tests; reworked preservation ACs as C#-side text-parse tests (no Python harness needed); enumerated the 14 `Context.IsReadOnly`-gated MCP tool files explicitly; added design decisions for the 24h self-heal threshold; tightened sentinel path resolution with an existence check on `CLAUDE_PROJECT_DIR`; specified the fixed truthy-string allowlist for env-var warnings; specified `sentinelAgeSeconds` (double) over `TimeSpan` for wire consistency; documented the four injected dependencies (`IEnvironment`, `IFileSystem`, `IClock`, `ILogger`) as part of the contract. |
 | 2026-04-20 | Revised per plan-phase review: expanded relocation scope from 6 services to the full 12 in `PPDS.Dataverse.Services` (added `UserService`, `RoleService`, `FlowService`, `ConnectionReferenceService`, `DeploymentSettingsService`, `ComponentNameResolver`) to resolve the transitive-dependency hazard (`DeploymentSettingsService` → `IEnvironmentVariableService`) and to fully pay down the A1 debt in one pass. Added `RoleService.AssignRoleAsync`/`RemoveRoleAsync` to the Mutation Method Inventory (the only new mutation methods in the 6 added services — the other 5 are pure reads/transforms). Tightened AC-26's assembly-purity test predicate to enumerate the 12 forbidden type names concretely (rather than forbid whole namespaces, which would have caught `SchemaValidator` and DTOs that legitimately remain). Total: 17 services, 70 mutation methods, 1 DML branch. |
 | 2026-04-20 | Implementation landed across commits `1729bd3f7` (Phase A foundation), `fc167e6fa` (Phase B+C — 12 services relocated, guard wired into 11 mutation-owning services), `9f03f99e3` (Phase D — preservation tests + CHANGELOG). During implementation, `TimelineHierarchyBuilder` was correctly identified by the B-1 agent as a domain-logic helper that had to follow `PluginTraceService` into `PPDS.Cli.Services.PluginTraces` — the B-DI coordinator handled the relocation. Status flipped to `Implemented`; all 40 ACs flipped to ✅ after full test suite ran green (3246 tests, 0 failures across net8.0/net9.0/net10.0). Added a `CurrentDirectoryMutatingCollection` xUnit collection to serialize process-CWD mutation between `ShakedownGuardTests.ProjectRoot_ResolvesInExpectedOrder` and the pre-existing `CleanCommandTests` — same kind of parallel-test CWD race that issue #668's retro addressed. |
+| 2026-07-13 | Post-#1315 sync: the session-start hook that owned the stale-sentinel sweep was extracted with the personal automation harness, so no proactive sentinel sweep remains — lazy cleanup stays with the `shakedown-safety.py` gate (stale/malformed deletion) and the guard's >24h absent-treatment; sweep ownership tracked in #1337. Guard behavior is unchanged. Removed dangling `retro-filing.md` reference. |
 
 ---
 

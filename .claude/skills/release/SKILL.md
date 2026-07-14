@@ -46,7 +46,7 @@ Before starting:
 python scripts/workflow-state.py set phase release
 ```
 
-> **Note:** `release` is a custom phase for this skill. Existing workflow hooks (`verify-workflow.py`, `session-stop-workflow.py`) do not recognize it and fall through as non-enforcing. The phase registration is purely for audit-trail and retro mining. If you need PR-gate enforcement during the release PR, use `set phase pr` at Step 7 instead.
+> **Note:** `release` is a custom phase for this skill. Nothing enforces workflow phases anymore — the workflow-enforcement hooks were extracted with the personal automation harness (#1315) — so the phase registration is purely an audit-trail entry in `.workflow/state.json`.
 
 Create a dated release worktree (following the PPDS `release/*` branch convention):
 
@@ -587,7 +587,7 @@ Bump the patch version (e.g., `1.0.0` → `1.0.1`), prepare a new CHANGELOG entr
 After all publishes verify:
 
 1. **Announce** — release notes on GitHub, optionally social/blog.
-2. **Record the release in workflow state** for audit/retro mining:
+2. **Record the release in workflow state** for the audit trail:
    ```bash
    python scripts/workflow-state.py set release.pr "https://github.com/.../pull/NNN"
    python scripts/workflow-state.py set release.tags "Auth-v...,Cli-v...,Dataverse-v...,Mcp-v...,Migration-v...,Query-v...,Plugins-v...,Extension-v..."

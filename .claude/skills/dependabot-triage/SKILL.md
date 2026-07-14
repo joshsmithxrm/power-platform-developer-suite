@@ -52,19 +52,13 @@ Run all of these checks before touching any PR. Halt on any failure with a clear
    ```
    If a release branch exists OR HEAD already carries a release tag from the current minute, halt: "A release appears to be in progress (branch: X). Re-run after the release PR merges and tags settle."
 
-4. **No conflicting in-flight work.**
-   ```bash
-   test -f .claude/state/in-flight-issues.json && cat .claude/state/in-flight-issues.json || echo '{"in_flight": []}'
-   ```
-   If the file exists and any entry overlaps with files this triage would touch (e.g., dependabot PR is bumping a package whose csproj is being modified by an in-flight feature), surface the conflict and ask the user before proceeding. If the file does not exist (it ships in a later PR), this check passes — log "in-flight tracking not yet present, skipping" and continue.
-
 If any pre-condition fails, write a one-line summary of which check tripped and stop. Do not attempt to remediate.
 
 ## Process
 
 ### Phase 1 — Pre-flight checks
 
-Run the four pre-condition checks above. Halt with a clear instruction on any failure.
+Run the three pre-condition checks above. Halt with a clear instruction on any failure.
 
 ### Phase 2 — Enumerate
 
@@ -194,7 +188,6 @@ After a successful run:
 - A summary table is in the session transcript.
 - No PR is in a half-merged or half-rebased state.
 - Throwaway worktrees from Group B verifications are cleaned up (`git worktree list` shows none).
-- `.claude/state/in-flight-issues.json` (if present) is unchanged — this skill does not write workflow state; it's a maintenance task, not a workflow gate.
 
 ## Edge Cases
 
