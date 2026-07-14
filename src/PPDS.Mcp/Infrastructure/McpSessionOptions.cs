@@ -43,6 +43,19 @@ public sealed class McpSessionOptions
     }
 
     /// <summary>
+    /// Checks whether the arguments request version output (<c>--version</c> anywhere in
+    /// the argument list, regardless of other flags). A version request short-circuits
+    /// server startup entirely: Program.cs prints the resolved version to stdout and
+    /// exits instead of hosting, so <see cref="Parse"/> semantics never apply.
+    /// </summary>
+    public static bool IsVersionRequested(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return args.Contains("--version", StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// Parses command-line arguments into session options.
     /// Unknown args are passed through to the host builder.
     /// </summary>

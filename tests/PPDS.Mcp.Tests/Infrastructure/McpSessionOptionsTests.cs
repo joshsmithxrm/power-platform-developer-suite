@@ -115,6 +115,73 @@ public sealed class McpSessionOptionsTests
 
     #endregion
 
+    #region IsVersionRequested Tests
+
+    [Fact]
+    public void IsVersionRequested_WithVersionFlag_ReturnsTrue()
+    {
+        // Arrange
+        var args = new[] { "--version" };
+
+        // Act
+        var result = McpSessionOptions.IsVersionRequested(args);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsVersionRequested_VersionAmongOtherArgs_ReturnsTrue()
+    {
+        // Arrange — --version must short-circuit no matter where it appears
+        // (e.g. `ppds-mcp-server --profile Dev --version`).
+        var args = new[] { "--profile", "Dev", "--version", "--read-only" };
+
+        // Act
+        var result = McpSessionOptions.IsVersionRequested(args);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsVersionRequested_WithoutVersionFlag_ReturnsFalse()
+    {
+        // Arrange — ordinary session args must take the normal startup path.
+        var args = new[] { "--profile", "Dev", "--read-only" };
+
+        // Act
+        var result = McpSessionOptions.IsVersionRequested(args);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsVersionRequested_EmptyArgs_ReturnsFalse()
+    {
+        // Arrange
+        var args = Array.Empty<string>();
+
+        // Act
+        var result = McpSessionOptions.IsVersionRequested(args);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsVersionRequested_NullArgs_ThrowsArgumentNullException()
+    {
+        // Act
+        var act = () => McpSessionOptions.IsVersionRequested(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    #endregion
+
     #region IsEnvironmentAllowed Tests
 
     [Fact]

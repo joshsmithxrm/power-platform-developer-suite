@@ -26,8 +26,10 @@ internal static class ServerVersion
     /// Resolves the reportable version from the given assembly's version attributes.
     /// </summary>
     /// <param name="assembly">
-    /// The assembly to read version metadata from — pass <c>Assembly.GetExecutingAssembly()</c>
-    /// from Program.cs to resolve ppds-mcp-server's own MinVer-stamped version.
+    /// The assembly to read version metadata from — pass <c>typeof(ServerVersion).Assembly</c>
+    /// to resolve ppds-mcp-server's own MinVer-stamped version, independent of which entry
+    /// assembly is executing (this is what Program.cs does for both the MCP handshake and
+    /// <c>--version</c>).
     /// </param>
     internal static string Resolve(Assembly assembly)
     {

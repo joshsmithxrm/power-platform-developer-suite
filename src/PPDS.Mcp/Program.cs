@@ -7,6 +7,16 @@ using PPDS.Cli.Services;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Mcp.Infrastructure;
 
+// --version short-circuits startup entirely: print the resolved package version and exit
+// instead of hosting. This must run before the stdout redirect below — version output is
+// data, and stdout is only reserved for the protocol once the server actually runs.
+// Documented in the README's "Report a Bug" section; see #1273/#1324.
+if (McpSessionOptions.IsVersionRequested(args))
+{
+    Console.WriteLine(ServerVersion.Resolve(typeof(ServerVersion).Assembly));
+    return 0;
+}
+
 // MCP servers MUST NOT write to stdout (reserved for protocol).
 // Redirect all console output to stderr before any logging occurs.
 Console.SetOut(Console.Error);
@@ -65,6 +75,7 @@ builder.Services.AddCliApplicationServices();
 
 var host = builder.Build();
 await host.RunAsync();
+return 0;
 
 // --- helpers -----------------------------------------------------------------
 
