@@ -261,7 +261,17 @@ def collect_tags(prefix: str) -> list[TagWithDate]:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
+    if result.returncode != 0:
+        # A git failure must not masquerade as "no tags" (which would silently
+        # suppress the guard). Surface it on stderr and raise so the CI step
+        # fails loudly rather than filing/skipping an issue on bad data.
+        raise RuntimeError(
+            f"git for-each-ref for {prefix}-v* failed "
+            f"(exit {result.returncode}): {result.stderr.strip()}"
+        )
     tags: list[TagWithDate] = []
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -314,11 +324,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         has_open_issue=args.has_open_issue,
     )
 
-    if args.format == "title":
-        # Only meaningful when a flag is warranted; callers gate on should_open_issue.
-        print(build_flag_message(result["cli_tag"], result["extension_tag"]))
-    elif args.format == "body":
-        print(build_issue_body(result["cli_tag"], result["extension_tag"]))
+    if args.format in ("title", "body"):
+        # title/body are only meaningful when a flag is warranted; the workflow
+        # gates these on should_open_issue == true. Guard the standalone case
+        # (no stable Cli tag) so we never emit a title/body naming a None tag.
+        if result["cli_tag"] is None:
+            print(
+                "no stable Cli-v* tag; nothing to flag "
+                f"(reason: {result['reason']})",
+                file=sys.stderr,
+            )
+            return 0
+        if args.format == "title":
+            print(build_flag_message(result["cli_tag"], result["extension_tag"]))
+        else:
+            print(build_issue_body(result["cli_tag"], result["extension_tag"]))
     else:
         print(json.dumps(result))
 
