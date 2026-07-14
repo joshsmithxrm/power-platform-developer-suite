@@ -16,7 +16,7 @@ gh pr merge <num> --squash --delete-branch --auto
 
 Use auto-merge when **green CI is sufficient evidence to ship**. Specifically:
 
-- Dependabot tooling/test bumps (eslint, knip, vitest, esbuild, @types/*, @playwright/test, Microsoft.NET.Test.Sdk)
+- Dependabot tooling/test bumps (eslint, knip, vitest, esbuild, prettier, stylelint, typescript, @types/*, @playwright/test, @vscode/test-electron, `eslint-plugin-*`, `stylelint-config-*`, Microsoft.NET.Test.Sdk, Microsoft.CodeAnalysis.\*Analyzers, xunit + xunit.skippablefact, coverlet, Moq, FluentAssertions) — see `scripts/dependabot/classify.py` (`TOOLING_PACKAGES` / `TOOLING_PREFIXES`) for the authoritative allowlist
 - Dependabot patch-level bumps on non-critical paths
 - GitHub Actions group bumps
 - Lockfile-only changes

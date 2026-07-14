@@ -28,7 +28,11 @@ on:
       - 'scripts/**'
       - '.claude/**'
       - 'CLAUDE.md'
-      - '.github/workflows/workflow-tests.yml'
+      # The suite asserts invariants of OTHER workflow files (e.g.
+      # tests/ci/test_post_merge_release_check.py), so a PR editing only a
+      # workflow must trigger it too — otherwise the violation merges green and
+      # the suite goes red later on an unrelated PR (issue #1359, Gap 1).
+      - '.github/workflows/**'
   push:
     branches:
       - main
@@ -37,7 +41,7 @@ on:
       - 'scripts/**'
       - '.claude/**'
       - 'CLAUDE.md'
-      - '.github/workflows/workflow-tests.yml'
+      - '.github/workflows/**'
   workflow_dispatch: {}
 
 concurrency:
