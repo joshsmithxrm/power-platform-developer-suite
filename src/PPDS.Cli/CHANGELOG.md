@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-14
+
 ### Added
 - **`--reference-dir` on `ppds plugins extract`** — repeatable option naming additional directories to search for a plugin's referenced assemblies when they live outside the input assembly's folder (#1294).
 
@@ -126,7 +128,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`ppds flows get|url` accept GUID or unique name** — The `name` argument resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.3.0...HEAD
+[1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...Cli-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.1.0...Cli-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0...Cli-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Cli-v1.0.0
