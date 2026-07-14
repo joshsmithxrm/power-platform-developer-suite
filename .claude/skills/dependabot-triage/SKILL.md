@@ -209,7 +209,7 @@ After a successful run:
 
 ```
 $ /dependabot-triage
-Pre-flight checks... OK (4/4)
+Pre-flight checks... OK (3/3)
 Enumerating... 5 open PRs (4 npm patch, 1 nuget patch)
 Classifying...
   #820 (Group A): patch eslint 9.1.1->9.1.2
@@ -231,7 +231,7 @@ Done. 5/5 merged. (silent — nothing requiring input)
 
 ```
 $ /dependabot-triage
-Pre-flight checks... OK (4/4)
+Pre-flight checks... OK (3/3)
 Enumerating... 3 open PRs
 Classifying...
   #830 (Group A): patch eslint 9.1.1->9.1.2
@@ -252,7 +252,7 @@ Done. 2 merged, 1 awaiting manual review (#832). (PushNotification: 1 manual rev
 
 ```
 $ /dependabot-triage
-Pre-flight checks... OK (4/4)
+Pre-flight checks... OK (3/3)
 Enumerating... 1 open PR
 Classifying...
   #840 (Group B): minor Azure.Identity 1.12->1.13 (auth-critical)
