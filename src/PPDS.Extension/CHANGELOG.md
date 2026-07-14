@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-14
+
+### Changed
+- **Bundled CLI updated to 1.3.0** — brings plugin-step functional-identity matching for deploy/diff/clean, a clear error instead of a silent global step when a configured entity has no SDK message filter (surfaced through the plugin panel's register/deploy flows), and working `plugins extract` from the extension's bundled single-file CLI (#1294, #1295, #1332).
+
 ## [1.4.0] - 2026-06-17
 
 ### Added
@@ -147,6 +152,7 @@ Complete ground-up rebuild of the extension. The new architecture uses a thin VS
 
 _Last stable release of the legacy architecture. See [archived repository](https://github.com/joshsmithxrm/power-platform-developer-suite/tree/archived) for full history._
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...HEAD
+[1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.0...Extension-v1.4.1
 [1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.2.0...Extension-v1.4.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Extension-v1.2.0
