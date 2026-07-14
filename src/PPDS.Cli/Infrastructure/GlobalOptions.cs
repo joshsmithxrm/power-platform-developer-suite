@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Completions;
 using System.CommandLine.Parsing;
 using PPDS.Cli.Commands;
 
@@ -67,16 +68,24 @@ public static class GlobalOptions
     /// <summary>
     /// Creates an --output-format option with a clean parse error for invalid values (#1076)
     /// and, unless <paramref name="supportsCsv"/> is set, a validator rejecting CSV (#1078).
+    /// Help usage label and shell completions advertise only the instance's valid set (#1336).
     /// </summary>
     /// <param name="supportsCsv">Whether the owning command implements CSV rendering.</param>
     /// <param name="shortAlias">Short alias — "-f" everywhere except data load, where -f belongs to --file.</param>
     public static Option<OutputFormat> CreateOutputFormatOption(bool supportsCsv = false, string shortAlias = "-f")
     {
-        var validValues = supportsCsv ? "Text, Json, Csv" : "Text, Json";
+        string[] validValueNames = supportsCsv
+            ? [nameof(Commands.OutputFormat.Text), nameof(Commands.OutputFormat.Json), nameof(Commands.OutputFormat.Csv)]
+            : [nameof(Commands.OutputFormat.Text), nameof(Commands.OutputFormat.Json)];
+        var validValues = string.Join(", ", validValueNames);
 
         var option = new Option<OutputFormat>("--output-format", shortAlias)
         {
             Description = "Output format",
+            // Without an explicit HelpName, System.CommandLine derives the usage label from the
+            // enum type and advertises <Csv|Json|Text> even where the validator below rejects
+            // Csv (#1336). Pin the label to this instance's actual valid set instead.
+            HelpName = string.Join("|", validValueNames),
             DefaultValueFactory = _ => Commands.OutputFormat.Text,
             CustomParser = result =>
             {
@@ -96,6 +105,11 @@ public static class GlobalOptions
                 return Commands.OutputFormat.Text;
             }
         };
+
+        // Replace the enum-derived completion source (Csv|Json|Text) so shell completions offer
+        // only the values this instance accepts (#1336).
+        option.CompletionSources.Clear();
+        option.CompletionSources.Add(_ => validValueNames.Select(name => new CompletionItem(name)));
 
         if (!supportsCsv)
         {
