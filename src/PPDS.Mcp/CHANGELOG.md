@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-14
+
 ### Added
 
 - **`ppds-mcp-server --version` prints the package version and exits** — previously the flag was documented in the README's bug-report instructions but unhandled: the server started normally and blocked silently waiting for MCP protocol messages on stdin. `--version` anywhere in the argument list now short-circuits startup, prints the MinVer-resolved version to stdout, and exits 0 ([#1273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1273), [#1324](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1324)).
@@ -42,6 +44,7 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Structured MCP error responses** — All tool exceptions now surface `errorCode`, `userMessage`, and `context`, giving MCP clients machine-readable failure details ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.1.0...HEAD
+[1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...Mcp-v1.1.0
 [1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...Mcp-v1.0.1
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Mcp-v1.0.0
