@@ -256,15 +256,33 @@ public static class DiffCommand
             {
                 var typeConfig = match.TypeConfig!;
                 var stepConfig = match.Config!;
+                var missingName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
                 drift.MissingSteps.Add(new StepDrift
                 {
                     TypeName = typeConfig.TypeName,
-                    StepName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig),
+                    StepName = missingName,
                     Message = stepConfig.Message,
                     Entity = stepConfig.Entity,
                     Stage = stepConfig.Stage,
                     Mode = stepConfig.Mode
                 });
+
+                // Same lookup deploy performs before creating a step: a specified entity with no SDK
+                // message filter can never be deployed (#1332). Warn so "[+] Missing step" is not read
+                // as "deploy will create it".
+                if (PluginStepIdentity.IsEntitySpecified(stepConfig.Entity) ||
+                    PluginStepIdentity.IsEntitySpecified(stepConfig.SecondaryEntity))
+                {
+                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
+                    if (messageId != null &&
+                        await service.GetSdkMessageFilterIdAsync(messageId.Value, stepConfig.Entity, stepConfig.SecondaryEntity) == null)
+                    {
+                        drift.Warnings.Add(
+                            $"Missing step '{missingName}' cannot be created by deploy: " +
+                            PluginRegistrationService.DescribeMissingMessageFilter(
+                                stepConfig.Message, stepConfig.Entity, stepConfig.SecondaryEntity));
+                    }
+                }
             }
             else if (match.IsOrphaned)
             {

@@ -303,6 +303,18 @@ public partial class RpcMethodHandler
 
             var filterId = await registrationService.GetSdkMessageFilterIdAsync(messageId, entity, secondaryEntity, ct);
 
+            // A specified entity with no SDK message filter is a configuration error (typo, or
+            // unsupported message/entity combo) — registering anyway would silently create a GLOBAL
+            // step that fires on every occurrence of the message (#1332). Only an intentionally
+            // global step (entity "none") may proceed with a null filter.
+            if (filterId == null &&
+                (PluginStepIdentity.IsEntitySpecified(entity) || PluginStepIdentity.IsEntitySpecified(secondaryEntity)))
+            {
+                throw new RpcException(
+                    ErrorCodes.Plugin.MessageFilterNotFound,
+                    PluginRegistrationService.DescribeMissingMessageFilter(message, entity, secondaryEntity));
+            }
+
             var stepConfig = new PluginStepConfig
             {
                 Name = name ?? $"{message} of {entity}",

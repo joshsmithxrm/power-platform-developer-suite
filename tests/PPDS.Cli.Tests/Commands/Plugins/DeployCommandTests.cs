@@ -463,4 +463,197 @@ public class DeployCommandTests : IDisposable
     }
 
     #endregion
+
+    #region Missing Message Filter Guard Tests (#1332)
+
+    // Bug (#1332): a configured entity that resolves no SDK message filter (typo like "acount") used
+    // to force-create an unfiltered GLOBAL step whose read-back identity ("none") never matches the
+    // config identity — so every deploy created another duplicate. The step must instead fail with a
+    // per-step error, be skipped, and fail the assembly result; other steps still deploy; repeated
+    // runs must not accumulate anything.
+    [Fact]
+    public async Task DeployAssemblyAsync_SpecifiedEntityWithNoMessageFilter_FailsStepAndNeverCreates()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            // Stateful environment so a second deploy sees whatever the first one created.
+            var envSteps = new List<PluginStepInfo>();
+
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => envSteps.ToList());
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            // The valid entity resolves a filter; the typo'd entity does not.
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), "account", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), "acount", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid?)null);
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid _, string _, PluginStepConfig cfg, Guid _, Guid? _, string? _, StepIdentityResolution? res, CancellationToken _) =>
+                {
+                    if (res?.ExistingStepId is { } existingId)
+                        return existingId;
+
+                    var id = Guid.NewGuid();
+                    envSteps.Add(new PluginStepInfo
+                    {
+                        Id = id,
+                        Name = cfg.Name!,
+                        Message = cfg.Message,
+                        PrimaryEntity = cfg.Entity,
+                        Stage = cfg.Stage,
+                        Mode = cfg.Mode,
+                        ExecutionOrder = cfg.ExecutionOrder
+                    });
+                    return id;
+                });
+
+            PluginAssemblyConfig BuildConfig() => new()
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Message = "Create", Entity = "acount", Stage = "PostOperation", Mode = "Synchronous" },
+                            new PluginStepConfig { Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            // First deploy: the typo'd step fails, the valid step deploys.
+            var first = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, BuildConfig(), Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+
+            Assert.False(first.Success);
+            Assert.NotNull(first.Error);
+            Assert.Contains("acount", first.Error);
+            Assert.Contains("No SDK message filter", first.Error);
+            Assert.Contains("Create", first.Error);
+            Assert.Equal(1, first.StepsCreated);
+
+            // The typo'd step was never written; only the valid step was.
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Entity == "acount"),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string?>(),
+                It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Assert.Single(envSteps);
+
+            // Second deploy: still fails the same way — and accumulates nothing (the #1332 bug was one
+            // new active global step per run).
+            var second = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, BuildConfig(), Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+
+            Assert.False(second.Success);
+            Assert.Equal(0, second.StepsCreated);
+            Assert.Equal(1, second.StepsUpdated); // the valid step converges to an in-place update
+            Assert.Single(envSteps);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
+    }
+
+    // Guard boundary (#1332): an intentionally global step — entity "none" (or empty) — legitimately
+    // resolves no filter and must keep deploying with a null filter id.
+    [Fact]
+    public async Task DeployAssemblyAsync_GlobalStepWithoutEntity_StillDeploysWithNullFilter()
+    {
+        var assemblyId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        var dummyAssembly = Path.Combine(Path.GetTempPath(), $"deploy-{Guid.NewGuid()}.dll");
+        File.WriteAllBytes(dummyAssembly, new byte[] { 0x4D, 0x5A });
+
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(s => s.UpsertAssemblyAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(s => s.ListTypesForAssemblyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginTypeInfo> { new() { Id = typeId, TypeName = "MyPlugin.Handler" } });
+            mock.Setup(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginStepInfo>());
+            mock.Setup(s => s.UpsertPluginTypeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            // Global messages have no filter row — the lookup returns null.
+            mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid?)null);
+            mock.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PluginImageInfo>());
+            mock.Setup(s => s.UpsertStepAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PluginStepConfig>(), It.IsAny<Guid>(),
+                    It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+
+            var assemblyConfig = new PluginAssemblyConfig
+            {
+                Name = "MyPlugin",
+                Type = "Assembly",
+                Path = dummyAssembly,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "MyPlugin.Handler",
+                        Steps =
+                        {
+                            new PluginStepConfig { Message = "Publish", Entity = "none", Stage = "PostOperation", Mode = "Synchronous" }
+                        }
+                    }
+                }
+            };
+
+            var globalOptions = new GlobalOptionValues { OutputFormat = OutputFormat.Json };
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object, assemblyConfig, Path.GetTempPath(), null, clean: false, dryRun: false, globalOptions, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.StepsCreated);
+
+            // The step was written with a null filter id (a real global registration).
+            mock.Verify(s => s.UpsertStepAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(),
+                It.Is<PluginStepConfig>(c => c.Entity == "none"),
+                It.IsAny<Guid>(), It.Is<Guid?>(f => f == null), It.IsAny<string?>(),
+                It.IsAny<StepIdentityResolution?>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally
+        {
+            File.Delete(dummyAssembly);
+        }
+    }
+
+    #endregion
 }

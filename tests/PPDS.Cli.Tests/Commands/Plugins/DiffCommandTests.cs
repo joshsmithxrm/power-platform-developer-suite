@@ -239,5 +239,51 @@ public class DiffCommandTests : IDisposable
         Assert.Equal("Old Display Name", change.Actual);
     }
 
+    // Bug (#1332): a missing step whose specified entity resolves no SDK message filter can never be
+    // created by deploy — diff must say so instead of presenting it as ordinary missing drift. An
+    // intentionally global step ("none") and a valid entity must not trigger the warning.
+    [Fact]
+    public async Task ComputeDriftAsync_MissingStepWithNoMessageFilter_WarnsItCannotBeCreated()
+    {
+        var typeId = Guid.NewGuid();
+
+        // Empty environment: every configured step is missing.
+        var mock = MockServiceWithSteps(Guid.NewGuid(), typeId, "MyPlugin.Handler", new List<PluginStepInfo>());
+        mock.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), "account", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), "acount", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        var config = new PluginAssemblyConfig
+        {
+            Name = "MyPlugin",
+            Types =
+            {
+                new PluginTypeConfig
+                {
+                    TypeName = "MyPlugin.Handler",
+                    Steps =
+                    {
+                        new PluginStepConfig { Message = "Create", Entity = "acount", Stage = "PostOperation", Mode = "Synchronous" },
+                        new PluginStepConfig { Message = "Update", Entity = "account", Stage = "PostOperation", Mode = "Synchronous" },
+                        new PluginStepConfig { Message = "Publish", Entity = "none", Stage = "PostOperation", Mode = "Synchronous" }
+                    }
+                }
+            }
+        };
+
+        var drift = await DiffCommand.ComputeDriftAsync(mock.Object, config);
+
+        // All three are missing, but only the typo'd entity warrants a warning: the valid entity is
+        // deployable and the global step legitimately has no filter.
+        Assert.Equal(3, drift.MissingSteps.Count);
+        var warning = Assert.Single(drift.Warnings);
+        Assert.Contains("cannot be created", warning);
+        Assert.Contains("acount", warning);
+        Assert.Contains("Create", warning);
+    }
+
     #endregion
 }

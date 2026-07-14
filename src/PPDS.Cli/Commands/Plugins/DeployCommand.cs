@@ -368,6 +368,11 @@ public static class DeployCommand
                     envForConfigStep[match.Config] = match.Env;
             }
 
+            // Per-step configuration errors (e.g., an entity with no SDK message filter). These fail
+            // the assembly result — and thus the command exit code — without aborting the remaining
+            // steps, mirroring how a thrown exception fails the whole assembly.
+            var stepErrors = new List<string>();
+
             // Deploy each type
             foreach (var typeConfig in assemblyConfig.Types)
             {
@@ -411,6 +416,26 @@ public static class DeployCommand
                         messageId.Value,
                         stepConfig.Entity,
                         stepConfig.SecondaryEntity);
+
+                    // A specified entity that resolves no SDK message filter is a configuration error
+                    // (typo, or unsupported message/entity combo) — the step can never be registered
+                    // against that entity. Creating it anyway would produce a GLOBAL step whose
+                    // read-back identity ("none") never matches this config identity, so every later
+                    // deploy would force-create yet another duplicate (#1332). Only an intentionally
+                    // global step (entity empty/"none") may proceed with a null filter.
+                    if (filterId == null &&
+                        (PluginStepIdentity.IsEntitySpecified(stepConfig.Entity) ||
+                         PluginStepIdentity.IsEntitySpecified(stepConfig.SecondaryEntity)))
+                    {
+                        var stepError = $"Step '{stepName}' was not deployed: " +
+                            PluginRegistrationService.DescribeMissingMessageFilter(
+                                stepConfig.Message, stepConfig.Entity, stepConfig.SecondaryEntity);
+                        stepErrors.Add(stepError);
+
+                        if (!globalOptions.IsJsonMode)
+                            Console.Error.WriteLine($"    [Error] {stepError}");
+                        continue;
+                    }
 
                     var matchedEnvStep = envForConfigStep.TryGetValue(stepConfig, out var env) ? env : null;
                     var isNew = matchedEnvStep is null;
@@ -518,6 +543,14 @@ public static class DeployCommand
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  [!] Warning: {warning}");
                 }
+            }
+
+            // Per-step configuration errors fail the assembly (and the command exit code) even though
+            // the remaining steps were still deployed.
+            if (stepErrors.Count > 0)
+            {
+                result.Success = false;
+                result.Error = string.Join("; ", stepErrors);
             }
         }
         catch (Exception ex)

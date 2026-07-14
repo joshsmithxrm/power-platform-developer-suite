@@ -163,6 +163,23 @@ public class PluginStepIdentityTests
         Assert.NotEqual(post, pre);
     }
 
+    // Guard boundary for #1332: "specified" means the value does not normalize to the NoEntity
+    // sentinel — only then is a null SDK message filter a configuration error.
+    [Theory]
+    [InlineData("account", true)]
+    [InlineData(" account ", true)]
+    [InlineData("acount", true)] // a typo is still "specified" — that is exactly the error case
+    [InlineData("none", false)]
+    [InlineData("NONE", false)]
+    [InlineData(" none ", false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(null, false)]
+    public void IsEntitySpecified_DistinguishesRealEntitiesFromNoneSentinel(string? entity, bool expected)
+    {
+        Assert.Equal(expected, PluginStepIdentity.IsEntitySpecified(entity));
+    }
+
     [Fact]
     public void ToString_RendersReadableComponents()
     {
