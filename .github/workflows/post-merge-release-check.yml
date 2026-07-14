@@ -4,6 +4,15 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  # The co-release guard (extension-corelease-detection job below) compares the
+  # latest Cli-v* and Extension-v* tags. A tag push is not a pull_request event,
+  # so the pull_request trigger above can't see it — we extend the triggers
+  # minimally with a Cli-v* tag push so the guard fires exactly when a new CLI
+  # release lands. workflow_dispatch allows a manual re-check.
+  push:
+    tags:
+      - 'Cli-v*'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -147,3 +156,70 @@ jobs:
           - [ ] Close this issue
 
           > **Procedure:** Follow the [Patch Release Procedure](.claude/skills/release/SKILL.md#patch-release-procedure) in the \`/release\` skill."
+
+  extension-corelease-detection:
+    name: Detect missing Extension bundled-CLI refresh
+    runs-on: ubuntu-latest
+    # Fires on a Cli-v* tag push (and manual dispatch), never on the PR-close
+    # path above — the two jobs are mutually exclusive by event.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check for existing open co-release issue
+        id: open-issue
+        run: |
+          # Idempotency: reuse the same label-based dedup as the cadence check so
+          # repeated runs never file a duplicate issue.
+          OPEN_COUNT=$(gh issue list --label "release:extension-corelease" --state open --json number | jq 'length')
+          echo "open_count=${OPEN_COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate co-release guard
+        id: evaluate
+        run: |
+          HAS_OPEN=""
+          if [ "${{ steps.open-issue.outputs.open_count }}" -gt "0" ]; then
+            HAS_OPEN="--has-open-issue"
+          fi
+
+          RESULT=$(python scripts/ci/check_extension_corelease.py ${HAS_OPEN})
+          echo "Guard result: ${RESULT}"
+          echo "should_open=$(echo "${RESULT}" | jq -r '.should_open_issue')" >> "$GITHUB_OUTPUT"
+          echo "reason=$(echo "${RESULT}" | jq -r '.reason')" >> "$GITHUB_OUTPUT"
+
+      - name: File Extension refresh issue
+        if: steps.evaluate.outputs.should_open == 'true'
+        run: |
+          # Ensure the dedup label exists (this is a new label; --force upserts
+          # idempotently so the create below never fails on a missing label).
+          gh label create "release:extension-corelease" \
+            --color BFD4F2 \
+            --description "A Cli-v* release shipped without an Extension bundled-CLI refresh" \
+            --force
+
+          # Title/body derive only from the tag state, not the dedup flag, so we
+          # regenerate them here without --has-open-issue.
+          TITLE=$(python scripts/ci/check_extension_corelease.py --format title)
+          BODY=$(python scripts/ci/check_extension_corelease.py --format body)
+
+          gh issue create \
+            --title "${TITLE}" \
+            --body  "${BODY}" \
+            --label "release:extension-corelease"
+
+      - name: Log decision (no issue opened)
+        if: steps.evaluate.outputs.should_open != 'true'
+        run: |
+          echo "No Extension co-release issue opened. Reason: ${{ steps.evaluate.outputs.reason }}"

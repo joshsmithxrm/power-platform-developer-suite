@@ -23,6 +23,23 @@ Channels:
 PPDS.Plugins is on its own lineage (it reached `1.0.0` ahead of the unified `1.x` line and is
 now `3.x`) — never regress its major to reconcile it with the other packages.
 
+### Cli ↔ Extension co-release rule
+
+**A `Cli-v*` release includes an `Extension-v*` bundled-CLI refresh in the same train.** The
+Extension bundles the CLI at publish time (`extension-publish.yml` → `npm run bundle:cli`), so
+marketplace users only pick up new CLI behavior when a *new* `Extension-v*` tag is cut. Whenever a
+release train ships a `Cli-v*` bump, cut an `Extension-v*` refresh that re-bundles it — even if the
+Extension's own source is unchanged (bump the Extension patch version to force a fresh vsix). Opt
+out **only** with a recorded reason (e.g. the CLI change cannot affect bundled behavior), noted in
+the release PR.
+
+This is the default that Cli-v1.3.0 + Mcp-v1.1.0 missed on 2026-07-14: no Extension release rode
+along, so marketplace users kept running ~1.2.0-era CLI behavior — including a bug 1.3.0 fixes. A
+mechanical backstop (`post-merge-release-check.yml` → `scripts/ci/check_extension_corelease.py`)
+files a `release:extension-corelease` issue whenever the latest stable `Cli-v*` tag postdates the
+latest `Extension-v*` tag, but the refresh belongs in the same train — treat the issue as a missed
+default, not the intended path.
+
 ## §2 - Signing matrix
 
 Which keys sign which surfaces:
