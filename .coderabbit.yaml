@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# The draft-first PR gate (ADR 0041/0042) assumes automated review lands during the
+# draft phase, but CodeRabbit skips drafts by default — its comments landed post-triage
+# on #1345/#1347 (2026-07-13). With Gemini sunsetting 2026-07-17, review drafts.
+reviews:
+  auto_review:
+    drafts: true
