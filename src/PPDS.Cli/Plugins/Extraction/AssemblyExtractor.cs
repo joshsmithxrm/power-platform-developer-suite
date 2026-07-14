@@ -22,6 +22,14 @@ public sealed class AssemblyExtractor : IDisposable
     private const string Net462ResourceName = "PPDS.Cli.Resources.Net462ReferenceAssemblies.zip";
 
     /// <summary>
+    /// Zero-byte marker written into the cache directory as the very last extraction step.
+    /// Its presence is the cache-validity contract: the cache key is fixed per CLI version,
+    /// so a cache partially deleted by a temp cleaner would otherwise pass an "any DLL"
+    /// check forever and could never self-heal. See #1326.
+    /// </summary>
+    internal const string CompletionSentinelFileName = ".complete";
+
+    /// <summary>
     /// Directory of embedded .NET Framework 4.6.2 reference assemblies, extracted once per
     /// process on first use. Null when the embedded resource is unavailable or extraction
     /// failed — in which case the resolver falls back to runtime-directory seeding.
@@ -147,6 +155,14 @@ public sealed class AssemblyExtractor : IDisposable
     /// seeding, so the fix can never make extraction worse than before. See #1294.
     /// </summary>
     internal static string? GetNet462ReferenceAssemblyDirectory()
+        => GetNet462ReferenceAssemblyDirectory(cacheBaseDirOverride: null);
+
+    /// <summary>
+    /// Overload that redirects the cache base directory so tests can exercise cache
+    /// corruption and self-healing against an isolated location instead of the real
+    /// per-user cache in the temp directory. See #1326.
+    /// </summary>
+    internal static string? GetNet462ReferenceAssemblyDirectory(string? cacheBaseDirOverride)
     {
         try
         {
@@ -165,20 +181,32 @@ public sealed class AssemblyExtractor : IDisposable
             // resource (new CLI version) lands in a fresh directory, so there is no stale cache.
             var hash = Convert.ToHexString(SHA256.HashData(zipBytes))[..16].ToLowerInvariant();
 
-            // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
-            // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
-            // created by the first user and then throw UnauthorizedAccessException for every other
-            // account — which the outer catch swallows, silently disabling the fix for them.
-            // Isolating by user name gives each account its own cache. See #1294.
-            var rawUser = Environment.UserName;
-            var userScope = string.IsNullOrWhiteSpace(rawUser)
-                ? "default"
-                : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
-            var baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
+            var baseDir = cacheBaseDirOverride;
+            if (baseDir == null)
+            {
+                // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
+                // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
+                // created by the first user and then throw UnauthorizedAccessException for every other
+                // account — which the outer catch swallows, silently disabling the fix for them.
+                // Isolating by user name gives each account its own cache. See #1294.
+                var rawUser = Environment.UserName;
+                var userScope = string.IsNullOrWhiteSpace(rawUser)
+                    ? "default"
+                    : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
+                baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
+            }
+
             var cacheDir = Path.Combine(baseDir, hash);
 
             if (IsPopulated(cacheDir))
                 return cacheDir;
+
+            // Self-heal: a cache directory that exists but fails validation is corrupt — e.g. a
+            // temp cleaner deleted the sentinel or some DLLs but kept the directory. The cache key
+            // is fixed per CLI version, so without deleting it here the corrupt directory would
+            // never recover (and Directory.Move below would throw on the existing destination on
+            // every run). See #1326.
+            TryDeleteDirectory(cacheDir);
 
             // Extract to a unique staging directory, then atomically move it into place so a
             // concurrent extraction never observes a half-populated cache directory.
@@ -192,6 +220,10 @@ public sealed class AssemblyExtractor : IDisposable
                     archive.ExtractToDirectory(stagingDir);
                 }
 
+                // Completion sentinel, written only after every entry extracted: validation
+                // treats any cache directory without it as incomplete.
+                File.WriteAllBytes(Path.Combine(stagingDir, CompletionSentinelFileName), []);
+
                 if (IsPopulated(cacheDir))
                     return cacheDir; // Another process won the race while we were extracting.
 
@@ -202,8 +234,23 @@ public sealed class AssemblyExtractor : IDisposable
                 }
                 catch (IOException) when (IsPopulated(cacheDir))
                 {
-                    // Race: another process created the cache dir between our check and move.
+                    // Race: another process created a complete cache between our check and move.
                     return cacheDir;
+                }
+                catch (IOException)
+                {
+                    // The destination exists but is invalid (e.g. re-created mid-run by a temp
+                    // cleaner or a concurrent loser): delete it and retry the move once. If the
+                    // retry loses to a concurrent winner, its cache is complete — use it.
+                    TryDeleteDirectory(cacheDir);
+                    try
+                    {
+                        Directory.Move(stagingDir, cacheDir);
+                    }
+                    catch (IOException) when (IsPopulated(cacheDir))
+                    {
+                        return cacheDir;
+                    }
                 }
 
                 return cacheDir;
@@ -213,15 +260,28 @@ public sealed class AssemblyExtractor : IDisposable
                 TryDeleteDirectory(stagingDir);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Never make things worse — fall back to runtime-directory seeding.
+            // Never make things worse — fall back to runtime-directory seeding. But say so
+            // (stderr — stdout is reserved for data): in a single-file install that fallback
+            // has no loose BCL DLLs, so extraction will likely fail downstream with the
+            // confusing "could not find core assembly" error. See #1326.
+            Console.Error.WriteLine(
+                "Warning: failed to extract embedded .NET Framework 4.6.2 reference assemblies; " +
+                $"plugin extraction may fail for single-file installs: {ex.Message}");
             return null;
         }
     }
 
+    /// <summary>
+    /// A cache directory is valid only when the completion sentinel (written as the last
+    /// extraction step) and the core assembly are both present. Checking mscorlib rather
+    /// than "any DLL" lets a partially deleted cache fail validation and self-heal instead
+    /// of passing forever. See #1326.
+    /// </summary>
     private static bool IsPopulated(string directory)
-        => Directory.Exists(directory) && Directory.EnumerateFiles(directory, "*.dll").Any();
+        => File.Exists(Path.Combine(directory, CompletionSentinelFileName))
+           && File.Exists(Path.Combine(directory, "mscorlib.dll"));
 
     private static void TryDeleteDirectory(string directory)
     {

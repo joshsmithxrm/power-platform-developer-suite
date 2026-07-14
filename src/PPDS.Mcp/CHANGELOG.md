@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`ppds-mcp-server --version` prints the package version and exits** — previously the flag was documented in the README's bug-report instructions but unhandled: the server started normally and blocked silently waiting for MCP protocol messages on stdin. `--version` anywhere in the argument list now short-circuits startup, prints the MinVer-resolved version to stdout, and exits 0 ([#1273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1273), [#1324](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1324)).
 
+### Fixed
+
+- **MCP `initialize` handshake now reports the real package version** — `serverInfo.version` previously reported the fixed `AssemblyVersion` (`1.0.0.0`) regardless of the installed package; it now reports the MinVer-stamped package version (e.g. `1.0.2-alpha.0.5`) with the `+<sha>` build-metadata suffix stripped ([#1273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1273)).
+
 ## [1.0.1] - 2026-06-17
 
 ### Added

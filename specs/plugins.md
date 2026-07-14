@@ -523,6 +523,7 @@ ppds plugins extract MyPlugin.1.0.0.nupkg -o registrations.json
 | `-o, --output` | Output JSON file path |
 | `-s, --solution` | Solution unique name for registration |
 | `-f, --force` | Overwrite existing output file |
+| `--reference-dir` | Additional directory to search for referenced assemblies (repeatable) |
 
 ### ppds plugins deploy
 
