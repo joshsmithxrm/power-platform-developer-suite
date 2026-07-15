@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-15
+
+### Added
+- **`ppds metadata attributes --exclude-auxiliary`** — opt-in filter that omits auxiliary attributes (lookup name/yomi companions carrying `AttributeOf`). Auxiliaries are shown by default and flagged `aux:<parent>` in the Flags column; `--json` output now carries the `attributeOf` field so scripts can filter deterministically (#1368).
+
+### Changed
+- **Metadata attribute daemon RPC returns the full attribute contract** — the `metadata/entityDetail` RPC previously forwarded a curated ~23-field subset of the service attribute metadata and dropped the rest. It now passes through the complete set (identity, CRUD/form/grid validity, searchable/filterable/sortable, security-capability flags, audit/customizable/renameable flags, `attributeOf`, `formulaDefinition`, `columnNumber`, `externalName`, introduced/deprecated versions, created/modified timestamps), enabling the extension's full attribute properties panel. Additive and backward compatible; a reflection test pins the RPC contract to the service DTO to prevent silent narrowing (#1369).
+
 ## [1.3.0] - 2026-07-14
 
 ### Added
@@ -129,6 +137,7 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.3.0...HEAD
+[1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.3.0...Cli-v1.4.0
 [1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...Cli-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.1.0...Cli-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0...Cli-v1.1.0

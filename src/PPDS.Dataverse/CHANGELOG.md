@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-15
+
+### Added
+
+- **Enriched attribute metadata on `AttributeMetadataDto`** — added `DeprecatedVersion`, `IsAuditEnabled`, `IsCustomizable`, `IsRenameable`, `IsValidForAdvancedFind`, `ExternalName`, `ColumnNumber`, `CreatedOn`, and `ModifiedOn`, mapped from the SDK `AttributeMetadata`. Combined with the already-captured `AttributeOf`, this gives consumers the full attribute picture (including the deterministic auxiliary-attribute marker) rather than a curated subset ([#1369](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1369), [#1368](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1368)).
+
 ## [1.2.0] - 2026-06-17
 
 ### Added
@@ -61,6 +67,7 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.2.0...HEAD
+[1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.2.0...Dataverse-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...Dataverse-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...Dataverse-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Dataverse-v1.0.0

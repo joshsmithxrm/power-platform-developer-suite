@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-15
+
+### Added
+
+- **`metadata_entity` attributes now include `attributeOf`** — each returned attribute carries the logical name of the attribute it extends when it is an auxiliary (lookup name/yomi) companion, and omits the field for real attributes. This lets agents deterministically distinguish schema plumbing from real, queryable columns without display-name heuristics ([#1368](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1368)).
+
 ## [1.1.0] - 2026-07-14
 
 ### Added
@@ -45,6 +51,7 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.1.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.1.0...Mcp-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...Mcp-v1.1.0
 [1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...Mcp-v1.0.1
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Mcp-v1.0.0

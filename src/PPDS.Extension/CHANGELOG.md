@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-15
+
+Stable-channel release (even minor per odd/even convention; 1.5.x is the pre-release channel).
+
+### Fixed
+- **Metadata Browser and 4 other panels rendered only the first ~22 rows, then an empty void** — the shared `DataTable` virtual scroll sized its window from an inner wrapper that was never height-bounded, so it never scrolled and only the initial buffer rendered. The wrapper is now a bounded flex-column host, so long lists (attributes, import jobs, environment variables, connection references, web resources) render and scroll fully (#1365, #1366).
+- **Metadata Browser Choices tab** — expanding a choice row no longer collapses the table columns into unreadable slivers (an over-wide colspan under `table-layout:fixed`), and every entity choice / global option set now renders instead of stopping after ~21 rows (tables were populated while detached from the DOM) (#1367).
+- **Single-row tables rendered empty** in every DataTable panel due to an initial visible-range sentinel colliding with a real single-row range (#1367).
+
+### Added
+- **Full attribute metadata in the properties panel** — clicking an attribute now shows the complete, grouped property set (General / Flags / Behavior / Security / Type Details / System) instead of a curated dozen; booleans display for both true and false. Backed by a widened daemon attribute contract (bundled CLI 1.4.0) (#1369).
+- **Auxiliary attributes are identified and managed** — lookup name/yomi companion attributes (which carry `AttributeOf`) are hidden by default with a disclosed **"Hide auxiliary (N)"** toggle that restores them in one click; when shown they are visually marked and labelled `aux of <parent>` instead of appearing as broken blank-name fields (#1368).
+
+### Changed
+- **Metadata Browser tab order** — Configuration now precedes Attributes and is the landing tab when selecting an entity (entity-level detail before the attribute drill-down) (#1370).
+- **Bundled CLI updated to 1.4.0** — carries the full-fidelity attribute metadata contract and the `attributeOf` marker that power the properties panel and auxiliary handling above (#1369).
+
 ## [1.4.1] - 2026-07-14
 
 ### Changed
@@ -153,6 +170,7 @@ Complete ground-up rebuild of the extension. The new architecture uses a thin VS
 _Last stable release of the legacy architecture. See [archived repository](https://github.com/joshsmithxrm/power-platform-developer-suite/tree/archived) for full history._
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...HEAD
+[1.6.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...Extension-v1.6.0
 [1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.0...Extension-v1.4.1
 [1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.2.0...Extension-v1.4.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Extension-v1.2.0
