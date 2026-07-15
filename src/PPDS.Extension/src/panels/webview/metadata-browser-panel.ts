@@ -609,7 +609,11 @@ function renderAttributeTable(container: HTMLElement, attrs: MetadataAttributeDt
                 render: (a) => isAuxiliaryAttribute(a) && !a.displayName
                     ? '<span class="attr-aux-label">aux of ' + escapeHtml(a.attributeOf ?? '') + '</span>'
                     : escapeHtml(a.displayName ?? '\u2014'),
-                sortValue: (a) => a.displayName ?? (isAuxiliaryAttribute(a) ? 'aux of ' + (a.attributeOf ?? '') : ''),
+                // Mirror render()'s branch exactly (empty-string displayName included)
+                // so the sort key matches what's shown.
+                sortValue: (a) => isAuxiliaryAttribute(a) && !a.displayName
+                    ? 'aux of ' + (a.attributeOf ?? '')
+                    : (a.displayName ?? ''),
             },
             { key: 'logicalName', label: 'Logical Name', render: (a) => escapeHtml(a.logicalName) },
             { key: 'attributeType', label: 'Type', render: (a) => escapeHtml(a.attributeType) },
@@ -740,7 +744,9 @@ function showAttributePropertiesPanel(attr: MetadataAttributeDto, container: HTM
             ['Targets', attr.targets && attr.targets.length > 0 ? attr.targets.join(', ') : null],
             ['Option Set Name', fmt(attr.optionSetName)],
             ['Is Global Option Set', attr.optionSetName ? fmt(attr.isGlobalOptionSet) : null],
-            ['Option Count', attr.options && attr.options.length > 0 ? String(attr.options.length) : null],
+            // Show an explicit 0 for a present-but-empty option set (real metadata);
+            // only omit when options is absent entirely (non-choice attribute).
+            ['Option Count', attr.options ? String(attr.options.length) : null],
         ]],
         ['System', [
             ['Metadata Id', fmt(attr.metadataId)],
@@ -1430,10 +1436,13 @@ function toggleOptionValues(
     tr.id = 'option-values-' + key;
     tr.className = 'option-values-row expanded';
     const td = document.createElement('td');
-    // Span exactly the real column count. Under table-layout:fixed an oversized
-    // colspan (the old 99) inflates the layout to that many columns, collapsing
-    // the real ones to slivers (#1367).
-    td.colSpan = Math.max(1, container.querySelectorAll('thead th').length);
+    // Span exactly the parent table's column count. Under table-layout:fixed an
+    // oversized colspan (the old 99) inflates the layout to that many columns,
+    // collapsing the real ones to slivers (#1367). Use the parent table's own
+    // <thead> only — a container-wide `thead th` query would also count headers
+    // from already-expanded option sub-tables and re-inflate the span.
+    const parentTable = selectedRow.closest('table');
+    td.colSpan = Math.max(1, parentTable?.tHead?.querySelectorAll('th').length ?? 1);
 
     if (options.length === 0) {
         td.textContent = 'No option values';
