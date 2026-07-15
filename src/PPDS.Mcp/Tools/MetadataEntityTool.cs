@@ -79,7 +79,8 @@ public sealed class MetadataEntityTool : McpToolBase
                     MinValue = a.MinValue,
                     MaxValue = a.MaxValue,
                     Precision = a.Precision,
-                    TargetEntities = a.Targets?.ToList()
+                    TargetEntities = a.Targets?.ToList(),
+                    AttributeOf = a.AttributeOf
                 }).OrderBy(a => a.LogicalName).ToList();
             }
 
@@ -317,6 +318,17 @@ public sealed class MetadataAttributeInfo
     [JsonPropertyName("targetEntities")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? TargetEntities { get; set; }
+
+    /// <summary>
+    /// Logical name of the attribute this auxiliary attribute extends (lookup
+    /// name/yomi companions). Null (omitted) for real attributes. Lets agents
+    /// distinguish schema plumbing deterministically — "mark, don't mask" (#1368).
+    /// This projection is deliberately lean for agent context budgets; the marker
+    /// field is included so nothing is silently indistinguishable.
+    /// </summary>
+    [JsonPropertyName("attributeOf")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttributeOf { get; set; }
 }
 
 /// <summary>

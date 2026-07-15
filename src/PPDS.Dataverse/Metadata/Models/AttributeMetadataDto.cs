@@ -269,5 +269,59 @@ public sealed class AttributeMetadataDto
     [JsonPropertyName("introducedVersion")]
     public string? IntroducedVersion { get; init; }
 
+    /// <summary>
+    /// Gets the version when this attribute was deprecated.
+    /// </summary>
+    [JsonPropertyName("deprecatedVersion")]
+    public string? DeprecatedVersion { get; init; }
+
+    /// <summary>
+    /// Gets whether auditing is enabled for this attribute.
+    /// </summary>
+    [JsonPropertyName("isAuditEnabled")]
+    public bool IsAuditEnabled { get; init; }
+
+    /// <summary>
+    /// Gets whether the attribute is customizable.
+    /// </summary>
+    [JsonPropertyName("isCustomizable")]
+    public bool IsCustomizable { get; init; }
+
+    /// <summary>
+    /// Gets whether the attribute can be renamed.
+    /// </summary>
+    [JsonPropertyName("isRenameable")]
+    public bool IsRenameable { get; init; }
+
+    /// <summary>
+    /// Gets whether the attribute appears in Advanced Find.
+    /// </summary>
+    [JsonPropertyName("isValidForAdvancedFind")]
+    public bool IsValidForAdvancedFind { get; init; }
+
+    /// <summary>
+    /// Gets the external name for virtual entity providers.
+    /// </summary>
+    [JsonPropertyName("externalName")]
+    public string? ExternalName { get; init; }
+
+    /// <summary>
+    /// Gets the physical column number of the attribute.
+    /// </summary>
+    [JsonPropertyName("columnNumber")]
+    public int? ColumnNumber { get; init; }
+
+    /// <summary>
+    /// Gets when the attribute was created.
+    /// </summary>
+    [JsonPropertyName("createdOn")]
+    public DateTime? CreatedOn { get; init; }
+
+    /// <summary>
+    /// Gets when the attribute was last modified.
+    /// </summary>
+    [JsonPropertyName("modifiedOn")]
+    public DateTime? ModifiedOn { get; init; }
+
     #endregion
 }

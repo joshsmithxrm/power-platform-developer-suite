@@ -238,7 +238,8 @@ public partial class RpcMethodHandler
         };
     }
 
-    private static MetadataAttributeDto MapAttributeToRpc(AttributeMetadataDto a)
+    // Internal for tests: the wire contract must preserve every service-DTO field (#1369).
+    internal static MetadataAttributeDto MapAttributeToRpc(AttributeMetadataDto a)
     {
         return new MetadataAttributeDto
         {
@@ -264,7 +265,35 @@ public partial class RpcMethodHandler
             SourceType = a.SourceType,
             IsSecured = a.IsSecured,
             Description = a.Description,
-            AutoNumberFormat = a.AutoNumberFormat
+            AutoNumberFormat = a.AutoNumberFormat,
+            // Full-fidelity pass-through (#1369)
+            MetadataId = a.MetadataId,
+            IsManaged = a.IsManaged,
+            AttributeOf = a.AttributeOf,
+            IsLogical = a.IsLogical,
+            IsValidForCreate = a.IsValidForCreate,
+            IsValidForUpdate = a.IsValidForUpdate,
+            IsValidForRead = a.IsValidForRead,
+            IsValidForForm = a.IsValidForForm,
+            IsValidForGrid = a.IsValidForGrid,
+            IsValidForAdvancedFind = a.IsValidForAdvancedFind,
+            IsSearchable = a.IsSearchable,
+            IsFilterable = a.IsFilterable,
+            IsSortable = a.IsSortable,
+            IsRetrievable = a.IsRetrievable,
+            CanBeSecuredForRead = a.CanBeSecuredForRead,
+            CanBeSecuredForCreate = a.CanBeSecuredForCreate,
+            CanBeSecuredForUpdate = a.CanBeSecuredForUpdate,
+            IsAuditEnabled = a.IsAuditEnabled,
+            IsCustomizable = a.IsCustomizable,
+            IsRenameable = a.IsRenameable,
+            FormulaDefinition = a.FormulaDefinition,
+            IntroducedVersion = a.IntroducedVersion,
+            DeprecatedVersion = a.DeprecatedVersion,
+            ExternalName = a.ExternalName,
+            ColumnNumber = a.ColumnNumber,
+            CreatedOn = a.CreatedOn,
+            ModifiedOn = a.ModifiedOn
         };
     }
 
@@ -652,6 +681,99 @@ public class MetadataAttributeDto
     [JsonPropertyName("autoNumberFormat")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AutoNumberFormat { get; set; }
+
+    // ── Full-fidelity pass-through of the service DTO (#1369) ──
+    // The RPC layer originally forwarded a curated subset; clients (Metadata
+    // Browser properties panel) need the complete attribute metadata.
+
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("attributeOf")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttributeOf { get; set; }
+
+    [JsonPropertyName("isLogical")]
+    public bool IsLogical { get; set; }
+
+    [JsonPropertyName("isValidForCreate")]
+    public bool IsValidForCreate { get; set; }
+
+    [JsonPropertyName("isValidForUpdate")]
+    public bool IsValidForUpdate { get; set; }
+
+    [JsonPropertyName("isValidForRead")]
+    public bool IsValidForRead { get; set; }
+
+    [JsonPropertyName("isValidForForm")]
+    public bool IsValidForForm { get; set; }
+
+    [JsonPropertyName("isValidForGrid")]
+    public bool IsValidForGrid { get; set; }
+
+    [JsonPropertyName("isValidForAdvancedFind")]
+    public bool IsValidForAdvancedFind { get; set; }
+
+    [JsonPropertyName("isSearchable")]
+    public bool IsSearchable { get; set; }
+
+    [JsonPropertyName("isFilterable")]
+    public bool IsFilterable { get; set; }
+
+    [JsonPropertyName("isSortable")]
+    public bool IsSortable { get; set; }
+
+    [JsonPropertyName("isRetrievable")]
+    public bool IsRetrievable { get; set; }
+
+    [JsonPropertyName("canBeSecuredForRead")]
+    public bool CanBeSecuredForRead { get; set; }
+
+    [JsonPropertyName("canBeSecuredForCreate")]
+    public bool CanBeSecuredForCreate { get; set; }
+
+    [JsonPropertyName("canBeSecuredForUpdate")]
+    public bool CanBeSecuredForUpdate { get; set; }
+
+    [JsonPropertyName("isAuditEnabled")]
+    public bool IsAuditEnabled { get; set; }
+
+    [JsonPropertyName("isCustomizable")]
+    public bool IsCustomizable { get; set; }
+
+    [JsonPropertyName("isRenameable")]
+    public bool IsRenameable { get; set; }
+
+    [JsonPropertyName("formulaDefinition")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FormulaDefinition { get; set; }
+
+    [JsonPropertyName("introducedVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IntroducedVersion { get; set; }
+
+    [JsonPropertyName("deprecatedVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedVersion { get; set; }
+
+    [JsonPropertyName("externalName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExternalName { get; set; }
+
+    [JsonPropertyName("columnNumber")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ColumnNumber { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? ModifiedOn { get; set; }
 }
 
 public class MetadataRelationshipDto

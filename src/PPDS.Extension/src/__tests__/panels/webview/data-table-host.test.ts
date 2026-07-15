@@ -20,8 +20,8 @@ import { DataTable } from '../../../panels/webview/shared/data-table.js';
  * are asserted here.
  */
 describe('DataTable virtual-scroll host contract', () => {
-    it('tags its host element with .data-table-host', () => {
-        // Minimal container stub — the constructor only calls classList.add + addEventListener.
+    // Minimal container stub — the constructor only calls classList.add + addEventListener.
+    function fakeContainer(): { classes: Set<string>; container: unknown } {
         const classes = new Set<string>();
         const container = {
             classList: {
@@ -31,15 +31,35 @@ describe('DataTable virtual-scroll host contract', () => {
             },
             addEventListener: () => { /* no-op */ },
         };
+        return { classes, container };
+    }
+
+    it('tags its host element with .data-table-host', () => {
+        const { classes, container } = fakeContainer();
 
         new DataTable<{ id: string }>({
             columns: [{ key: 'id', label: 'Id', render: (r) => r.id }],
             getRowId: (r) => r.id,
-            container,
+            container: container as never,
         });
 
         // The class the CSS below hangs off of must be applied to the host.
         expect(classes.has('data-table-host')).toBe(true);
+    });
+
+    it('accepts virtualize:false and rowClassName (#1367/#1368 contract)', () => {
+        const { container } = fakeContainer();
+
+        // Compile-time + constructor-level lock: eager mode for short tables with
+        // expansion rows (#1367), and per-row marking for auxiliary items (#1368).
+        const table = new DataTable<{ id: string; aux: boolean }>({
+            columns: [{ key: 'id', label: 'Id', render: (r) => r.id }],
+            getRowId: (r) => r.id,
+            container: container as never,
+            virtualize: false,
+            rowClassName: (r) => r.aux ? 'attr-aux' : null,
+        });
+        expect(table).toBeInstanceOf(DataTable);
     });
 
     it('shared.css makes .data-table-host a bounded flex column', () => {

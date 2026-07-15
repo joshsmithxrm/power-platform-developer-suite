@@ -18,6 +18,7 @@ import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable } from './shared/data-table.js';
+import { isAuxiliaryAttribute } from './shared/metadata-utils.js';
 
 const vscode = getVsCodeApi<MetadataBrowserPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg));
@@ -44,9 +45,12 @@ let selectedEntityName: string | null = null;
 let selectedChoiceName: string | null = null;
 let currentEntity: MetadataEntityDetailDto | null = null;
 let currentGlobalChoice: MetadataOptionSetDto | null = null;
-let activeTab = 'attributes';
+let activeTab = 'config';
 let hideSystem = false;
 let intersectHiddenCount = 0;
+// #1368 "mark, don't mask": auxiliary attributes (attributeOf != null) are SHOWN by
+// default and visually marked; this user-initiated toggle hides them for cleanliness.
+let hideAuxiliaryAttributes = false;
 
 // Per-tab search state
 const tabSearchTerms: Record<string, string> = {};
@@ -57,9 +61,10 @@ let choicesSectionCollapsed = false;
 
 type TabId = 'attributes' | 'config' | '1n' | 'n1' | 'nn' | 'keys' | 'privileges' | 'choices' | 'choice-detail';
 
+// #1370: Configuration first — it describes the entity itself; Attributes is a drill-down.
 const ENTITY_TAB_DEFS: { id: TabId; label: string }[] = [
-    { id: 'attributes', label: 'Attributes' },
     { id: 'config', label: 'Configuration' },
+    { id: 'attributes', label: 'Attributes' },
     { id: '1n', label: '1:N' },
     { id: 'n1', label: 'N:1' },
     { id: 'nn', label: 'N:N' },
@@ -549,15 +554,35 @@ function renderAttributesTab(): void {
     const searchBar = buildTabSearchBar('attributes', 'Search attributes...', () => {
         renderAttributeTable(tabContent, currentEntity!.attributes);
     });
+
+    // #1368 "mark, don't mask": auxiliaries show by default; this hides them on request.
+    const auxToggle = document.createElement('label');
+    auxToggle.className = 'toolbar-checkbox';
+    const auxCheckbox = document.createElement('input');
+    auxCheckbox.type = 'checkbox';
+    auxCheckbox.checked = hideAuxiliaryAttributes;
+    auxCheckbox.addEventListener('change', () => {
+        hideAuxiliaryAttributes = auxCheckbox.checked;
+        renderAttributeTable(tabContent, currentEntity!.attributes);
+    });
+    auxToggle.appendChild(auxCheckbox);
+    auxToggle.appendChild(document.createTextNode(' Hide auxiliary'));
+    auxToggle.title = 'Hide auxiliary attributes (lookup name/yomi companions marked with AttributeOf)';
+    searchBar.appendChild(auxToggle);
+
     tabContent.appendChild(searchBar);
 
     renderAttributeTable(tabContent, currentEntity.attributes);
 }
 
 function getFilteredAttributes(attrs: MetadataAttributeDto[]): MetadataAttributeDto[] {
+    let result = attrs;
+    if (hideAuxiliaryAttributes) {
+        result = result.filter(a => !isAuxiliaryAttribute(a));
+    }
     const term = (tabSearchTerms['attributes'] ?? '').toLowerCase().trim();
-    if (!term) return attrs;
-    return attrs.filter(a =>
+    if (!term) return result;
+    return result.filter(a =>
         (a.displayName ?? '').toLowerCase().includes(term) ||
         a.logicalName.toLowerCase().includes(term) ||
         a.attributeType.toLowerCase().includes(term)
@@ -577,8 +602,15 @@ function renderAttributeTable(container: HTMLElement, attrs: MetadataAttributeDt
     const table = new DataTable<MetadataAttributeDto>({
         container: wrapper,
         columns: [
-            // MB-10: displayName first
-            { key: 'displayName', label: 'Display Name', render: (a) => escapeHtml(a.displayName ?? '\u2014') },
+            // MB-10: displayName first. Auxiliary attributes have no display name of
+            // their own \u2014 show what they are instead of a blank cell (#1368).
+            {
+                key: 'displayName', label: 'Display Name',
+                render: (a) => isAuxiliaryAttribute(a) && !a.displayName
+                    ? '<span class="attr-aux-label">aux of ' + escapeHtml(a.attributeOf ?? '') + '</span>'
+                    : escapeHtml(a.displayName ?? '\u2014'),
+                sortValue: (a) => a.displayName ?? (isAuxiliaryAttribute(a) ? 'aux of ' + (a.attributeOf ?? '') : ''),
+            },
             { key: 'logicalName', label: 'Logical Name', render: (a) => escapeHtml(a.logicalName) },
             { key: 'attributeType', label: 'Type', render: (a) => escapeHtml(a.attributeType) },
             { key: 'requiredLevel', label: 'Required', render: (a) => escapeHtml(a.requiredLevel ?? '\u2014') },
@@ -592,6 +624,8 @@ function renderAttributeTable(container: HTMLElement, attrs: MetadataAttributeDt
         emptyMessage: 'No attributes',
         // MB-05: click to show properties panel
         onRowClick: (a) => showAttributePropertiesPanel(a, wrapper),
+        // #1368: mark auxiliary rows so they read as plumbing, not broken fields
+        rowClassName: (a) => isAuxiliaryAttribute(a) ? 'attr-aux' : null,
     });
     table.setItems(filtered);
 
@@ -635,80 +669,117 @@ function showAttributePropertiesPanel(attr: MetadataAttributeDto, container: HTM
     closeBtn.addEventListener('click', () => panel.remove());
     title.appendChild(closeBtn);
 
-    const props: [string, string | number | boolean | null][] = [
-        ['Display Name', attr.displayName],
-        ['Logical Name', attr.logicalName],
-        ['Schema Name', attr.schemaName],
-        ['Type', attr.attributeType],
-        ['Type Name', attr.attributeTypeName],
-        ['Required Level', attr.requiredLevel],
-        ['Is Custom', attr.isCustomAttribute ? 'Yes' : 'No'],
-        ['Is Secured', attr.isSecured ? 'Yes' : 'No'],
+    // #1369: render the complete attribute metadata, grouped for readability.
+    // Booleans render Yes/No including false (false is information); null/undefined
+    // rows are omitted (not applicable, or a bundled CLI older than the RPC widening).
+    const fmt = (v: string | number | boolean | null | undefined): string | null => {
+        if (v === null || v === undefined) return null;
+        if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+        const s = String(v);
+        return s.length > 0 ? s : null;
+    };
+    const fmtDate = (v: string | null | undefined): string | null => {
+        if (!v) return null;
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? v : d.toLocaleString();
+    };
+    const SOURCE_TYPE_LABELS: Record<number, string> = { 0: '0 (Simple)', 1: '1 (Calculated)', 2: '2 (Rollup)' };
+    const sourceType = attr.sourceType !== null && attr.sourceType !== undefined
+        ? (SOURCE_TYPE_LABELS[attr.sourceType] ?? String(attr.sourceType))
+        : null;
+
+    const sections: [string, [string, string | null][]][] = [
+        ['General', [
+            ['Display Name', fmt(attr.displayName)],
+            ['Logical Name', fmt(attr.logicalName)],
+            ['Schema Name', fmt(attr.schemaName)],
+            ['Attribute Of', fmt(attr.attributeOf)],
+            ['Type', fmt(attr.attributeType)],
+            ['Type Name', fmt(attr.attributeTypeName)],
+            ['Required Level', fmt(attr.requiredLevel)],
+            ['Source Type', sourceType],
+            ['Description', fmt(attr.description)],
+        ]],
+        ['Flags', [
+            ['Is Custom', fmt(attr.isCustomAttribute)],
+            ['Is Managed', fmt(attr.isManaged)],
+            ['Is Primary Id', fmt(attr.isPrimaryId)],
+            ['Is Primary Name', fmt(attr.isPrimaryName)],
+            ['Is Logical', fmt(attr.isLogical)],
+            ['Is Audit Enabled', fmt(attr.isAuditEnabled)],
+            ['Is Customizable', fmt(attr.isCustomizable)],
+            ['Is Renameable', fmt(attr.isRenameable)],
+        ]],
+        ['Behavior', [
+            ['Valid For Create', fmt(attr.isValidForCreate)],
+            ['Valid For Update', fmt(attr.isValidForUpdate)],
+            ['Valid For Read', fmt(attr.isValidForRead)],
+            ['Valid For Form', fmt(attr.isValidForForm)],
+            ['Valid For Grid', fmt(attr.isValidForGrid)],
+            ['Valid For Advanced Find', fmt(attr.isValidForAdvancedFind)],
+            ['Searchable', fmt(attr.isSearchable)],
+            ['Filterable', fmt(attr.isFilterable)],
+            ['Sortable', fmt(attr.isSortable)],
+            ['Retrievable', fmt(attr.isRetrievable)],
+        ]],
+        ['Security', [
+            ['Is Secured', fmt(attr.isSecured)],
+            ['Can Be Secured For Read', fmt(attr.canBeSecuredForRead)],
+            ['Can Be Secured For Create', fmt(attr.canBeSecuredForCreate)],
+            ['Can Be Secured For Update', fmt(attr.canBeSecuredForUpdate)],
+        ]],
+        ['Type Details', [
+            ['Max Length', fmt(attr.maxLength)],
+            ['Precision', fmt(attr.precision)],
+            ['Min Value', fmt(attr.minValue)],
+            ['Max Value', fmt(attr.maxValue)],
+            ['Format', fmt(attr.format)],
+            ['Date/Time Behavior', fmt(attr.dateTimeBehavior)],
+            ['Auto Number Format', fmt(attr.autoNumberFormat)],
+            ['Formula Definition', fmt(attr.formulaDefinition)],
+            ['Targets', attr.targets && attr.targets.length > 0 ? attr.targets.join(', ') : null],
+            ['Option Set Name', fmt(attr.optionSetName)],
+            ['Is Global Option Set', attr.optionSetName ? fmt(attr.isGlobalOptionSet) : null],
+            ['Option Count', attr.options && attr.options.length > 0 ? String(attr.options.length) : null],
+        ]],
+        ['System', [
+            ['Metadata Id', fmt(attr.metadataId)],
+            ['Column Number', fmt(attr.columnNumber)],
+            ['External Name', fmt(attr.externalName)],
+            ['Introduced Version', fmt(attr.introducedVersion)],
+            ['Deprecated Version', fmt(attr.deprecatedVersion)],
+            ['Created On', fmtDate(attr.createdOn)],
+            ['Modified On', fmtDate(attr.modifiedOn)],
+        ]],
     ];
 
-    // Type-specific properties (MB-32/33)
-    if (attr.maxLength !== null && attr.maxLength !== undefined) {
-        props.push(['Max Length', attr.maxLength]);
-    }
-    if (attr.precision !== null && attr.precision !== undefined) {
-        props.push(['Precision', attr.precision]);
-    }
-    if (attr.minValue !== null && attr.minValue !== undefined) {
-        props.push(['Min Value', attr.minValue]);
-    }
-    if (attr.maxValue !== null && attr.maxValue !== undefined) {
-        props.push(['Max Value', attr.maxValue]);
-    }
-    if (attr.format) {
-        props.push(['Format', attr.format]);
-    }
-    if (attr.dateTimeBehavior) {
-        props.push(['Date/Time Behavior', attr.dateTimeBehavior]);
-    }
-    if (attr.autoNumberFormat) {
-        props.push(['Auto Number Format', attr.autoNumberFormat]);
-    }
-    if (attr.sourceType !== null && attr.sourceType !== undefined) {
-        props.push(['Source Type', attr.sourceType]);
-    }
-    if (attr.description) {
-        props.push(['Description', attr.description]);
-    }
+    for (const [sectionTitle, rows] of sections) {
+        const visible = rows.filter((r): r is [string, string] => r[1] !== null);
+        if (visible.length === 0) continue;
 
-    // Lookup targets
-    if (attr.targets && attr.targets.length > 0) {
-        props.push(['Targets', attr.targets.join(', ')]);
+        const header = document.createElement('div');
+        header.className = 'prop-section-header';
+        header.textContent = sectionTitle;
+        panel.appendChild(header);
+
+        const table = document.createElement('table');
+        table.className = 'prop-panel-table';
+        for (const [label, value] of visible) {
+            const tr = document.createElement('tr');
+            const labelTd = document.createElement('td');
+            labelTd.className = 'prop-label';
+            labelTd.textContent = label;
+            tr.appendChild(labelTd);
+
+            const valueTd = document.createElement('td');
+            valueTd.className = 'prop-value';
+            valueTd.textContent = value;
+            tr.appendChild(valueTd);
+
+            table.appendChild(tr);
+        }
+        panel.appendChild(table);
     }
-
-    // Option set info
-    if (attr.optionSetName) {
-        props.push(['Option Set Name', attr.optionSetName]);
-        props.push(['Is Global Option Set', attr.isGlobalOptionSet ? 'Yes' : 'No']);
-    }
-    if (attr.options && attr.options.length > 0) {
-        props.push(['Option Count', attr.options.length]);
-    }
-
-    const table = document.createElement('table');
-    table.className = 'prop-panel-table';
-
-    for (const [label, value] of props) {
-        if (value === null || value === undefined) continue;
-        const tr = document.createElement('tr');
-        const labelTd = document.createElement('td');
-        labelTd.className = 'prop-label';
-        labelTd.textContent = label;
-        tr.appendChild(labelTd);
-
-        const valueTd = document.createElement('td');
-        valueTd.className = 'prop-value';
-        valueTd.textContent = String(value);
-        tr.appendChild(valueTd);
-
-        table.appendChild(tr);
-    }
-
-    panel.appendChild(table);
 
     // Show options table if present
     if (attr.options && attr.options.length > 0) {
@@ -1250,6 +1321,10 @@ function renderChoicesContent(container: HTMLElement): void {
     entityHeader.textContent = 'Entity Choices';
     entitySection.appendChild(entityHeader);
 
+    // Attach the section before populating its table: DataTable measures its
+    // viewport at setItems() time, and a detached container measures 0 (#1367).
+    wrapper.appendChild(entitySection);
+
     if (entityChoiceAttrs.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
@@ -1271,11 +1346,12 @@ function renderChoicesContent(container: HTMLElement): void {
             defaultSortKey: 'logicalName',
             defaultSortDirection: 'asc',
             emptyMessage: 'No entity choices',
+            // Short list inside the tab's outer scroll page, and rows inject
+            // expansion sub-tables \u2014 both rule out virtualization (#1367).
+            virtualize: false,
         });
         table.setItems(entityChoiceAttrs);
     }
-
-    wrapper.appendChild(entitySection);
 
     // -- Global Option Sets section --
     const globalSection = document.createElement('div');
@@ -1285,6 +1361,9 @@ function renderChoicesContent(container: HTMLElement): void {
     globalHeader.className = 'choices-section-header';
     globalHeader.textContent = 'Global Option Sets';
     globalSection.appendChild(globalHeader);
+
+    // Attach before populating (see entity section note, #1367).
+    wrapper.appendChild(globalSection);
 
     if (globalOptionSets.length === 0) {
         const empty = document.createElement('div');
@@ -1324,11 +1403,10 @@ function renderChoicesContent(container: HTMLElement): void {
             defaultSortKey: 'name',
             defaultSortDirection: 'asc',
             emptyMessage: 'No global option sets',
+            virtualize: false,
         });
         globalTable.setItems(globalRows);
     }
-
-    wrapper.appendChild(globalSection);
 }
 
 /** Toggle visibility of option values sub-table for a choice row. */
@@ -1352,7 +1430,10 @@ function toggleOptionValues(
     tr.id = 'option-values-' + key;
     tr.className = 'option-values-row expanded';
     const td = document.createElement('td');
-    td.colSpan = 99;
+    // Span exactly the real column count. Under table-layout:fixed an oversized
+    // colspan (the old 99) inflates the layout to that many columns, collapsing
+    // the real ones to slivers (#1367).
+    td.colSpan = Math.max(1, container.querySelectorAll('thead th').length);
 
     if (options.length === 0) {
         td.textContent = 'No option values';
@@ -1589,7 +1670,7 @@ window.addEventListener('message', (event: MessageEvent<MetadataBrowserPanelHost
         case 'entityDetailLoaded':
             currentEntity = msg.entity;
             currentGlobalChoice = null;
-            activeTab = 'attributes';
+            activeTab = 'config';
             updateBreadcrumb();
             renderTabBar();
             renderTabContent();

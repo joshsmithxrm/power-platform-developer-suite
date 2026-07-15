@@ -189,10 +189,13 @@
     padding: 6px 8px;
     border-bottom: 1px solid var(--vscode-panel-border);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .tab-search-input {
-    width: 100%;
+    flex: 1;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
@@ -285,6 +288,17 @@
 .data-table-row.selected {
     background: var(--vscode-list-activeSelectionBackground);
     color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* ── Auxiliary attributes (#1368: mark, don't mask) ────────────────────── */
+
+.data-table-row.attr-aux {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.attr-aux-label {
+    opacity: 0.85;
 }
 
 /* Entity links in relationship tables */
