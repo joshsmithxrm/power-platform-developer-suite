@@ -47,12 +47,13 @@ describe('DataTable virtual-scroll host contract', () => {
             resolve(__dirname, '../../../panels/styles/shared.css'),
             'utf-8',
         );
-        const rule = css.match(/\.data-table-host\s*\{([^}]*)\}/);
+        // Tolerate grouped selectors and extra whitespace (e.g. `.data-table-host, .x {`).
+        const rule = css.match(/(?:^|[\s,])\.data-table-host\b[^{]*\{([^}]*)\}/);
         expect(rule, '.data-table-host rule missing from shared.css').not.toBeNull();
         const body = rule![1];
         // Without a flex column + min-height:0, the inner .data-table-scroll cannot be bounded.
-        expect(body).toMatch(/display\s*:\s*flex/);
-        expect(body).toMatch(/flex-direction\s*:\s*column/);
-        expect(body).toMatch(/min-height\s*:\s*0/);
+        expect(body).toMatch(/display\s*:\s*flex\b/);
+        expect(body).toMatch(/flex-direction\s*:\s*column\b/);
+        expect(body).toMatch(/min-height\s*:\s*0\b/);
     });
 });
