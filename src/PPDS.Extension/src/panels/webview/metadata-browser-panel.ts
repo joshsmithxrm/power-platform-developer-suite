@@ -48,9 +48,11 @@ let currentGlobalChoice: MetadataOptionSetDto | null = null;
 let activeTab = 'config';
 let hideSystem = false;
 let intersectHiddenCount = 0;
-// #1368 "mark, don't mask": auxiliary attributes (attributeOf != null) are SHOWN by
-// default and visually marked; this user-initiated toggle hides them for cleanliness.
-let hideAuxiliaryAttributes = false;
+// #1368: auxiliary attributes (attributeOf != null) are hidden by default because
+// they are dense API plumbing, but this is a *disclosed* reduction, not a silent one:
+// the toggle shows the hidden count and restores them in one click (same contract as
+// the "Include Intersect" entity filter). When shown they are visually marked.
+let hideAuxiliaryAttributes = true;
 
 // Per-tab search state
 const tabSearchTerms: Record<string, string> = {};
@@ -555,20 +557,25 @@ function renderAttributesTab(): void {
         renderAttributeTable(tabContent, currentEntity!.attributes);
     });
 
-    // #1368 "mark, don't mask": auxiliaries show by default; this hides them on request.
-    const auxToggle = document.createElement('label');
-    auxToggle.className = 'toolbar-checkbox';
-    const auxCheckbox = document.createElement('input');
-    auxCheckbox.type = 'checkbox';
-    auxCheckbox.checked = hideAuxiliaryAttributes;
-    auxCheckbox.addEventListener('change', () => {
-        hideAuxiliaryAttributes = auxCheckbox.checked;
-        renderAttributeTable(tabContent, currentEntity!.attributes);
-    });
-    auxToggle.appendChild(auxCheckbox);
-    auxToggle.appendChild(document.createTextNode(' Hide auxiliary'));
-    auxToggle.title = 'Hide auxiliary attributes (lookup name/yomi companions marked with AttributeOf)';
-    searchBar.appendChild(auxToggle);
+    // #1368: hidden by default, but disclosed — the label carries the hidden count so
+    // the reduction is visible, and one click restores them (the intersect-filter contract).
+    const auxCount = currentEntity.attributes.filter(isAuxiliaryAttribute).length;
+    if (auxCount > 0) {
+        const auxToggle = document.createElement('label');
+        auxToggle.className = 'toolbar-checkbox';
+        const auxCheckbox = document.createElement('input');
+        auxCheckbox.type = 'checkbox';
+        auxCheckbox.checked = hideAuxiliaryAttributes;
+        auxCheckbox.addEventListener('change', () => {
+            hideAuxiliaryAttributes = auxCheckbox.checked;
+            renderAttributeTable(tabContent, currentEntity!.attributes);
+        });
+        auxToggle.appendChild(auxCheckbox);
+        auxToggle.appendChild(document.createTextNode(` Hide auxiliary (${auxCount})`));
+        auxToggle.title = 'Auxiliary attributes are lookup name/yomi companions (marked with AttributeOf). '
+            + 'Hidden by default; uncheck to show them (marked in the list).';
+        searchBar.appendChild(auxToggle);
+    }
 
     tabContent.appendChild(searchBar);
 
