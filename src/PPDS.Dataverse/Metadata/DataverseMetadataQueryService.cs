@@ -582,7 +582,16 @@ public class DataverseMetadataQueryService : IMetadataQueryService
             IsRetrievable = attr.IsRetrievable ?? false,
             AttributeOf = attr.AttributeOf,
             IsLogical = attr.IsLogical ?? false,
-            IntroducedVersion = attr.IntroducedVersion
+            IntroducedVersion = attr.IntroducedVersion,
+            DeprecatedVersion = attr.DeprecatedVersion,
+            IsAuditEnabled = attr.IsAuditEnabled?.Value ?? false,
+            IsCustomizable = attr.IsCustomizable?.Value ?? false,
+            IsRenameable = attr.IsRenameable?.Value ?? false,
+            IsValidForAdvancedFind = attr.IsValidForAdvancedFind?.Value ?? false,
+            ExternalName = attr.ExternalName,
+            ColumnNumber = attr.ColumnNumber,
+            CreatedOn = attr.CreatedOn,
+            ModifiedOn = attr.ModifiedOn
         };
     }
 

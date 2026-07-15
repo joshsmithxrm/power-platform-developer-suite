@@ -27,12 +27,20 @@ public static class AttributesCommand
             Description = "Filter by attribute type (e.g., 'Lookup', 'String', 'DateTime', 'Picklist')"
         };
 
+        // #1368 "mark, don't mask": auxiliaries are shown (and flagged) by default;
+        // exclusion is an explicit opt-in so scripts and humans both see the full schema.
+        var excludeAuxiliaryOption = new Option<bool>("--exclude-auxiliary")
+        {
+            Description = "Exclude auxiliary attributes (lookup name/yomi companions marked with AttributeOf)"
+        };
+
         var command = new Command("attributes", "List attributes for an entity")
         {
             entityArgument,
             MetadataCommandGroup.ProfileOption,
             MetadataCommandGroup.EnvironmentOption,
-            typeOption
+            typeOption,
+            excludeAuxiliaryOption
         };
 
         GlobalOptions.AddToCommand(command);
@@ -43,9 +51,10 @@ public static class AttributesCommand
             var profile = parseResult.GetValue(MetadataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var type = parseResult.GetValue(typeOption);
+            var excludeAuxiliary = parseResult.GetValue(excludeAuxiliaryOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity!, profile, environment, type, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity!, profile, environment, type, excludeAuxiliary, globalOptions, cancellationToken);
         });
 
         return command;
@@ -56,6 +65,7 @@ public static class AttributesCommand
         string? profile,
         string? environment,
         string? type,
+        bool excludeAuxiliary,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -83,6 +93,11 @@ public static class AttributesCommand
 
             var attributes = await metadataService.GetAttributesAsync(entity, type, cancellationToken);
 
+            if (excludeAuxiliary)
+            {
+                attributes = attributes.Where(a => a.AttributeOf == null).ToList();
+            }
+
             if (globalOptions.IsJsonMode)
             {
                 writer.WriteSuccess(attributes);
@@ -102,6 +117,8 @@ public static class AttributesCommand
                     if (!attr.IsValidForCreate && !attr.IsValidForUpdate) flags.Add("readonly");
                     if (attr.RequiredLevel == "ApplicationRequired" || attr.RequiredLevel == "SystemRequired")
                         flags.Add("required");
+                    // #1368 "mark, don't mask": auxiliary companions are flagged, not hidden
+                    if (attr.AttributeOf != null) flags.Add($"aux:{attr.AttributeOf}");
 
                     var flagText = flags.Count > 0 ? string.Join(", ", flags) : "";
                     Console.WriteLine($"  {attr.LogicalName,-35} {attr.AttributeType,-20} {attr.DisplayName,-30} {flagText}");

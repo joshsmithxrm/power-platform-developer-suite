@@ -379,6 +379,36 @@ export interface MetadataAttributeDto {
     isSecured: boolean;
     description: string | null;
     autoNumberFormat: string | null;
+    // Full-fidelity fields (#1369) — optional: absent when talking to a bundled
+    // CLI older than the RPC widening; treat missing as "unknown", not false.
+    metadataId?: string;
+    isManaged?: boolean;
+    /** Logical name of the attribute this auxiliary attribute extends (#1368). Null/absent = a real attribute. */
+    attributeOf?: string | null;
+    isLogical?: boolean;
+    isValidForCreate?: boolean;
+    isValidForUpdate?: boolean;
+    isValidForRead?: boolean;
+    isValidForForm?: boolean;
+    isValidForGrid?: boolean;
+    isValidForAdvancedFind?: boolean;
+    isSearchable?: boolean;
+    isFilterable?: boolean;
+    isSortable?: boolean;
+    isRetrievable?: boolean;
+    canBeSecuredForRead?: boolean;
+    canBeSecuredForCreate?: boolean;
+    canBeSecuredForUpdate?: boolean;
+    isAuditEnabled?: boolean;
+    isCustomizable?: boolean;
+    isRenameable?: boolean;
+    formulaDefinition?: string | null;
+    introducedVersion?: string | null;
+    deprecatedVersion?: string | null;
+    externalName?: string | null;
+    columnNumber?: number | null;
+    createdOn?: string | null;
+    modifiedOn?: string | null;
 }
 
 export interface MetadataRelationshipDto {

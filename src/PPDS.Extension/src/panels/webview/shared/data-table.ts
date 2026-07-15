@@ -31,6 +31,15 @@ interface DataTableOptions<T> {
     rowHeight?: number;
     /** Number of buffer rows above and below the visible area (default: 20) */
     bufferRows?: number;
+    /**
+     * Virtualize rows (default: true). Set false to render every row eagerly —
+     * required for short tables that live inside an outer scrolling page (no bounded
+     * viewport of their own) and for tables that inject expansion rows, which
+     * virtualization would orphan on re-window.
+     */
+    virtualize?: boolean;
+    /** Optional extra CSS class for a row (e.g. to visually mark auxiliary items). */
+    rowClassName?: (item: T) => string | null;
 }
 
 /** Strip HTML tags to extract plain text (for tooltips and legacy sort). */
@@ -50,11 +59,14 @@ export class DataTable<T> {
     // Virtual scroll state
     private readonly rowHeight: number;
     private readonly bufferRows: number;
+    private readonly virtualize: boolean;
     private scrollContainer: HTMLElement | null = null;
     private spacer: HTMLElement | null = null;
     private tbody: HTMLElement | null = null;
-    private visibleStart = 0;
-    private visibleEnd = 0;
+    // -1 sentinel: "nothing rendered yet" — must not collide with a real 0..0 range,
+    // or single-row tables skip their initial render.
+    private visibleStart = -1;
+    private visibleEnd = -1;
     private scrollRafId = 0;
 
     constructor(opts: DataTableOptions<T>) {
@@ -73,6 +85,7 @@ export class DataTable<T> {
         this.sortDirection = opts.defaultSortDirection === 'asc' ? 'asc' : opts.defaultSortDirection === 'desc' ? 'desc' : 'none';
         this.rowHeight = opts.rowHeight ?? 28;
         this.bufferRows = opts.bufferRows ?? 20;
+        this.virtualize = opts.virtualize ?? true;
 
         // Keyboard: Enter on row (delegated, registered once)
         opts.container.addEventListener('keydown', (e) => {
@@ -179,18 +192,21 @@ export class DataTable<T> {
         this.tbody = tbody;
 
         // Initial render of visible rows
-        this.visibleStart = 0;
-        this.visibleEnd = 0;
+        this.visibleStart = -1;
+        this.visibleEnd = -1;
         this.updateVisibleRows();
 
-        // Scroll handler with requestAnimationFrame throttling
-        wrapper.addEventListener('scroll', () => {
-            if (this.scrollRafId) return;
-            this.scrollRafId = requestAnimationFrame(() => {
-                this.scrollRafId = 0;
-                this.updateVisibleRows();
+        // Scroll handler with requestAnimationFrame throttling.
+        // Non-virtualized tables render everything up front — no re-window needed.
+        if (this.virtualize) {
+            wrapper.addEventListener('scroll', () => {
+                if (this.scrollRafId) return;
+                this.scrollRafId = requestAnimationFrame(() => {
+                    this.scrollRafId = 0;
+                    this.updateVisibleRows();
+                });
             });
-        });
+        }
 
         // Sort click handlers (delegated on the table)
         table.addEventListener('click', (e) => {
@@ -247,22 +263,31 @@ export class DataTable<T> {
 
         const { columns } = this.opts;
         const totalRows = this.sortedItems.length;
-        const scrollTop = this.scrollContainer.scrollTop;
-        const clientHeight = this.scrollContainer.clientHeight;
 
-        // Account for thead height
-        const thead = this.scrollContainer.querySelector('thead');
-        const theadHeight = thead ? thead.offsetHeight : 0;
-        const adjustedScrollTop = Math.max(0, scrollTop - theadHeight);
+        let start: number;
+        let end: number;
+        if (this.virtualize) {
+            const scrollTop = this.scrollContainer.scrollTop;
+            const clientHeight = this.scrollContainer.clientHeight;
 
-        const firstVisible = Math.floor(adjustedScrollTop / this.rowHeight);
-        const lastVisible = Math.min(
-            totalRows - 1,
-            Math.ceil((adjustedScrollTop + clientHeight) / this.rowHeight)
-        );
+            // Account for thead height
+            const thead = this.scrollContainer.querySelector('thead');
+            const theadHeight = thead ? thead.offsetHeight : 0;
+            const adjustedScrollTop = Math.max(0, scrollTop - theadHeight);
 
-        const start = Math.max(0, firstVisible - this.bufferRows);
-        const end = Math.min(totalRows - 1, lastVisible + this.bufferRows);
+            const firstVisible = Math.floor(adjustedScrollTop / this.rowHeight);
+            const lastVisible = Math.min(
+                totalRows - 1,
+                Math.ceil((adjustedScrollTop + clientHeight) / this.rowHeight)
+            );
+
+            start = Math.max(0, firstVisible - this.bufferRows);
+            end = Math.min(totalRows - 1, lastVisible + this.bufferRows);
+        } else {
+            // Eager mode: every row, always.
+            start = 0;
+            end = totalRows - 1;
+        }
 
         // Skip if the range hasn't changed
         if (start === this.visibleStart && end === this.visibleEnd) return;
@@ -294,6 +319,8 @@ export class DataTable<T> {
             const id = this.opts.getRowId(item);
             const tr = document.createElement('tr');
             tr.className = 'data-table-row';
+            const extraClass = this.opts.rowClassName?.(item);
+            if (extraClass) tr.className += ' ' + extraClass;
             if (id === this.selectedId) tr.className += ' selected';
             tr.dataset['id'] = id;
             tr.tabIndex = 0;

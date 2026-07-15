@@ -1104,9 +1104,15 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
         foreach (var attr in _selectedEntity!.Attributes.OrderBy(a => a.LogicalName))
         {
+            // #1368 "mark, don't mask": auxiliary companions have no display name of
+            // their own \u2014 show what they extend instead of a blank cell.
+            var displayName = attr.AttributeOf != null && string.IsNullOrEmpty(attr.DisplayName)
+                ? $"aux of {attr.AttributeOf}"
+                : attr.DisplayName;
+
             dt.Rows.Add(
                 attr.LogicalName,
-                attr.DisplayName,
+                displayName,
                 attr.AttributeType,
                 attr.RequiredLevel ?? "\u2014",
                 attr.IsCustomAttribute ? "\u2713" : "\u2014",
