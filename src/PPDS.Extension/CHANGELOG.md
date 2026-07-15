@@ -169,7 +169,7 @@ Complete ground-up rebuild of the extension. The new architecture uses a thin VS
 
 _Last stable release of the legacy architecture. See [archived repository](https://github.com/joshsmithxrm/power-platform-developer-suite/tree/archived) for full history._
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.6.0...HEAD
 [1.6.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...Extension-v1.6.0
 [1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.0...Extension-v1.4.1
 [1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.2.0...Extension-v1.4.0

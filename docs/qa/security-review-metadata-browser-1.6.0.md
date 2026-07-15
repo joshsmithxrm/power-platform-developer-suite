@@ -3,11 +3,12 @@
 - **Date:** 2026-07-15
 - **Reviewer:** Claude Opus 4.8 (security-review skill) + adversarial verification sub-agent
 - **Release train:** Extension 1.6.0 (stable), Cli 1.4.0, Dataverse 1.3.0, Mcp 1.2.0
-- **Scope (delta since last stable):** `git diff Extension-v1.4.1..origin/main` over
+- **Scope (immutable reviewed delta):** `git diff 85e1328ff..3534a06f3` over
   `src/PPDS.Cli`, `src/PPDS.Dataverse`, `src/PPDS.Mcp`, `src/PPDS.Extension`
-  (14 files, +718/-113). Covers PRs #1366 (scroll fix) lineage and #1373
-  (metadata browser round 2: Choices tab, wire fidelity, mark-don't-mask
-  auxiliaries, tab order).
+  (14 files, +718/-113), where `85e1328ff` = tag `Extension-v1.4.1` (last stable)
+  and `3534a06f3` = the round-2 merge on `main` (#1373) that this review signs off.
+  Covers PR #1366 (scroll fix) lineage and #1373 (metadata browser round 2:
+  Choices tab, wire fidelity, mark-don't-mask auxiliaries, tab order).
 
 ## Result: PASS — no HIGH or MEDIUM findings
 
