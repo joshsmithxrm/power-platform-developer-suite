@@ -249,6 +249,18 @@ input, textarea, pre, code, .selectable, [contenteditable], .data-table td {
     color: var(--vscode-list-activeSelectionForeground);
 }
 
+/* DataTable host — the element a DataTable is mounted into.
+   Applied automatically by DataTable (see data-table.ts). Must be a bounded
+   flex column so the inner `.data-table-scroll` (flex:1; min-height:0) resolves
+   to a real height and becomes the scroll viewport. Without this, the scroll
+   wrapper grows to full content height, never fires its scroll handler, and
+   virtual scrolling only ever renders the initial row buffer (empty void below). */
+.data-table-host {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
 /* Virtual scroll container */
 .data-table-scroll {
     overflow: auto;

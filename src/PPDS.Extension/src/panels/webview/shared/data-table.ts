@@ -59,6 +59,15 @@ export class DataTable<T> {
 
     constructor(opts: DataTableOptions<T>) {
         this.opts = opts;
+
+        // Virtual scrolling requires the inner `.data-table-scroll` (flex:1; min-height:0)
+        // to be height-bounded by a flex-column host. Tag the container so it becomes the
+        // scroll viewport regardless of how the panel lays it out. Without this, when the
+        // container is not itself a flex column, `.data-table-scroll` expands to full content
+        // height, never scrolls, and only the initial row buffer renders — leaving the rest of
+        // the list as an empty void. See shared.css `.data-table-host`.
+        opts.container.classList.add('data-table-host');
+
         this.sortKey = opts.defaultSortKey ?? opts.columns[0]?.key ?? '';
         // Map legacy 'desc'/'asc' default to our three-state (for backward compat, default 'desc' means active desc)
         this.sortDirection = opts.defaultSortDirection === 'asc' ? 'asc' : opts.defaultSortDirection === 'desc' ? 'desc' : 'none';
