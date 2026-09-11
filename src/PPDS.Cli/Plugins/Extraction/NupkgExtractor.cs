@@ -33,12 +33,13 @@ public static class NupkgExtractor
             var packageMetadata = PluginPackageMetadataReader.Read(File.ReadAllBytes(nupkgPath));
             Directory.CreateDirectory(tempDir);
 
-            // Extract the nupkg (it's a zip file). Use the 3-arg overload with
-            // overwriteFiles: false — .NET 8 applies a zip-slip mitigation by default, but we
-            // also re-assert every entry's canonical path stays under tempDir to guard against
-            // any future regression or custom .nupkg entries with traversal segments.
-            ZipFile.ExtractToDirectory(nupkgPath, tempDir, overwriteFiles: false);
+            // Validate every destination before extraction so containment does not depend on
+            // the runtime's ZipFile implementation rejecting traversal entries first.
             AssertExtractedEntriesContained(nupkgPath, tempDir);
+
+            // Extract the nupkg (it's a zip file). Use the 3-arg overload with
+            // overwriteFiles: false as a second layer of zip-slip protection.
+            ZipFile.ExtractToDirectory(nupkgPath, tempDir, overwriteFiles: false);
 
             // Find plugin DLLs in the lib folder
             // Plugin packages target a supported .NET Framework version.

@@ -60,10 +60,9 @@ public class NupkgExtractorTests : IDisposable
     public void Extract_NupkgWithZipSlipEntry_ThrowsPpdsException()
     {
         // Handcraft a zip archive that contains an entry whose full name traverses up out of the
-        // extraction directory (classic zip-slip payload). .NET 8 blocks this by default inside
-        // ExtractToDirectory, so the SUT's AssertExtractedEntriesContained walk is the second
-        // line of defense. This test constructs the archive and confirms that either the platform
-        // or the SUT refuses the package — both outcomes keep us safe.
+        // extraction directory (classic zip-slip payload). The SUT validates every canonical
+        // destination before calling ExtractToDirectory so containment does not depend on the
+        // runtime's built-in protection.
         var nupkgPath = Path.Combine(_scratch, "evil.nupkg");
         using (var stream = File.Create(nupkgPath))
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
@@ -87,16 +86,15 @@ public class NupkgExtractorTests : IDisposable
                 hostileStream.Write(payload, 0, payload.Length);
             }
 
-            var frameworkMarker = archive.CreateEntry("lib/net462/_._");
-            frameworkMarker.Open().Dispose();
+            var pluginAssembly = archive.CreateEntry("lib/net462/Evil.dll");
+            using var pluginStream = pluginAssembly.Open();
+            pluginStream.WriteByte(0);
         }
 
-        // Either the platform raises IOException / InvalidDataException, or the SUT raises
-        // PpdsException from AssertExtractedEntriesContained. Both are acceptable containment.
-        var caught = Assert.ThrowsAny<Exception>(() => NupkgExtractor.Extract(nupkgPath));
-        Assert.True(
-            caught is PpdsException or IOException or InvalidDataException or UnauthorizedAccessException,
-            $"Expected containment-related exception, got {caught.GetType().FullName}: {caught.Message}");
+        var ex = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, ex.ErrorCode);
+        Assert.Contains("escapes the extraction directory", ex.Message);
+        Assert.Contains("../../escaped.txt", ex.Message);
     }
 
     [Fact]
