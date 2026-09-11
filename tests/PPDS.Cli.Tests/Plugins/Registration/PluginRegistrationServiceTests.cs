@@ -1,4 +1,4 @@
-﻿using System.ServiceModel;
+using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -2033,6 +2033,58 @@ public class PluginRegistrationServiceTests
         Assert.Equal("Package", result.EntityType);
         Assert.Equal(1, result.PackagesDeleted);
         _mockPooledClient.Verify(s => s.DeleteAsync(PluginPackage.EntityLogicalName, packageId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UnregisterPackageAsync_Force_DeletesPackageWithoutDirectlyDeletingOwnedAssembly()
+    {
+        // Arrange
+        var packageId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        var package = new PluginPackage
+        {
+            Id = packageId,
+            Name = "TestPackage",
+            UniqueName = "TestPackage",
+            Version = "1.0.0.0"
+        };
+        package[PluginPackage.Fields.IsManaged] = false;
+
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "TestPackageAssembly",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        assembly[PluginAssembly.Fields.IsManaged] = false;
+
+        var packageEntities = new EntityCollection([package]);
+        var assemblyEntities = new EntityCollection([assembly]);
+        var queryResults = new Queue<EntityCollection>(
+        [
+            packageEntities,  // GetPackageByIdAsync
+            assemblyEntities, // ListAssembliesForPackageAsync
+            assemblyEntities, // GetAssemblyByIdAsync
+            new EntityCollection() // ListTypesForAssemblyAsync
+        ]);
+
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => queryResults.Dequeue());
+
+        // Act
+        var result = await _sut.UnregisterPackageAsync(packageId, force: true);
+
+        // Assert
+        Assert.Equal(1, result.PackagesDeleted);
+        Assert.Equal(1, result.AssembliesDeleted);
+        _mockPooledClient.Verify(
+            s => s.DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockPooledClient.Verify(
+            s => s.DeleteAsync(PluginPackage.EntityLogicalName, packageId, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

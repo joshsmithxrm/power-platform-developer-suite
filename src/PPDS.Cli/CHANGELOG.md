@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`ppds plugins unregister package --force` now removes NuGet plugin packages cleanly** — PPDS deletes descendant registrations, then deletes the owning `pluginpackage` so Dataverse can cascade its package-owned assemblies instead of attempting a forbidden direct `pluginassembly` delete and leaving a partially unregistered package behind.
+
 ## [1.4.0] - 2026-07-15
 
 ### Added
