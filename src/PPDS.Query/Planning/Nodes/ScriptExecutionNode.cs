@@ -222,6 +222,17 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                 $"SELECT INTO {tempTableName} without FROM");
         }
 
+        var sourceTempTableName = GetTempTableNameFromSelect(selectStatement);
+        if (sourceTempTableName != null)
+        {
+            return DescribeControlFlow(
+                "SelectIntoTempTable",
+                $"SELECT INTO {tempTableName}",
+                [DescribeDeferredStatement(
+                    "TempTableSelect",
+                    $"SELECT from {sourceTempTableName}")]);
+        }
+
         // Plan only the source query. Removing INTO mirrors execution, which creates
         // and populates the session temp table itself after the source is evaluated.
         var into = selectStatement.Into;

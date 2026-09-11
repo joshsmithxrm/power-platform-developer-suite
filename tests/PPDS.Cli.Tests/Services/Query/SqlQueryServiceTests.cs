@@ -1756,18 +1756,18 @@ public class SqlQueryServiceTests
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
-        var remoteExecutor = Mock.Of<IQueryExecutor>();
+        var remoteExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
             bulkOperationExecutor: mockBulkExecutor.Object)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
-            RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor : null
+            RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor.Object : null
         };
         var request = new SqlQueryRequest
         {
-            Sql = "SELECT name INTO #accounts FROM [DEV].account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'",
+            Sql = "SELECT name INTO #accounts FROM [DEV].account; SELECT name INTO #filtered FROM #accounts; SELECT * FROM #filtered; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'",
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
@@ -1793,15 +1793,18 @@ public class SqlQueryServiceTests
         }
 
         Assert.NotNull(plan);
-        Assert.True(ContainsNodeType(plan, "SelectIntoTempTable"));
+        Assert.Equal(2, CountNodeType(plan, "SelectIntoTempTable"));
         Assert.True(ContainsNodeType(plan, "RemoteScanNode"));
-        Assert.True(ContainsNodeType(plan, "TempTableSelect"));
+        Assert.Equal(2, CountNodeType(plan, "TempTableSelect"));
         Assert.True(ContainsNodeType(plan, "DmlExecuteNode"));
         Assert.Equal(1, CountOccurrences(fetchXml!, "-- Next statement --"));
         Assert.Contains("<!-- client-side join -->", fetchXml, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("<fetch", fetchXml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("#accounts", fetchXml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("#filtered", fetchXml, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(["Local", "DEV"], dataSources!.Select(source => source.Label));
         mockExecutor.VerifyNoOtherCalls();
+        remoteExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
