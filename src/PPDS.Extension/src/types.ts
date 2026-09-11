@@ -111,7 +111,7 @@ export interface QueryResultResponse {
     isAggregate: boolean;
     executedFetchXml: string | null;
     executionTimeMs: number;
-    queryMode: 'tds' | 'dataverse' | null;
+    queryMode?: 'tds' | 'dataverse' | null;
     dataSources?: { label: string; isRemote: boolean }[];
     appliedHints?: string[];
     warnings?: string[];

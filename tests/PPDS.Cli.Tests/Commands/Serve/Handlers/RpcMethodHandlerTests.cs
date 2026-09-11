@@ -409,6 +409,26 @@ public class RpcMethodHandlerTests
         Assert.DoesNotContain("\"queryMode\"", json);
     }
 
+    [Theory]
+    [InlineData(QueryExecutionMode.Dataverse, "dataverse")]
+    [InlineData(QueryExecutionMode.Tds, "tds")]
+    public void MapToResponse_ExecutedQuery_MapsExecutionMode(
+        QueryExecutionMode executionMode,
+        string expectedQueryMode)
+    {
+        var result = new SqlQueryResult
+        {
+            OriginalSql = "SELECT name FROM account",
+            TranspiledFetchXml = "<fetch />",
+            Result = QueryResult.Empty("account"),
+            ExecutionMode = executionMode
+        };
+
+        var response = RpcMethodHandler.MapToResponse(result);
+
+        Assert.Equal(expectedQueryMode, response.QueryMode);
+    }
+
     [Fact]
     public void MapToResponse_DmlDryRun_IncludesPreviewMetadata()
     {
@@ -442,11 +462,13 @@ public class RpcMethodHandlerTests
         var json = JsonSerializer.Serialize(response);
 
         Assert.True(response.DryRun);
+        Assert.Null(response.QueryMode);
         Assert.Equal("DmlExecuteNode", response.Plan?.NodeType);
         Assert.Equal("DataverseScanNode", response.Plan?.Children[0].NodeType);
         Assert.Equal(42, response.RowCap);
         Assert.True(response.RequiresConfirmationForExecution == true);
         Assert.Contains("\"dryRun\":true", json);
+        Assert.DoesNotContain("\"queryMode\"", json);
         Assert.Contains("\"plan\":", json);
         Assert.Contains("\"nodeType\":\"DmlExecuteNode\"", json);
         Assert.DoesNotContain("\"NodeType\"", json);

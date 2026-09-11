@@ -325,11 +325,6 @@ public partial class RpcMethodHandler
             {
                 var result = await service.ExecuteAsync(sqlRequest, ct);
                 var mapped = MapToResponse(result);
-                mapped.QueryMode = result.ExecutionMode switch
-                {
-                    QueryExecutionMode.Tds => "tds",
-                    _ => "dataverse"
-                };
 
                 if (result.DataSources is { Count: > 1 })
                 {

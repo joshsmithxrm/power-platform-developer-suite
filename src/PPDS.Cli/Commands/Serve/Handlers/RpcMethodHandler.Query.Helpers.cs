@@ -205,6 +205,12 @@ public partial class RpcMethodHandler
     {
         var response = MapToResponse(result.Result, result.TranspiledFetchXml);
         var safety = result.DmlSafetyResult;
+        response.QueryMode = result.ExecutionMode switch
+        {
+            QueryExecutionMode.Dataverse => "dataverse",
+            QueryExecutionMode.Tds => "tds",
+            _ => null
+        };
 
         if (safety?.IsDryRun == true)
         {
