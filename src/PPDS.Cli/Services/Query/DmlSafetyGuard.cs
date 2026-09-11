@@ -186,7 +186,7 @@ public sealed class DmlSafetyGuard
                 BlockReason = result.BlockReason,
                 ErrorCode = result.ErrorCode,
                 EstimatedAffectedRows = result.EstimatedAffectedRows,
-                RequiresConfirmation = false,
+                RequiresConfirmation = result.RequiresConfirmation,
                 ConfirmationMessage = result.ConfirmationMessage,
                 RowCap = result.RowCap,
                 ExceedsRowCap = result.ExceedsRowCap,
@@ -318,7 +318,9 @@ public sealed class DmlSafetyGuard
         {
             IsBlocked = false,
             ContainsDml = true,
-            RequiresConfirmation = !options.IsConfirmed,
+            // Dry-run is a preview, so its response always describes the confirmation
+            // gate that will apply when the caller later requests actual execution.
+            RequiresConfirmation = options.IsDryRun || !options.IsConfirmed,
             RowCap = rowCap,
             ExceedsRowCap = false, // Set during execution when actual count is known
             IsDryRun = options.IsDryRun

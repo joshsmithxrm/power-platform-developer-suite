@@ -91,6 +91,19 @@ public class DmlSafetyGuardTests
     }
 
     [Fact]
+    public void Check_DeleteWithConfirmAndDryRun_RetainsExecutionConfirmationGate()
+    {
+        var result = _guard.Check(
+            Parse("DELETE FROM account WHERE statecode = 1"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true },
+            protectionLevel: ProtectionLevel.Development);
+
+        Assert.True(result.IsDryRun);
+        Assert.True(result.RequiresConfirmation,
+            "A preview should report the confirmation required for subsequent execution");
+    }
+
+    [Fact]
     public void Check_DeleteWithoutWhere_IsBlockedEvenWithConfirm()
     {
         var result = _guard.Check(
@@ -497,7 +510,7 @@ public class DmlSafetyGuardTests
 
         Assert.True(result.ContainsDml);
         Assert.True(result.IsDryRun);
-        Assert.False(result.RequiresConfirmation);
+        Assert.True(result.RequiresConfirmation);
         Assert.Equal(25, result.RowCap);
     }
 

@@ -466,6 +466,7 @@ public class SqlQueryServiceTests
 
         Assert.True(result.DmlSafetyResult?.ContainsDml);
         Assert.True(result.DmlSafetyResult?.IsDryRun);
+        Assert.True(result.DmlSafetyResult?.RequiresConfirmation);
         Assert.NotNull(result.DryRunPlan);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
@@ -501,6 +502,7 @@ public class SqlQueryServiceTests
         var result = Assert.Single(chunks);
         Assert.True(result.DmlSafetyResult?.ContainsDml);
         Assert.True(result.DmlSafetyResult?.IsDryRun);
+        Assert.True(result.DmlSafetyResult?.RequiresConfirmation);
         Assert.NotNull(result.DryRunPlan);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
@@ -531,6 +533,7 @@ public class SqlQueryServiceTests
 
         Assert.True(result.DmlSafetyResult?.ContainsDml);
         Assert.True(result.DmlSafetyResult?.IsDryRun);
+        Assert.True(result.DmlSafetyResult?.RequiresConfirmation);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
