@@ -115,6 +115,19 @@ export interface QueryResultResponse {
     dataSources?: { label: string; isRemote: boolean }[];
     appliedHints?: string[];
     warnings?: string[];
+    dryRun?: boolean;
+    plan?: QueryPlanDescription;
+    rowCap?: number;
+    requiresConfirmationForExecution?: boolean;
+}
+
+export interface QueryPlanDescription {
+    nodeType: string;
+    description: string;
+    estimatedRows: number;
+    children: QueryPlanDescription[];
+    poolCapacity?: number | null;
+    effectiveParallelism?: number | null;
 }
 
 export interface QueryColumnInfo {

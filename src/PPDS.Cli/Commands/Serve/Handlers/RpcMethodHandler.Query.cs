@@ -25,6 +25,7 @@ using Authoring = PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Security;
 using PPDS.Cli.Services.ConnectionReferences;
 using PPDS.Cli.Services.DeploymentSettings;
@@ -323,7 +324,7 @@ public partial class RpcMethodHandler
             try
             {
                 var result = await service.ExecuteAsync(sqlRequest, ct);
-                var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
+                var mapped = MapToResponse(result);
                 mapped.QueryMode = result.ExecutionMode switch
                 {
                     QueryExecutionMode.Tds => "tds",
@@ -702,6 +703,58 @@ public class QueryResultResponse
     [JsonPropertyName("appliedHints")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? AppliedHints { get; set; }
+
+    [JsonPropertyName("dryRun")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DryRun { get; set; }
+
+    [JsonPropertyName("plan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryPlanDescriptionDto? Plan { get; set; }
+
+    [JsonPropertyName("rowCap")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RowCap { get; set; }
+
+    [JsonPropertyName("requiresConfirmationForExecution")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequiresConfirmationForExecution { get; set; }
+}
+
+/// <summary>
+/// Serializable execution-plan node returned by DML dry-run RPC responses.
+/// </summary>
+public sealed class QueryPlanDescriptionDto
+{
+    [JsonPropertyName("nodeType")]
+    public string NodeType { get; set; } = "";
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = "";
+
+    [JsonPropertyName("estimatedRows")]
+    public long EstimatedRows { get; set; }
+
+    [JsonPropertyName("children")]
+    public List<QueryPlanDescriptionDto> Children { get; set; } = [];
+
+    [JsonPropertyName("poolCapacity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? PoolCapacity { get; set; }
+
+    [JsonPropertyName("effectiveParallelism")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? EffectiveParallelism { get; set; }
+
+    internal static QueryPlanDescriptionDto FromDescription(QueryPlanDescription description) => new()
+    {
+        NodeType = description.NodeType,
+        Description = description.Description,
+        EstimatedRows = description.EstimatedRows,
+        Children = description.Children.Select(FromDescription).ToList(),
+        PoolCapacity = description.PoolCapacity,
+        EffectiveParallelism = description.EffectiveParallelism
+    };
 }
 
 /// <summary>

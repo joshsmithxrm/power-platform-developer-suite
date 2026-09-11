@@ -1,5 +1,8 @@
 using System.Text.Json;
 using PPDS.Cli.Commands.Serve.Handlers;
+using PPDS.Cli.Services.Query;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Serve.Handlers;
@@ -404,6 +407,62 @@ public class RpcMethodHandlerTests
 
         // QueryMode should be omitted when null (JsonIgnoreCondition.WhenWritingNull)
         Assert.DoesNotContain("\"queryMode\"", json);
+    }
+
+    [Fact]
+    public void MapToResponse_DmlDryRun_IncludesPreviewMetadata()
+    {
+        var result = new SqlQueryResult
+        {
+            OriginalSql = "UPDATE account SET name = 'preview' WHERE accountid = 'id'",
+            TranspiledFetchXml = "<fetch />",
+            Result = QueryResult.Empty("dry-run"),
+            DmlSafetyResult = new DmlSafetyResult
+            {
+                IsDryRun = true,
+                RequiresConfirmation = true,
+                RowCap = 42
+            },
+            DryRunPlan = new QueryPlanDescription
+            {
+                NodeType = "DmlExecuteNode",
+                Description = "DmlExecute: UPDATE account",
+                Children =
+                [
+                    new QueryPlanDescription
+                    {
+                        NodeType = "DataverseScanNode",
+                        Description = "Preview affected account rows"
+                    }
+                ]
+            }
+        };
+
+        var response = RpcMethodHandler.MapToResponse(result);
+        var json = JsonSerializer.Serialize(response);
+
+        Assert.True(response.DryRun);
+        Assert.Equal("DmlExecuteNode", response.Plan?.NodeType);
+        Assert.Equal("DataverseScanNode", response.Plan?.Children[0].NodeType);
+        Assert.Equal(42, response.RowCap);
+        Assert.True(response.RequiresConfirmationForExecution == true);
+        Assert.Contains("\"dryRun\":true", json);
+        Assert.Contains("\"plan\":", json);
+        Assert.Contains("\"nodeType\":\"DmlExecuteNode\"", json);
+        Assert.DoesNotContain("\"NodeType\"", json);
+        Assert.Contains("\"rowCap\":42", json);
+        Assert.Contains("\"requiresConfirmationForExecution\":true", json);
+    }
+
+    [Fact]
+    public void QueryResultResponse_DefaultDryRunMetadata_IsOmittedInJson()
+    {
+        var json = JsonSerializer.Serialize(new QueryResultResponse { Success = true }, JsonOptions);
+
+        Assert.DoesNotContain("\"dryRun\"", json);
+        Assert.DoesNotContain("\"plan\"", json);
+        Assert.DoesNotContain("\"rowCap\"", json);
+        Assert.DoesNotContain("\"requiresConfirmationForExecution\"", json);
     }
 
     #endregion

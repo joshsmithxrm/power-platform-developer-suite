@@ -216,6 +216,8 @@ The VS Code extension surfaces query capabilities through webview panels served 
 
 **TDS Read Replica toggle:** The query panel menu includes a TDS Read Replica toggle. When enabled, queries route through the TDS Endpoint. The status text reflects the actual execution mode ("via TDS" or "via Dataverse") based on `SqlQueryResult.ExecutionMode`, not the toggle state.
 
+**DML dry-run response:** A `query/sql` request with `dmlSafety.isDryRun=true` returns the side-effect-free preview through the standard response contract. The response sets `dryRun`, `plan`, `executedFetchXml`, `rowCap`, and `requiresConfirmationForExecution`; no executor is dispatched. These fields are omitted for ordinary query responses.
+
 ---
 
 ## Core Types
@@ -539,6 +541,7 @@ public sealed class SqlParseException : Exception
 - [ ] Cross-environment query results include `DataSources` metadata
 - [ ] TDS requested + incompatible query fails with clear error, no silent fallback
 - [ ] DML `--dry-run` succeeds without `--confirm`, executes no mutations, and leaves hard DML safety blocks intact
+- [ ] Daemon `query/sql` DML dry-run responses include the preview plan, FetchXML, row cap, and execution-confirmation requirement
 
 ### Edge Cases
 
