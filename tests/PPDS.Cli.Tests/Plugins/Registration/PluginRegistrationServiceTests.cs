@@ -1,4 +1,6 @@
-﻿using System.ServiceModel;
+using System.IO.Compression;
+using System.ServiceModel;
+using System.Text;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -100,6 +102,8 @@ public class PluginRegistrationServiceTests
         _sut = new PluginRegistrationService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
     }
 
+    #region Core Assembly Tests
+
     [Fact]
     public async Task ListAssembliesAsync_ReturnsEmptyList_WhenNoAssembliesExist()
     {
@@ -178,6 +182,206 @@ public class PluginRegistrationServiceTests
         Assert.NotNull(_updatedEntity);
         Assert.Equal(existingId, _updatedEntity!.Id);
     }
+
+    #endregion
+
+    #region Plugin Package Upsert Tests
+
+    [Fact]
+    public async Task UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists()
+    {
+        // Arrange
+        var expectedId = Guid.NewGuid();
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "2.4.6");
+        _retrieveMultipleResult = new EntityCollection();
+        ConfigureCreateResponse(expectedId);
+
+        // Act
+        var result = await _sut.UpsertPackageAsync(
+            "ppds_TestPackage",
+            packageBytes,
+            "PPDSDemo");
+
+        // Assert
+        Assert.Equal(expectedId, result);
+        var request = Assert.IsType<CreateRequest>(_executedRequest);
+        var target = Assert.IsType<PluginPackage>(request.Target);
+        Assert.Equal("ppds_TestPackage", target.Name);
+        Assert.Equal("2.4.6", target.Version);
+        Assert.Equal(Convert.ToBase64String(packageBytes), target.Content);
+        Assert.Equal("PPDSDemo", request.Parameters["SolutionUniqueName"]);
+    }
+
+    [Fact]
+    public async Task UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists()
+    {
+        // Arrange
+        var existingId = Guid.NewGuid();
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0");
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginPackage
+            {
+                Id = existingId,
+                Name = "ppds_TestPackage",
+                UniqueName = "ppds_TestPackage",
+                Version = "1.0.0"
+            }
+        ]);
+
+        // Act
+        var result = await _sut.UpsertPackageAsync(
+            "ppds_TestPackage",
+            packageBytes,
+            "PPDSDemo");
+
+        // Assert
+        Assert.Equal(existingId, result);
+        var request = Assert.IsType<UpdateRequest>(_executedRequest);
+        var target = Assert.IsType<PluginPackage>(request.Target);
+        Assert.Equal(existingId, target.Id);
+        Assert.Equal(Convert.ToBase64String(packageBytes), target.Content);
+        Assert.DoesNotContain(PluginPackage.Fields.Name, target.Attributes.Keys);
+        Assert.DoesNotContain(PluginPackage.Fields.Version, target.Attributes.Keys);
+        Assert.Equal("PPDSDemo", request.Parameters["SolutionUniqueName"]);
+    }
+
+    [Fact]
+    public async Task UpsertPackageAsync_UpdatesUniqueNameMatch_WhenDisplayNameCollides()
+    {
+        // Arrange
+        var collidingId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0");
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginPackage
+            {
+                Id = collidingId,
+                Name = "ppds_TestPackage",
+                UniqueName = "ppds_OtherPackage",
+                Version = "1.0.0"
+            },
+            new PluginPackage
+            {
+                Id = expectedId,
+                Name = "Test Package",
+                UniqueName = "ppds_TestPackage",
+                Version = "1.0.0"
+            }
+        ]);
+
+        // Act
+        var result = await _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
+
+        // Assert
+        Assert.Equal(expectedId, result);
+        var request = Assert.IsType<UpdateRequest>(_executedRequest);
+        Assert.Equal(expectedId, Assert.IsType<PluginPackage>(request.Target).Id);
+    }
+
+    [Fact]
+    public async Task UpsertPackageAsync_RejectsPackageWithoutVersion()
+    {
+        // Arrange
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", version: null);
+        _retrieveMultipleResult = new EntityCollection();
+        ConfigureCreateResponse(Guid.NewGuid());
+
+        // Act
+        var action = () => _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(action);
+        Assert.Equal(ErrorCodes.Validation.RequiredField, exception.ErrorCode);
+        _mockPooledClient.Verify(
+            s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpsertPackageAsync_RejectsMismatchedPackageName()
+    {
+        // Arrange
+        var packageBytes = CreatePackageBytes("ppds_ActualPackage", "1.0.0");
+        _retrieveMultipleResult = new EntityCollection();
+        ConfigureCreateResponse(Guid.NewGuid());
+
+        // Act
+        var action = () => _sut.UpsertPackageAsync("ppds_DifferentPackage", packageBytes);
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(action);
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        _mockPooledClient.Verify(
+            s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall()
+    {
+        // Arrange
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", "net48");
+
+        // Act
+        var action = () => _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(action);
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("lib/net462", exception.Message);
+        Assert.Contains("lib/net471", exception.Message);
+        Assert.Contains("lib/net48", exception.Message);
+        _mockPooledClient.Verify(
+            s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockPooledClient.Verify(
+            s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private void ConfigureCreateResponse(Guid id)
+    {
+        var response = new CreateResponse();
+        response.Results["id"] = id;
+
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((request, _) =>
+            {
+                _executedRequest = request;
+                _executedRequests.Add(request);
+            })
+            .ReturnsAsync(response);
+    }
+
+    private static byte[] CreatePackageBytes(string id, string? version, string framework = "net462")
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = archive.CreateEntry($"{id}.nuspec");
+            using (var writer = new StreamWriter(entry.Open(), Encoding.UTF8))
+            {
+                var versionElement = version == null ? string.Empty : $"<version>{version}</version>";
+                writer.Write($$"""
+                    <?xml version="1.0"?>
+                    <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+                      <metadata>
+                        <id>{{id}}</id>
+                        {{versionElement}}
+                      </metadata>
+                    </package>
+                    """);
+            }
+
+            var assemblyEntry = archive.CreateEntry($"lib/{framework}/{id}.dll");
+            assemblyEntry.Open().Dispose();
+        }
+
+        return stream.ToArray();
+    }
+
+    #endregion
 
     [Fact]
     public async Task GetSdkMessageIdAsync_ReturnsNull_WhenMessageNotFound()
@@ -2566,6 +2770,35 @@ public class PluginRegistrationServiceTests
         Assert.NotNull(result);
         Assert.Equal(packageId, result!.Id);
         Assert.Equal("MyPackage", result.Name);
+    }
+
+    [Fact]
+    public async Task GetPackageByNameAsync_PrefersUniqueName_WhenAnotherDisplayNameCollides()
+    {
+        // Arrange
+        var displayCollisionId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginPackage
+            {
+                Id = displayCollisionId,
+                Name = "ppds_Target",
+                UniqueName = "ppds_Other"
+            },
+            new PluginPackage
+            {
+                Id = expectedId,
+                Name = "Target Package",
+                UniqueName = "ppds_Target"
+            }
+        ]);
+
+        // Act
+        var result = await _sut.GetPackageByNameAsync("ppds_Target");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(expectedId, result!.Id);
     }
 
     [Fact]
