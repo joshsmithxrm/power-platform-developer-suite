@@ -4,6 +4,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tests.Services.Shared;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Sql.Transpilation;
 using Xunit;
@@ -421,6 +422,7 @@ public class SqlQueryServiceTests
         Assert.Equal(DmlSafetyGuard.DefaultRowCap, result.DmlSafetyResult.RowCap);
         Assert.NotNull(result.DryRunPlan);
         Assert.Equal("DmlExecuteNode", result.DryRunPlan.NodeType);
+        Assert.Equal("account", result.Result.EntityLogicalName);
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
@@ -435,6 +437,102 @@ public class SqlQueryServiceTests
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Theory]
+    [Trait("Category", "PlanUnit")]
+    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END")]
+    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH")]
+    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);")]
+    public async Task ExecuteAsync_CompoundDmlDryRun_NeverDispatchesExecution(string sql)
+    {
+        var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
+        var service = new SqlQueryService(
+            mockExecutor.Object,
+            guard: new InactiveFakeShakedownGuard(),
+            bulkOperationExecutor: mockBulkExecutor.Object)
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = sql,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+        };
+
+        var result = await service.ExecuteAsync(request);
+
+        Assert.True(result.DmlSafetyResult?.ContainsDml);
+        Assert.True(result.DmlSafetyResult?.IsDryRun);
+        Assert.NotNull(result.DryRunPlan);
+        mockExecutor.VerifyNoOtherCalls();
+        mockBulkExecutor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [Trait("Category", "PlanUnit")]
+    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END")]
+    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH")]
+    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);")]
+    public async Task ExecuteStreamingAsync_CompoundDmlDryRun_NeverDispatchesExecution(string sql)
+    {
+        var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
+        var service = new SqlQueryService(
+            mockExecutor.Object,
+            guard: new InactiveFakeShakedownGuard(),
+            bulkOperationExecutor: mockBulkExecutor.Object)
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = sql,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+        };
+
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in service.ExecuteStreamingAsync(request))
+            chunks.Add(chunk);
+
+        var result = Assert.Single(chunks);
+        Assert.True(result.DmlSafetyResult?.ContainsDml);
+        Assert.True(result.DmlSafetyResult?.IsDryRun);
+        Assert.NotNull(result.DryRunPlan);
+        mockExecutor.VerifyNoOtherCalls();
+        mockBulkExecutor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [Trait("Category", "PlanUnit")]
+    [InlineData("SELECT name FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("DECLARE @preview INT = 0; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    public async Task ExecuteAsync_MultiStatementDryRun_InspectsEntirePlannedBatch(string sql)
+    {
+        var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
+        var service = new SqlQueryService(
+            mockExecutor.Object,
+            guard: new InactiveFakeShakedownGuard(),
+            bulkOperationExecutor: mockBulkExecutor.Object)
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = sql,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+        };
+
+        var result = await service.ExecuteAsync(request);
+
+        Assert.True(result.DmlSafetyResult?.ContainsDml);
+        Assert.True(result.DmlSafetyResult?.IsDryRun);
+        mockExecutor.VerifyNoOtherCalls();
+        mockBulkExecutor.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -1292,6 +1390,40 @@ public class SqlQueryServiceTests
         var request = new SqlQueryRequest
         {
             Sql = "DELETE FROM [QA].account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
+        };
+
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("read-only", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CompoundCrossEnvDml_ReadOnlyPolicy_BlocksBeforeDeferredExecution()
+    {
+        var service = new SqlQueryService(
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+        {
+            RemoteExecutorFactory = label => label == "QA" ? Mock.Of<IQueryExecutor>() : null,
+            ProfileResolver = new ProfileResolutionService(
+            [
+                new EnvironmentConfig
+                {
+                    Url = "https://qa.crm.dynamics.com/",
+                    Label = "QA",
+                    Type = EnvironmentType.Sandbox,
+                    SafetySettings = new QuerySafetySettings
+                    {
+                        CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly
+                    }
+                }
+            ])
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = "WHILE 1 = 0 DELETE FROM [QA].account WHERE name = 'test'",
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 

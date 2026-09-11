@@ -265,6 +265,7 @@ public class DmlSafetyGuardTests
 
         // SELECT pass-through does not propagate dry-run - it has no effect on reads
         Assert.False(result.IsDryRun, "SELECT should not be affected by --dry-run");
+        Assert.False(result.ContainsDml, "SELECT should remain classified as read-only");
     }
 
     [Fact]
@@ -485,6 +486,86 @@ public class DmlSafetyGuardTests
         var result = _guard.Check(stmt, new DmlSafetyOptions());
 
         Assert.True(result.IsBlocked, "Single-statement DELETE without WHERE in ELSE should be blocked");
+    }
+
+    [Fact]
+    public void Check_BlockWithConfirmedDryRun_PreservesDryRunClassification()
+    {
+        var result = _guard.Check(
+            Parse("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true, RowCap = 25 });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsDryRun);
+        Assert.False(result.RequiresConfirmation);
+        Assert.Equal(25, result.RowCap);
+    }
+
+    [Fact]
+    public void Check_IfWithDmlOnlyInElse_PreservesDryRunClassification()
+    {
+        var result = _guard.Check(
+            Parse("IF 1 = 1 SELECT name FROM account ELSE UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsDryRun);
+    }
+
+    [Fact]
+    public void Check_WhileContainingDml_PreservesDryRunClassification()
+    {
+        var result = _guard.Check(
+            Parse("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsDryRun);
+    }
+
+    [Theory]
+    [InlineData("WHILE 1 = 0 DELETE FROM account WHERE statecode = 1")]
+    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE statecode = 1 END TRY BEGIN CATCH SELECT name FROM account END CATCH")]
+    public void Check_UnconfirmedCompoundDml_RequiresConfirmation(string sql)
+    {
+        var result = _guard.Check(Parse(sql), new DmlSafetyOptions());
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void Check_TryCatchContainingDml_PreservesDryRunClassification()
+    {
+        var result = _guard.Check(
+            Parse("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH SELECT name FROM account END CATCH"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsDryRun);
+    }
+
+    [Fact]
+    public void Check_Merge_PreservesDryRunClassification()
+    {
+        var result = _guard.Check(
+            Parse("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsDryRun);
+    }
+
+    [Fact]
+    public void Check_WhileContainingWhereLessDml_RemainsBlocked()
+    {
+        var result = _guard.Check(
+            Parse("WHILE 1 = 0 UPDATE account SET name = 'preview'"),
+            new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
+
+        Assert.True(result.ContainsDml);
+        Assert.True(result.IsBlocked);
+        Assert.Contains("without WHERE", result.BlockReason);
     }
 
     #endregion

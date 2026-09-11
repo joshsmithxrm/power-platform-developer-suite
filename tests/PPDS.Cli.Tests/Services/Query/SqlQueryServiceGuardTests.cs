@@ -19,8 +19,8 @@ namespace PPDS.Cli.Tests.Services.Query;
 /// Placement contract (see Phase C.5 of the shakedown-guard plan):
 /// the guard call lives in <see cref="SqlQueryService.ExecuteAsync"/> AFTER
 /// <c>PrepareExecutionAsync</c> returns and BEFORE
-/// <c>_planExecutor.ExecuteAsync</c>, gated on
-/// <c>safetyResult != null &amp;&amp; !safetyResult.IsDryRun</c>.
+/// <c>_planExecutor.ExecuteAsync</c>, gated on an executing result whose
+/// internal DML classification is true.
 ///
 /// The test uses a <see cref="RecordingShakedownGuard"/> test double to
 /// observe whether <c>EnsureCanMutate</c> was invoked. The plan-executor
@@ -31,7 +31,7 @@ namespace PPDS.Cli.Tests.Services.Query;
 public class SqlQueryServiceGuardTests
 {
     [Theory]
-    [InlineData("SELECT name FROM account", false, false, false)]
+    [InlineData("SELECT name FROM account", true, false, false)]
     [InlineData("DELETE FROM account WHERE name = 'x'", true, false, true)]
     [InlineData("DELETE FROM account WHERE name = 'x'", true, true, false)]
     public async Task DmlBranch_Blocks_AndSelectBranch_DoesNot(
@@ -98,6 +98,34 @@ public class SqlQueryServiceGuardTests
         {
             Assert.Equal("query.dml", guard.LastOperation);
         }
+    }
+
+    [Fact]
+    public async Task StreamingDmlBranch_InvokesShakedownGuardBeforeExecution()
+    {
+        var guard = new RecordingShakedownGuard();
+        var service = new SqlQueryService(
+            Mock.Of<IQueryExecutor>(),
+            guard: guard)
+        {
+            EnvironmentProtectionLevel = PPDS.Auth.Profiles.ProtectionLevel.Development
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'x'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        };
+
+        var exception = await Assert.ThrowsAsync<PpdsException>(async () =>
+        {
+            await foreach (var _ in service.ExecuteStreamingAsync(request))
+            {
+            }
+        });
+
+        Assert.Equal(ErrorCodes.Safety.ShakedownActive, exception.ErrorCode);
+        Assert.True(guard.WasCalled);
+        Assert.Equal("query.dml", guard.LastOperation);
     }
 
     /// <summary>

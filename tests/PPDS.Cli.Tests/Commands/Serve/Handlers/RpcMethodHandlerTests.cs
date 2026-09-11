@@ -436,7 +436,7 @@ public class RpcMethodHandlerTests
         {
             OriginalSql = "UPDATE account SET name = 'preview' WHERE accountid = 'id'",
             TranspiledFetchXml = "<fetch />",
-            Result = QueryResult.Empty("dry-run"),
+            Result = QueryResult.Empty("account"),
             DmlSafetyResult = new DmlSafetyResult
             {
                 IsDryRun = true,
@@ -462,6 +462,7 @@ public class RpcMethodHandlerTests
         var json = JsonSerializer.Serialize(response);
 
         Assert.True(response.DryRun);
+        Assert.Equal("account", response.EntityName);
         Assert.Null(response.QueryMode);
         Assert.Equal("DmlExecuteNode", response.Plan?.NodeType);
         Assert.Equal("DataverseScanNode", response.Plan?.Children[0].NodeType);
