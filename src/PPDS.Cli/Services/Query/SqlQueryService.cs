@@ -12,6 +12,7 @@ using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
+using PPDS.Query.Planning.Nodes;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -190,14 +191,15 @@ public sealed class SqlQueryService : ISqlQueryService
         // so running it gives the user the FetchXML and execution plan for review.
         if (safetyResult is { ContainsDml: true, IsDryRun: true })
         {
+            var preview = BuildDryRunPreview(planResult);
             return new SqlQueryResult
             {
                 OriginalSql = request.Sql,
-                TranspiledFetchXml = planResult.FetchXml,
+                TranspiledFetchXml = preview.FetchXml,
                 Result = QueryResult.Empty(planResult.EntityLogicalName),
                 DmlSafetyResult = safetyResult,
-                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode),
-                DataSources = dataSources,
+                DryRunPlan = preview.Plan,
+                DataSources = CollectDataSources(preview.PlannedNodes, "Local"),
                 AppliedHints = appliedHints
             };
         }
@@ -332,6 +334,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // Dry-run: yield empty completion chunk
         if (safetyResult is { ContainsDml: true, IsDryRun: true })
         {
+            var preview = BuildDryRunPreview(planResult);
             yield return new SqlQueryStreamChunk
             {
                 Rows = new List<IReadOnlyDictionary<string, QueryValue>>(),
@@ -339,10 +342,10 @@ public sealed class SqlQueryService : ISqlQueryService
                 EntityLogicalName = planResult.EntityLogicalName,
                 TotalRowsSoFar = 0,
                 IsComplete = true,
-                TranspiledFetchXml = planResult.FetchXml,
+                TranspiledFetchXml = preview.FetchXml,
                 DmlSafetyResult = safetyResult,
-                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode),
-                DataSources = streamDataSources,
+                DryRunPlan = preview.Plan,
+                DataSources = CollectDataSources(preview.PlannedNodes, "Local"),
                 AppliedHints = streamAppliedHints
             };
             yield break;
@@ -552,8 +555,12 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // For aggregate queries, fetch metadata needed for partitioning decisions.
+        // A DML dry-run must remain side-effect-free, including avoiding Dataverse
+        // metadata calls made only to optimize a read that will not be executed.
         var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
+            safetyResult is { ContainsDml: true, IsDryRun: true }
+                ? (null, null, null)
+                : await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
 
         // Apply hint-level overrides to pool capacity
         var effectivePoolCapacity = hints.MaxParallelism.HasValue
@@ -799,13 +806,33 @@ public sealed class SqlQueryService : ISqlQueryService
     private static List<QueryDataSource> CollectDataSources(
         IQueryPlanNode rootNode,
         string localLabel)
+        => CollectDataSources([rootNode], localLabel);
+
+    private static List<QueryDataSource> CollectDataSources(
+        IEnumerable<IQueryPlanNode> rootNodes,
+        string localLabel)
     {
         var sources = new List<QueryDataSource>
         {
             new() { Label = localLabel, IsRemote = false }
         };
-        CollectRemoteLabels(rootNode, sources);
+        foreach (var rootNode in rootNodes)
+            CollectRemoteLabels(rootNode, sources);
         return sources;
+    }
+
+    private static (
+        QueryPlanDescription Plan,
+        string FetchXml,
+        IReadOnlyList<IQueryPlanNode> PlannedNodes) BuildDryRunPreview(QueryPlanResult planResult)
+    {
+        if (planResult.RootNode is ScriptExecutionNode script)
+            return script.BuildDryRunPreview();
+
+        return (
+            QueryPlanDescription.FromNode(planResult.RootNode),
+            planResult.FetchXml,
+            [planResult.RootNode]);
     }
 
     private static void CollectRemoteLabels(IQueryPlanNode node, List<QueryDataSource> sources)
@@ -838,63 +865,167 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
-    /// Detects if a DML statement targets a remote environment by checking for RemoteScanNode in the plan.
-    /// Returns the remote label if found, null otherwise (SELECT or local-only DML).
+    /// Detects every remote environment targeted by DML in the syntax tree.
+    /// All distinct targets must pass their own safety policy.
     /// </summary>
-    private string? DetectCrossEnvironmentDmlTarget(
+    private IReadOnlyList<string> DetectCrossEnvironmentDmlTargets(
         TSqlFragment fragment,
-        QueryPlanResult planResult,
         DmlSafetyResult? safetyResult)
     {
         if (safetyResult?.ContainsDml != true)
-            return null;
+            return [];
 
-        // Direct DML exposes its remote scan in the plan tree. ScriptExecutionNode
-        // defers child planning until execution, so inspect compound AST targets as
-        // a fallback to keep the same cross-environment policy boundary.
-        return FindRemoteLabel(planResult.RootNode)
-            ?? FindCrossEnvironmentDmlTarget(ExtractPlannedStatement(fragment));
+        // The AST identifies write targets without confusing remote read sources in
+        // the plan for remote mutation targets. UPDATE/DELETE one-part targets are
+        // resolved against their FROM bindings below.
+        var labels = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectCrossEnvironmentDmlTargets(ExtractPlannedStatement(fragment), labels, seen);
+        return labels;
     }
 
-    private string? FindCrossEnvironmentDmlTarget(TSqlStatement statement)
+    private void CollectCrossEnvironmentDmlTargets(
+        TSqlStatement statement,
+        List<string> labels,
+        HashSet<string> seen)
     {
         switch (statement)
         {
             case InsertStatement insert:
-                return GetRemoteTargetLabel(insert.InsertSpecification.Target);
+                AddRemoteTargetLabel(insert.InsertSpecification.Target, labels, seen);
+                break;
             case UpdateStatement update:
-                return GetRemoteTargetLabel(update.UpdateSpecification.Target);
+                AddRemoteTargetLabel(
+                    update.UpdateSpecification.Target,
+                    update.UpdateSpecification.FromClause,
+                    labels,
+                    seen);
+                break;
             case DeleteStatement delete:
-                return GetRemoteTargetLabel(delete.DeleteSpecification.Target);
+                AddRemoteTargetLabel(
+                    delete.DeleteSpecification.Target,
+                    delete.DeleteSpecification.FromClause,
+                    labels,
+                    seen);
+                break;
             case MergeStatement merge:
-                return GetRemoteTargetLabel(merge.MergeSpecification.Target);
+                AddRemoteTargetLabel(merge.MergeSpecification.Target, labels, seen);
+                break;
             case BeginEndBlockStatement block:
-                return FindCrossEnvironmentDmlTarget(block.StatementList.Statements);
+                CollectCrossEnvironmentDmlTargets(block.StatementList.Statements, labels, seen);
+                break;
             case IfStatement ifStatement:
-                return FindCrossEnvironmentDmlTarget(ifStatement.ThenStatement)
-                    ?? (ifStatement.ElseStatement == null
-                        ? null
-                        : FindCrossEnvironmentDmlTarget(ifStatement.ElseStatement));
+                CollectCrossEnvironmentDmlTargets(ifStatement.ThenStatement, labels, seen);
+                if (ifStatement.ElseStatement != null)
+                    CollectCrossEnvironmentDmlTargets(ifStatement.ElseStatement, labels, seen);
+                break;
             case WhileStatement whileStatement:
-                return FindCrossEnvironmentDmlTarget(whileStatement.Statement);
+                CollectCrossEnvironmentDmlTargets(whileStatement.Statement, labels, seen);
+                break;
             case TryCatchStatement tryCatch:
-                return FindCrossEnvironmentDmlTarget(tryCatch.TryStatements.Statements)
-                    ?? FindCrossEnvironmentDmlTarget(tryCatch.CatchStatements.Statements);
-            default:
-                return null;
+                CollectCrossEnvironmentDmlTargets(tryCatch.TryStatements.Statements, labels, seen);
+                CollectCrossEnvironmentDmlTargets(tryCatch.CatchStatements.Statements, labels, seen);
+                break;
         }
     }
 
-    private string? FindCrossEnvironmentDmlTarget(IEnumerable<TSqlStatement> statements)
+    private void CollectCrossEnvironmentDmlTargets(
+        IEnumerable<TSqlStatement> statements,
+        List<string> labels,
+        HashSet<string> seen)
     {
         foreach (var statement in statements)
+            CollectCrossEnvironmentDmlTargets(statement, labels, seen);
+    }
+
+    private void AddRemoteTargetLabel(
+        TableReference target,
+        List<string> labels,
+        HashSet<string> seen)
+        => AddRemoteTargetLabel(target, fromClause: null, labels, seen);
+
+    private void AddRemoteTargetLabel(
+        TableReference target,
+        FromClause? fromClause,
+        List<string> labels,
+        HashSet<string> seen)
+    {
+        var label = GetRemoteTargetLabel(target)
+            ?? ResolveRemoteTargetAlias(target, fromClause);
+        if (label != null && seen.Add(label))
+            labels.Add(label);
+    }
+
+    private string? ResolveRemoteTargetAlias(TableReference target, FromClause? fromClause)
+    {
+        if (target is not NamedTableReference namedTarget || fromClause == null)
+            return null;
+
+        // A multipart target names its table directly (for example dbo.account).
+        // Only a one-part target can be an alias or unqualified FROM binding.
+        if (namedTarget.SchemaObject.ServerIdentifier != null
+            || namedTarget.SchemaObject.DatabaseIdentifier != null
+            || namedTarget.SchemaObject.SchemaIdentifier != null)
+            return null;
+
+        var targetAlias = namedTarget.SchemaObject.BaseIdentifier?.Value;
+        if (targetAlias == null)
+            return null;
+
+        var aliasMatches = new List<NamedTableReference>();
+        var baseNameMatches = new List<NamedTableReference>();
+        foreach (var tableReference in fromClause.TableReferences)
+            CollectNamedTableBindings(tableReference, targetAlias, aliasMatches, baseNameMatches);
+
+        // An explicit alias takes precedence over an unaliased table name. If either
+        // binding form is ambiguous, fail closed rather than guessing which remote
+        // environment would receive the mutation.
+        var matches = aliasMatches.Count > 0 ? aliasMatches : baseNameMatches;
+        if (matches.Count > 1)
         {
-            var label = FindCrossEnvironmentDmlTarget(statement);
-            if (label != null)
-                return label;
+            throw new PpdsException(
+                ErrorCodes.Query.DmlBlocked,
+                $"Cannot safely identify DML target '{targetAlias}' because multiple FROM tables match it.");
         }
 
-        return null;
+        return matches.Count == 1 ? GetRemoteTargetLabel(matches[0]) : null;
+    }
+
+    private static void CollectNamedTableBindings(
+        TableReference tableReference,
+        string targetAlias,
+        List<NamedTableReference> aliasMatches,
+        List<NamedTableReference> baseNameMatches)
+    {
+        switch (tableReference)
+        {
+            case NamedTableReference named:
+                if (string.Equals(named.Alias?.Value, targetAlias, StringComparison.OrdinalIgnoreCase))
+                    aliasMatches.Add(named);
+                else if (named.Alias == null
+                    && string.Equals(
+                        named.SchemaObject.BaseIdentifier?.Value,
+                        targetAlias,
+                        StringComparison.OrdinalIgnoreCase))
+                    baseNameMatches.Add(named);
+                break;
+            case QualifiedJoin qualified:
+                CollectNamedTableBindings(
+                    qualified.FirstTableReference, targetAlias, aliasMatches, baseNameMatches);
+                CollectNamedTableBindings(
+                    qualified.SecondTableReference, targetAlias, aliasMatches, baseNameMatches);
+                break;
+            case UnqualifiedJoin unqualified:
+                CollectNamedTableBindings(
+                    unqualified.FirstTableReference, targetAlias, aliasMatches, baseNameMatches);
+                CollectNamedTableBindings(
+                    unqualified.SecondTableReference, targetAlias, aliasMatches, baseNameMatches);
+                break;
+            case JoinParenthesisTableReference parenthesized:
+                CollectNamedTableBindings(
+                    parenthesized.Join, targetAlias, aliasMatches, baseNameMatches);
+                break;
+        }
     }
 
     private string? GetRemoteTargetLabel(TableReference target)
@@ -914,17 +1045,6 @@ public sealed class SqlQueryService : ISqlQueryService
         return ProfileResolver?.ResolveByLabel(schemaLabel) != null ? schemaLabel : null;
     }
 
-    private static string? FindRemoteLabel(IQueryPlanNode node)
-    {
-        if (node is RemoteScanNode remote) return remote.RemoteLabel;
-        foreach (var child in node.Children)
-        {
-            var label = FindRemoteLabel(child);
-            if (label != null) return label;
-        }
-        return null;
-    }
-
     /// <summary>
     /// Checks cross-environment DML policy after planning. Throws if blocked or requires unconfirmed confirmation.
     /// </summary>
@@ -936,36 +1056,37 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (dmlSafety == null) return;
 
-        var targetLabel = DetectCrossEnvironmentDmlTarget(fragment, planResult, safetyResult);
-        if (targetLabel == null) return;
-
-        var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
-        var targetType = targetConfig?.Type ?? EnvironmentType.Production;
-        var targetProtection = targetConfig?.Protection
-            ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
-
-        var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
-            ExtractPlannedStatement(fragment),
-            targetConfig?.SafetySettings,
-            "local",
-            targetLabel,
-            targetProtection);
-
-        if (crossEnvResult.IsBlocked)
+        var plannedStatement = ExtractPlannedStatement(fragment);
+        foreach (var targetLabel in DetectCrossEnvironmentDmlTargets(fragment, safetyResult))
         {
-            throw new PpdsException(
-                crossEnvResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
-        }
+            var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
+            var targetType = targetConfig?.Type ?? EnvironmentType.Production;
+            var targetProtection = targetConfig?.Protection
+                ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
 
-        // Prompt/Production policies gate cross-environment execution, not its
-        // side-effect-free preview. ReadOnly remains a hard block above.
-        if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed && !dmlSafety.IsDryRun)
-        {
-            throw new PpdsException(
-                ErrorCodes.Query.DmlBlocked,
-                crossEnvResult.ConfirmationMessage
-                    ?? "Cross-environment DML requires confirmation.");
+            var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
+                plannedStatement,
+                targetConfig?.SafetySettings,
+                "local",
+                targetLabel,
+                targetProtection);
+
+            if (crossEnvResult.IsBlocked)
+            {
+                throw new PpdsException(
+                    crossEnvResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                    crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
+            }
+
+            // Prompt/Production policies gate cross-environment execution, not its
+            // side-effect-free preview. ReadOnly remains a hard block above.
+            if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed && !dmlSafety.IsDryRun)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    crossEnvResult.ConfirmationMessage
+                        ?? "Cross-environment DML requires confirmation.");
+            }
         }
     }
 

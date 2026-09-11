@@ -34,7 +34,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Query.Tests" />
-    <InternalsVisibleTo Include="PPDS.Cli" />
+    <InternalsVisibleTo Include="ppds" />
     <InternalsVisibleTo Include="PPDS.Cli.Tests" />
   </ItemGroup>
 
