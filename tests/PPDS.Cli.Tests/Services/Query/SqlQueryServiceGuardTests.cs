@@ -120,6 +120,7 @@ public class SqlQueryServiceGuardTests
         {
             await foreach (var _ in service.ExecuteStreamingAsync(request))
             {
+                // Enumerate the stream to trigger the shakedown guard before any result is yielded.
             }
         });
 
