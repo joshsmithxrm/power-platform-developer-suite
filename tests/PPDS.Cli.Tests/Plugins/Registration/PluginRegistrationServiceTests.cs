@@ -341,8 +341,8 @@ public class PluginRegistrationServiceTests
                     """);
             }
 
-            var frameworkMarker = archive.CreateEntry($"lib/{framework}/_._");
-            frameworkMarker.Open().Dispose();
+            var assemblyEntry = archive.CreateEntry($"lib/{framework}/{id}.dll");
+            assemblyEntry.Open().Dispose();
         }
 
         return stream.ToArray();

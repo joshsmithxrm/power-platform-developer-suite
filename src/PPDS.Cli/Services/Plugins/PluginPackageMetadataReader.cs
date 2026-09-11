@@ -64,11 +64,16 @@ internal static class PluginPackageMetadataReader
             }
 
             var packageFrameworks = archive.Entries
-                .Select(entry => entry.FullName.Replace('\\', '/').Split('/'))
-                .Where(parts => parts.Length >= 3
-                    && parts[0].Equals("lib", StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrWhiteSpace(parts[1]))
-                .Select(parts => parts[1])
+                .Select(entry => new
+                {
+                    Parts = entry.FullName.Replace('\\', '/').Split('/'),
+                    IsDll = entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                })
+                .Where(entry => entry.IsDll
+                    && entry.Parts.Length >= 3
+                    && entry.Parts[0].Equals("lib", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(entry.Parts[1]))
+                .Select(entry => entry.Parts[1])
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(framework => framework, StringComparer.OrdinalIgnoreCase)
                 .ToArray();

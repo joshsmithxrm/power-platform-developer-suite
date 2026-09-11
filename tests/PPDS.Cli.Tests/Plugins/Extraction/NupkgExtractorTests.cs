@@ -162,7 +162,23 @@ public class NupkgExtractorTests : IDisposable
         Assert.Equal("account", step.Entity);
     }
 
-    private static void CreatePluginPackage(string nupkgPath, string framework)
+    [Fact]
+    public void Extract_EmptyNet462GroupAndNet471DllAssets_SelectsNet471()
+    {
+        var nupkgPath = Path.Combine(_scratch, "multi-target-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, "net471", emptyFramework: "net462");
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        Assert.Equal("Nuget", config.Type);
+        var type = Assert.Single(config.Types);
+        Assert.Equal("Net48Plugin", type.TypeName);
+    }
+
+    private static void CreatePluginPackage(
+        string nupkgPath,
+        string framework,
+        string? emptyFramework = null)
     {
         var pluginAssembly = CompilePluginAssembly();
         var pluginsAssemblyPath = typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location;
@@ -185,9 +201,17 @@ public class NupkgExtractorTests : IDisposable
         }
 
         var attributesEntry = archive.CreateEntry($"lib/{framework}/PPDS.Plugins.dll");
-        using var attributesStream = attributesEntry.Open();
-        using var attributesFile = File.OpenRead(pluginsAssemblyPath);
-        attributesFile.CopyTo(attributesStream);
+        using (var attributesStream = attributesEntry.Open())
+        using (var attributesFile = File.OpenRead(pluginsAssemblyPath))
+        {
+            attributesFile.CopyTo(attributesStream);
+        }
+
+        if (emptyFramework != null)
+        {
+            var marker = archive.CreateEntry($"lib/{emptyFramework}/_._");
+            marker.Open().Dispose();
+        }
     }
 
     private static byte[] CompilePluginAssembly()
