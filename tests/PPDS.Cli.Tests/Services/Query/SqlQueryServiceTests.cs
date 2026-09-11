@@ -386,7 +386,7 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "PlanUnit")]
-    public async Task ExecuteAsync_DmlDryRun_ReturnsPlanWithoutExecuting()
+    public async Task ExecuteAsync_DmlDryRun_WithoutConfirmation_ReturnsPlanWithoutExecuting()
     {
         // Arrange: executor that throws if called, proving dry-run skips execution
         var mockExecutor = new Mock<IQueryExecutor>();
@@ -403,7 +403,7 @@ public class SqlQueryServiceTests
         var request = new SqlQueryRequest
         {
             Sql = "DELETE FROM account WHERE name = 'test'",
-            DmlSafety = new DmlSafetyOptions { IsDryRun = true, IsConfirmed = true }
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
         // Act
@@ -414,6 +414,13 @@ public class SqlQueryServiceTests
         Assert.False(string.IsNullOrEmpty(result.TranspiledFetchXml), "Dry-run should return transpiled FetchXML");
         Assert.NotNull(result.DmlSafetyResult);
         Assert.True(result.DmlSafetyResult.IsDryRun, "DmlSafetyResult should indicate dry-run");
+        Assert.True(result.DmlSafetyResult.RequiresConfirmation,
+            "Actual DML execution should remain confirmation-gated after its preview");
+        Assert.True(result.DmlSafetyResult.RequiresPreview,
+            "Production execution should retain its preview requirement");
+        Assert.Equal(DmlSafetyGuard.DefaultRowCap, result.DmlSafetyResult.RowCap);
+        Assert.NotNull(result.DryRunPlan);
+        Assert.Equal("DmlExecuteNode", result.DryRunPlan.NodeType);
 
         // Verify executor was never called
         mockExecutor.Verify(
@@ -424,6 +431,71 @@ public class SqlQueryServiceTests
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_DmlWithoutDryRunOrConfirmation_StillRequiresConfirmation()
+    {
+        var service = new SqlQueryService(
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development
+        };
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions()
+        };
+
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_WhereLessDmlDryRun_RemainsBlocked()
+    {
+        var service = new SqlQueryService(
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard());
+        var request = new SqlQueryRequest
+        {
+            Sql = "UPDATE account SET name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
+        };
+
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("without WHERE", exception.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteStreamingAsync_DmlDryRun_WithoutConfirmation_YieldsPlanWithoutExecuting()
+    {
+        var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var service = new SqlQueryService(
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
+        };
+
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in service.ExecuteStreamingAsync(request))
+        {
+            chunks.Add(chunk);
+        }
+
+        var result = Assert.Single(chunks);
+        Assert.True(result.IsComplete);
+        Assert.Empty(result.Rows);
+        Assert.False(string.IsNullOrEmpty(result.TranspiledFetchXml));
+        mockExecutor.VerifyNoOtherCalls();
     }
 
     #endregion
@@ -799,7 +871,7 @@ public class SqlQueryServiceTests
         var mockExecutor = new Mock<IQueryExecutor>();
         var records = Enumerable.Range(0, 200)
             .Select(i => (IReadOnlyDictionary<string, QueryValue>)new Dictionary<string, QueryValue>
-                { ["name"] = QueryValue.Simple($"Record {i}") })
+            { ["name"] = QueryValue.Simple($"Record {i}") })
             .ToList();
 
         mockExecutor
@@ -1113,7 +1185,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_DevelopmentProtection_UsesRelaxedSafety()
     {
         // Arrange: service with Development protection level — DML dry-run should pass
-        // without requiring confirmation (Development is relaxed).
+        // without execution confirmation.
         var mockExecutor = new Mock<IQueryExecutor>();
         var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
         {
@@ -1123,10 +1195,10 @@ public class SqlQueryServiceTests
         var request = new SqlQueryRequest
         {
             Sql = "DELETE FROM account WHERE name = 'test'",
-            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        // Act — should not throw (Development protection + confirmed = passes safety check)
+        // Act — should not throw: a dry-run is the preview used before confirmation.
         var result = await service.ExecuteAsync(request);
 
         // Assert: dry-run returns plan without executing
@@ -1175,6 +1247,87 @@ public class SqlQueryServiceTests
 
         Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
         Assert.Contains("read-only", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CrossEnvDml_ReadOnlyPolicy_BlocksDryRun()
+    {
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var service = new SqlQueryService(
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+        {
+            RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
+            ProfileResolver = new ProfileResolutionService(
+            [
+                new EnvironmentConfig
+                {
+                    Url = "https://qa.crm.dynamics.com/",
+                    Label = "QA",
+                    Type = EnvironmentType.Sandbox,
+                    SafetySettings = new QuerySafetySettings
+                    {
+                        CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly
+                    }
+                }
+            ])
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM [QA].account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
+        };
+
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("read-only", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CrossEnvDml_PromptPolicy_DryRunBypassesOnlyExecutionConfirmation()
+    {
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var service = new SqlQueryService(
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+        {
+            RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
+            ProfileResolver = new ProfileResolutionService(
+            [
+                new EnvironmentConfig
+                {
+                    Url = "https://qa.crm.dynamics.com/",
+                    Label = "QA",
+                    Type = EnvironmentType.Sandbox,
+                    Protection = ProtectionLevel.Development,
+                    SafetySettings = new QuerySafetySettings
+                    {
+                        CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Prompt
+                    }
+                }
+            ])
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM [QA].account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsDryRun = true }
+        };
+
+        var result = await service.ExecuteAsync(request);
+
+        Assert.True(result.DmlSafetyResult?.IsDryRun);
+
+        var executionRequest = request with
+        {
+            DmlSafety = new DmlSafetyOptions()
+        };
+        var exception = await Assert.ThrowsAsync<PpdsException>(
+            () => service.ExecuteAsync(executionRequest));
+        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
+        Assert.Contains("require --confirm", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

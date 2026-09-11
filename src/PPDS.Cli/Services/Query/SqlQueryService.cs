@@ -159,7 +159,8 @@ public sealed class SqlQueryService : ISqlQueryService
                 OriginalSql = request.Sql,
                 TranspiledFetchXml = planResult.FetchXml,
                 Result = QueryResult.Empty("dry-run"),
-                DmlSafetyResult = safetyResult
+                DmlSafetyResult = safetyResult,
+                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode)
             };
         }
 
@@ -490,7 +491,12 @@ public sealed class SqlQueryService : ISqlQueryService
                     safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
             }
 
-            if (safetyResult.RequiresConfirmation)
+            // A dry-run is the confirmation preview, not an execution attempt. Keep the
+            // confirmation requirement on the result so callers know actual execution is
+            // still gated, but do not require --confirm merely to build the side-effect-free
+            // plan. Hard safety blocks above (for example, UPDATE/DELETE without WHERE) still
+            // apply to previews.
+            if (safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
             {
                 throw new PpdsException(
                     ErrorCodes.Query.DmlConfirmationRequired,
@@ -839,7 +845,9 @@ public sealed class SqlQueryService : ISqlQueryService
                 crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
         }
 
-        if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed)
+        // Prompt/Production policies gate cross-environment execution, not its
+        // side-effect-free preview. ReadOnly remains a hard block above.
+        if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed && !dmlSafety.IsDryRun)
         {
             throw new PpdsException(
                 ErrorCodes.Query.DmlBlocked,

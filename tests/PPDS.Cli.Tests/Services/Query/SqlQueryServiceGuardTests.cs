@@ -76,7 +76,7 @@ public class SqlQueryServiceGuardTests
         {
             Sql = sql,
             DmlSafety = useDmlSafety
-                ? new DmlSafetyOptions { IsConfirmed = true, IsDryRun = isDryRun }
+                ? new DmlSafetyOptions { IsConfirmed = !isDryRun, IsDryRun = isDryRun }
                 : null
         };
 
