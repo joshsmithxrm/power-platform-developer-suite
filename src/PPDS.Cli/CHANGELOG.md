@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`ppds plugins unregister package --force` now removes NuGet plugin packages cleanly** — PPDS deletes descendant registrations, then deletes the owning `pluginpackage` so Dataverse can cascade its package-owned assemblies instead of attempting a forbidden direct `pluginassembly` delete and leaving a partially unregistered package behind.
 - **Direct assembly unregistration now protects package-owned assemblies** — PPDS rejects the operation before deleting descendants and directs the user to unregister the owning package instead.
+- **First-time `ppds plugins deploy|register package` no longer fails with `Attribute 'version' cannot be NULL`** — PPDS now reads the root `.nuspec` ID and version through one validated package-metadata path and sends both on `pluginpackage` creation; existing packages remain content-only updates because Dataverse package name and version are immutable. NuGet packages are also preflighted for Dataverse-supported `lib/net462` or `lib/net471` assets, so a `lib/net48`-only package gets an actionable local validation error instead of a late server/PRT rejection.
 
 ## [1.4.0] - 2026-07-15
 

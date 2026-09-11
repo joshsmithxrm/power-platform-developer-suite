@@ -55,8 +55,9 @@ public static class ExtractCommand
         var command = new Command(
             "extract",
             "Extract plugin step/image attributes from an assembly (.dll) or plugin package (.nupkg) to " +
-            "JSON configuration. Works against .NET Framework 4.6.2 plugin assemblies regardless of how " +
-            "the CLI is packaged (single-file, self-contained, or framework-dependent).")
+            "JSON configuration. Works against Dataverse-supported .NET Framework plugin assemblies and " +
+            "net462/net471 plugin package assets regardless of how the CLI is packaged (single-file, " +
+            "self-contained, or framework-dependent).")
         {
             inputOption,
             outputOption,
