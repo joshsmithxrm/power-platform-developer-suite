@@ -2063,6 +2063,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 "Assembly",
                 ErrorCodes.Plugin.NotFound);
 
+        if (deleteAssemblyDirectly && assembly.PackageId.HasValue)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister assembly: {assembly.Name}. Assembly is owned by plugin package {assembly.PackageId.Value}. " +
+                $"Unregister the owning package instead: ppds plugins unregister package {assembly.PackageId.Value} --force.",
+                assembly.Name,
+                "Assembly",
+                ErrorCodes.Operation.NotSupported);
+        }
+
         // Get types and their steps
         var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
         var totalSteps = 0;

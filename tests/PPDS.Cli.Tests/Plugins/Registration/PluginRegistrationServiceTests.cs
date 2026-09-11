@@ -1999,6 +1999,40 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
+    public async Task UnregisterAssemblyAsync_ThrowsBeforeDeletingChildren_WhenAssemblyBelongsToPackage()
+    {
+        // Arrange
+        var assemblyId = Guid.NewGuid();
+        var packageId = Guid.NewGuid();
+        var assembly = new PluginAssembly
+        {
+            Id = assemblyId,
+            Name = "TestPackageAssembly",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox,
+            PackageId = new EntityReference(PluginPackage.EntityLogicalName, packageId)
+        };
+        assembly[PluginAssembly.Fields.IsManaged] = false;
+
+        _retrieveMultipleResult = new EntityCollection([assembly]);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<UnregisterException>(
+            () => _sut.UnregisterAssemblyAsync(assemblyId, force: true));
+
+        // Assert
+        Assert.Equal(ErrorCodes.Operation.NotSupported, exception.ErrorCode);
+        Assert.Contains(packageId.ToString(), exception.Message);
+        Assert.Contains("ppds plugins unregister package", exception.Message);
+        _mockPooledClient.Verify(
+            s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockPooledClient.Verify(
+            s => s.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task UnregisterPackageAsync_DeletesPackage_WhenFound()
     {
         // Arrange
