@@ -573,7 +573,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     {
         // Use IncludeMicrosoft: true to search all packages including Microsoft.* when looking up by exact name
         var packages = await ListPackagesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
-        return packages.FirstOrDefault();
+        return packages.FirstOrDefault(p => string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase))
+            ?? packages.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

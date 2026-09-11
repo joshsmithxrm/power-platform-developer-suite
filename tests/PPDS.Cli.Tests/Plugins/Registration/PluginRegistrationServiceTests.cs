@@ -246,6 +246,39 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
+    public async Task UpsertPackageAsync_UpdatesUniqueNameMatch_WhenDisplayNameCollides()
+    {
+        // Arrange
+        var collidingId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0");
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginPackage
+            {
+                Id = collidingId,
+                Name = "ppds_TestPackage",
+                UniqueName = "ppds_OtherPackage",
+                Version = "1.0.0"
+            },
+            new PluginPackage
+            {
+                Id = expectedId,
+                Name = "Test Package",
+                UniqueName = "ppds_TestPackage",
+                Version = "1.0.0"
+            }
+        ]);
+
+        // Act
+        var result = await _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
+
+        // Assert
+        Assert.Equal(expectedId, result);
+        var request = Assert.IsType<UpdateRequest>(_executedRequest);
+        Assert.Equal(expectedId, Assert.IsType<PluginPackage>(request.Target).Id);
+    }
+
+    [Fact]
     public async Task UpsertPackageAsync_RejectsPackageWithoutVersion()
     {
         // Arrange
@@ -2737,6 +2770,35 @@ public class PluginRegistrationServiceTests
         Assert.NotNull(result);
         Assert.Equal(packageId, result!.Id);
         Assert.Equal("MyPackage", result.Name);
+    }
+
+    [Fact]
+    public async Task GetPackageByNameAsync_PrefersUniqueName_WhenAnotherDisplayNameCollides()
+    {
+        // Arrange
+        var displayCollisionId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginPackage
+            {
+                Id = displayCollisionId,
+                Name = "ppds_Target",
+                UniqueName = "ppds_Other"
+            },
+            new PluginPackage
+            {
+                Id = expectedId,
+                Name = "Target Package",
+                UniqueName = "ppds_Target"
+            }
+        ]);
+
+        // Act
+        var result = await _sut.GetPackageByNameAsync("ppds_Target");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(expectedId, result!.Id);
     }
 
     [Fact]
