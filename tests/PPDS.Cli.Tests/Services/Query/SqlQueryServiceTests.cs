@@ -495,6 +495,14 @@ public class SqlQueryServiceTests
         Assert.True(result.IsComplete);
         Assert.Empty(result.Rows);
         Assert.False(string.IsNullOrEmpty(result.TranspiledFetchXml));
+        Assert.NotNull(result.DmlSafetyResult);
+        Assert.True(result.DmlSafetyResult.IsDryRun);
+        Assert.True(result.DmlSafetyResult.RequiresConfirmation,
+            "Actual DML execution should remain confirmation-gated after its streaming preview");
+        Assert.Equal(DmlSafetyGuard.DefaultRowCap, result.DmlSafetyResult.RowCap);
+        Assert.NotNull(result.DryRunPlan);
+        Assert.Equal("DmlExecuteNode", result.DryRunPlan.NodeType);
+        Assert.Null(result.ExecutionMode);
         mockExecutor.VerifyNoOtherCalls();
     }
 

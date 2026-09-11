@@ -304,7 +304,9 @@ public sealed class SqlQueryService : ISqlQueryService
                 EntityLogicalName = planResult.EntityLogicalName,
                 TotalRowsSoFar = 0,
                 IsComplete = true,
-                TranspiledFetchXml = planResult.FetchXml
+                TranspiledFetchXml = planResult.FetchXml,
+                DmlSafetyResult = safetyResult,
+                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode)
             };
             yield break;
         }

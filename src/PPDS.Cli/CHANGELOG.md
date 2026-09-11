@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **`ppds query sql <DML> --dry-run` no longer requires `--confirm`** — dry-run now performs the side-effect-free DML planning path directly while preserving hard safety blocks such as UPDATE/DELETE without `WHERE` and cross-environment read-only policy, the configured execution row cap, and the shakedown guard's dry-run carve-out. CLI Text/JSON and daemon JSON-RPC responses now contain the plan, FetchXML, row cap, and execution-confirmation requirement instead of an empty result. Actual DML remains confirmation-gated, and an unconfirmed CLI execution now returns the documented confirmation-required exit code (11).
+- **`ppds query sql <DML> --dry-run` no longer requires `--confirm`** — dry-run now performs the side-effect-free DML planning path directly while preserving hard safety blocks such as UPDATE/DELETE without `WHERE` and cross-environment read-only policy, the configured execution row cap, and the shakedown guard's dry-run carve-out. CLI Text/JSON, daemon JSON-RPC, and service streaming responses now contain the plan, FetchXML, row cap, and execution-confirmation requirement instead of an empty result. Actual DML remains confirmation-gated, and an unconfirmed CLI execution now returns the documented confirmation-required exit code (11).
 
 ## [1.4.0] - 2026-07-15
 
