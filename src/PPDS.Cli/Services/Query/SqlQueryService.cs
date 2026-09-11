@@ -1042,7 +1042,10 @@ public sealed class SqlQueryService : ISqlQueryService
         if (schemaLabel == null || schemaLabel.Equals("dbo", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        return ProfileResolver?.ResolveByLabel(schemaLabel) != null ? schemaLabel : null;
+        // Planning treats every non-dbo two-part name as a remote target whenever a
+        // remote executor factory is configured. Classify it the same way here so
+        // missing profile metadata falls back to the fail-closed read-only policy.
+        return schemaLabel;
     }
 
     /// <summary>

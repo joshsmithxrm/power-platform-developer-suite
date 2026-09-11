@@ -1439,6 +1439,47 @@ public class SqlQueryServiceTests
         Assert.Contains("read-only", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [Trait("Category", "Unit")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CrossEnvDml_FactoryOnlyTarget_DefaultsToReadOnlyWithoutDispatch(bool streaming)
+    {
+        var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var mockRemoteExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
+        var service = new SqlQueryService(
+            mockExecutor.Object,
+            guard: new InactiveFakeShakedownGuard(),
+            bulkOperationExecutor: mockBulkExecutor.Object)
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development,
+            RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor.Object : null
+        };
+        var request = new SqlQueryRequest
+        {
+            Sql = "UPDATE [QA].account SET name = 'test' WHERE accountid = '00000000-0000-0000-0000-000000000001'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        };
+
+        var exception = streaming
+            ? await Assert.ThrowsAsync<PpdsException>(async () =>
+            {
+                await foreach (var _ in service.ExecuteStreamingAsync(request))
+                {
+                    // Enumerate the stream to force policy validation before execution.
+                }
+            })
+            : await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("[QA]", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("read-only", exception.Message, StringComparison.OrdinalIgnoreCase);
+        mockExecutor.VerifyNoOtherCalls();
+        mockRemoteExecutor.VerifyNoOtherCalls();
+        mockBulkExecutor.VerifyNoOtherCalls();
+    }
+
     [Fact]
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_CrossEnvDml_ReadOnlyPolicy_BlocksDryRun()
