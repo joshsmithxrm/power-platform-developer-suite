@@ -1,7 +1,7 @@
 # Plugin System
 
 **Status:** Draft
-**Last Updated:** 2026-03-23
+**Last Updated:** 2026-09-10
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** All
 
@@ -106,10 +106,19 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 
 ### Constraints
 
-- Plugin assemblies must target .NET 4.6.2 (Dataverse sandbox requirement)
+- Loose plugin assemblies may target a Dataverse-supported .NET Framework version (4.6.2 through 4.8)
+- NuGet plugin packages must contain a `lib/net462` or `lib/net471` asset group; Dataverse currently rejects packages containing only `lib/net48`
 - Assemblies must be strong-named for Dataverse registration
 - `ExecutionOrder` must be 1-999999
 - All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
+
+### NuGet Plugin Package Registration
+
+- The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
+- A `lib/net462` or `lib/net471` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
+- First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
+- Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
+- Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
 
 ### Validation Rules
 
@@ -1178,6 +1187,16 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-25 | RPC `plugins/registerStep` accepts `eventHandlerType` (pluginType or serviceEndpoint) and `eventHandlerId` to support registering steps on service endpoints and webhooks | ❌ |
 | AC-26 | RPC `plugins/registerStep` accepts `secureConfiguration` parameter and passes it through to `UpsertStepAsync` | ❌ |
 | AC-27 | CLI `ppds plugins register step` accepts `--event-handler-type` flag (pluginType or serviceEndpoint, default: pluginType) to register steps on service endpoints | ❌ |
+
+### NuGet Plugin Package Acceptance Criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-28 | First-time NuGet package registration sends the root `.nuspec` ID and version with package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
+| AC-29 | Re-deploying an existing NuGet package updates content without attempting to change immutable name or version | `UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists` | ✅ |
+| AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
+| AC-31 | A package containing only `lib/net48` fails locally with a structured error naming Dataverse's supported `lib/net462` and `lib/net471` groups | `Extract_Net48OnlyPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
+| AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` asset group | `Extract_Net471Package_SelectsSupportedPluginAssembly` | ✅ |
 
 ### Edge Cases
 

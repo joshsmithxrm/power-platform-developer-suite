@@ -85,7 +85,7 @@ All libraries target `net8.0`, `net9.0`, and `net10.0`. Install with `dotnet add
 - **`PPDS.Dataverse`** — High-performance Dataverse connectivity. Multi-connection `IDataverseConnectionPool` with DOP-based parallelism from `RecommendedDegreesOfParallelism`, affinity cookie disabled for throughput, `RoundRobin` / `LeastConnections` / `ThrottleAware` strategies, automatic throttle routing and retry (TVP race, SQL deadlock). Bulk wrappers (`CreateMultiple`, `UpdateMultiple`, `UpsertMultiple`, `DeleteMultiple`) with progress reporting. Services: `IMetadataQueryService`, `IMetadataAuthoringService`, `IWebResourceService`, `IFlowService`, `IConnectionReferenceService`, `IDeploymentSettingsService`, `IPluginTraceService`, `IQueryExecutor`. `ListResult<T>` everywhere (no silent truncation).
 - **`PPDS.Query`** — Production-grade SQL query engine. Full T-SQL via ScriptDom, Volcano iterator execution, FetchXML pushdown with hash/merge/nested-loop fallback, parallel partitioned aggregates for accurate `COUNT(*)` beyond the Dataverse 50K limit, TDS endpoint routing, cross-environment queries, `EXPLAIN`, DML safety guards, query hints (`USE_TDS`, `MAXDOP`, `BATCH_SIZE`, `BYPASS_PLUGINS`, etc.), ADO.NET provider (`PpdsDbConnection`, `PpdsDbCommand`, `PpdsDbDataReader`, `PpdsDbProviderFactory`), and FetchXML IntelliSense.
 - **`PPDS.Migration`** — Data migration library with parallel export (configurable DOP), page-level parallelism for large entities via GUID range partitioning, tiered import with Tarjan's algorithm for dependency resolution, deferred field processing for circular references, CMT-format compatibility (`schema.xml` + `data.zip`), file column chunked transfer, owner impersonation via `CallerId`, state-transition handlers (10 built-in: SystemUser, Activity, BusinessUnit, Opportunity, Incident, Quote, SalesOrder, Lead, DuplicateRule, Product), date shifting (4 modes), structured warnings and pool-statistics in `summary.json`.
-- **`PPDS.Plugins`** — Attribute-driven plugin registration (`PluginStepAttribute`, `PluginImageAttribute`, `CustomApiAttribute`, `CustomApiParameterAttribute`) replacing Plugin Registration Tool rituals. Code-first Custom API definition with enums for binding scope, parameter types, processing step types. Targets `net462` (Dataverse plugin sandbox requirement); strong-name-signed.
+- **`PPDS.Plugins`** — Attribute-driven plugin registration (`PluginStepAttribute`, `PluginImageAttribute`, `CustomApiAttribute`, `CustomApiParameterAttribute`) replacing Plugin Registration Tool rituals. Code-first Custom API definition with enums for binding scope, parameter types, processing step types. Targets `net462` as its compatibility baseline; strong-name-signed.
 
 ---
 
@@ -142,7 +142,7 @@ dotnet add package PPDS.Plugins
 
 ### Supported platforms
 
-- **.NET runtime** — .NET 8.0 or later (CLI, MCP, libraries). Plugins: .NET Framework 4.6.2 (Dataverse sandbox requirement).
+- **.NET runtime** — .NET 8.0 or later (CLI, MCP, libraries). Loose Dataverse plug-in assemblies may target .NET Framework 4.6.2 through 4.8; NuGet plug-in packages currently require a `lib/net462` or `lib/net471` asset group. `PPDS.Plugins` targets the compatible `net462` baseline.
 - **OS** — Windows, macOS, Linux.
 - **VS Code** — 1.116 or later.
 - **Node.js** — 20 or later (contributors only).

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Plugins.Extraction;
 
@@ -29,6 +30,7 @@ public static class NupkgExtractor
 
         try
         {
+            var packageMetadata = PluginPackageMetadataReader.Read(File.ReadAllBytes(nupkgPath));
             Directory.CreateDirectory(tempDir);
 
             // Extract the nupkg (it's a zip file). Use the 3-arg overload with
@@ -39,7 +41,7 @@ public static class NupkgExtractor
             AssertExtractedEntriesContained(nupkgPath, tempDir);
 
             // Find plugin DLLs in the lib folder
-            // Plugin packages target net462 typically
+            // Plugin packages target a supported .NET Framework version.
             var libDir = Path.Combine(tempDir, "lib");
             if (!Directory.Exists(libDir))
             {
@@ -47,21 +49,16 @@ public static class NupkgExtractor
                     $"NuGet package does not contain a 'lib' folder: {nupkgPath}");
             }
 
-            // Look for the most specific framework folder
-            var frameworkDirs = Directory.GetDirectories(libDir)
-                .OrderByDescending(d => Path.GetFileName(d)) // Prefer higher versions
-                .ToList();
-
-            if (frameworkDirs.Count == 0)
+            var targetDir = Directory.GetDirectories(libDir).FirstOrDefault(directory =>
+                Path.GetFileName(directory).Equals(
+                    packageMetadata.TargetFramework,
+                    StringComparison.OrdinalIgnoreCase));
+            if (targetDir == null)
             {
-                throw new InvalidOperationException(
-                    $"NuGet package 'lib' folder is empty: {nupkgPath}");
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"NuGet package framework folder 'lib/{packageMetadata.TargetFramework}' could not be extracted: {nupkgPath}");
             }
-
-            // Prefer net462 for plugins (Dataverse requirement), fallback to first available
-            var targetDir = frameworkDirs.FirstOrDefault(d =>
-                Path.GetFileName(d).Equals("net462", StringComparison.OrdinalIgnoreCase))
-                ?? frameworkDirs[0];
 
             // Get all DLLs in the target framework folder
             var dlls = Directory.GetFiles(targetDir, "*.dll");

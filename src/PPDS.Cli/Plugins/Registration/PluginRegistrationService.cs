@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
@@ -10,6 +10,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
@@ -1020,7 +1021,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Creates or updates a plugin package (for NuGet packages).
     /// </summary>
-    /// <param name="packageName">The package name from .nuspec (e.g., "ppds_MyPlugin"). This is what Dataverse uses as uniquename.</param>
+    /// <param name="packageName">The expected package name. It must match the root .nuspec ID.</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
     /// <param name="solutionName">Solution to add the package to.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1032,9 +1033,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.package.upsert");
-        // packageName comes from .nuspec <id> (parsed from .nuspec)
-        // Dataverse extracts uniquename from the nupkg content, so we use packageName for lookup
-        var existing = await GetPackageByNameAsync(packageName, cancellationToken);
+        var metadata = PluginPackageMetadataReader.Read(nupkgContent);
+        if (!string.Equals(packageName, metadata.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Package name '{packageName}' does not match the root .nuspec ID '{metadata.Id}'.");
+        }
+
+        // Dataverse extracts uniquename from the nupkg content, so the .nuspec ID is used for lookup.
+        var existing = await GetPackageByNameAsync(metadata.Id, cancellationToken);
 
         if (existing != null)
         {
@@ -1056,10 +1064,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             return existing.Id;
         }
 
-        // CREATE: Set name and content only - Dataverse extracts uniquename from .nuspec <id> inside nupkg
+        // CREATE: Version is system-required. Dataverse extracts uniquename from the package content.
         var entity = new PluginPackage
         {
-            Name = packageName,
+            Name = metadata.Id,
+            Version = metadata.Version,
             Content = Convert.ToBase64String(nupkgContent)
         };
 
