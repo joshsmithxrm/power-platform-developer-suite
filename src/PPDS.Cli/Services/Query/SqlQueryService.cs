@@ -150,6 +150,9 @@ public sealed class SqlQueryService : ISqlQueryService
         var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
+        var dataSources = CollectDataSources(planResult.RootNode, "Local");
+        var appliedHints = CollectAppliedHints(hints);
+
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
         if (safetyResult?.IsDryRun == true)
@@ -160,7 +163,9 @@ public sealed class SqlQueryService : ISqlQueryService
                 TranspiledFetchXml = planResult.FetchXml,
                 Result = QueryResult.Empty("dry-run"),
                 DmlSafetyResult = safetyResult,
-                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode)
+                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode),
+                DataSources = dataSources,
+                AppliedHints = appliedHints
             };
         }
 
@@ -208,9 +213,6 @@ public sealed class SqlQueryService : ISqlQueryService
             result,
             planResult.VirtualColumns,
             isAggregate);
-
-        var dataSources = CollectDataSources(planResult.RootNode, "Local");
-        var appliedHints = CollectAppliedHints(hints);
 
         return new SqlQueryResult
         {
