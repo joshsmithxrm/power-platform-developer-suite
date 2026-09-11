@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **First-time `ppds plugins deploy|register package` no longer fails with `Attribute 'version' cannot be NULL`** — PPDS now reads the root `.nuspec` ID and version through one validated package-metadata path and sends both on `pluginpackage` creation; existing packages remain content-only updates because Dataverse package name and version are immutable. NuGet packages are also preflighted for Dataverse-supported `lib/net462` or `lib/net471` assets, so a `lib/net48`-only package gets an actionable local validation error instead of a late server/PRT rejection.
+
 ## [1.4.0] - 2026-07-15
 
 ### Added
