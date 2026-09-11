@@ -481,7 +481,7 @@ public class SqlQueryServiceTests
             mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
         var request = new SqlQueryRequest
         {
-            Sql = "DELETE FROM account WHERE name = 'test'",
+            Sql = "-- ppds:BATCH_SIZE 50\nDELETE FROM account WHERE name = 'test'",
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
@@ -502,6 +502,10 @@ public class SqlQueryServiceTests
         Assert.Equal(DmlSafetyGuard.DefaultRowCap, result.DmlSafetyResult.RowCap);
         Assert.NotNull(result.DryRunPlan);
         Assert.Equal("DmlExecuteNode", result.DryRunPlan.NodeType);
+        var dataSource = Assert.Single(result.DataSources!);
+        Assert.Equal("Local", dataSource.Label);
+        Assert.False(dataSource.IsRemote);
+        Assert.Equal(["BATCH_SIZE"], result.AppliedHints);
         Assert.Null(result.ExecutionMode);
         mockExecutor.VerifyNoOtherCalls();
     }

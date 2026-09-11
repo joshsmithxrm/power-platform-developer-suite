@@ -306,7 +306,9 @@ public sealed class SqlQueryService : ISqlQueryService
                 IsComplete = true,
                 TranspiledFetchXml = planResult.FetchXml,
                 DmlSafetyResult = safetyResult,
-                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode)
+                DryRunPlan = QueryPlanDescription.FromNode(planResult.RootNode),
+                DataSources = streamDataSources,
+                AppliedHints = streamAppliedHints
             };
             yield break;
         }
