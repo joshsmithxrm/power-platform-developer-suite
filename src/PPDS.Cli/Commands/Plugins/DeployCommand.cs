@@ -96,20 +96,10 @@ public static class DeployCommand
             var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
             var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
 
-            // Collect custom APIs from both root-level and per-assembly sections
-            var allCustomApis = new List<CustomApiConfig>();
-            if (config?.CustomApis != null)
-                allCustomApis.AddRange(config.CustomApis);
-            if (config?.Assemblies != null)
-            {
-                foreach (var asm in config.Assemblies)
-                {
-                    if (asm.CustomApis != null)
-                        allCustomApis.AddRange(asm.CustomApis);
-                }
-            }
+            var configuredCustomApiCount = (config?.CustomApis?.Count ?? 0)
+                + (config?.Assemblies?.Sum(assembly => assembly.CustomApis?.Count ?? 0) ?? 0);
 
-            if ((config?.Assemblies == null || config.Assemblies.Count == 0) && allCustomApis.Count == 0)
+            if ((config?.Assemblies == null || config.Assemblies.Count == 0) && configuredCustomApiCount == 0)
             {
                 writer.WriteError(new StructuredError(
                     ErrorCodes.Validation.InvalidValue,
@@ -166,6 +156,12 @@ public static class DeployCommand
                     results.Add(result);
                 }
             }
+
+            // Root-level APIs can intentionally target an already registered type. APIs nested
+            // under an assembly are owned by that deployment and must not bind to a stale
+            // Dataverse type when the corresponding preflight or deployment failed.
+            var allCustomApis = new List<CustomApiConfig>(config.CustomApis ?? []);
+            allCustomApis.AddRange(SelectAssemblyCustomApisForDeployment(config.Assemblies, results));
 
             // Deploy custom APIs
             if (allCustomApis.Count > 0)
@@ -614,6 +610,32 @@ public static class DeployCommand
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Returns only the Custom APIs owned by assemblies whose deployment completed successfully.
+    /// The lists are positional because <see cref="ExecuteAsync"/> records one result for each
+    /// configured assembly in order.
+    /// </summary>
+    internal static IReadOnlyList<CustomApiConfig> SelectAssemblyCustomApisForDeployment(
+        IReadOnlyList<PluginAssemblyConfig>? assemblies,
+        IReadOnlyList<DeploymentResult> results)
+    {
+        if (assemblies == null || assemblies.Count == 0)
+            return [];
+
+        if (assemblies.Count != results.Count)
+        {
+            throw new ArgumentException(
+                "Assembly deployment results must align with the configured assemblies.",
+                nameof(results));
+        }
+
+        return assemblies
+            .Zip(results)
+            .Where(pair => pair.Second.Success)
+            .SelectMany(pair => pair.First.CustomApis ?? [])
+            .ToList();
     }
 
     private static async Task DeployCustomApisAsync(

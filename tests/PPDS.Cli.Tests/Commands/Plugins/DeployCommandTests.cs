@@ -418,6 +418,91 @@ public class DeployCommandTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public void SelectAssemblyCustomApisForDeployment_GatesApisOnAssemblySuccess(
+        bool assemblySucceeded,
+        int expectedCount)
+    {
+        var customApi = new CustomApiConfig
+        {
+            UniqueName = "ppds_GatedApi",
+            PluginTypeName = "Contoso.Plugins.ApiPlugin"
+        };
+        var assembly = new PluginAssemblyConfig
+        {
+            Name = "Contoso.Plugins",
+            Type = "Nuget",
+            PackagePath = "contoso.nupkg",
+            CustomApis = [customApi]
+        };
+        var result = new DeployCommand.DeploymentResult
+        {
+            AssemblyName = assembly.Name,
+            Success = assemblySucceeded,
+            ErrorCode = assemblySucceeded ? null : ErrorCodes.Plugin.PackageAssemblyMismatch
+        };
+
+        var selected = DeployCommand.SelectAssemblyCustomApisForDeployment([assembly], [result]);
+
+        Assert.Equal(expectedCount, selected.Count);
+        if (assemblySucceeded)
+            Assert.Same(customApi, Assert.Single(selected));
+    }
+
+    [Fact]
+    public async Task SelectAssemblyCustomApisForDeployment_FailedPackagePreflightSkipsAssemblyApis()
+    {
+        var packagePath = CreateRuntimePluginPackage();
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            var assembly = new PluginAssemblyConfig
+            {
+                Name = "ppds_RuntimePackage.1.0.0",
+                Type = "Nuget",
+                PackagePath = packagePath,
+                CustomApis =
+                [
+                    new CustomApiConfig
+                    {
+                        UniqueName = "ppds_GatedApi",
+                        PluginTypeName = "Contoso.RuntimePlugins.RuntimePlugin"
+                    }
+                ]
+            };
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                assembly,
+                Path.GetTempPath(),
+                solutionOverride: null,
+                clean: false,
+                dryRun: false,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            var selected = DeployCommand.SelectAssemblyCustomApisForDeployment([assembly], [result]);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
+            Assert.Empty(selected);
+            mock.Verify(service => service.GetPackageByNameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
     [Fact]
     public async Task DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph()
     {
