@@ -249,6 +249,18 @@ public class ExceptionMapperTests
         Assert.Equal(ExitCodes.Failure, code);
     }
 
+    [Fact]
+    public void ToExitCode_DmlConfirmationRequired_ReturnsConfirmationRequired()
+    {
+        var ex = new PpdsException(
+            ErrorCodes.Query.DmlConfirmationRequired,
+            "DML operations require --confirm to execute.");
+
+        var code = ExceptionMapper.ToExitCode(ex);
+
+        Assert.Equal(ExitCodes.ConfirmationRequired, code);
+    }
+
     #endregion
 
     #region MapWithExitCode Tests

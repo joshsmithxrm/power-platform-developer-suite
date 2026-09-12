@@ -80,6 +80,211 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         _baseOptions = baseOptions;
     }
 
+    /// <summary>
+    /// Builds a side-effect-free preview of the statements that this script node
+    /// defers until execution. Control-flow statements are represented structurally,
+    /// while data statements are planned normally so callers can inspect their real
+    /// execution nodes and FetchXML without dispatching an executor.
+    /// </summary>
+    internal (
+        QueryPlanDescription Plan,
+        string FetchXml,
+        IReadOnlyList<IQueryPlanNode> PlannedNodes) BuildDryRunPreview()
+    {
+        var fetchXmlParts = new List<string>();
+        var plannedNodes = new List<IQueryPlanNode>();
+        var children = DescribeStatements(_statements, fetchXmlParts, plannedNodes);
+
+        return (
+            new QueryPlanDescription
+            {
+                NodeType = nameof(ScriptExecutionNode),
+                Description = Description,
+                EstimatedRows = EstimatedRows,
+                Children = children
+            },
+            fetchXmlParts.Count == 0
+                ? "-- Script: no data statements to plan"
+                : string.Join("\n-- Next statement --\n", fetchXmlParts),
+            plannedNodes);
+    }
+
+    private IReadOnlyList<QueryPlanDescription> DescribeStatements(
+        IEnumerable<TSqlStatement> statements,
+        List<string> fetchXmlParts,
+        List<IQueryPlanNode> plannedNodes)
+    {
+        var descriptions = new List<QueryPlanDescription>();
+        foreach (var statement in statements)
+            descriptions.Add(DescribeStatement(statement, fetchXmlParts, plannedNodes));
+        return descriptions;
+    }
+
+    private QueryPlanDescription DescribeStatement(
+        TSqlStatement statement,
+        List<string> fetchXmlParts,
+        List<IQueryPlanNode> plannedNodes)
+    {
+        switch (statement)
+        {
+            case BeginEndBlockStatement block:
+                return DescribeControlFlow(
+                    nameof(BeginEndBlockStatement),
+                    "BEGIN...END",
+                    DescribeStatements(block.StatementList.Statements, fetchXmlParts, plannedNodes));
+
+            case IfStatement ifStatement:
+                var ifChildren = new List<QueryPlanDescription>
+                {
+                    DescribeControlFlow(
+                        "ThenBranch",
+                        "THEN",
+                        DescribeStatements(UnwrapStatement(ifStatement.ThenStatement), fetchXmlParts, plannedNodes))
+                };
+                if (ifStatement.ElseStatement != null)
+                {
+                    ifChildren.Add(DescribeControlFlow(
+                        "ElseBranch",
+                        "ELSE",
+                        DescribeStatements(UnwrapStatement(ifStatement.ElseStatement), fetchXmlParts, plannedNodes)));
+                }
+                return DescribeControlFlow(nameof(IfStatement), "IF", ifChildren);
+
+            case WhileStatement whileStatement:
+                return DescribeControlFlow(
+                    nameof(WhileStatement),
+                    "WHILE",
+                    DescribeStatements(UnwrapStatement(whileStatement.Statement), fetchXmlParts, plannedNodes));
+
+            case TryCatchStatement tryCatch:
+                return DescribeControlFlow(
+                    nameof(TryCatchStatement),
+                    "TRY/CATCH",
+                    [
+                        DescribeControlFlow(
+                            "TryBranch",
+                            "TRY",
+                            DescribeStatements(tryCatch.TryStatements.Statements, fetchXmlParts, plannedNodes)),
+                        DescribeControlFlow(
+                            "CatchBranch",
+                            "CATCH",
+                            DescribeStatements(tryCatch.CatchStatements.Statements, fetchXmlParts, plannedNodes))
+                    ]);
+
+            case SelectStatement select when HasIntoTempTable(select):
+                return DescribeSelectInto(select, fetchXmlParts, plannedNodes);
+
+            case SelectStatement select when IsVariableAssignment(select)
+                && IsFromlessSelect(select):
+                return DescribeDeferredStatement("SelectVariableAssignment", "SELECT variable assignment");
+
+            case SelectStatement select when IsVariableAssignment(select):
+                return DescribeControlFlow(
+                    "SelectVariableAssignment",
+                    "SELECT variable assignment from data source",
+                    [DescribePlannedStatement(select, fetchXmlParts, plannedNodes)]);
+
+            case SelectStatement select when IsFromlessSelect(select):
+                return DescribeDeferredStatement("FromlessSelect", "SELECT without FROM");
+
+            case SelectStatement select when GetTempTableNameFromSelect(select) != null:
+                return DescribeDeferredStatement(
+                    "TempTableSelect",
+                    $"SELECT from {GetTempTableNameFromSelect(select)}");
+
+            case SelectStatement:
+            case InsertStatement:
+            case UpdateStatement:
+            case DeleteStatement:
+            case MergeStatement:
+                return DescribePlannedStatement(statement, fetchXmlParts, plannedNodes);
+
+            default:
+                return new QueryPlanDescription
+                {
+                    NodeType = statement.GetType().Name,
+                    Description = statement.GetType().Name,
+                    EstimatedRows = -1
+                };
+        }
+    }
+
+    private QueryPlanDescription DescribeSelectInto(
+        SelectStatement selectStatement,
+        List<string> fetchXmlParts,
+        List<IQueryPlanNode> plannedNodes)
+    {
+        var tempTableName = selectStatement.Into.BaseIdentifier.Value;
+        if (IsFromlessSelect(selectStatement))
+        {
+            return DescribeDeferredStatement(
+                "SelectIntoTempTable",
+                $"SELECT INTO {tempTableName} without FROM");
+        }
+
+        var sourceTempTableName = GetTempTableNameFromSelect(selectStatement);
+        if (sourceTempTableName != null)
+        {
+            return DescribeControlFlow(
+                "SelectIntoTempTable",
+                $"SELECT INTO {tempTableName}",
+                [DescribeDeferredStatement(
+                    "TempTableSelect",
+                    $"SELECT from {sourceTempTableName}")]);
+        }
+
+        // Plan only the source query. Removing INTO mirrors execution, which creates
+        // and populates the session temp table itself after the source is evaluated.
+        var into = selectStatement.Into;
+        try
+        {
+            selectStatement.Into = null;
+            var sourcePlan = DescribePlannedStatement(
+                selectStatement, fetchXmlParts, plannedNodes);
+            return DescribeControlFlow(
+                "SelectIntoTempTable",
+                $"SELECT INTO {tempTableName}",
+                [sourcePlan]);
+        }
+        finally
+        {
+            selectStatement.Into = into;
+        }
+    }
+
+    private QueryPlanDescription DescribePlannedStatement(
+        TSqlStatement statement,
+        List<string> fetchXmlParts,
+        List<IQueryPlanNode> plannedNodes)
+    {
+        var planned = _planBuilder.PlanStatement(
+            statement,
+            _baseOptions ?? new QueryPlanOptions());
+        fetchXmlParts.Add(planned.FetchXml);
+        plannedNodes.Add(planned.RootNode);
+        return QueryPlanDescription.FromNode(planned.RootNode);
+    }
+
+    private static QueryPlanDescription DescribeDeferredStatement(
+        string nodeType,
+        string description) => new()
+        {
+            NodeType = nodeType,
+            Description = description,
+            EstimatedRows = -1
+        };
+
+    private static QueryPlanDescription DescribeControlFlow(
+        string nodeType,
+        string description,
+        IReadOnlyList<QueryPlanDescription> children) => new()
+        {
+            NodeType = nodeType,
+            Description = description,
+            EstimatedRows = -1,
+            Children = children
+        };
+
     /// <inheritdoc />
     public async IAsyncEnumerable<QueryRow> ExecuteAsync(
         QueryPlanContext context,

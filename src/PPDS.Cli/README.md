@@ -511,19 +511,30 @@ ppds query sql "SELECT name, revenue FROM account" -f csv > accounts.csv
 
 # Export to JSON file
 ppds query sql "SELECT * FROM contact" -f json > contacts.json
+
+# Preview a DML plan without changing records or supplying --confirm
+ppds query sql "UPDATE contact SET jobtitle = 'Senior Developer' WHERE jobtitle = 'Developer'" --dry-run
+
+# Execute the previewed DML after confirmation
+ppds query sql "UPDATE contact SET jobtitle = 'Senior Developer' WHERE jobtitle = 'Developer'" --confirm
 ```
 
 Options:
 - `--file`, `-f` - Read SQL from file
 - `--stdin` - Read SQL from stdin
 - `--show-fetchxml` - Output the transpiled FetchXML instead of executing
+- `--explain` - Show the execution plan without executing
+- `--tds` - Route compatible read queries through the TDS Endpoint
+- `--dry-run` - Build a DML plan without changing Dataverse; does not require `--confirm`
+- `--confirm` - Confirm actual DML execution without an interactive prompt
+- `--no-limit` - Remove the 10,000-row DML safety cap
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
 - `--top`, `-t` - Limit number of results (applies if no TOP in query)
 - `--page` - Page number (1-based)
 - `--paging-cookie` - Paging cookie for continuation
 - `--count`, `-c` - Include total record count
-- `--output-format` - Output format (Text, Json, or Csv)
+- `--output-format` - Output format (Text, Json, or Csv); DML dry-run plans support Text or Json
 
 #### Supported SQL Syntax
 
