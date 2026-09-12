@@ -20,6 +20,9 @@ on:
           - pre-release
           - stable
 
+permissions:
+  contents: read
+
 jobs:
   preflight:
     name: marketplace-listing-preflight
@@ -195,3 +198,45 @@ jobs:
         run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
+
+  verify-public-artifacts:
+    name: Verify public Marketplace artifacts
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+    steps:
+      - name: Checkout release verifier
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Resolve bundled CLI release
+        id: resolve-cli
+        shell: bash
+        run: |
+          sha="$(git rev-list -n 1 "$GITHUB_REF")"
+          cli_tag="$(git describe --tags --exact-match --match 'Cli-v*' "$sha" 2>/dev/null || true)"
+          if [[ -z "$cli_tag" ]]; then
+            echo "::error::Extension verification requires the co-located Cli-v* release tag."
+            exit 1
+          fi
+          echo "version=${cli_tag#Cli-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify all public Marketplace targets
+        run: >-
+          python scripts/ci/verify_public_release.py
+          marketplace
+          --tag "$GITHUB_REF_NAME"
+          --cli-version "${{ steps.resolve-cli.outputs.version }}"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    createBundledCliManifest,
     extractInformationalVersion,
     verifyBundledCliVersion,
 } from './bundle-cli-version.mjs';
@@ -42,5 +43,21 @@ describe('bundled CLI release version verification', () => {
     ])('rejects release or prerelease mismatches (%s vs %s)', (actual, expected) => {
         expect(() => verifyBundledCliVersion(assemblyInfo(actual), expected))
             .toThrow(`Bundled CLI version mismatch: expected ${expected}, MinVer produced ${actual}`);
+    });
+});
+
+describe('bundled CLI identity manifest', () => {
+    it('records the release, compiled version, and runtime target', () => {
+        expect(createBundledCliManifest('linux-x64', '1.6.1', '1.6.1+abc1234')).toEqual({
+            schemaVersion: 1,
+            rid: 'linux-x64',
+            releaseVersion: '1.6.1',
+            informationalVersion: '1.6.1+abc1234',
+        });
+    });
+
+    it('fails closed if any identity field is unavailable', () => {
+        expect(() => createBundledCliManifest('', '1.6.1', '1.6.1+abc1234'))
+            .toThrow('requires rid, release version, and informational version');
     });
 });
