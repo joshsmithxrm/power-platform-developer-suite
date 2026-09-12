@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **`ppds query sql <DML> --dry-run` no longer requires `--confirm`** — dry-run now performs the side-effect-free DML planning path directly while preserving hard safety blocks such as UPDATE/DELETE without `WHERE` and cross-environment read-only policy for every target, the configured execution row cap, and the shakedown guard's dry-run carve-out. CLI Text/JSON, daemon JSON-RPC, and service streaming responses now contain the plan, FetchXML, row cap, and execution-confirmation requirement instead of an empty result; compound scripts expand their nested DML plans and per-statement FetchXML. Actual DML remains confirmation-gated, and an unconfirmed CLI execution now returns the documented confirmation-required exit code (11).
+- **`ppds plugins unregister package --force` now removes NuGet plugin packages cleanly** — PPDS deletes descendant registrations, then deletes the owning `pluginpackage` so Dataverse can cascade its package-owned assemblies instead of attempting a forbidden direct `pluginassembly` delete and leaving a partially unregistered package behind.
+- **Direct assembly unregistration now protects package-owned assemblies** — PPDS rejects the operation before deleting descendants and directs the user to unregister the owning package instead.
+- **First-time `ppds plugins deploy|register package` no longer fails with `Attribute 'version' cannot be NULL`** — PPDS now reads the root `.nuspec` ID and version through one validated package-metadata path and sends both on `pluginpackage` creation; existing packages remain content-only updates because Dataverse package name and version are immutable. NuGet packages are also preflighted for Dataverse-supported `lib/net462` or `lib/net471` assets, so a `lib/net48`-only package gets an actionable local validation error instead of a late server/PRT rejection.
 
 ## [1.4.0] - 2026-07-15
 
