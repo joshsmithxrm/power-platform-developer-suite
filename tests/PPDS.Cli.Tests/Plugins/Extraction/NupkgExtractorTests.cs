@@ -361,6 +361,175 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
+    public void Extract_SpoofedPluginInterfaceFromUnrelatedAssembly_RejectsPackage()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "spoofed-plugin-interface.nupkg",
+            "ppds_SpoofedPluginInterface",
+            new TestPackageAssembly(
+                "Contoso.FakeSdk",
+                "Contoso.FakeSdk.dll",
+                """
+                using System;
+                namespace Microsoft.Xrm.Sdk
+                {
+                    public interface IPlugin
+                    {
+                        void Execute(IServiceProvider serviceProvider);
+                    }
+                }
+                """),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class SpoofedPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                AssemblyReferences: ["Contoso.FakeSdk"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_LocalTypeDefinitionNamedIPlugin_RejectsPackage()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "local-spoofed-plugin-interface.nupkg",
+            "ppds_LocalSpoofedPluginInterface",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                namespace Microsoft.Xrm.Sdk
+                {
+                    public interface IPlugin
+                    {
+                        void Execute(IServiceProvider serviceProvider);
+                    }
+                }
+
+                namespace Contoso.Plugins
+                {
+                    public sealed class SpoofedPlugin : Microsoft.Xrm.Sdk.IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_IPluginFromMicrosoftXrmSdkWithWrongToken_RejectsPackage()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "wrong-token-plugin-interface.nupkg",
+            "ppds_WrongTokenPluginInterface",
+            new TestPackageAssembly(
+                "Microsoft.Xrm.Sdk",
+                "Microsoft.Xrm.Sdk.dll",
+                """
+                using System;
+                namespace Microsoft.Xrm.Sdk
+                {
+                    public interface IPlugin
+                    {
+                        void Execute(IServiceProvider serviceProvider);
+                    }
+                }
+                """),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class SpoofedPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                AssemblyReferences: ["Microsoft.Xrm.Sdk"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_IPluginForwardedFromNonSdkIdentity_RejectsPackage()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "forwarded-spoofed-plugin-interface.nupkg",
+            "ppds_ForwardedSpoofedPluginInterface",
+            new TestPackageAssembly(
+                "Contoso.ForwardedSdk",
+                "Contoso.ForwardedSdk.dll",
+                """
+                using System;
+                namespace Microsoft.Xrm.Sdk
+                {
+                    public interface IPlugin
+                    {
+                        void Execute(IServiceProvider serviceProvider);
+                    }
+                }
+                """),
+            new TestPackageAssembly(
+                "Microsoft.Xrm.Sdk",
+                "Microsoft.Xrm.Sdk.dll",
+                """
+                using System.Runtime.CompilerServices;
+                [assembly: TypeForwardedTo(typeof(Microsoft.Xrm.Sdk.IPlugin))]
+                """,
+                AssemblyReferences: ["Contoso.ForwardedSdk"]),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class SpoofedPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                AssemblyReferences: ["Microsoft.Xrm.Sdk", "Contoso.ForwardedSdk"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
     public void Extract_RuntimePluginInheritedThroughExternalBase_DetectsConcreteType()
     {
         var nupkgPath = PluginPackageTestFixture.Create(

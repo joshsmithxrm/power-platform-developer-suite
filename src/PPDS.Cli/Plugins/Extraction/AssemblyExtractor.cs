@@ -15,6 +15,11 @@ namespace PPDS.Cli.Plugins.Extraction;
 /// </summary>
 public sealed class AssemblyExtractor : IDisposable
 {
+    private const string DataversePluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
+    private const string DataverseSdkAssemblyName = "Microsoft.Xrm.Sdk";
+    private static readonly ImmutableArray<byte> DataverseSdkPublicKeyToken =
+        [0x31, 0xbf, 0x38, 0x56, 0xad, 0x36, 0x4e, 0x35];
+
     /// <summary>
     /// Logical name of the embedded resource holding the zipped .NET Framework 4.6.2
     /// reference assemblies. Must stay in sync with the <c>EmbedNet462ReferenceAssemblies</c>
@@ -403,8 +408,6 @@ public sealed class AssemblyExtractor : IDisposable
         string assemblyPath,
         IReadOnlyList<string> resolverPaths)
     {
-        const string pluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
-
         using var resolver = new MetadataTypeResolver(resolverPaths);
         var target = resolver.LoadAssembly(assemblyPath);
         var implementsPlugin = new Dictionary<ResolvedMetadataType, bool>();
@@ -432,7 +435,12 @@ public sealed class AssemblyExtractor : IDisposable
                     .Select(type.Assembly.Reader.GetInterfaceImplementation)
                     .ToList();
                 if (interfaces.Any(implementation =>
-                        resolver.GetTypeFullName(type.Assembly, implementation.Interface) == pluginInterfaceName))
+                        resolver.IsAssemblyQualifiedType(
+                            type.Assembly,
+                            implementation.Interface,
+                            DataversePluginInterfaceName,
+                            DataverseSdkAssemblyName,
+                            DataverseSdkPublicKeyToken)))
                 {
                     implementsPlugin[type] = true;
                     return true;
@@ -614,6 +622,35 @@ public sealed class AssemblyExtractor : IDisposable
         internal string? GetTypeFullName(MetadataAssembly assembly, EntityHandle handle)
         {
             return GetTypeFullName(assembly, handle, []);
+        }
+
+        internal bool IsAssemblyQualifiedType(
+            MetadataAssembly context,
+            EntityHandle handle,
+            string expectedTypeName,
+            string expectedAssemblyName,
+            ImmutableArray<byte> expectedPublicKeyToken)
+        {
+            if (handle.Kind != HandleKind.TypeReference
+                || GetTypeFullName(context, handle) != expectedTypeName)
+            {
+                return false;
+            }
+
+            var reference = context.Reader.GetTypeReference((TypeReferenceHandle)handle);
+            if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+                return false;
+
+            var assemblyReference = context.Reader.GetAssemblyReference(
+                (AssemblyReferenceHandle)reference.ResolutionScope);
+            if (!context.Reader.StringComparer.Equals(assemblyReference.Name, expectedAssemblyName)
+                || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0)
+            {
+                return false;
+            }
+
+            var publicKeyToken = context.Reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
+            return publicKeyToken.AsSpan().SequenceEqual(expectedPublicKeyToken.AsSpan());
         }
 
         private string? GetTypeFullName(

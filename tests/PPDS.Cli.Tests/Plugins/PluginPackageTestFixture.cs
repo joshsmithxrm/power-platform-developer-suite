@@ -79,7 +79,12 @@ internal static class PluginPackageTestFixture
         };
 
         if (source.ReferencesSdk)
-            references.Add(MetadataReference.CreateFromImage(CompileSdkContract(referenceDirectory)));
+        {
+            references.Add(MetadataReference.CreateFromFile(Path.Combine(
+                AppContext.BaseDirectory,
+                "TestAssets",
+                "Microsoft.Xrm.Sdk.net462.dll")));
+        }
         if (source.ReferencesPpdsPlugins)
             references.Add(MetadataReference.CreateFromFile(typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location));
         if (source.AssemblyReferences != null)
@@ -100,39 +105,6 @@ internal static class PluginPackageTestFixture
             source.AssemblyName,
             [CSharpSyntaxTree.ParseText(source.Source)],
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        using var output = new MemoryStream();
-        var result = compilation.Emit(output);
-        if (!result.Success)
-        {
-            throw new InvalidOperationException(
-                string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => diagnostic.ToString())));
-        }
-
-        return output.ToArray();
-    }
-
-    private static byte[] CompileSdkContract(string referenceDirectory)
-    {
-        var compilation = CSharpCompilation.Create(
-            "Microsoft.Xrm.Sdk",
-            [CSharpSyntaxTree.ParseText("""
-                using System;
-                namespace Microsoft.Xrm.Sdk
-                {
-                    public interface IPlugin
-                    {
-                        void Execute(IServiceProvider serviceProvider);
-                    }
-
-                    public interface ITracingService
-                    {
-                        void Trace(string format, params object[] args);
-                    }
-                }
-                """)],
-            [MetadataReference.CreateFromFile(Path.Combine(referenceDirectory, "mscorlib.dll"))],
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         using var output = new MemoryStream();

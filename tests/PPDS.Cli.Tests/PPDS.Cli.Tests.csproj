@@ -10,12 +10,15 @@
     <!-- NU1702: PPDS.Plugins targets the net462 Dataverse compatibility baseline but is
          referenced transitively from net8.0+. The package contains only attributes/enums
          with no framework-specific APIs, so cross-framework reference is safe. -->
-    <NoWarn>$(NoWarn);NU1702</NoWarn>
+    <!-- NU1701: CoreAssemblies is excluded from compile/runtime and copied only as an
+         authentic net462 metadata fixture for plug-in assembly identity tests. -->
+    <NoWarn>$(NoWarn);NU1701;NU1702</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Moq" />
     <PackageReference Include="xunit" />
@@ -32,5 +35,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyNet462DataverseSdkTestAsset" AfterTargets="Build">
+    <Copy
+      SourceFiles="$(PkgMicrosoft_CrmSdk_CoreAssemblies)\lib\net462\Microsoft.Xrm.Sdk.dll"
+      DestinationFiles="$(OutDir)TestAssets\Microsoft.Xrm.Sdk.net462.dll" />
+  </Target>
 
 </Project>
