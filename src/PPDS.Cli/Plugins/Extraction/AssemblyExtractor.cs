@@ -542,24 +542,30 @@ public sealed class AssemblyExtractor : IDisposable
             try
             {
                 var peReader = new PEReader(stream);
-                if (!peReader.HasMetadata)
+                try
+                {
+                    if (!peReader.HasMetadata)
+                    {
+                        throw new BadImageFormatException($"Assembly '{path}' does not contain managed metadata.");
+                    }
+
+                    var reader = peReader.GetMetadataReader();
+                    if (!reader.IsAssembly)
+                    {
+                        throw new BadImageFormatException($"File '{path}' is not a managed assembly manifest.");
+                    }
+
+                    var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
+                    var assembly = new MetadataAssembly(stream, peReader, reader);
+                    _assembliesByPath.Add(fullPath, assembly);
+                    _pathsByAssemblyName.TryAdd(assemblyName, fullPath);
+                    return assembly;
+                }
+                catch
                 {
                     peReader.Dispose();
-                    throw new BadImageFormatException($"Assembly '{path}' does not contain managed metadata.");
+                    throw;
                 }
-
-                var reader = peReader.GetMetadataReader();
-                if (!reader.IsAssembly)
-                {
-                    peReader.Dispose();
-                    throw new BadImageFormatException($"File '{path}' is not a managed assembly manifest.");
-                }
-
-                var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
-                var assembly = new MetadataAssembly(stream, peReader, reader);
-                _assembliesByPath.Add(fullPath, assembly);
-                _pathsByAssemblyName.TryAdd(assemblyName, fullPath);
-                return assembly;
             }
             catch
             {
