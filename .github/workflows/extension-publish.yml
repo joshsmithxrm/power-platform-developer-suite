@@ -20,6 +20,9 @@ on:
           - pre-release
           - stable
 
+permissions:
+  contents: read
+
 jobs:
   preflight:
     name: marketplace-listing-preflight
@@ -200,6 +203,8 @@ jobs:
     name: Verify public Marketplace artifacts
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
@@ -210,6 +215,7 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6

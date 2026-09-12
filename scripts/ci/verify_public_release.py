@@ -68,14 +68,24 @@ MARKETPLACE_TARGETS = {
     "darwin-arm64": "osx-arm64",
 }
 
-SEMVER_PATTERN = re.compile(
-    r"(?P<version>"
-    r"(?:0|[1-9]\d*)\."
-    r"(?:0|[1-9]\d*)\."
-    r"(?:0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r")"
+SEMVER_NUMERIC_IDENTIFIER = r"(?:0|[1-9][0-9]*)"
+SEMVER_PRERELEASE_IDENTIFIER = (
+    r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+SEMVER_BUILD_IDENTIFIER = r"[0-9A-Za-z-]+"
+SEMVER_TEXT = (
+    rf"{SEMVER_NUMERIC_IDENTIFIER}\."
+    rf"{SEMVER_NUMERIC_IDENTIFIER}\."
+    rf"{SEMVER_NUMERIC_IDENTIFIER}"
+    rf"(?:-{SEMVER_PRERELEASE_IDENTIFIER}"
+    rf"(?:\.{SEMVER_PRERELEASE_IDENTIFIER})*)?"
+    rf"(?:\+{SEMVER_BUILD_IDENTIFIER}"
+    rf"(?:\.{SEMVER_BUILD_IDENTIFIER})*)?"
+)
+SEMVER_PATTERN = re.compile(rf"(?P<version>{SEMVER_TEXT})", re.ASCII)
+CLI_VERSION_OUTPUT_PATTERN = re.compile(
+    rf"(?:[A-Za-z0-9._-]+[ \t]+)?(?P<version>{SEMVER_TEXT})",
+    re.ASCII,
 )
 
 
@@ -125,21 +135,24 @@ def package_from_tag(tag: str) -> tuple[str, str]:
 
 def versions_match(actual: str, expected: str) -> bool:
     try:
-        return release_version(actual).casefold() == release_version(expected).casefold()
+        return release_version(actual) == release_version(expected)
     except VerificationError:
         return False
 
 
 def extract_cli_version(output: str) -> str:
-    """Extract one unambiguous SemVer from public CLI ``--version`` output."""
+    """Validate the complete CLI ``--version`` line and return its strict SemVer."""
 
-    matches = {match.group("version") for match in SEMVER_PATTERN.finditer(output)}
-    if len(matches) != 1:
+    # Both tools emit either ``<semver>`` or ``<command> <semver>``.  Do not
+    # search for a SemVer substring: malformed values such as 1.6.1.0 and
+    # 1.6.1-01 must fail the public release gate rather than match a prefix.
+    match = CLI_VERSION_OUTPUT_PATTERN.fullmatch(output.strip(" \t\r\n"))
+    if match is None:
         raise VerificationError(
-            "CLI --version output did not contain exactly one semantic version: "
+            "CLI --version output was not one complete strict semantic-version line: "
             f"{output.strip()!r}"
         )
-    return matches.pop()
+    return match.group("version")
 
 
 def default_http_fetch(
@@ -250,6 +263,35 @@ def _run_or_pending(
     return result
 
 
+def _verify_installed_tool(
+    runner: CommandRunner,
+    executable: Path,
+    package: str,
+    version: str,
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+) -> None:
+    try:
+        result = runner([str(executable), "--version"], cwd, env)
+    except ArtifactPending as error:
+        raise VerificationError(
+            f"Public {package} launcher could not execute: {error}"
+        ) from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "no command output").strip()
+        raise VerificationError(
+            f"Public {package} launcher failed with exit code {result.returncode}: "
+            f"{detail[-1000:]}"
+        )
+    actual = extract_cli_version(f"{result.stdout}\n{result.stderr}")
+    if not versions_match(actual, version):
+        raise VerificationError(
+            f"Public {package} version mismatch: expected {release_version(version)}, "
+            f"got {actual}"
+        )
+
+
 def verify_nuget_once(
     package: str,
     version: str,
@@ -317,20 +359,18 @@ def verify_nuget_once(
                 env=env,
                 action=f"Clean nuget.org install of {package} {version}",
             )
-            if package == "PPDS.Cli":
-                executable = tool_dir / ("ppds.exe" if os.name == "nt" else "ppds")
-                result = _run_or_pending(
-                    runner,
-                    [str(executable), "--version"],
-                    cwd=temp,
-                    env=env,
-                    action="Public PPDS CLI execution",
-                )
-                actual = extract_cli_version(f"{result.stdout}\n{result.stderr}")
-                if not versions_match(actual, version):
-                    raise VerificationError(
-                        f"Public PPDS CLI version mismatch: expected {version}, got {actual}"
-                    )
+            command_name = TOOL_COMMANDS[package]
+            executable = tool_dir / (
+                f"{command_name}.exe" if os.name == "nt" else command_name
+            )
+            _verify_installed_tool(
+                runner,
+                executable,
+                package,
+                version,
+                cwd=temp,
+                env=env,
+            )
         else:
             target_framework = "net462" if package == "PPDS.Plugins" else "net8.0"
             project = temp / "verify.csproj"

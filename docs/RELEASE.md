@@ -16,7 +16,7 @@ credentials and do not modify release state:
 
 - NuGet publishes are polled through nuget.org, then restored or installed in
   a clean temporary directory whose only package source is nuget.org. A
-  `PPDS.Cli` release is also executed with `--version`.
+  `PPDS.Cli` or `PPDS.Mcp` tool release is also executed with `--version`.
 - CLI GitHub Releases must expose all five platform binaries plus
   `checksums.sha256`. Every downloaded binary is hashed, and the public Linux
   binary is executed to confirm its version.
@@ -34,6 +34,10 @@ or otherwise attempt to roll back an artifact that has reached a public feed.
 The shared implementation is `scripts/ci/verify_public_release.py`; its tests
 inject HTTP and process adapters, so CI policy tests never contact production
 distribution channels.
+
+Downloaded tools and binaries execute only in fresh follow-on jobs with
+read-only repository permissions. Checkout credentials are not persisted, and
+publishing secrets are confined to the preceding publish jobs.
 
 ## Strong-Name Keys
 

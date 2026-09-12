@@ -107,11 +107,50 @@ def test_release_tag_parsing(tag: str, expected: tuple[str, str]) -> None:
 
 @pytest.mark.parametrize(
     "tag",
-    ["v1.6.1", "Cli-1.6.1", "Cli-v01.6.1", "Cli-v1.6", "Cli-v1.6.1!"],
+    [
+        "v1.6.1",
+        "Cli-1.6.1",
+        "Cli-v01.6.1",
+        "Cli-v1.6",
+        "Cli-v1.6.1-01",
+        "Cli-v1.6.1!",
+    ],
 )
 def test_release_tag_parsing_fails_closed(tag: str) -> None:
     with pytest.raises(verifier.VerificationError):
         verifier.parse_release_tag(tag)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("1.6.1\n", "1.6.1"),
+        ("ppds 1.6.1\n", "1.6.1"),
+        ("ppds-mcp-server 1.7.0-beta.2+build.7\r\n", "1.7.0-beta.2+build.7"),
+    ],
+)
+def test_cli_version_output_is_one_complete_strict_semver_token(
+    output: str, expected: str
+) -> None:
+    assert verifier.extract_cli_version(output) == expected
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "1.6.1.0",
+        "1.6.1-01",
+        "v01.6.1",
+        "prefix1.6.1",
+        "1.6.1junk",
+        "ppds 1.6.1 trailing",
+        "ppds release=1.6.1",
+        "ppds １.6.1",
+    ],
+)
+def test_cli_version_output_rejects_partial_or_malformed_versions(output: str) -> None:
+    with pytest.raises(verifier.VerificationError, match="complete strict"):
+        verifier.extract_cli_version(output)
 
 
 def test_tag_must_match_selected_nuget_package() -> None:
@@ -224,6 +263,51 @@ def test_public_cli_version_mismatch_fails() -> None:
 
     with pytest.raises(verifier.VerificationError, match="version mismatch"):
         verifier.verify_nuget_once("PPDS.Cli", "1.6.1", fetch=fetch, runner=runner)
+
+
+def test_public_mcp_launcher_exits_zero_and_reports_exact_version() -> None:
+    commands: list[list[str]] = []
+
+    def fetch(url: str, method: str, headers: dict[str, str], body: bytes | None) -> bytes:
+        return json.dumps({"versions": ["1.6.1"]}).encode()
+
+    def runner(command: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if command[:3] == ["dotnet", "tool", "install"]:
+            return completed(command)
+        return completed(command, returncode=0, stdout="1.6.1\n")
+
+    verifier.verify_nuget_once("PPDS.Mcp", "1.6.1", fetch=fetch, runner=runner)
+
+    assert commands[0][:4] == ["dotnet", "tool", "install", "PPDS.Mcp"]
+    assert Path(commands[1][0]).stem == "ppds-mcp-server"
+    assert commands[1][1] == "--version"
+
+
+def test_public_mcp_failed_launcher_fails_verification() -> None:
+    def fetch(url: str, method: str, headers: dict[str, str], body: bytes | None) -> bytes:
+        return json.dumps({"versions": ["1.6.1"]}).encode()
+
+    def runner(command: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["dotnet", "tool", "install"]:
+            return completed(command)
+        return completed(command, returncode=23, stderr="launcher failed")
+
+    with pytest.raises(verifier.VerificationError, match="exit code 23"):
+        verifier.verify_nuget_once("PPDS.Mcp", "1.6.1", fetch=fetch, runner=runner)
+
+
+def test_public_mcp_wrong_version_fails_verification() -> None:
+    def fetch(url: str, method: str, headers: dict[str, str], body: bytes | None) -> bytes:
+        return json.dumps({"versions": ["1.6.1"]}).encode()
+
+    def runner(command: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["dotnet", "tool", "install"]:
+            return completed(command)
+        return completed(command, stdout="1.6.2\n")
+
+    with pytest.raises(verifier.VerificationError, match="version mismatch"):
+        verifier.verify_nuget_once("PPDS.Mcp", "1.6.1", fetch=fetch, runner=runner)
 
 
 def test_checksum_parser_requires_exact_binary_coverage() -> None:
@@ -342,20 +426,50 @@ def load_workflow(name: str) -> dict[str, Any]:
     )
 
 
-def test_publish_workflows_run_verification_after_publication() -> None:
+def assert_isolated_verifier_job(
+    workflow: dict[str, Any], job_name: str, publishing_job: str
+) -> dict[str, Any]:
+    job = workflow["jobs"][job_name]
+    assert job["needs"] == publishing_job
+    assert job["permissions"] == {"contents": "read"}
+    checkout = next(step for step in job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+    assert checkout["with"]["persist-credentials"] is False
+    serialized = json.dumps(job)
+    assert "NUGET_API_KEY" not in serialized
+    assert "ADO_MARKETPLACE_PAT" not in serialized
+    assert "GH_TOKEN" not in serialized
+    return job
+
+
+def test_publish_workflows_run_verification_in_follow_on_jobs() -> None:
     nuget = load_workflow("publish-nuget.yml")
-    nuget_steps = nuget["jobs"]["publish"]["steps"]
-    assert nuget_steps[-1]["name"] == "Verify public NuGet artifact"
-    assert "verify_public_release.py nuget" in nuget_steps[-1]["run"]
+    assert nuget["permissions"] == {"contents": "read"}
+    nuget_job = assert_isolated_verifier_job(
+        nuget, "verify-public-artifact", "publish"
+    )
+    assert "verify_public_release.py nuget" in nuget_job["steps"][-1]["run"]
+    assert nuget["jobs"]["publish"]["outputs"] == {
+        "tag": "${{ steps.package.outputs.tag }}",
+        "package": "${{ steps.package.outputs.package }}",
+    }
+    assert "NUGET_API_KEY" not in json.dumps(nuget_job)
 
     cli = load_workflow("release-cli.yml")
-    cli_steps = cli["jobs"]["release"]["steps"]
-    assert cli_steps[-1]["name"] == "Verify public GitHub release"
-    assert "verify_public_release.py github" in cli_steps[-1]["run"]
+    assert cli["permissions"] == {"contents": "read"}
+    assert cli["jobs"]["release"]["permissions"] == {"contents": "write"}
+    cli_job = assert_isolated_verifier_job(
+        cli, "verify-public-release", "release"
+    )
+    assert "verify_public_release.py github" in cli_job["steps"][-1]["run"]
+    assert all(
+        "verify_public_release.py" not in str(step.get("run", ""))
+        for step in cli["jobs"]["release"]["steps"]
+    )
 
 
 def test_marketplace_verification_waits_for_full_publish_matrix() -> None:
     workflow = load_workflow("extension-publish.yml")
+    assert workflow["permissions"] == {"contents": "read"}
     publish = workflow["jobs"]["publish"]
     matrix_targets = {
         item["target"] for item in publish["strategy"]["matrix"]["include"]
@@ -363,7 +477,9 @@ def test_marketplace_verification_waits_for_full_publish_matrix() -> None:
     assert matrix_targets == set(verifier.MARKETPLACE_TARGETS)
 
     verification = workflow["jobs"]["verify-public-artifacts"]
-    assert verification["needs"] == "publish"
+    assert_isolated_verifier_job(
+        workflow, "verify-public-artifacts", "publish"
+    )
     assert "!inputs.dry_run" in verification["if"]
     verify_step = verification["steps"][-1]
     assert "verify_public_release.py marketplace" in verify_step["run"]

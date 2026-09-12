@@ -5,6 +5,9 @@ on:
     tags:
       - 'Cli-v*'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -72,16 +75,6 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout release verifier
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -193,8 +186,26 @@ jobs:
         run: |
           gh release edit "${{ steps.version.outputs.tag }}" --draft=false
 
-      - name: Verify public GitHub release
+  verify-public-release:
+    name: Verify public GitHub release
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release verifier
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Verify assets from public GitHub release
         run: >-
           python scripts/ci/verify_public_release.py
           github
-          --tag "${{ steps.version.outputs.tag }}"
+          --tag "$GITHUB_REF_NAME"

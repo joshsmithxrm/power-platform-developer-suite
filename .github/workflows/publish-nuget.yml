@@ -11,9 +11,15 @@ on:
       - 'Query-v*'
       - 'Mcp-v*'
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.package.outputs.tag }}
+      package: ${{ steps.package.outputs.package }}
 
     steps:
     - uses: actions/checkout@v6
@@ -27,11 +33,6 @@ jobs:
           8.0.x
           9.0.x
           10.0.x
-
-    - name: Setup Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.11'
 
     - name: Determine package to publish
       id: package
@@ -150,10 +151,33 @@ jobs:
         done
       continue-on-error: true
 
-    - name: Verify public NuGet artifact
+  verify-public-artifact:
+    name: Verify public NuGet artifact
+    needs: publish
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout release verifier
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.ref }}
+        persist-credentials: false
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Verify package from public NuGet
       shell: bash
       run: >-
         python scripts/ci/verify_public_release.py
         nuget
-        --tag "${{ steps.package.outputs.tag }}"
-        --package "${{ steps.package.outputs.package }}"
+        --tag "${{ needs.publish.outputs.tag }}"
+        --package "${{ needs.publish.outputs.package }}"
