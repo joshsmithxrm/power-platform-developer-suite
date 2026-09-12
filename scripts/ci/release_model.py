@@ -168,7 +168,10 @@ def _first_element_text(root: ET.Element, name: str) -> Optional[str]:
 
 
 def _normalise_repo_path(path: str | Path) -> str:
-    return str(PurePosixPath(str(path).replace("\\", "/"))).lstrip("./")
+    value = str(path).replace("\\", "/")
+    if value.startswith("./"):
+        value = value[2:]
+    return str(PurePosixPath(value))
 
 
 def _xml_root(content: Optional[str]) -> Optional[ET.Element]:
@@ -188,8 +191,9 @@ def _canonical_xml(content: Optional[str]) -> Optional[tuple]:
     def canonical(element: ET.Element) -> tuple:
         attributes = tuple(sorted((key, " ".join(value.split())) for key, value in element.attrib.items()))
         text = " ".join((element.text or "").split())
+        tail = " ".join((element.tail or "").split())
         children = tuple(canonical(child) for child in list(element))
-        return (_local_name(element.tag), attributes, text, children)
+        return (_local_name(element.tag), attributes, text, tail, children)
 
     return canonical(root)
 
@@ -213,13 +217,6 @@ def _package_versions(content: Optional[str]) -> Optional[dict[str, str]]:
                     break
         result[package] = version or ""
     return result
-
-
-def _strip_csharp_xml_docs(content: Optional[str]) -> Optional[str]:
-    if content is None:
-        return None
-    kept = [line.rstrip() for line in content.splitlines() if not re.match(r"^\s*///", line)]
-    return "\n".join(kept).strip()
 
 
 @dataclass(frozen=True)
@@ -341,7 +338,11 @@ class ReleaseGraph:
         frontier = list(source_set)
         while frontier:
             dependency = frontier.pop(0)
-            inherited = reached_by.get(dependency, {dependency} if dependency in source_set else set())
+            inherited = set(reached_by.get(dependency, set()))
+            if dependency in source_set:
+                # A directly changed surface keeps its own identity even when
+                # it is also downstream of another direct source.
+                inherited.add(dependency)
             for name, surface in self.surfaces.items():
                 if dependency not in surface.dependencies:
                     continue
@@ -397,16 +398,13 @@ def _is_deterministic_non_product(path: str) -> Optional[str]:
 
 def _content_is_comment_only(change: FileChange) -> bool:
     suffix = PurePosixPath(change.path).suffix.casefold()
-    if suffix in {".xml", ".props", ".targets", ".csproj"}:
+    # Comment suppression is deliberately limited to modeled MSBuild XML.
+    # Treat C# and arbitrary XML as product content: proving comments outside
+    # strings/raw strings or mixed-content text requires a language lexer.
+    if suffix in {".props", ".targets", ".csproj"}:
         before = _canonical_xml(change.before)
         after = _canonical_xml(change.after)
         return before is not None and after is not None and before == after
-    if suffix == ".cs":
-        return (
-            change.before is not None
-            and change.after is not None
-            and _strip_csharp_xml_docs(change.before) == _strip_csharp_xml_docs(change.after)
-        )
     return False
 
 

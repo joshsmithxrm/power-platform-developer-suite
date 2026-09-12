@@ -243,8 +243,8 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `post-merge-release-check.yml` opens a GitHub issue when a PR with `release:patch` label merges to main | `tests/ci/test_post_merge_release_check.py::test_opens_issue_on_patch_label` | ✅ |
-| AC-02 | The patch release issue body identifies affected package(s) by mapping changed file paths to package prefixes | `tests/ci/test_post_merge_release_check.py::test_maps_paths_to_packages` | ✅ |
+| AC-01 | `post-merge-release-check.yml` opens a GitHub issue when a PR with `release:patch` label merges to main and the advisory finds product impact | `tests/ci/test_post_merge_release_check.py::TestOpensIssueOnPatchLabel` | ✅ |
+| AC-02 | The patch release issue body explains direct product changes, downstream deliverables, and MinVer prerequisites | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_uses_explained_release_model` | ✅ |
 | AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | ✅ |
 | AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | ✅ |
 | AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | ✅ |
@@ -252,16 +252,16 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-07 | `/release` skill contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_skill_content.py::test_stabilization_branch_documented` | ✅ |
 | AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | ✅ |
 | AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | ✅ |
-| AC-10 | `post-merge-release-check.yml` opens an issue with "unknown package" warning when a `release:patch` PR touches no recognized `src/PPDS.*` paths | `tests/ci/test_post_merge_release_check.py::test_unknown_package_warning` | ✅ |
+| AC-10 | `post-merge-release-check.yml` does not open a release issue when the explained advisory finds only deterministic non-product changes | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_skips_issue_when_model_finds_no_product_impact` | ✅ |
 | AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | ✅ |
-| AC-12 | `post-merge-release-check.yml` identifies multiple affected packages when a `release:patch` PR touches paths in more than one package | `tests/ci/test_post_merge_release_check.py::test_multi_package_detection` | ✅ |
+| AC-12 | The release model identifies and explains multiple direct/downstream surfaces when a patch spans the product graph | `tests/ci/test_release_model.py::TestImpactAnalysis::test_pr_1402_fixture_yields_seven_surfaces_excluding_plugins` | ✅ |
 | AC-13 | `/release` skill enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_skill_content.py::test_security_review_gate_documented` | ✅ |
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
 | AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
 | AC-17 | One shared strict SemVer implementation orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
 | AC-18 | The release graph is discovered from publishable MSBuild projects and their `ProjectReference` XML, with declarative non-MSBuild delivery edges | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites while deterministic docs/tests/specs/CHANGELOG and semantic comment-only changes produce no impact | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites; deterministic docs/tests/specs/CHANGELOG and modeled MSBuild comment-only changes produce no impact, while C#/arbitrary XML remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 | AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases

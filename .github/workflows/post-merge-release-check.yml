@@ -29,10 +29,12 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout main
+      - name: Checkout analyzed merge commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          # Keep ReleaseGraph discovery on the same revision as the semantic
+          # diff below, even if another PR lands before this job starts.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       - name: Set up Python

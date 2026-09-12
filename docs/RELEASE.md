@@ -26,8 +26,11 @@ The advisory deliberately separates three concepts:
 
 1. **Direct product changes** — publishable runtime/package inputs that changed.
    Deterministic documentation, specification, test, fixture, CHANGELOG, and
-   semantic XML-comment/XML-documentation-only changes are excluded. Uncertain
-   changes beneath a product source root are included conservatively.
+   comment-only changes in modeled MSBuild XML are excluded. C# and arbitrary
+   XML remain product changes because comment-looking text can be a raw string
+   or mixed-content value. Uncertain product-source changes are included
+   conservatively. Dot-directories such as `.github/` remain intact during path
+   normalization and are explained as automation/tooling changes.
 2. **Downstream deliverables** — publishable projects that consume a directly
    changed project. Project dependencies are discovered from MSBuild
    `ProjectReference` XML; the Extension-to-CLI bundle relationship is declared

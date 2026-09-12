@@ -112,6 +112,22 @@ class TestImpactAnalysis:
             "PPDS.Query",
         ]
         assert "PPDS.Plugins" not in plan["affected_surfaces"]
+        downstream = {
+            entry["surface"]: entry["reasons"]
+            for entry in plan["downstream_deliverables"]
+        }
+        assert downstream == {
+            "PPDS.Cli": [
+                "consumes changed surface(s): PPDS.Auth, PPDS.Dataverse, PPDS.Migration"
+            ],
+            "PPDS.Extension": [
+                "consumes changed surface(s): PPDS.Auth, PPDS.Dataverse, PPDS.Migration"
+            ],
+            "PPDS.Mcp": [
+                "consumes changed surface(s): PPDS.Auth, PPDS.Dataverse, PPDS.Migration"
+            ],
+            "PPDS.Query": ["consumes changed surface(s): PPDS.Dataverse"],
+        }
 
     @pytest.mark.parametrize("surface", ["PPDS.Query", "PPDS.Migration"])
     def test_stable_library_plan_includes_dataverse_minver_prerequisite(
@@ -171,7 +187,7 @@ class TestImpactAnalysis:
         assert plan["release_targets"] == []
         assert "semantic content unchanged" in plan["ignored_changes"][0]["reason"]
 
-    def test_csharp_xml_documentation_only_change_has_no_impact(self, graph: ReleaseGraph):
+    def test_csharp_xml_documentation_change_counts_conservatively(self, graph: ReleaseGraph):
         plan = build_release_plan(
             graph,
             [
@@ -182,7 +198,49 @@ class TestImpactAnalysis:
                 )
             ],
         )
+        assert "PPDS.Auth" in plan["release_targets"]
+
+    def test_csharp_raw_string_lines_that_look_like_xml_docs_are_not_suppressed(
+        self,
+        graph: ReleaseGraph,
+    ):
+        plan = build_release_plan(
+            graph,
+            [
+                FileChange(
+                    path="src/PPDS.Auth/AuthService.cs",
+                    before='var text = """\n/// old runtime value\n""";',
+                    after='var text = """\n/// new runtime value\n""";',
+                )
+            ],
+        )
+        assert "PPDS.Auth" in plan["release_targets"]
+
+    def test_msbuild_mixed_content_tail_change_is_not_suppressed(self, graph: ReleaseGraph):
+        plan = build_release_plan(
+            graph,
+            [
+                FileChange(
+                    path="src/PPDS.Auth/PPDS.Auth.csproj",
+                    before="<Project><PropertyGroup />old runtime tail</Project>",
+                    after="<Project><PropertyGroup />new runtime tail</Project>",
+                )
+            ],
+        )
+        assert "PPDS.Auth" in plan["release_targets"]
+
+    def test_dot_directory_path_is_preserved_and_explained(self, graph: ReleaseGraph):
+        plan = build_release_plan(
+            graph,
+            [_change("./.github/workflows/release.yml")],
+        )
         assert plan["release_targets"] == []
+        assert plan["ignored_changes"] == [
+            {
+                "path": ".github/workflows/release.yml",
+                "reason": "automation/tooling change",
+            }
+        ]
 
     def test_uncertain_source_change_is_included_conservatively(self, graph: ReleaseGraph):
         plan = build_release_plan(

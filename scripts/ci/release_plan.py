@@ -48,6 +48,18 @@ def changes_from_git(repo_root: Path, base: str, head: str) -> list[FileChange]:
     return changes
 
 
+def ensure_graph_revision(repo_root: Path, head: str) -> None:
+    """Fail rather than analyze a diff with a graph from another revision."""
+    checked_out = (_git(repo_root, "rev-parse", "HEAD") or "").strip()
+    analyzed = (_git(repo_root, "rev-parse", head) or "").strip()
+    if checked_out != analyzed:
+        raise RuntimeError(
+            "Release graph revision mismatch: "
+            f"checkout is {checked_out or '(unknown)'} but --head resolves to "
+            f"{analyzed or '(unknown)'}. Check out the analyzed head first."
+        )
+
+
 def _title(plan: dict) -> str:
     targets = plan["release_targets"]
     if not targets:
@@ -75,6 +87,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if bool(args.base) != bool(args.head):
         parser.error("--base and --head must be supplied together")
     if args.base and args.head:
+        ensure_graph_revision(repo_root, args.head)
         changes = changes_from_git(repo_root, args.base, args.head)
     elif args.files_file:
         changes = [

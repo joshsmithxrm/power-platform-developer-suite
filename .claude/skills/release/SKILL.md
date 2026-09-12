@@ -79,9 +79,9 @@ The output keeps **direct product changes**, **downstream deliverables**, and
 Review all three lists before drafting CHANGELOGs. The project dependency graph
 comes from MSBuild `ProjectReference` XML; the Extension's bundled-CLI delivery
 edge is declared in `scripts/ci/release_surfaces.json`. Documentation, specs,
-tests, fixtures, CHANGELOGs, and semantic XML-comment/XML-documentation-only
-changes are ignored deterministically; uncertain source changes are included
-conservatively.
+tests, fixtures, CHANGELOGs, and comment-only changes in modeled MSBuild XML are
+ignored deterministically. C# and arbitrary XML are treated conservatively
+because comment-looking text may be runtime string or mixed-content data.
 
 This command is advisory only. It never creates tags, publishes packages, or
 dispatches release workflows. Malformed release tags appear as diagnostics and
