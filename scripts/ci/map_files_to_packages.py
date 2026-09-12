@@ -21,26 +21,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
-# The 8 NuGet packages that make up the PPDS platform.
-KNOWN_PACKAGES = frozenset({
-    "Auth",
-    "Cli",
-    "Dataverse",
-    "Extension",
-    "Mcp",
-    "Migration",
-    "Plugins",
-    "Query",
-})
+from release_model import ReleaseGraph
 
-# Match src/PPDS.<Name>/ at the start of a path.  The name must be at least
-# one character and consist only of word characters (letters, digits,
-# underscores) — this rejects bare ``src/PPDS./foo.cs`` entries.
-_PREFIX_RE = re.compile(r"^src/PPDS\.(\w+)/")
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def map_files_to_packages(file_paths: list[str]) -> list[str]:
@@ -58,13 +46,18 @@ def map_files_to_packages(file_paths: list[str]) -> list[str]:
     directories appear in *file_paths*.  Returns ``["unknown"]`` if no path
     matches a recognized ``src/PPDS.<Name>/`` prefix.
     """
+    graph = ReleaseGraph.discover(REPO_ROOT)
+    roots = {
+        surface.root.rstrip("/") + "/": name
+        for name, surface in graph.surfaces.items()
+    }
     packages: set[str] = set()
-    for path in file_paths:
-        m = _PREFIX_RE.match(path)
-        if m:
-            name = m.group(1)
-            if name in KNOWN_PACKAGES:
-                packages.add(f"PPDS.{name}")
+    for raw_path in file_paths:
+        path = str(PurePosixPath(raw_path.replace("\\", "/")))
+        for root, name in roots.items():
+            if path.startswith(root):
+                packages.add(name)
+                break
     return sorted(packages) if packages else ["unknown"]
 
 
