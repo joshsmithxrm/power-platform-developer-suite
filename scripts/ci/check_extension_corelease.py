@@ -22,8 +22,8 @@ not been refreshed to bundle that CLI, and the refresh is missing.
 
 Which tags count
 ----------------
-* Cli: only *stable* tags — anything with a ``-rc.`` or ``-beta.`` prerelease
-  suffix is ignored (a prerelease CLI never ships to marketplace users).
+* Cli: only valid, stable SemVer tags — every prerelease suffix is ignored (a
+  prerelease CLI never ships to marketplace users).
 * Extension: *all* ``Extension-v*`` tags count. Extension channels are encoded in
   the minor version (odd minor = pre-release, even minor = stable) rather than a
   suffix, and *either* channel bundles a fresh CLI — so we deliberately keep the
@@ -53,6 +53,8 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+from release_model import SemVer
+
 
 # ---------------------------------------------------------------------------
 # Tag parsing / selection
@@ -64,30 +66,26 @@ TagWithDate = tuple[str, datetime]
 
 
 def is_stable_cli_tag(tag: str) -> bool:
-    """Return True unless *tag* carries an -rc./-beta. prerelease suffix.
+    """Return True when *tag* is a valid, stable ``Cli-v`` SemVer tag.
 
-    Mirrors the stable/prerelease distinction the rest of the release tooling
-    uses: ``Cli-v1.3.0`` is stable; ``Cli-v1.4.0-rc.1`` and ``Cli-v1.4.0-beta.2``
-    are not.
+    The shared release model supplies strict SemVer parsing, so malformed tags
+    cannot accidentally be classified as stable.
     """
-    return "-rc." not in tag and "-beta." not in tag
+    if not tag.startswith("Cli-v"):
+        return False
+    try:
+        return not SemVer.parse(tag[len("Cli-v"):]).is_prerelease
+    except ValueError:
+        return False
 
 
-def _version_key(tag: str) -> tuple[int, ...]:
-    """Sort key from the numeric ``X.Y.Z`` core of a ``<Prefix>-vX.Y.Z`` tag.
-
-    The prerelease suffix (everything after the first ``-`` in the version) is
-    dropped for sorting; only stable tags are ranked against each other here.
-    Unparseable tags sort lowest so a malformed tag never wins selection.
-    """
-    _, _, version = tag.partition("-v")
-    core = version.split("-", 1)[0]  # strip any -rc./-beta. suffix
-    parts: list[int] = []
-    for piece in core.split("."):
-        if not piece.isdigit():
-            return (-1,)
-        parts.append(int(piece))
-    return tuple(parts) if parts else (-1,)
+def _tag_version(tag: str, prefix: str) -> Optional[SemVer]:
+    if not tag.startswith(prefix):
+        return None
+    try:
+        return SemVer.parse(tag[len(prefix):])
+    except ValueError:
+        return None
 
 
 def select_latest_stable_cli(tags: list[TagWithDate]) -> Optional[TagWithDate]:
@@ -99,7 +97,15 @@ def select_latest_stable_cli(tags: list[TagWithDate]) -> Optional[TagWithDate]:
     stable = [t for t in tags if is_stable_cli_tag(t[0])]
     if not stable:
         return None
-    return max(stable, key=lambda t: _version_key(t[0]))
+    selected = stable[0]
+    for candidate in stable[1:]:
+        selected_version = _tag_version(selected[0], "Cli-v")
+        candidate_version = _tag_version(candidate[0], "Cli-v")
+        if candidate_version is not None and (
+            selected_version is None or candidate_version > selected_version
+        ):
+            selected = candidate
+    return selected
 
 
 def select_latest_extension(tags: list[TagWithDate]) -> Optional[TagWithDate]:
@@ -108,9 +114,18 @@ def select_latest_extension(tags: list[TagWithDate]) -> Optional[TagWithDate]:
     All Extension tags count regardless of channel (odd/even minor); either
     channel bundles a fresh CLI.
     """
-    if not tags:
+    valid = [(tag, when) for tag, when in tags if _tag_version(tag, "Extension-v") is not None]
+    if not valid:
         return None
-    return max(tags, key=lambda t: _version_key(t[0]))
+    selected = valid[0]
+    for candidate in valid[1:]:
+        selected_version = _tag_version(selected[0], "Extension-v")
+        candidate_version = _tag_version(candidate[0], "Extension-v")
+        if candidate_version is not None and (
+            selected_version is None or candidate_version > selected_version
+        ):
+            selected = candidate
+    return selected
 
 
 # ---------------------------------------------------------------------------

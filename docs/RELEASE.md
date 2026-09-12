@@ -1,12 +1,59 @@
 # PPDS Release Operations
 
-End-user reference for release-related operations: cutting a release, the
-strong-name rotation procedure, key custody, and incident response.
+Tool-neutral reference for release scope analysis, release operations,
+strong-name rotation, key custody, and incident response. Automation may advise
+what should be released, but a maintainer must approve every tag and publish.
 
-For the full release ceremony (CHANGELOGs, version bumps, tag push
-sequence, CI monitoring), see the **release skill**:
-`.claude/skills/release/SKILL.md`. This doc covers the rare operations
-that fall outside the routine release flow.
+## Release Scope Analysis
+
+Before preparing CHANGELOGs or choosing versions, generate an explained scope
+advisory from the exact commit range:
+
+```bash
+python scripts/ci/release_plan.py \
+  --base <base-commit> \
+  --head <release-commit> \
+  --release-kind patch \
+  --channel stable \
+  --format markdown
+```
+
+Use `--release-kind minor` or `major` for coordinated releases, and
+`--channel prerelease` for a prerelease plan. The command is read-only: it does
+not create or push tags, publish packages, or dispatch a workflow.
+
+The advisory deliberately separates three concepts:
+
+1. **Direct product changes** — publishable runtime/package inputs that changed.
+   Deterministic documentation, specification, test, fixture, CHANGELOG, and
+   semantic XML-comment/XML-documentation-only changes are excluded. Uncertain
+   changes beneath a product source root are included conservatively.
+2. **Downstream deliverables** — publishable projects that consume a directly
+   changed project. Project dependencies are discovered from MSBuild
+   `ProjectReference` XML; the Extension-to-CLI bundle relationship is declared
+   in `scripts/ci/release_surfaces.json`.
+3. **Same-commit MinVer tag prerequisites** — unchanged library dependencies
+   that need a stable tag on the release commit. For example, a stable Query or
+   Migration plan includes Dataverse as a prerequisite. Without that tag,
+   MinVer derives an `alpha` version and NuGet rejects the stable package's
+   prerelease dependency.
+
+The latest-tag section uses strict SemVer 2.0 ordering. Stable versions outrank
+prereleases of the same version, numeric identifiers compare numerically
+(`beta.10` after `beta.2`), build metadata does not affect precedence, and
+malformed tags are surfaced as diagnostics instead of silently winning a git
+refname sort.
+
+For a patch, review the proposed direct and downstream targets plus any MinVer
+prerequisites. A coordinated minor or major intentionally plans all release
+surfaces, even when some have no user-facing change. Update each target's
+CHANGELOG, create tags only after review, push tags individually, monitor every
+publish workflow, and verify the public artifacts before closing the release
+record.
+
+The repository's optional `.claude/skills/release/SKILL.md` documents the same
+ceremony for supported agents; this public document remains the authoritative,
+tool-neutral entry point for generated GitHub issues.
 
 ## Strong-Name Keys
 

@@ -1,7 +1,7 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-04-25
+**Last Updated:** 2026-09-12
 **Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
@@ -16,6 +16,7 @@ Policy layer governing *when* PPDS releases happen, *how* work is grouped into m
 - **Predictable release cadence**: patches ship fast, minors ship when ready, nothing drifts silently
 - **Automated detection**: the system tells the maintainer when a release is warranted — not the other way around
 - **Manual ceremony**: irreversible actions (tag push, NuGet/Marketplace publish) remain human-initiated via `/release`
+- **Explained scope**: direct changes, downstream deliverables, and MinVer tag prerequisites are reported separately
 
 ### Non-Goals
 
@@ -81,7 +82,7 @@ All three paths lead to:
 
 | Type | Version | Trigger | Scope | Example |
 |------|---------|---------|-------|---------|
-| Patch | `X.Y.Z` (Z > 0) | Bug fix or security fix merged with `release:patch` label | Per-package — only affected package(s) get new tags | `Query-v1.0.1` |
+| Patch | `X.Y.Z` (Z > 0) | Bug fix or security fix merged with `release:patch` label | Direct product changes, downstream deliverables, and required same-commit MinVer dependency tags | `Dataverse-v1.0.1`, `Query-v1.0.1` |
 | Minor | `X.Y.0` (Y > 0) | GitHub Milestone reaches 100% closed | All packages — coordinated release via `/release` | `Auth-v1.1.0`, `Cli-v1.1.0`, ... |
 | Major | `X.0.0` (X > 1) | Breaking change (API, strong-name rotation, etc.) | All packages — coordinated release via `/release` | Future |
 
@@ -128,21 +129,25 @@ Releases are **event-driven with a cadence floor**:
 
 3. **Patch releases from main**:
    - Bug fix merges to main as a normal PR
-   - Tag the affected package(s) from the merge commit on main
-   - No branch, no release PR needed for single-package patches
+   - Tag reviewed release targets and MinVer prerequisites from the merge commit on main
+   - No branch or full release PR is needed for a focused patch
    - Multi-package patches (rare) follow the standard `/release` ceremony
 
 ### Patch Release Procedure
 
-For single-package patches (the common case):
+For focused patches (the common case):
 
 1. Fix merges to main via normal PR process
-2. Maintainer runs abbreviated `/release` targeting one package:
-   - Update that package's CHANGELOG only
-   - Push one tag (e.g., `Query-v1.0.1`)
-   - Monitor one `publish-nuget.yml` run
+2. Maintainer runs the read-only scope advisory and reviews its three categories:
+   - Direct product changes
+   - Downstream deliverables that consume those changes
+   - Same-commit stable MinVer tag prerequisites
+3. Maintainer runs abbreviated `/release` for the reviewed scope:
+   - Update each release target's CHANGELOG
+   - Push each reviewed target/prerequisite tag individually
+   - Monitor every triggered publish workflow
    - Verify publish
-3. No release PR needed — the fix PR itself is the audit trail
+4. No full release PR needed — the fix and focused CHANGELOG PRs are the audit trail
 
 For multi-package patches or patches that touch the Extension:
 
@@ -171,8 +176,8 @@ A merged PR does NOT warrant `release:patch`:
 **Flow 1 — Patch release (label-triggered):**
 
 1. **PR merges to main** with `release:patch` label
-2. **`post-merge-release-check.yml` fires**: identifies affected package(s) from changed file paths, opens a GitHub issue titled "Patch release needed: PPDS.{Package} vX.Y.Z"
-3. **Issue body includes**: affected package(s), commit summary, link to merged PR, checklist linking to `/release` steps
+2. **`post-merge-release-check.yml` fires**: uses the release model to analyze the exact merge diff and opens an advisory issue only when product impact exists
+3. **Issue body includes**: explained direct changes, downstream deliverables, MinVer prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
 4. **Maintainer reviews issue**, runs `/release` for the affected package(s)
 5. **Maintainer closes issue** after publish verification
 
@@ -201,7 +206,11 @@ PPDS uses **two layers of git tags** with distinct purposes:
 | Per-package | `{Package}-v{version}` | Source of truth for package versions (MinVer); triggers publishing workflows | `publish-nuget.yml`, `release-cli.yml`, `extension-publish.yml` |
 | Unified | `v{version}` | Trigger for docs generation; marks the coordinated release point | `docs-release.yml` |
 
-**Per-package tags** are always pushed — one per package that has changes. These drive MinVer version resolution and trigger the appropriate CI publishing workflows.
+**Per-package tags** are pushed for reviewed release targets and any stable
+same-commit MinVer prerequisites. ProjectReference dependencies are discovered
+from MSBuild XML; they are not maintained as a hard-coded closure. These tags
+drive MinVer version resolution and trigger the appropriate CI publishing
+workflows.
 
 **Unified tags** are pushed only for coordinated releases (minor/stable). They trigger `docs-release.yml` which regenerates reference documentation and opens a paired PR in ppds-docs. Patches do not push unified tags because docs don't regenerate for single-package fixes.
 
@@ -221,7 +230,9 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 ### Constraints
 
 - Tag push is irreversible — never auto-tag or auto-publish
-- Per-package patching must not require re-releasing unaffected packages
+- Patch scope must explain direct changes, downstream deliverables, and prerequisite-only tags separately; a MinVer consistency tag is not misreported as a product change
+- Release-scope automation is advisory and must never create/push tags, publish packages, or dispatch release workflows
+- Latest tag selection must use strict SemVer 2.0 precedence, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
 - Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the `/release` skill's pre-merge verification step
@@ -248,12 +259,19 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
 | AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
+| AC-17 | One shared strict SemVer implementation orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
+| AC-18 | The release graph is discovered from publishable MSBuild projects and their `ProjectReference` XML, with declarative non-MSBuild delivery edges | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
+| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites while deterministic docs/tests/specs/CHANGELOG and semantic comment-only changes produce no impact | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
-| PR has `release:patch` but touches no `src/PPDS.*` paths | Issue opened with "unknown package" warning — maintainer triages manually |
+| PR has `release:patch` but contains only deterministic non-product changes | Advisory reports no impact and the workflow does not open a release issue |
+| Source change cannot be classified with certainty | Include its owning release surface conservatively and explain why |
+| Release tag has malformed SemVer | Ignore it for latest-version selection and emit a diagnostic for maintainer review |
+| Stable Query or Migration patch has no Dataverse tag on the target commit | List Dataverse separately as a same-commit MinVer prerequisite |
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |
 | Two `release:patch` PRs merge in quick succession | Two separate issues opened — maintainer can batch into one patch release |
 | Cadence check runs but an open check-in issue already exists | No duplicate issue — workflow checks for existing open issues with the label |
@@ -311,15 +329,19 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 
 **Context:** A bug in PPDS.Query shouldn't force re-releasing PPDS.Auth, PPDS.Plugins, and 5 other packages.
 
-**Decision:** Patch releases can target individual packages. Only the affected package gets a new tag and publish.
+**Decision:** Patch releases target direct changes and actual downstream
+deliverables. Stable library tags also include any same-commit MinVer
+prerequisites required by their MSBuild project dependencies, clearly labeled as
+version-consistency tags rather than product changes.
 
 **Alternatives considered:**
 - **Always release all packages together**: Simpler mental model but wastes CI time and creates noise on NuGet (7 packages with identical content, just bumped version).
-- **Per-package with dependency cascade**: If PPDS.Cli depends on PPDS.Query, bump both. Correct in theory but PPDS packages are independently versioned and consumers pin versions — a Query patch doesn't break Cli consumers.
+- **Path-only package mapping**: misses shared central dependencies and hides the reason a downstream deliverable contains changed code.
+- **Always cascade every package**: avoids dependency reasoning but creates unrelated releases and noise.
 
 **Consequences:**
-- Positive: Fast, minimal patch releases. No noise on unaffected packages.
-- Negative: Requires the maintainer to know which package(s) a fix affects (mitigated by the detection workflow mapping file paths to packages).
+- Positive: Minimal, explainable releases without broken stable MinVer dependency graphs.
+- Negative: Some unchanged dependencies need consistency tags; the advisory keeps those distinct so CHANGELOGs do not claim product changes.
 
 ---
 
@@ -333,5 +355,6 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 
 | Date | Change |
 |------|--------|
+| 2026-09-12 | Add strict SemVer and explained MSBuild-derived release impact planning (AC-17–AC-20) |
 | 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
 | 2026-04-24 | Initial spec |

@@ -2,8 +2,8 @@
 
 Covers:
   AC-01  Workflow opens issue on release:patch label merge
-  AC-02  Mapping changed file paths to package names
-  AC-10  Unknown-package warning when no src/PPDS.* paths found
+  AC-02  Mapping changed file paths to package names (legacy helper contract)
+  AC-10  Non-product changes produce an explained no-release advisory
   AC-12  Multi-package detection
 
 Run with: python -m pytest tests/ci/test_post_merge_release_check.py -v
@@ -162,23 +162,36 @@ class TestMapsPathsToPackages:
 
 
 # ---------------------------------------------------------------------------
-# AC-10  Unknown-package warning
+# AC-10  Non-product/no-release workflow behavior
 # ---------------------------------------------------------------------------
 
 class TestUnknownPackageWarning:
-    """AC-10 — unknown warning when no src/PPDS.* paths found."""
+    """Legacy mapping remains compatible while the workflow uses the model."""
 
     def test_unknown_package_warning(self):
         """Non-PPDS paths return ["unknown"] from the mapping script."""
         result = mfp.map_files_to_packages(["docs/README.md"])
         assert result == ["unknown"]
 
-    def test_workflow_contains_unknown_warning_string(self):
-        """Workflow YAML must contain the warning text for the unknown case."""
+    def test_workflow_uses_explained_release_model(self):
         text = _workflow_text()
-        assert "No recognized PPDS package paths found" in text, (
-            "Workflow must include the 'No recognized PPDS package paths found' warning text"
-        )
+        assert "scripts/ci/release_plan.py" in text
+        assert "release-plan.json" in text
+        assert "release-plan.md" in text
+
+    def test_workflow_skips_issue_when_model_finds_no_product_impact(self):
+        text = _workflow_text()
+        assert "steps.evaluate.outputs.release_needed == 'true'" in text
+        assert "No product release issue opened" in text
+
+    def test_workflow_does_not_use_git_refname_as_semver(self):
+        assert "--sort=-v:refname" not in _workflow_text()
+
+    def test_workflow_is_advisory_and_does_not_release(self):
+        text = _workflow_text()
+        assert "git tag" not in text
+        assert "gh workflow run" not in text
+        assert "gh release create" not in text
 
     def test_empty_input_returns_unknown(self):
         """Empty input list returns ["unknown"]."""
