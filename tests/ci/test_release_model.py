@@ -187,6 +187,58 @@ class TestImpactAnalysis:
         assert plan["release_targets"] == []
         assert "semantic content unchanged" in plan["ignored_changes"][0]["reason"]
 
+    def test_msbuild_formatting_only_change_has_no_impact(self, graph: ReleaseGraph):
+        plan = build_release_plan(
+            graph,
+            [
+                FileChange(
+                    path="src/PPDS.Auth/PPDS.Auth.csproj",
+                    before="<Project><PropertyGroup><Nullable>enable</Nullable></PropertyGroup></Project>",
+                    after=(
+                        "<Project>\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n"
+                        "  </PropertyGroup>\n</Project>"
+                    ),
+                )
+            ],
+        )
+        assert plan["release_targets"] == []
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            (
+                '<Project><Target><Exec Command="a b" /></Target></Project>',
+                '<Project><Target><Exec Command="a  b" /></Target></Project>',
+            ),
+            (
+                "<Project><PropertyGroup><AssemblyTitle>one space</AssemblyTitle></PropertyGroup></Project>",
+                "<Project><PropertyGroup><AssemblyTitle>one  space</AssemblyTitle></PropertyGroup></Project>",
+            ),
+            (
+                '<Project xmlns="urn:one"><PropertyGroup /></Project>',
+                '<Project xmlns="urn:two"><PropertyGroup /></Project>',
+            ),
+        ],
+        ids=["exec-command-whitespace", "property-text-whitespace", "namespace-uri"],
+    )
+    def test_msbuild_semantic_whitespace_and_namespace_changes_require_release(
+        self,
+        graph: ReleaseGraph,
+        before: str,
+        after: str,
+    ):
+        plan = build_release_plan(
+            graph,
+            [
+                FileChange(
+                    path="src/PPDS.Auth/PPDS.Auth.csproj",
+                    before=before,
+                    after=after,
+                )
+            ],
+        )
+        assert "PPDS.Auth" in plan["release_targets"]
+
     def test_csharp_xml_documentation_change_counts_conservatively(self, graph: ReleaseGraph):
         plan = build_release_plan(
             graph,

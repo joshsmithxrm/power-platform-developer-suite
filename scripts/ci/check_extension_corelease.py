@@ -253,7 +253,7 @@ refresh in the same train — opt-out only with a recorded reason.
 - [ ] Cut an `Extension-v*` refresh bundling `{cli_tag}`, **or** record an opt-out reason
 - [ ] Close this issue once actioned
 
-> **Procedure:** Follow the co-release rule in the [`/release` skill](.claude/skills/release/SKILL.md).
+> **Procedure:** Follow the co-release rule in the public [release operations runbook](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/RELEASE.md#release-scope-analysis).
 """
 
 

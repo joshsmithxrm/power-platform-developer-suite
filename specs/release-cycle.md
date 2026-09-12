@@ -220,8 +220,8 @@ workflows.
 # Minor release — all packages + unified tag:
 Auth-v1.1.0  Cli-v1.1.0  Dataverse-v1.1.0  ...  v1.1.0
 
-# Patch release — single package only, no unified tag:
-Query-v1.0.1
+# Stable Query patch — Dataverse prerequisite + Query target, no unified tag:
+Dataverse-v1.0.1  Query-v1.0.1
 
 # Prerelease — all packages, optional unified tag:
 Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)

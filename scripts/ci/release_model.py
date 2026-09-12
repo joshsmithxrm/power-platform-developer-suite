@@ -188,12 +188,24 @@ def _canonical_xml(content: Optional[str]) -> Optional[tuple]:
     if root is None:
         return None
 
+    def content_or_none(value: Optional[str]) -> Optional[str]:
+        # Whitespace-only text between MSBuild elements is formatting. Any
+        # non-whitespace text is potentially an MSBuild value or task input and
+        # must remain byte-for-byte significant (including repeated spaces).
+        if value is None or not value.strip():
+            return None
+        return value
+
     def canonical(element: ET.Element) -> tuple:
-        attributes = tuple(sorted((key, " ".join(value.split())) for key, value in element.attrib.items()))
-        text = " ".join((element.text or "").split())
-        tail = " ".join((element.tail or "").split())
+        # ElementTree retains namespace URIs in Clark notation for element and
+        # attribute names. Do not collapse to local names: changing an xmlns is
+        # a semantic change. Attribute values are also exact because task
+        # parameters such as Exec.Command can be whitespace-sensitive.
+        attributes = tuple(sorted(element.attrib.items()))
+        text = content_or_none(element.text)
+        tail = content_or_none(element.tail)
         children = tuple(canonical(child) for child in list(element))
-        return (_local_name(element.tag), attributes, text, tail, children)
+        return (element.tag, attributes, text, tail, children)
 
     return canonical(root)
 
