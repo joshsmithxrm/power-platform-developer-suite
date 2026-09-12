@@ -67,6 +67,7 @@ All three paths lead to:
 | `milestone-release-check.yml` | Detects milestone completion, opens minor release readiness issue |
 | `release-cadence-check.yml` | Weekly cron, checks days since last release tag, opens check-in issue |
 | `/release` skill (existing) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
+| `verify_public_release.py` | Read-only post-publish verification through nuget.org, GitHub Releases, and the VS Code Marketplace |
 | GitHub Milestones | Group PRs into minor release targets (v1.1.0, v1.2.0, ...) |
 
 ### Dependencies
@@ -238,6 +239,9 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
 - Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the `/release` skill's pre-merge verification step
+- Publish workflows poll public availability every two minutes, with a bounded 30-attempt limit, then validate installability, versions, target coverage, and checksums as applicable
+- A public verification failure stops and escalates; automation never unpublishes, deletes, deprecates, replaces, or rolls back published artifacts
+- Downloaded public executables run only in fresh follow-on jobs with read-only repository permissions, non-persisted checkout credentials, and no publishing secrets
 
 ---
 
@@ -261,10 +265,14 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
 | AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
-| AC-17 | One shared strict SemVer implementation uses ASCII digits, orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
-| AC-18 | The release graph discovers publishable and build-only MSBuild projects, all `ProjectReference` edges, declarative packed inputs, and non-MSBuild delivery edges while keeping internal nodes out of release targets | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-19 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, same-commit delivery prerequisites, and MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
-| AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-17 | NuGet publication is polled at a bounded two-minute cadence, restored/installed from a clean nuget.org-only configuration, and public CLI/MCP tool releases execute with the exact tagged version | `test_polling_retries_at_two_minute_intervals_then_succeeds`, `test_nuget_library_restore_uses_only_clean_public_feed`, `test_public_cli_is_installed_to_temp_and_version_checked`, `test_public_mcp_launcher_exits_zero_and_reports_exact_version` | ✅ |
+| AC-18 | Public CLI GitHub Releases contain all five binaries and a complete checksum manifest; downloaded checksums and CLI version must match | `test_checksum_parser_requires_exact_binary_coverage`, `test_github_release_checksum_mismatch_fails_before_execution` | ✅ |
+| AC-19 | After the Marketplace publish matrix completes, all four public target VSIXs match the Extension version, target RID, and bundled CLI release | `test_marketplace_downloads_and_validates_every_target`, `test_marketplace_version_and_target_mismatches_fail`, `test_marketplace_verification_waits_for_full_publish_matrix` | ✅ |
+| AC-20 | Verification failures stop and escalate without any automated unpublish, delete, deprecate, replacement, or rollback action; downloaded executables run only in read-only follow-on jobs without publishing credentials | `test_failure_exits_with_escalation_and_no_rollback`, `test_publish_workflows_run_verification_in_follow_on_jobs` | ✅ |
+| AC-21 | One shared strict SemVer implementation uses ASCII digits, orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
+| AC-22 | The release graph discovers publishable and build-only MSBuild projects, all `ProjectReference` edges, declarative packed inputs, and non-MSBuild delivery edges while keeping internal nodes out of release targets | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
+| AC-23 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, same-commit delivery prerequisites, and MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-24 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases
 
@@ -284,6 +292,8 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | Two `release:patch` PRs merge in quick succession | Two separate issues opened — maintainer can batch into one patch release |
 | Cadence check runs but an open check-in issue already exists | No duplicate issue — workflow checks for existing open issues with the label |
 | Stabilization branch diverges from main | Maintainer merges back to main after release; conflicts resolved manually |
+| Public feed propagation is delayed | Retry every two minutes for at most 30 attempts, then fail and escalate |
+| One public target, checksum, or version differs | Fail immediately and preserve every published artifact for investigation |
 
 ---
 
@@ -363,6 +373,7 @@ version-consistency tags rather than product changes.
 
 | Date | Change |
 |------|--------|
-| 2026-09-12 | Add strict ASCII SemVer and explained MSBuild-derived release impact planning, including packed package assets, build-only dependency nodes, repository-wide build inputs, and central-package semantics (AC-17–AC-20) |
+| 2026-09-12 | Add bounded, read-only public artifact verification after NuGet, CLI GitHub Release, and four-target Marketplace publication (AC-17 through AC-20) |
+| 2026-09-12 | Add strict ASCII SemVer and explained MSBuild-derived release impact planning, including packed package assets, build-only dependency nodes, repository-wide build inputs, and central-package semantics (AC-21–AC-24) |
 | 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
 | 2026-04-24 | Initial spec |
