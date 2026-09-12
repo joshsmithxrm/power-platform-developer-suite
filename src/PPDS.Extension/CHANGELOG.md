@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Extension release packaging could silently bundle a mis-versioned CLI** — the publish workflow now fetches full git history and tags, resolves the co-located `Cli-v*` release tag, and verifies the CLI assembly's MinVer version matches that release before packaging the VSIX.
+
 ## [1.6.0] - 2026-07-15
 
 Stable-channel release (even minor per odd/even convention; 1.5.x is the pre-release channel).
