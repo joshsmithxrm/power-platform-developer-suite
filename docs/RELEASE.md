@@ -8,6 +8,33 @@ sequence, CI monitoring), see the **release skill**:
 `.claude/skills/release/SKILL.md`. This doc covers the rare operations
 that fall outside the routine release flow.
 
+## Automated Public Artifact Verification
+
+Every publish workflow finishes by validating the artifact through the same
+public channel an end user receives it from. The checks use no publishing
+credentials and do not modify release state:
+
+- NuGet publishes are polled through nuget.org, then restored or installed in
+  a clean temporary directory whose only package source is nuget.org. A
+  `PPDS.Cli` release is also executed with `--version`.
+- CLI GitHub Releases must expose all five platform binaries plus
+  `checksums.sha256`. Every downloaded binary is hashed, and the public Linux
+  binary is executed to confirm its version.
+- Extension publishes are verified only after all four Marketplace matrix
+  jobs complete. The verifier downloads the public `win32-x64`, `linux-x64`,
+  `darwin-x64`, and `darwin-arm64` VSIX packages and checks extension identity,
+  package version, runtime target, and bundled CLI version.
+
+Availability checks run at two-minute intervals for at most 30 attempts. A
+timeout, missing target, checksum mismatch, or version mismatch fails the
+publish workflow. Treat that failure as a release incident: stop and escalate
+for investigation. Automation must never unpublish, delete, deprecate, replace,
+or otherwise attempt to roll back an artifact that has reached a public feed.
+
+The shared implementation is `scripts/ci/verify_public_release.py`; its tests
+inject HTTP and process adapters, so CI policy tests never contact production
+distribution channels.
+
 ## Strong-Name Keys
 
 PPDS strong-names its assemblies. The key custody model is:
@@ -142,4 +169,5 @@ design.
 - Routine release ceremony: `.claude/skills/release/SKILL.md`
 - Hook implementation: `.claude/hooks/snk-protect.py`
 - CI workflow: `.github/workflows/publish-nuget.yml`
+- Public artifact verifier: `scripts/ci/verify_public_release.py`
 - Hook tests: `tests/test_snk_protect.py`

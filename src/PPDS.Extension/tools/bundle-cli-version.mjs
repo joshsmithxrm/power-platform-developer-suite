@@ -17,3 +17,15 @@ export function verifyBundledCliVersion(assemblyInfo, expectedVersion) {
     }
     return actualVersion;
 }
+
+export function createBundledCliManifest(rid, releaseVersion, informationalVersion) {
+    if (!rid || !releaseVersion || !informationalVersion) {
+        throw new Error('Bundled CLI manifest requires rid, release version, and informational version');
+    }
+    return {
+        schemaVersion: 1,
+        rid,
+        releaseVersion,
+        informationalVersion,
+    };
+}

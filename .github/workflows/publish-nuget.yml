@@ -28,6 +28,11 @@ jobs:
           9.0.x
           10.0.x
 
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
     - name: Determine package to publish
       id: package
       shell: bash
@@ -144,3 +149,11 @@ jobs:
           dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
         done
       continue-on-error: true
+
+    - name: Verify public NuGet artifact
+      shell: bash
+      run: >-
+        python scripts/ci/verify_public_release.py
+        nuget
+        --tag "${{ steps.package.outputs.tag }}"
+        --package "${{ steps.package.outputs.package }}"
