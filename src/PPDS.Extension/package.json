@@ -631,6 +631,7 @@
     "dead-code": "knip",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run compile",
     "test:e2e": "playwright test",
     "vsce:package": "vsce package --pre-release",
     "local:install": "node tools/install-local.mjs",
@@ -646,7 +647,8 @@
     "dev:webview": "npx vite dev/",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:webview": "tsc --noEmit -p tsconfig.webview.json",
-    "typecheck:all": "npm run typecheck && npm run typecheck:webview",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "typecheck:all": "npm run typecheck && npm run typecheck:webview && npm run typecheck:e2e",
     "prepare": "cd ../.. && git config core.hooksPath scripts/hooks"
   },
   "overrides": {
