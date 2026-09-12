@@ -10,10 +10,13 @@
  */
 
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { verifyBundledCliVersion } from './bundle-cli-version.mjs';
+import {
+    createBundledCliManifest,
+    verifyBundledCliVersion,
+} from './bundle-cli-version.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIR = join(__dirname, '..');
@@ -95,7 +98,18 @@ function main() {
                 readFileSync(assemblyInfoPath, 'utf8'),
                 expectedVersion
             );
+            const manifestPath = join(BIN_DIR, 'ppds.version.json');
+            writeFileSync(
+                manifestPath,
+                JSON.stringify(
+                    createBundledCliManifest(rid, expectedVersion, actualVersion),
+                    null,
+                    2
+                ) + '\n',
+                'utf8'
+            );
             console.log(`Verified bundled CLI version: ${actualVersion}`);
+            console.log(`Wrote bundled CLI identity manifest: ${manifestPath}`);
         } catch (error) {
             console.error(error.message);
             process.exit(1);
