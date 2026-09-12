@@ -8,7 +8,9 @@ export function extractInformationalVersion(assemblyInfo) {
 
 export function verifyBundledCliVersion(assemblyInfo, expectedVersion) {
     const actualVersion = extractInformationalVersion(assemblyInfo);
-    if (actualVersion !== expectedVersion) {
+    const actualReleaseVersion = actualVersion.split('+', 1)[0];
+    const expectedReleaseVersion = expectedVersion.split('+', 1)[0];
+    if (actualReleaseVersion !== expectedReleaseVersion) {
         throw new Error(
             `Bundled CLI version mismatch: expected ${expectedVersion}, MinVer produced ${actualVersion}`
         );
