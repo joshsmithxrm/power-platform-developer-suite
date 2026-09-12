@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -513,6 +514,7 @@ public sealed class AssemblyExtractor : IDisposable
 
     private sealed class MetadataTypeResolver : IDisposable
     {
+        private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
         private readonly Dictionary<string, string> _pathsByAssemblyName =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, MetadataAssembly> _assembliesByPath =
@@ -576,14 +578,37 @@ public sealed class AssemblyExtractor : IDisposable
 
         internal string? GetTypeFullName(MetadataAssembly assembly, EntityHandle handle)
         {
-            return handle.Kind switch
+            return GetTypeFullName(assembly, handle, []);
+        }
+
+        private string? GetTypeFullName(
+            MetadataAssembly assembly,
+            EntityHandle handle,
+            HashSet<MetadataEntityHandle> visiting)
+        {
+            var key = new MetadataEntityHandle(assembly, handle);
+            if (!visiting.Add(key))
+                return null;
+
+            try
             {
-                HandleKind.TypeDefinition =>
-                    GetTypeDefinitionFullName(assembly.Reader, (TypeDefinitionHandle)handle),
-                HandleKind.TypeReference =>
-                    GetTypeReferenceFullName(assembly.Reader, (TypeReferenceHandle)handle),
-                _ => null
-            };
+                return handle.Kind switch
+                {
+                    HandleKind.TypeDefinition =>
+                        GetTypeDefinitionFullName(assembly.Reader, (TypeDefinitionHandle)handle),
+                    HandleKind.TypeReference =>
+                        GetTypeReferenceFullName(assembly.Reader, (TypeReferenceHandle)handle),
+                    HandleKind.TypeSpecification => GetTypeSpecificationFullName(
+                        assembly,
+                        (TypeSpecificationHandle)handle,
+                        visiting),
+                    _ => null
+                };
+            }
+            finally
+            {
+                visiting.Remove(key);
+            }
         }
 
         internal bool TryResolve(
@@ -591,19 +616,135 @@ public sealed class AssemblyExtractor : IDisposable
             EntityHandle handle,
             out ResolvedMetadataType resolved)
         {
-            if (handle.Kind == HandleKind.TypeDefinition)
-            {
-                resolved = new ResolvedMetadataType(context, (TypeDefinitionHandle)handle);
-                return true;
-            }
+            return TryResolve(context, handle, [], out resolved);
+        }
 
-            if (handle.Kind != HandleKind.TypeReference)
+        private bool TryResolve(
+            MetadataAssembly context,
+            EntityHandle handle,
+            HashSet<MetadataEntityHandle> visiting,
+            out ResolvedMetadataType resolved)
+        {
+            var key = new MetadataEntityHandle(context, handle);
+            if (!visiting.Add(key))
             {
                 resolved = default;
                 return false;
             }
 
-            return TryResolveTypeReference(context, (TypeReferenceHandle)handle, out resolved);
+            try
+            {
+                if (handle.Kind == HandleKind.TypeDefinition)
+                {
+                    resolved = new ResolvedMetadataType(context, (TypeDefinitionHandle)handle);
+                    return true;
+                }
+
+                if (handle.Kind == HandleKind.TypeReference)
+                {
+                    return TryResolveTypeReference(
+                        context,
+                        (TypeReferenceHandle)handle,
+                        visiting,
+                        out resolved);
+                }
+
+                if (handle.Kind == HandleKind.TypeSpecification)
+                {
+                    if (!TryDecodeTypeSpecification(
+                            context.Reader,
+                            (TypeSpecificationHandle)handle,
+                            out var genericType))
+                    {
+                        resolved = default;
+                        return false;
+                    }
+
+                    return TryResolve(context, genericType, visiting, out resolved);
+                }
+
+                resolved = default;
+                return false;
+            }
+            finally
+            {
+                visiting.Remove(key);
+            }
+        }
+
+        private string? GetTypeSpecificationFullName(
+            MetadataAssembly context,
+            TypeSpecificationHandle handle,
+            HashSet<MetadataEntityHandle> visiting)
+        {
+            return TryDecodeTypeSpecification(context.Reader, handle, out var genericType)
+                ? GetTypeFullName(context, genericType, visiting)
+                : null;
+        }
+
+        private static bool TryDecodeTypeSpecification(
+            MetadataReader reader,
+            TypeSpecificationHandle handle,
+            out EntityHandle namedType)
+        {
+            try
+            {
+                namedType = reader.GetTypeSpecification(handle)
+                    .DecodeSignature(TypeSpecificationDecoder, genericContext: null);
+                return !namedType.IsNil;
+            }
+            catch (BadImageFormatException)
+            {
+                namedType = default;
+                return false;
+            }
+        }
+
+        private sealed class TypeSpecificationProvider :
+            ISignatureTypeProvider<EntityHandle, object?>
+        {
+            public EntityHandle GetArrayType(EntityHandle elementType, ArrayShape shape) => default;
+
+            public EntityHandle GetByReferenceType(EntityHandle elementType) => default;
+
+            public EntityHandle GetFunctionPointerType(MethodSignature<EntityHandle> signature) => default;
+
+            public EntityHandle GetGenericInstantiation(
+                EntityHandle genericType,
+                ImmutableArray<EntityHandle> typeArguments) => genericType;
+
+            public EntityHandle GetGenericMethodParameter(object? genericContext, int index) => default;
+
+            public EntityHandle GetGenericTypeParameter(object? genericContext, int index) => default;
+
+            public EntityHandle GetModifiedType(
+                EntityHandle modifier,
+                EntityHandle unmodifiedType,
+                bool isRequired) => unmodifiedType;
+
+            public EntityHandle GetPinnedType(EntityHandle elementType) => default;
+
+            public EntityHandle GetPointerType(EntityHandle elementType) => default;
+
+            public EntityHandle GetPrimitiveType(PrimitiveTypeCode typeCode) => default;
+
+            public EntityHandle GetSZArrayType(EntityHandle elementType) => default;
+
+            public EntityHandle GetTypeFromDefinition(
+                MetadataReader reader,
+                TypeDefinitionHandle handle,
+                byte rawTypeKind) => handle;
+
+            public EntityHandle GetTypeFromReference(
+                MetadataReader reader,
+                TypeReferenceHandle handle,
+                byte rawTypeKind) => handle;
+
+            public EntityHandle GetTypeFromSpecification(
+                MetadataReader reader,
+                object? genericContext,
+                TypeSpecificationHandle handle,
+                byte rawTypeKind) => handle;
         }
 
         internal InvalidOperationException CreateUnresolvedTypeException(
@@ -621,6 +762,7 @@ public sealed class AssemblyExtractor : IDisposable
         private bool TryResolveTypeReference(
             MetadataAssembly context,
             TypeReferenceHandle handle,
+            HashSet<MetadataEntityHandle> visiting,
             out ResolvedMetadataType resolved)
         {
             var reference = context.Reader.GetTypeReference(handle);
@@ -628,9 +770,10 @@ public sealed class AssemblyExtractor : IDisposable
 
             if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
             {
-                if (!TryResolveTypeReference(
+                if (!TryResolve(
                         context,
-                        (TypeReferenceHandle)reference.ResolutionScope,
+                        reference.ResolutionScope,
+                        visiting,
                         out var declaringType))
                 {
                     resolved = default;
@@ -780,6 +923,10 @@ public sealed class AssemblyExtractor : IDisposable
     private readonly record struct ResolvedMetadataType(
         MetadataAssembly Assembly,
         TypeDefinitionHandle Handle);
+
+    private readonly record struct MetadataEntityHandle(
+        MetadataAssembly Assembly,
+        EntityHandle Handle);
 
     private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
     {
