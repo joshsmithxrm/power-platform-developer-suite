@@ -5,8 +5,12 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
+
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "dependabot-label.yml"
 
 import label_major_dependency as labeler  # noqa: E402
 
@@ -118,19 +122,78 @@ class TestEvaluateAndLabel:
 
 
 class TestApplyEvaluationLabel:
-    def test_uses_repository_evaluation_label(self):
+    def test_uses_issues_rest_endpoint_with_existing_issues_permission(self):
         with patch.object(labeler, "_run_gh", return_value="") as run_gh:
             labeler.apply_evaluation_label(42)
         run_gh.assert_called_once_with([
-            "pr", "edit", "42", "--add-label", "status:needs-evaluation",
+            "api", "--method", "POST",
+            "repos/{owner}/{repo}/issues/42/labels",
+            "--field", "labels[]=status:needs-evaluation",
+            "--silent",
         ])
 
-    def test_removes_repository_evaluation_label(self):
+    def test_removes_label_through_issues_rest_endpoint(self):
         with patch.object(labeler, "_run_gh", return_value="") as run_gh:
             labeler.remove_evaluation_label(42)
         run_gh.assert_called_once_with([
-            "pr", "edit", "42", "--remove-label", "status:needs-evaluation",
+            "api", "--method", "DELETE",
+            "repos/{owner}/{repo}/issues/42/labels/status%3Aneeds-evaluation",
+            "--silent",
         ])
+
+    def test_label_mutations_do_not_use_graphql_pr_edit(self):
+        with patch.object(labeler, "_run_gh", return_value="") as run_gh:
+            labeler.apply_evaluation_label(42)
+            labeler.remove_evaluation_label(42)
+
+        for call in run_gh.call_args_list:
+            assert call.args[0][0] == "api"
+            assert "pr" not in call.args[0]
+            assert "edit" not in call.args[0]
+
+
+class TestWorkflowSecurityContract:
+    @staticmethod
+    def _workflow() -> dict:
+        return yaml.load(
+            WORKFLOW_PATH.read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+
+    def test_keeps_pull_request_target_and_least_privilege_permissions(self):
+        workflow = self._workflow()
+
+        assert workflow["on"] == {
+            "pull_request_target": {
+                "types": ["opened", "reopened", "synchronize"],
+            },
+        }
+        assert workflow["permissions"] == {
+            "contents": "read",
+            "issues": "write",
+            "pull-requests": "read",
+        }
+
+    def test_runs_only_for_dependabot_owned_prs(self):
+        job = self._workflow()["jobs"]["label-major-updates"]
+
+        assert job["if"] == (
+            "github.event.pull_request.user.login == 'dependabot[bot]'"
+        )
+
+    def test_checks_out_only_the_trusted_base_revision(self):
+        job = self._workflow()["jobs"]["label-major-updates"]
+        checkout = next(
+            step for step in job["steps"]
+            if step.get("uses", "").startswith("actions/checkout@")
+        )
+
+        assert checkout["with"]["ref"] == (
+            "${{ github.event.pull_request.base.sha }}"
+        )
+        assert "github.event.pull_request.head" not in WORKFLOW_PATH.read_text(
+            encoding="utf-8",
+        )
 
 
 class TestMain:

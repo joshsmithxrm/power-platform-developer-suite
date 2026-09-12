@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "dependabot"))
@@ -48,16 +49,20 @@ def fetch_pr_payload(pr_number: int) -> dict:
 def apply_evaluation_label(pr_number: int) -> None:
     """Idempotently apply the workflow-owned evaluation label."""
     _run_gh([
-        "pr", "edit", str(pr_number),
-        "--add-label", EVALUATION_LABEL,
+        "api", "--method", "POST",
+        f"repos/{{owner}}/{{repo}}/issues/{pr_number}/labels",
+        "--field", f"labels[]={EVALUATION_LABEL}",
+        "--silent",
     ])
 
 
 def remove_evaluation_label(pr_number: int) -> None:
     """Remove the workflow-owned evaluation label after reclassification."""
+    encoded_label = quote(EVALUATION_LABEL, safe="")
     _run_gh([
-        "pr", "edit", str(pr_number),
-        "--remove-label", EVALUATION_LABEL,
+        "api", "--method", "DELETE",
+        f"repos/{{owner}}/{{repo}}/issues/{pr_number}/labels/{encoded_label}",
+        "--silent",
     ])
 
 
