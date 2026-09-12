@@ -36,7 +36,10 @@
     <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
   </ItemGroup>
 
-  <Target Name="CopyNet462DataverseSdkTestAsset" AfterTargets="Build">
+  <Target
+    Name="CopyNet462DataverseSdkTestAsset"
+    AfterTargets="Build"
+    Condition="'$(TargetFramework)' != ''">
     <Copy
       SourceFiles="$(PkgMicrosoft_CrmSdk_CoreAssemblies)\lib\net462\Microsoft.Xrm.Sdk.dll"
       DestinationFiles="$(OutDir)TestAssets\Microsoft.Xrm.Sdk.net462.dll" />
