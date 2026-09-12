@@ -2055,7 +2055,14 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Unregisters an assembly and optionally all its types, steps, and images.
     /// </summary>
-    public async Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
+    public Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
+        => UnregisterAssemblyCoreAsync(assemblyId, force, deleteAssemblyDirectly: true, cancellationToken);
+
+    private async Task<UnregisterResult> UnregisterAssemblyCoreAsync(
+        Guid assemblyId,
+        bool force,
+        bool deleteAssemblyDirectly,
+        CancellationToken cancellationToken)
     {
         _guard.EnsureCanMutate("plugins.assembly.unregister");
         // Get assembly info
@@ -2065,6 +2072,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 assemblyId.ToString(),
                 "Assembly",
                 ErrorCodes.Plugin.NotFound);
+
+        if (deleteAssemblyDirectly && assembly.PackageId.HasValue)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister assembly: {assembly.Name}. Assembly is owned by plugin package {assembly.PackageId.Value}. " +
+                $"Unregister the owning package instead: ppds plugins unregister package {assembly.PackageId.Value} --force.",
+                assembly.Name,
+                "Assembly",
+                ErrorCodes.Operation.NotSupported);
+        }
 
         // Get types and their steps
         var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
@@ -2100,9 +2117,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             result += typeResult;
         }
 
-        // Delete assembly
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, client, cancellationToken);
+        if (deleteAssemblyDirectly)
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, client, cancellationToken);
+        }
+
         result.AssembliesDeleted = 1;
 
         return result;
@@ -2141,10 +2161,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             EntityType = "Package"
         };
 
-        // Delete assemblies (and their types/steps/images) in sequence
+        // Package-owned assemblies cannot be deleted directly. Delete their manually
+        // registered descendants, then let deleting the package cascade the assemblies.
         foreach (var assembly in assemblies)
         {
-            var assemblyResult = await UnregisterAssemblyAsync(assembly.Id, force: true, cancellationToken);
+            var assemblyResult = await UnregisterAssemblyCoreAsync(
+                assembly.Id,
+                force: true,
+                deleteAssemblyDirectly: false,
+                cancellationToken);
             result += assemblyResult;
         }
 

@@ -341,6 +341,16 @@ Task DeletePluginTypeAsync(Guid pluginTypeId, CancellationToken cancellationToke
 
 Cascade unregister with optional `force` for child deletion. Returns `UnregisterResult` with counts.
 
+Assemblies materialized from a NuGet plugin package are owned by the
+`pluginpackage` record and cannot be deleted directly. Forced package
+unregistration deletes manually registered descendants first, then deletes the
+package and lets Dataverse cascade its owned assembly records. PPDS must never
+send a direct `pluginassembly` delete for a package-owned assembly. The
+Dataverse `pluginpackage_pluginassembly` relationship defines this behavior as
+[`Delete: Cascade`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/pluginassembly#pluginpackage_pluginassembly).
+Direct assembly unregistration detects this ownership before deleting any
+descendants and directs the user to unregister the owning package instead.
+
 ```csharp
 Task<UnregisterResult> UnregisterImageAsync(Guid imageId, CancellationToken cancellationToken = default);
 Task<UnregisterResult> UnregisterStepAsync(
@@ -352,6 +362,13 @@ Task<UnregisterResult> UnregisterAssemblyAsync(
 Task<UnregisterResult> UnregisterPackageAsync(
     Guid packageId, bool force = false, CancellationToken cancellationToken = default);
 ```
+
+#### Package Unregistration Acceptance Criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-33 | `plugins unregister package --force` deletes descendant registrations and the package without directly deleting package-owned assemblies; Dataverse cascades those assemblies with the package | `UnregisterPackageAsync_Force_DeletesPackageWithoutDirectlyDeletingOwnedAssembly` | ✅ |
+| AC-34 | Direct assembly unregistration rejects a package-owned assembly before deleting descendants and identifies the owning package command | `UnregisterAssemblyAsync_ThrowsBeforeDeletingChildren_WhenAssemblyBelongsToPackage` | ✅ |
 
 #### Download Operations
 
