@@ -94,14 +94,21 @@ Bypass: `[size-waived: <reason>]` in the PR title or body. The reason must be no
 
 Catches the failure mode from PR #792 (131 files / 7.5K LoC merged unreviewed).
 
-### Rule 3 — Major-bump test enforcement (`scripts/ci/check_major_bump_tested.py`)
+### Rule 3 — Major dependency evidence (`scripts/ci/check_major_bump_tested.py`)
 
-For dependabot PRs (label `dependencies` OR author `app/dependabot` / `dependabot[bot]`) whose title indicates a major-version bump (per `_BUMP_TITLE_RE` + `classify_update_type` from `scripts/dependabot/classify.py`):
+For dependency PRs (label `dependencies` OR author `app/dependabot` / `dependabot[bot]`), the shared classifier in `scripts/dependabot/classify.py` determines both update type and ecosystem. Major-version updates require passing evidence from the affected surface. Unclassifiable versions are treated like majors so ambiguity cannot silently bypass the gate.
 
-- Requires the actual `test` job (not the path-filter `check-changes` skip-status) to have **run AND passed** in the PR's CI rollup.
-- Blocks merge if `test` is `SKIPPED`, `FAILURE`, still pending, or absent.
+| Ecosystem | Required workflow / job | Evidence |
+|-----------|-------------------------|----------|
+| NuGet | `Test / test` | The real .NET unit-test job ran |
+| npm | `Build / extension` | Extension typecheck, lint, build, and tests ran |
+| GitHub Actions | `Python Tests / workflow-tests` | Executable workflow-policy regression tests ran |
 
-**No bypass marker.** A major bump that didn't trigger the real test job is by definition unverified — fix the cause (push an empty commit, re-run all jobs, or expand path filters), don't wave it through.
+The gate matches both workflow and job name, so an unrelated generic `test` check cannot satisfy the rule. It blocks when the required job is `SKIPPED`, failed, still pending, or absent. If the ecosystem cannot be determined from labels, Dependabot branch naming, or a single dependency-manifest/workflow surface, the gate also blocks rather than choosing an unrelated test.
+
+`.github/workflows/dependabot-label.yml` uses the same classifier to apply `status:needs-evaluation` to major or unclassifiable Dependabot PRs. Do not duplicate version heuristics in workflow YAML.
+
+**No bypass marker.** A major update without relevant executable evidence is unverified — fix the cause or re-run the relevant workflow after it passes; don't wave it through.
 
 Catches the failure mode from PR #806 (`vite 5 → 8` — two major-version jumps, auto-merged after only `check-changes` ran).
 

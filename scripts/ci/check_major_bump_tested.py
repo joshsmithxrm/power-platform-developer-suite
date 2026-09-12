@@ -1,42 +1,41 @@
 #!/usr/bin/env python3
-"""Rule 3 of the pre-merge gate: major-version bump test enforcement.
+"""Rule 3 of the pre-merge gate: major dependency evidence enforcement.
 
-Catches the failure mode from PR #806 (vite 5 -> 8 — TWO major-version jumps,
-auto-merged with no real ``test`` job re-run, only ``check-changes`` ran).
+Catches the failure mode from PR #806 (vite 5 -> 8 was merged without the
+relevant product tests) without requiring an unrelated .NET job for every
+dependency ecosystem.
 
-For dependabot PRs (label ``dependencies`` OR author ``app/dependabot``):
+For dependency PRs (label ``dependencies`` or a Dependabot author):
 
-1. Use ``classify_pr`` from ``scripts/dependabot/classify.py`` to detect
-   whether the title indicates a major-version bump.
-2. If yes, require the actual ``test`` job (not the path-filter
-   ``check-changes`` skip-status) to have run AND passed in the PR's CI rollup.
+1. Classify the update with ``scripts/dependabot/classify.py``. Major and
+   unclassifiable updates require evaluation; uncertainty fails closed.
+2. Select the executable evidence for the classified ecosystem:
+   NuGet -> .NET tests, npm -> Extension build/tests, GitHub Actions -> Python
+   workflow-policy tests.
+3. Require that exact job, from the expected workflow, to have run and passed.
 
-Block merge if the test job is SKIPPED or didn't run.
-
-Bypass: there is no bypass marker for this rule. A major bump that didn't
-trigger the test job is by definition unverified — the fix is to retrigger
-CI by pushing an empty commit or hitting "Re-run all jobs", not to wave it
-through.
+There is no bypass marker. A major update without relevant passing evidence is
+unverified and remains blocked.
 
 Usage:
     python -m scripts.ci.check_major_bump_tested --pr 123
 
 Exit codes:
-    0 — not a dependabot major bump, OR test job ran and passed
-    1 — major bump and test job skipped / failed / missing
-    2 — invocation / data error
+    0 — policy not applicable, or required evidence ran and passed
+    1 — major/uncertain update is unclassified or lacks passing evidence
+    2 — invocation / GitHub data error
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-# Make scripts/dependabot importable so we can reuse classify_pr without copying.
+# Make scripts/dependabot importable so classification has one implementation.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "dependabot"))
 
@@ -45,19 +44,34 @@ try:
 except ImportError as e:  # pragma: no cover — only hits in broken layouts
     raise SystemExit(
         f"error: cannot import scripts/dependabot/classify.py: {e}\n"
-        "Rule 3 depends on the dependabot classifier shipped in PR #814."
+        "Rule 3 depends on the repository dependency classifier."
     )
 
 
-# Job names that count as the real test job (must have RUN + SUCCESS).
-# Sourced from .github/workflows/test.yml (job id: `test`).
-# `test-status` is the gate job that branch protection sees — but it can pass
-# trivially when `test` is skipped, which is exactly the failure mode we're
-# catching. So we look at `test` directly.
-REQUIRED_TEST_JOB_NAMES = ("test",)
+@dataclass(frozen=True)
+class RequiredEvidence:
+    """A check run that proves the affected dependency surface was exercised."""
 
-# Authors that mark a PR as dependabot-originated.
-DEPENDABOT_AUTHORS = frozenset({"dependabot", "app/dependabot", "dependabot[bot]"})
+    workflow: str
+    job: str
+    description: str
+
+
+# Names are the user-visible values returned by ``gh pr checks --json``.
+# Matching both workflow and job avoids accepting an unrelated generic `test`
+# check from another workflow or third-party integration.
+REQUIRED_EVIDENCE_BY_ECOSYSTEM = {
+    "nuget": RequiredEvidence("Test", "test", ".NET unit tests"),
+    "npm": RequiredEvidence("Build", "extension", "Extension build and tests"),
+    "github-actions": RequiredEvidence(
+        "Python Tests",
+        "workflow-tests",
+        "executable workflow-policy tests",
+    ),
+}
+
+PASSING_STATES = frozenset({"SUCCESS", "PASS"})
+RUNNING_STATES = frozenset({"PENDING", "IN_PROGRESS", "QUEUED", ""})
 
 
 def _run_gh(args: list[str]) -> str:
@@ -73,7 +87,7 @@ def _run_gh(args: list[str]) -> str:
 
 
 def fetch_pr_payload(pr_number: int) -> dict:
-    """Fetch fields needed for classification."""
+    """Fetch fields needed for dependency classification."""
     raw = _run_gh([
         "pr", "view", str(pr_number),
         "--json", "number,title,body,labels,headRefName,files,author",
@@ -82,82 +96,72 @@ def fetch_pr_payload(pr_number: int) -> dict:
 
 
 def fetch_pr_checks(pr_number: int) -> list[dict]:
-    """Return the list of checks for the PR (gh pr checks --json)."""
-    raw = _run_gh(["pr", "checks", str(pr_number), "--json", "name,state"])
+    """Return job name, state, and workflow identity for the PR's checks."""
+    raw = _run_gh([
+        "pr", "checks", str(pr_number),
+        "--json", "name,state,workflow",
+    ])
     return json.loads(raw) if raw.strip() else []
 
 
-def is_dependabot_pr(pr: dict) -> bool:
-    """True if the PR is dependabot-originated."""
-    labels = {(lbl.get("name") or "").lower() for lbl in (pr.get("labels") or [])}
-    if "dependencies" in labels:
-        return True
-    author = (pr.get("author") or {}).get("login", "").lower()
-    return author in DEPENDABOT_AUTHORS
+def required_evidence_for(
+    classification: classify.Classification,
+) -> tuple[Optional[RequiredEvidence], str]:
+    """Resolve required evidence or return a fail-closed explanation."""
+    evidence = REQUIRED_EVIDENCE_BY_ECOSYSTEM.get(classification.ecosystem)
+    if evidence is not None:
+        return evidence, ""
+    return None, (
+        "Major or unclassifiable dependency update detected, but its ecosystem "
+        f"is '{classification.ecosystem}'. Cannot select relevant test evidence; "
+        "add an ecosystem label or use a dependency manifest/workflow-only diff."
+    )
 
 
-def is_major_bump(pr: dict) -> bool:
-    """True if the dependabot PR title indicates a major-version bump.
+def check_required_evidence(
+    checks: list[dict],
+    evidence: RequiredEvidence,
+) -> tuple[bool, str]:
+    """Pass iff the exact ecosystem-specific workflow job ran successfully."""
+    matching_states = [
+        (check.get("state") or "").upper()
+        for check in checks
+        if (check.get("name") or "") == evidence.job
+        and (check.get("workflow") or "") == evidence.workflow
+    ]
+    check_name = f"{evidence.workflow} / {evidence.job}"
 
-    Uses ``classify_pr`` (which uses ``_BUMP_TITLE_RE`` + ``classify_update_type``).
-    A grouped bump returns Group B with update_type="unknown" — not major,
-    so this returns False. That's the right call: grouped bumps need the
-    skill operator to inspect them; we don't auto-flag them here.
-    """
-    cls = classify.classify_pr(pr)
-    return cls.update_type == "major"
-
-
-def check_test_job_ran(checks: list[dict]) -> tuple[bool, str]:
-    """Return (passed, message). Passes iff a required test job both ran and succeeded.
-
-    States we honor (per gh pr checks --json):
-      - SUCCESS / pass  -> ran and passed
-      - SKIPPED         -> did NOT run, fail the rule
-      - PENDING / IN_PROGRESS / QUEUED -> still running, fail (PR isn't ready)
-      - FAILURE / CANCELLED / TIMED_OUT / ACTION_REQUIRED / NEUTRAL -> fail
-      - missing entirely -> fail
-    """
-    by_name = {(c.get("name") or ""): (c.get("state") or "").upper() for c in checks}
-
-    found = []
-    for required in REQUIRED_TEST_JOB_NAMES:
-        if required in by_name:
-            found.append((required, by_name[required]))
-
-    if not found:
-        return False, (
-            "Major-version bump detected, but the required test job "
-            f"({', '.join(REQUIRED_TEST_JOB_NAMES)}) did not run on this PR. "
-            "Trigger CI by pushing an empty commit or re-running all jobs."
+    # A successful rerun is sufficient even if an older attempt is also
+    # present in the rollup.
+    if any(state in PASSING_STATES for state in matching_states):
+        return True, (
+            "Major or unclassifiable dependency update detected; required "
+            f"{evidence.description} ({check_name}) ran and passed."
         )
 
-    failures = []
-    for name, state in found:
-        if state in {"SUCCESS", "PASS"}:
-            continue
-        if state == "SKIPPED":
-            failures.append(
-                f"required test job '{name}' was SKIPPED — major bumps must "
-                "re-run the test job; trigger CI by pushing an empty commit"
-            )
-        elif state in {"PENDING", "IN_PROGRESS", "QUEUED", ""}:
-            failures.append(f"required test job '{name}' is still running ({state or 'unknown'})")
-        else:
-            failures.append(f"required test job '{name}' did not pass (state={state})")
+    if not matching_states:
+        return False, (
+            "Major or unclassifiable dependency update detected, but required "
+            f"{evidence.description} ({check_name}) did not run on this PR."
+        )
 
-    if failures:
-        return False, "Major-version bump test enforcement failed:\n  - " + "\n  - ".join(failures)
+    if any(state in RUNNING_STATES for state in matching_states):
+        state_text = ", ".join(state or "UNKNOWN" for state in matching_states)
+        return False, f"Required check {check_name} is still running ({state_text})."
 
-    return True, (
-        "Major-version bump detected; required test job(s) "
-        f"({', '.join(n for n, _ in found)}) ran and passed."
-    )
+    if all(state == "SKIPPED" for state in matching_states):
+        return False, (
+            f"Required check {check_name} was SKIPPED; major dependency updates "
+            "must run the relevant test surface."
+        )
+
+    state_text = ", ".join(state or "UNKNOWN" for state in matching_states)
+    return False, f"Required check {check_name} did not pass (state={state_text})."
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Pre-merge gate Rule 3: major-version bump test enforcement.",
+        description="Pre-merge Rule 3: major dependency evidence enforcement.",
     )
     parser.add_argument("--pr", type=int, required=True, help="PR number")
     args = parser.parse_args(argv)
@@ -168,13 +172,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    if not is_dependabot_pr(pr):
-        print("Not a dependabot PR — rule not applicable.")
+    if not classify.is_dependency_update(pr):
+        print("Not a dependency-update PR — rule not applicable.")
         return 0
 
-    if not is_major_bump(pr):
-        print("Dependabot PR but not a major-version bump — rule not applicable.")
+    classification = classify.classify_pr(pr)
+    if not classify.requires_major_evaluation(classification):
+        print("Dependency PR is a classified patch/minor update — rule not applicable.")
         return 0
+
+    evidence, error = required_evidence_for(classification)
+    if evidence is None:
+        print(error)
+        return 1
 
     try:
         checks = fetch_pr_checks(args.pr)
@@ -182,7 +192,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    passed, message = check_test_job_ran(checks)
+    passed, message = check_required_evidence(checks, evidence)
     print(message)
     return 0 if passed else 1
 

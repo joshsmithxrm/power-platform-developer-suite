@@ -1,14 +1,9 @@
-"""Unit tests for scripts/ci/check_major_bump_tested.py.
-
-Run with: python -m pytest tests/ci/test_check_major_bump_tested.py -v
-"""
+"""Behavior tests for ecosystem-aware major dependency evidence enforcement."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
@@ -16,231 +11,258 @@ sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
 import check_major_bump_tested as cmbt  # noqa: E402
 
 
-def make_pr(*, number=1, title="", body="", labels=None, head_ref="",
-            files=None, author_login=""):
+def make_pr(
+    *,
+    number=1,
+    title="",
+    body="",
+    labels=None,
+    head_ref="",
+    files=None,
+    author_login="",
+):
     return {
         "number": number,
         "title": title,
         "body": body,
-        "labels": [{"name": n} for n in (labels or [])],
+        "labels": [{"name": name} for name in (labels or [])],
         "headRefName": head_ref,
-        "files": [{"path": p} for p in (files or [])],
+        "files": [{"path": path} for path in (files or [])],
         "author": {"login": author_login},
     }
 
 
-# ---------------------------------------------------------------------------
-# Dependabot detection
-# ---------------------------------------------------------------------------
+def major_pr(ecosystem: str) -> dict:
+    if ecosystem == "nuget":
+        return make_pr(
+            title="deps: Bump Example.Package from 1.0.0 to 2.0.0",
+            labels=["dependencies", "nuget"],
+            head_ref="dependabot/nuget/Example.Package-2.0.0",
+            files=["Directory.Packages.props"],
+            author_login="dependabot[bot]",
+        )
+    if ecosystem == "npm":
+        return make_pr(
+            title="deps(extension): Bump example-package from 1.0.0 to 2.0.0",
+            labels=["dependencies"],
+            head_ref="dependabot/npm_and_yarn/src/PPDS.Extension/example-package-2.0.0",
+            files=["src/PPDS.Extension/package.json"],
+            author_login="dependabot[bot]",
+        )
+    if ecosystem == "github-actions":
+        return make_pr(
+            title="ci: bump actions/setup-python from 6 to 7",
+            labels=["dependencies"],
+            head_ref="dependabot/github_actions/actions/setup-python-7",
+            files=[".github/workflows/workflow-tests.yml"],
+            author_login="dependabot[bot]",
+        )
+    raise AssertionError(f"unsupported test ecosystem: {ecosystem}")
 
-class TestIsDependabotPr:
-    def test_label_dependencies_matches(self):
-        assert cmbt.is_dependabot_pr(make_pr(labels=["dependencies"]))
 
-    def test_author_app_dependabot_matches(self):
-        assert cmbt.is_dependabot_pr(make_pr(author_login="app/dependabot"))
+def check(workflow: str, name: str, state: str) -> dict:
+    return {"workflow": workflow, "name": name, "state": state}
 
-    def test_author_dependabot_bot_matches(self):
-        assert cmbt.is_dependabot_pr(make_pr(author_login="dependabot[bot]"))
 
-    def test_no_label_no_author_returns_false(self):
-        assert not cmbt.is_dependabot_pr(
-            make_pr(labels=["bug"], author_login="some-human"),
+class TestRequiredEvidenceSelection:
+    def test_nuget_requires_dotnet_unit_tests(self):
+        classification = cmbt.classify.classify_pr(major_pr("nuget"))
+        evidence, error = cmbt.required_evidence_for(classification)
+        assert error == ""
+        assert evidence == cmbt.RequiredEvidence("Test", "test", ".NET unit tests")
+
+    def test_npm_requires_extension_build_and_tests(self):
+        classification = cmbt.classify.classify_pr(major_pr("npm"))
+        evidence, error = cmbt.required_evidence_for(classification)
+        assert error == ""
+        assert evidence == cmbt.RequiredEvidence(
+            "Build", "extension", "Extension build and tests",
         )
 
-    def test_label_match_is_case_insensitive(self):
-        assert cmbt.is_dependabot_pr(make_pr(labels=["Dependencies"]))
-
-    def test_null_label_name_treated_as_empty(self):
-        # Defensive: gh shouldn't return null label names, but handle it.
-        pr = {"labels": [{"name": None}, {"name": "dependencies"}], "author": {"login": ""}}
-        assert cmbt.is_dependabot_pr(pr)
-
-    def test_null_labels_list_treated_as_empty(self):
-        pr = {"labels": None, "author": {"login": "alice"}}
-        assert not cmbt.is_dependabot_pr(pr)
-
-
-# ---------------------------------------------------------------------------
-# Major bump detection (delegates to classify_pr)
-# ---------------------------------------------------------------------------
-
-class TestIsMajorBump:
-    def test_pr806_vite_5_to_8_is_major(self):
-        # The retro item: vite 5 -> 8.
-        pr = make_pr(
-            title="Bump vite from 5.0.0 to 8.0.0",
-            head_ref="dependabot/npm_and_yarn/vite-8.0.0",
-            labels=["dependencies", "npm_and_yarn"],
+    def test_github_actions_requires_workflow_policy_tests(self):
+        classification = cmbt.classify.classify_pr(major_pr("github-actions"))
+        evidence, error = cmbt.required_evidence_for(classification)
+        assert error == ""
+        assert evidence == cmbt.RequiredEvidence(
+            "Python Tests", "workflow-tests", "executable workflow-policy tests",
         )
-        assert cmbt.is_major_bump(pr)
 
-    def test_minor_bump_is_not_major(self):
-        pr = make_pr(
-            title="Bump foo from 1.2.0 to 1.3.0",
-            head_ref="dependabot/npm_and_yarn/foo-1.3.0",
-            labels=["dependencies", "npm_and_yarn"],
+    def test_unknown_ecosystem_has_no_fallback_to_unrelated_tests(self):
+        classification = cmbt.classify.Classification(
+            pr_number=1,
+            group="C",
+            reason="ambiguous",
+            ecosystem="unknown",
+            update_type="major",
+            package="example",
+            from_version="1",
+            to_version="2",
         )
-        assert not cmbt.is_major_bump(pr)
+        evidence, error = cmbt.required_evidence_for(classification)
+        assert evidence is None
+        assert "Cannot select relevant test evidence" in error
 
-    def test_patch_bump_is_not_major(self):
-        pr = make_pr(
-            title="Bump foo from 1.2.3 to 1.2.4",
-            head_ref="dependabot/npm_and_yarn/foo-1.2.4",
-            labels=["dependencies", "npm_and_yarn"],
+
+class TestCheckRequiredEvidence:
+    EVIDENCE = cmbt.RequiredEvidence("Build", "extension", "Extension build and tests")
+
+    def test_exact_success_passes(self):
+        passed, message = cmbt.check_required_evidence(
+            [check("Build", "extension", "SUCCESS")],
+            self.EVIDENCE,
         )
-        assert not cmbt.is_major_bump(pr)
-
-    def test_grouped_bump_is_not_flagged_as_major(self):
-        # Grouped bumps are unknown/Group B per classify; not major here.
-        pr = make_pr(
-            title="Bump the github-actions group with 3 updates",
-            labels=["dependencies", "github_actions"],
-        )
-        assert not cmbt.is_major_bump(pr)
-
-    def test_v_prefixed_action_major(self):
-        pr = make_pr(
-            title="Bump actions/checkout from v3 to v4",
-            labels=["dependencies", "github_actions"],
-        )
-        assert cmbt.is_major_bump(pr)
-
-
-# ---------------------------------------------------------------------------
-# Test-job state evaluation
-# ---------------------------------------------------------------------------
-
-class TestCheckTestJobRan:
-    def test_success_passes(self):
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "test", "state": "SUCCESS"},
-        ])
         assert passed
-        assert "ran and passed" in msg
+        assert "ran and passed" in message
 
-    def test_pass_state_passes(self):
-        # gh sometimes emits 'pass' in older versions
-        passed, _ = cmbt.check_test_job_ran([{"name": "test", "state": "pass"}])
+    def test_pass_state_is_accepted(self):
+        passed, _ = cmbt.check_required_evidence(
+            [check("Build", "extension", "pass")],
+            self.EVIDENCE,
+        )
         assert passed
+
+    def test_same_job_name_from_wrong_workflow_does_not_pass(self):
+        passed, message = cmbt.check_required_evidence(
+            [check("Third Party", "extension", "SUCCESS")],
+            self.EVIDENCE,
+        )
+        assert not passed
+        assert "did not run" in message
 
     def test_skipped_fails(self):
-        # The PR #806 scenario.
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "test", "state": "SKIPPED"},
-        ])
+        passed, message = cmbt.check_required_evidence(
+            [check("Build", "extension", "SKIPPED")],
+            self.EVIDENCE,
+        )
         assert not passed
-        assert "SKIPPED" in msg
-        assert "test" in msg
+        assert "SKIPPED" in message
 
     def test_failure_fails(self):
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "test", "state": "FAILURE"},
-        ])
+        passed, message = cmbt.check_required_evidence(
+            [check("Build", "extension", "FAILURE")],
+            self.EVIDENCE,
+        )
         assert not passed
-        assert "FAILURE" in msg
+        assert "FAILURE" in message
 
     def test_pending_fails(self):
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "test", "state": "IN_PROGRESS"},
-        ])
+        passed, message = cmbt.check_required_evidence(
+            [check("Build", "extension", "IN_PROGRESS")],
+            self.EVIDENCE,
+        )
         assert not passed
-        assert "still running" in msg
+        assert "still running" in message
 
-    def test_missing_test_job_fails(self):
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "check-changes", "state": "SUCCESS"},
-            {"name": "lint", "state": "SUCCESS"},
-        ])
+    def test_missing_fails(self):
+        passed, message = cmbt.check_required_evidence([], self.EVIDENCE)
         assert not passed
-        assert "did not run" in msg
+        assert "did not run" in message
 
-    def test_empty_checks_fails(self):
-        passed, msg = cmbt.check_test_job_ran([])
-        assert not passed
-        assert "did not run" in msg
-
-    def test_other_jobs_alongside_test_success_passes(self):
-        passed, _ = cmbt.check_test_job_ran([
-            {"name": "test", "state": "SUCCESS"},
-            {"name": "check-changes", "state": "SUCCESS"},
-            {"name": "lint", "state": "SUCCESS"},
-        ])
+    def test_successful_rerun_wins_over_prior_failure(self):
+        passed, _ = cmbt.check_required_evidence(
+            [
+                check("Build", "extension", "FAILURE"),
+                check("Build", "extension", "SUCCESS"),
+            ],
+            self.EVIDENCE,
+        )
         assert passed
 
-    def test_null_check_name_does_not_crash(self):
-        # Defensive: a check entry with null name shouldn't crash.
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": None, "state": "SUCCESS"},
-            {"name": "test", "state": "SUCCESS"},
-        ])
-        assert passed
-
-    def test_null_check_state_treated_as_pending(self):
-        # Defensive: a null state for the test job should be treated like
-        # "still running / unknown", not crash.
-        passed, msg = cmbt.check_test_job_ran([
-            {"name": "test", "state": None},
-        ])
-        assert not passed
-        assert "still running" in msg or "did not pass" in msg
-
-
-# ---------------------------------------------------------------------------
-# Main entry — wiring
-# ---------------------------------------------------------------------------
 
 class TestMain:
-    def test_non_dependabot_pr_returns_0(self):
+    def test_non_dependency_pr_returns_zero_without_fetching_checks(self):
         pr = make_pr(labels=["bug"], author_login="alice")
-        with patch.object(cmbt, "fetch_pr_payload", return_value=pr):
-            rc = cmbt.main(["--pr", "1"])
-        assert rc == 0
+        with patch.object(cmbt, "fetch_pr_payload", return_value=pr), \
+             patch.object(cmbt, "fetch_pr_checks", return_value=[]) as fetch_checks:
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
+        fetch_checks.assert_not_called()
 
-    def test_dependabot_minor_bump_returns_0_without_checking_jobs(self):
+    def test_minor_dependency_returns_zero_without_fetching_checks(self):
         pr = make_pr(
-            title="Bump foo from 1.2.0 to 1.3.0",
+            title="Bump example from 1.2.0 to 1.3.0",
             labels=["dependencies"],
+            files=["src/PPDS.Extension/package.json"],
             author_login="dependabot[bot]",
         )
         with patch.object(cmbt, "fetch_pr_payload", return_value=pr), \
-             patch.object(cmbt, "fetch_pr_checks", return_value=[]) as m:
-            rc = cmbt.main(["--pr", "1"])
-        assert rc == 0
-        m.assert_not_called()
+             patch.object(cmbt, "fetch_pr_checks", return_value=[]) as fetch_checks:
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
+        fetch_checks.assert_not_called()
 
-    def test_dependabot_major_bump_with_passing_test_returns_0(self):
+    def test_nuget_major_passes_with_dotnet_test(self):
+        with patch.object(cmbt, "fetch_pr_payload", return_value=major_pr("nuget")), \
+             patch.object(
+                 cmbt,
+                 "fetch_pr_checks",
+                 return_value=[check("Test", "test", "SUCCESS")],
+             ):
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
+
+    def test_npm_major_passes_with_extension_job_while_dotnet_is_skipped(self):
+        checks = [
+            check("Test", "test", "SKIPPED"),
+            check("Build", "extension", "SUCCESS"),
+        ]
+        with patch.object(cmbt, "fetch_pr_payload", return_value=major_pr("npm")), \
+             patch.object(cmbt, "fetch_pr_checks", return_value=checks):
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
+
+    def test_actions_major_passes_with_workflow_tests_while_product_tests_skip(self):
+        checks = [
+            check("Test", "test", "SKIPPED"),
+            check("Build", "extension", "SKIPPED"),
+            check("Python Tests", "workflow-tests", "SUCCESS"),
+        ]
+        with patch.object(
+            cmbt, "fetch_pr_payload", return_value=major_pr("github-actions"),
+        ), patch.object(cmbt, "fetch_pr_checks", return_value=checks):
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
+
+    def test_actions_major_fails_without_workflow_tests(self):
+        checks = [check("Test", "test", "SKIPPED")]
+        with patch.object(
+            cmbt, "fetch_pr_payload", return_value=major_pr("github-actions"),
+        ), patch.object(cmbt, "fetch_pr_checks", return_value=checks):
+            result = cmbt.main(["--pr", "1"])
+        assert result == 1
+
+    def test_unparseable_dependency_with_known_ecosystem_still_requires_evidence(self):
         pr = make_pr(
-            title="Bump foo from 1.2.0 to 2.0.0",
+            title="Update internal dependency",
             labels=["dependencies"],
+            files=["src/PPDS.Extension/package.json"],
             author_login="dependabot[bot]",
         )
         with patch.object(cmbt, "fetch_pr_payload", return_value=pr), \
              patch.object(
-                cmbt, "fetch_pr_checks",
-                return_value=[{"name": "test", "state": "SUCCESS"}],
+                 cmbt,
+                 "fetch_pr_checks",
+                 return_value=[check("Build", "extension", "SUCCESS")],
              ):
-            rc = cmbt.main(["--pr", "1"])
-        assert rc == 0
+            result = cmbt.main(["--pr", "1"])
+        assert result == 0
 
-    def test_dependabot_major_bump_with_skipped_test_returns_1(self):
-        # The PR #806 retro scenario.
+    def test_unknown_ecosystem_fails_closed_without_fetching_checks(self):
         pr = make_pr(
-            title="Bump vite from 5.0.0 to 8.0.0",
+            title="Bump example from 1.0.0 to 2.0.0",
             labels=["dependencies"],
+            files=["docs/dependencies.md"],
             author_login="dependabot[bot]",
         )
         with patch.object(cmbt, "fetch_pr_payload", return_value=pr), \
-             patch.object(
-                cmbt, "fetch_pr_checks",
-                return_value=[{"name": "test", "state": "SKIPPED"}],
-             ):
-            rc = cmbt.main(["--pr", "1"])
-        assert rc == 1
+             patch.object(cmbt, "fetch_pr_checks", return_value=[]) as fetch_checks:
+            result = cmbt.main(["--pr", "1"])
+        assert result == 1
+        fetch_checks.assert_not_called()
 
-    def test_gh_failure_returns_2(self):
+    def test_github_failure_returns_two(self):
         with patch.object(
             cmbt, "fetch_pr_payload", side_effect=RuntimeError("gh boom"),
         ):
-            rc = cmbt.main(["--pr", "1"])
-        assert rc == 2
+            result = cmbt.main(["--pr", "1"])
+        assert result == 2
