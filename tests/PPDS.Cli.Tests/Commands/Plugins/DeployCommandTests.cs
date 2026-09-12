@@ -5,6 +5,7 @@ using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Tests.Plugins;
@@ -240,6 +241,94 @@ public class DeployCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), $"ppds-reference-deploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            var packagePath = PluginPackageTestFixture.Create(
+                scratch,
+                "reference-dir-package.nupkg",
+                "ppds_ReferenceDirPackage",
+                new TestPackageAssembly(
+                    "Contoso.ExternalFramework",
+                    "Contoso.ExternalFramework.dll",
+                    """
+                    using System;
+                    using Microsoft.Xrm.Sdk;
+                    namespace Contoso.External
+                    {
+                        public abstract class PluginBase : IPlugin
+                        {
+                            public void Execute(IServiceProvider serviceProvider) { }
+                        }
+                    }
+                    """,
+                    ReferencesSdk: true,
+                    IncludeInPackage: false),
+                new TestPackageAssembly(
+                    "Contoso.RuntimePlugins",
+                    "Contoso.RuntimePlugins.dll",
+                    """
+                    namespace Contoso.Plugins
+                    {
+                        public sealed class RuntimeOnlyPlugin : Contoso.External.PluginBase { }
+                    }
+                    """,
+                    ReferencesSdk: true,
+                    AssemblyReferences: ["Contoso.ExternalFramework"]));
+
+            var config = NupkgExtractor.Extract(packagePath, [scratch]);
+            Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], config.AllTypeNames);
+
+            // Prove deploy preflight uses portable manifest/type identity rather than relying on
+            // the extraction machine's --reference-dir still being available.
+            File.Delete(Path.Combine(scratch, "Contoso.ExternalFramework.dll"));
+
+            var packageId = Guid.NewGuid();
+            var assemblyId = Guid.NewGuid();
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(service => service.GetPackageByNameAsync(
+                    "ppds_ReferenceDirPackage",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PluginPackageInfo { Id = packageId, Name = "ppds_ReferenceDirPackage" });
+            mock.Setup(service => service.GetAssemblyIdForPackageAsync(
+                    packageId,
+                    "Contoso.RuntimePlugins",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(service => service.ListTypesForAssemblyAsync(
+                    assemblyId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                scratch,
+                solutionOverride: null,
+                clean: false,
+                dryRun: true,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Null(result.Error);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive()
     {
         var packagePath = CreateRuntimePluginPackage();
@@ -317,7 +406,7 @@ public class DeployCommandTests : IDisposable
                     packageId,
                     "Contoso.RuntimePlugins",
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid?)null);
+                .ReturnsAsync(value: null);
 
             var config = new PluginAssemblyConfig
             {

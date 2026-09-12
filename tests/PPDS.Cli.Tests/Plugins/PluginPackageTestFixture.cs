@@ -11,7 +11,9 @@ internal sealed record TestPackageAssembly(
     string FileName,
     string Source,
     bool ReferencesSdk = false,
-    bool ReferencesPpdsPlugins = false);
+    bool ReferencesPpdsPlugins = false,
+    bool IncludeInPackage = true,
+    IReadOnlyList<string>? AssemblyReferences = null);
 
 internal static class PluginPackageTestFixture
 {
@@ -34,11 +36,22 @@ internal static class PluginPackageTestFixture
                 """);
         }
 
+        var compiledAssemblies = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var assembly in assemblies)
         {
-            var entry = archive.CreateEntry($"lib/net462/{assembly.FileName}");
-            using var entryStream = entry.Open();
-            entryStream.Write(Compile(assembly));
+            var image = Compile(assembly, compiledAssemblies);
+            compiledAssemblies.Add(assembly.AssemblyName, image);
+
+            if (assembly.IncludeInPackage)
+            {
+                var entry = archive.CreateEntry($"lib/net462/{assembly.FileName}");
+                using var entryStream = entry.Open();
+                entryStream.Write(image);
+            }
+            else
+            {
+                File.WriteAllBytes(Path.Combine(directory, assembly.FileName), image);
+            }
         }
 
         if (assemblies.Any(assembly => assembly.ReferencesPpdsPlugins))
@@ -52,7 +65,9 @@ internal static class PluginPackageTestFixture
         return nupkgPath;
     }
 
-    private static byte[] Compile(TestPackageAssembly source)
+    private static byte[] Compile(
+        TestPackageAssembly source,
+        IReadOnlyDictionary<string, byte[]> compiledAssemblies)
     {
         var referenceDirectory = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory();
         if (referenceDirectory == null)
@@ -67,6 +82,19 @@ internal static class PluginPackageTestFixture
             references.Add(MetadataReference.CreateFromImage(CompileSdkContract(referenceDirectory)));
         if (source.ReferencesPpdsPlugins)
             references.Add(MetadataReference.CreateFromFile(typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location));
+        if (source.AssemblyReferences != null)
+        {
+            foreach (var assemblyName in source.AssemblyReferences)
+            {
+                if (!compiledAssemblies.TryGetValue(assemblyName, out var image))
+                {
+                    throw new InvalidOperationException(
+                        $"Test assembly reference '{assemblyName}' must be declared before '{source.AssemblyName}'.");
+                }
+
+                references.Add(MetadataReference.CreateFromImage(image));
+            }
+        }
 
         var compilation = CSharpCompilation.Create(
             source.AssemblyName,

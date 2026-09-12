@@ -39,12 +39,17 @@ public sealed class AssemblyExtractor : IDisposable
 
     private readonly MetadataLoadContext _metadataLoadContext;
     private readonly string _assemblyPath;
+    private readonly IReadOnlyList<string> _resolverPaths;
     private bool _disposed;
 
-    private AssemblyExtractor(MetadataLoadContext metadataLoadContext, string assemblyPath)
+    private AssemblyExtractor(
+        MetadataLoadContext metadataLoadContext,
+        string assemblyPath,
+        IReadOnlyList<string> resolverPaths)
     {
         _metadataLoadContext = metadataLoadContext;
         _assemblyPath = assemblyPath;
+        _resolverPaths = resolverPaths;
     }
 
     /// <summary>
@@ -83,7 +88,7 @@ public sealed class AssemblyExtractor : IDisposable
         // is the more general choice — MLC binds whatever core the target actually references.
         var mlc = new MetadataLoadContext(resolver);
 
-        return new AssemblyExtractor(mlc, assemblyPath);
+        return new AssemblyExtractor(mlc, assemblyPath, assemblyPaths);
     }
 
     /// <summary>
@@ -304,7 +309,7 @@ public sealed class AssemblyExtractor : IDisposable
     {
         var assembly = _metadataLoadContext.LoadFromAssemblyPath(_assemblyPath);
         var assemblyName = assembly.GetName();
-        var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath);
+        var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath, _resolverPaths);
 
         var config = new PluginAssemblyConfig
         {
@@ -387,68 +392,388 @@ public sealed class AssemblyExtractor : IDisposable
     }
 
     /// <summary>
-    /// Reads public, concrete types that implement <c>Microsoft.Xrm.Sdk.IPlugin</c> directly,
-    /// or through a base type declared in the same assembly, without resolving the SDK assembly.
+    /// Reads public, concrete types that implement <c>Microsoft.Xrm.Sdk.IPlugin</c> directly or
+    /// through resolvable base classes and derived interfaces. The SDK interface itself is matched
+    /// by metadata name, so a normal Dataverse package does not need to bundle Microsoft.Xrm.Sdk.
+    /// Other referenced types are resolved from the same ordered paths as MetadataLoadContext,
+    /// including caller-supplied <c>--reference-dir</c> paths.
     /// </summary>
-    private static HashSet<string> ReadRuntimePluginTypeNames(string assemblyPath)
+    private static HashSet<string> ReadRuntimePluginTypeNames(
+        string assemblyPath,
+        IReadOnlyList<string> resolverPaths)
     {
         const string pluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
 
-        using var stream = File.OpenRead(assemblyPath);
-        using var peReader = new PEReader(stream);
-        if (!peReader.HasMetadata)
-            return [];
+        using var resolver = new MetadataTypeResolver(resolverPaths);
+        var target = resolver.LoadAssembly(assemblyPath);
+        var implementsPlugin = new Dictionary<ResolvedMetadataType, bool>();
 
-        var reader = peReader.GetMetadataReader();
-        var implementsPlugin = new Dictionary<TypeDefinitionHandle, bool>();
-
-        bool ImplementsPlugin(TypeDefinitionHandle handle, HashSet<TypeDefinitionHandle> visiting)
+        bool ImplementsPlugin(
+            ResolvedMetadataType type,
+            HashSet<ResolvedMetadataType> visiting,
+            string exportedTypeName)
         {
-            if (implementsPlugin.TryGetValue(handle, out var cached))
+            if (implementsPlugin.TryGetValue(type, out var cached))
                 return cached;
 
-            if (!visiting.Add(handle))
+            if (!visiting.Add(type))
                 return false;
 
-            var definition = reader.GetTypeDefinition(handle);
-            var direct = definition.GetInterfaceImplementations()
-                .Select(reader.GetInterfaceImplementation)
-                .Any(implementation => GetTypeFullName(reader, implementation.Interface) == pluginInterfaceName);
+            try
+            {
+                var definition = type.Assembly.Reader.GetTypeDefinition(type.Handle);
 
-            var inherited = !direct
-                && definition.BaseType.Kind == HandleKind.TypeDefinition
-                && ImplementsPlugin((TypeDefinitionHandle)definition.BaseType, visiting);
+                // Interfaces can inherit IPlugin through other interfaces, including interfaces
+                // declared in another assembly. Check the well-known SDK metadata name before
+                // attempting resolution because Microsoft.Xrm.Sdk is intentionally not bundled.
+                var interfaces = definition.GetInterfaceImplementations()
+                    .Select(type.Assembly.Reader.GetInterfaceImplementation)
+                    .ToList();
+                if (interfaces.Any(implementation =>
+                        resolver.GetTypeFullName(type.Assembly, implementation.Interface) == pluginInterfaceName))
+                {
+                    implementsPlugin[type] = true;
+                    return true;
+                }
 
-            visiting.Remove(handle);
-            implementsPlugin[handle] = direct || inherited;
-            return direct || inherited;
+                foreach (var implementation in interfaces)
+                {
+                    if (!resolver.TryResolve(type.Assembly, implementation.Interface, out var interfaceType))
+                    {
+                        throw resolver.CreateUnresolvedTypeException(
+                            exportedTypeName,
+                            type.Assembly,
+                            implementation.Interface);
+                    }
+
+                    if (ImplementsPlugin(interfaceType, visiting, exportedTypeName))
+                    {
+                        implementsPlugin[type] = true;
+                        return true;
+                    }
+                }
+
+                if (!definition.BaseType.IsNil)
+                {
+                    if (!resolver.TryResolve(type.Assembly, definition.BaseType, out var baseType))
+                    {
+                        throw resolver.CreateUnresolvedTypeException(
+                            exportedTypeName,
+                            type.Assembly,
+                            definition.BaseType);
+                    }
+
+                    if (ImplementsPlugin(baseType, visiting, exportedTypeName))
+                    {
+                        implementsPlugin[type] = true;
+                        return true;
+                    }
+                }
+
+                implementsPlugin[type] = false;
+                return false;
+            }
+            finally
+            {
+                visiting.Remove(type);
+            }
         }
 
         var result = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var handle in reader.TypeDefinitions)
+        foreach (var handle in target.Reader.TypeDefinitions)
         {
-            var definition = reader.GetTypeDefinition(handle);
-            var visibility = definition.Attributes & TypeAttributes.VisibilityMask;
-            var isExported = visibility is TypeAttributes.Public or TypeAttributes.NestedPublic;
+            var definition = target.Reader.GetTypeDefinition(handle);
+            var isExported = IsExported(target.Reader, handle);
             var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
             var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+            var typeName = GetTypeDefinitionFullName(target.Reader, handle);
 
-            if (isExported && !isAbstract && !isInterface && ImplementsPlugin(handle, []))
-                result.Add(GetTypeDefinitionFullName(reader, handle));
+            if (isExported
+                && !isAbstract
+                && !isInterface
+                && ImplementsPlugin(new ResolvedMetadataType(target, handle), [], typeName))
+            {
+                result.Add(typeName);
+            }
         }
 
         return result;
     }
 
-    private static string? GetTypeFullName(MetadataReader reader, EntityHandle handle)
+    private static bool IsExported(MetadataReader reader, TypeDefinitionHandle handle)
     {
-        return handle.Kind switch
-        {
-            HandleKind.TypeDefinition => GetTypeDefinitionFullName(reader, (TypeDefinitionHandle)handle),
-            HandleKind.TypeReference => GetTypeReferenceFullName(reader, (TypeReferenceHandle)handle),
-            _ => null
-        };
+        var definition = reader.GetTypeDefinition(handle);
+        var visibility = definition.Attributes & TypeAttributes.VisibilityMask;
+        if (definition.GetDeclaringType().IsNil)
+            return visibility == TypeAttributes.Public;
+
+        return visibility == TypeAttributes.NestedPublic
+            && IsExported(reader, definition.GetDeclaringType());
     }
+
+    private sealed class MetadataTypeResolver : IDisposable
+    {
+        private readonly Dictionary<string, string> _pathsByAssemblyName =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, MetadataAssembly> _assembliesByPath =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly IReadOnlyList<string> _resolverPaths;
+
+        internal MetadataTypeResolver(IEnumerable<string> resolverPaths)
+        {
+            _resolverPaths = resolverPaths.ToList();
+            foreach (var path in _resolverPaths)
+            {
+                // Assembly references conventionally match the DLL filename. Seed that cheap
+                // lookup eagerly; if a dependency DLL was renamed, TryFindAssemblyPath falls
+                // back to reading manifest identities lazily. This avoids opening unrelated
+                // resolver files merely to inspect one inheritance chain.
+                _pathsByAssemblyName.TryAdd(Path.GetFileNameWithoutExtension(path), path);
+            }
+        }
+
+        internal MetadataAssembly LoadAssembly(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (_assembliesByPath.TryGetValue(fullPath, out var existing))
+                return existing;
+
+            var stream = File.OpenRead(fullPath);
+            try
+            {
+                var peReader = new PEReader(stream);
+                if (!peReader.HasMetadata)
+                {
+                    peReader.Dispose();
+                    throw new BadImageFormatException($"Assembly '{path}' does not contain managed metadata.");
+                }
+
+                var reader = peReader.GetMetadataReader();
+                if (!reader.IsAssembly)
+                {
+                    peReader.Dispose();
+                    throw new BadImageFormatException($"File '{path}' is not a managed assembly manifest.");
+                }
+
+                var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
+                var assembly = new MetadataAssembly(stream, peReader, reader);
+                _assembliesByPath.Add(fullPath, assembly);
+                _pathsByAssemblyName.TryAdd(assemblyName, fullPath);
+                return assembly;
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        internal string? GetTypeFullName(MetadataAssembly assembly, EntityHandle handle)
+        {
+            return handle.Kind switch
+            {
+                HandleKind.TypeDefinition =>
+                    GetTypeDefinitionFullName(assembly.Reader, (TypeDefinitionHandle)handle),
+                HandleKind.TypeReference =>
+                    GetTypeReferenceFullName(assembly.Reader, (TypeReferenceHandle)handle),
+                _ => null
+            };
+        }
+
+        internal bool TryResolve(
+            MetadataAssembly context,
+            EntityHandle handle,
+            out ResolvedMetadataType resolved)
+        {
+            if (handle.Kind == HandleKind.TypeDefinition)
+            {
+                resolved = new ResolvedMetadataType(context, (TypeDefinitionHandle)handle);
+                return true;
+            }
+
+            if (handle.Kind != HandleKind.TypeReference)
+            {
+                resolved = default;
+                return false;
+            }
+
+            return TryResolveTypeReference(context, (TypeReferenceHandle)handle, out resolved);
+        }
+
+        internal InvalidOperationException CreateUnresolvedTypeException(
+            string exportedTypeName,
+            MetadataAssembly context,
+            EntityHandle handle)
+        {
+            var referencedType = GetTypeFullName(context, handle) ?? $"metadata handle {handle.Kind}";
+            return new InvalidOperationException(
+                $"Could not determine whether exported type '{exportedTypeName}' implements " +
+                $"Microsoft.Xrm.Sdk.IPlugin because referenced type '{referencedType}' could not be resolved. " +
+                "Place the dependency beside the plugin assembly or pass its directory with --reference-dir.");
+        }
+
+        private bool TryResolveTypeReference(
+            MetadataAssembly context,
+            TypeReferenceHandle handle,
+            out ResolvedMetadataType resolved)
+        {
+            var reference = context.Reader.GetTypeReference(handle);
+            var name = context.Reader.GetString(reference.Name);
+
+            if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            {
+                if (!TryResolveTypeReference(
+                        context,
+                        (TypeReferenceHandle)reference.ResolutionScope,
+                        out var declaringType))
+                {
+                    resolved = default;
+                    return false;
+                }
+
+                var declaringDefinition = declaringType.Assembly.Reader.GetTypeDefinition(declaringType.Handle);
+                foreach (var nestedHandle in declaringDefinition.GetNestedTypes())
+                {
+                    var nested = declaringType.Assembly.Reader.GetTypeDefinition(nestedHandle);
+                    if (declaringType.Assembly.Reader.StringComparer.Equals(nested.Name, name))
+                    {
+                        resolved = new ResolvedMetadataType(declaringType.Assembly, nestedHandle);
+                        return true;
+                    }
+                }
+
+                resolved = default;
+                return false;
+            }
+
+            MetadataAssembly targetAssembly;
+            if (reference.ResolutionScope.Kind is HandleKind.ModuleDefinition or HandleKind.ModuleReference)
+            {
+                targetAssembly = context;
+            }
+            else if (reference.ResolutionScope.Kind == HandleKind.AssemblyReference)
+            {
+                var assemblyReference = context.Reader.GetAssemblyReference(
+                    (AssemblyReferenceHandle)reference.ResolutionScope);
+                var assemblyName = context.Reader.GetString(assemblyReference.Name);
+                if (!TryFindAssemblyPath(assemblyName, out var path))
+                {
+                    resolved = default;
+                    return false;
+                }
+
+                targetAssembly = LoadAssembly(path);
+            }
+            else
+            {
+                resolved = default;
+                return false;
+            }
+
+            var @namespace = context.Reader.GetString(reference.Namespace);
+            foreach (var candidateHandle in targetAssembly.Reader.TypeDefinitions)
+            {
+                var candidate = targetAssembly.Reader.GetTypeDefinition(candidateHandle);
+                if (!candidate.GetDeclaringType().IsNil)
+                    continue;
+
+                if (targetAssembly.Reader.StringComparer.Equals(candidate.Name, name)
+                    && targetAssembly.Reader.StringComparer.Equals(candidate.Namespace, @namespace))
+                {
+                    resolved = new ResolvedMetadataType(targetAssembly, candidateHandle);
+                    return true;
+                }
+            }
+
+            resolved = default;
+            return false;
+        }
+
+        private bool TryFindAssemblyPath(string assemblyName, out string path)
+        {
+            if (_pathsByAssemblyName.TryGetValue(assemblyName, out path!))
+            {
+                var actualName = TryReadAssemblyName(path);
+                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                _pathsByAssemblyName.Remove(assemblyName);
+            }
+
+            // A dependency DLL can be renamed independently of its manifest identity. Only when
+            // the filename convention fails do we inspect resolver manifests, tolerating native,
+            // inaccessible, or resource-only DLLs that are unrelated to the required type.
+            foreach (var candidate in _resolverPaths)
+            {
+                var actualName = TryReadAssemblyName(candidate);
+                if (!string.IsNullOrEmpty(actualName))
+                    _pathsByAssemblyName.TryAdd(actualName, candidate);
+
+                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    path = candidate;
+                    return true;
+                }
+            }
+
+            path = string.Empty;
+            return false;
+        }
+
+        private static string? TryReadAssemblyName(string path)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var peReader = new PEReader(stream);
+                if (!peReader.HasMetadata)
+                    return null;
+
+                var reader = peReader.GetMetadataReader();
+                return reader.IsAssembly
+                    ? reader.GetString(reader.GetAssemblyDefinition().Name)
+                    : null;
+            }
+            catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var assembly in _assembliesByPath.Values)
+                assembly.Dispose();
+        }
+    }
+
+    private sealed class MetadataAssembly : IDisposable
+    {
+        private readonly Stream _stream;
+        private readonly PEReader _peReader;
+
+        internal MetadataAssembly(
+            Stream stream,
+            PEReader peReader,
+            MetadataReader reader)
+        {
+            _stream = stream;
+            _peReader = peReader;
+            Reader = reader;
+        }
+
+        internal MetadataReader Reader { get; }
+
+        public void Dispose()
+        {
+            _peReader.Dispose();
+            _stream.Dispose();
+        }
+    }
+
+    private readonly record struct ResolvedMetadataType(
+        MetadataAssembly Assembly,
+        TypeDefinitionHandle Handle);
 
     private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
     {
@@ -465,6 +790,9 @@ public sealed class AssemblyExtractor : IDisposable
     {
         var reference = reader.GetTypeReference(handle);
         var name = reader.GetString(reference.Name);
+        if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            return $"{GetTypeReferenceFullName(reader, (TypeReferenceHandle)reference.ResolutionScope)}+{name}";
+
         var @namespace = reader.GetString(reference.Namespace);
         return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }

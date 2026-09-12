@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Services.Plugins;
@@ -28,8 +30,7 @@ public static class NupkgExtractor
         => Inspect(nupkgPath, referenceDirs).Assembly;
 
     /// <summary>
-    /// Inspects a package and resolves its one plausible primary plugin assembly. Inspection is
-    /// also used by deployment to validate the configured assembly identity before any upload.
+    /// Inspects a package and resolves its one plausible primary plugin assembly.
     /// </summary>
     internal static PluginPackageInspection Inspect(
         string nupkgPath,
@@ -195,12 +196,149 @@ public static class NupkgExtractor
         }
     }
 
+    /// <summary>
+    /// Resolves the manifest identity of the assembly represented by an existing configuration
+    /// without loading its dependency graph. This is the deploy preflight path: registrations
+    /// produced with <c>--reference-dir</c> remain portable because machine-local resolver paths
+    /// are not persisted in registrations.json or required again during deployment.
+    /// </summary>
+    internal static string InspectConfiguredAssemblyIdentity(
+        string nupkgPath,
+        PluginAssemblyConfig config)
+    {
+        var packageMetadata = PluginPackageMetadataReader.Read(File.ReadAllBytes(nupkgPath));
+        var frameworkPrefix = $"lib/{packageMetadata.TargetFramework}/";
+        var assemblies = new List<ManifestAssembly>();
+
+        using (var archive = ZipFile.OpenRead(nupkgPath))
+        {
+            foreach (var entry in archive.Entries.OrderBy(item => item.FullName, StringComparer.OrdinalIgnoreCase))
+            {
+                var normalizedName = entry.FullName.Replace('\\', '/');
+                if (!normalizedName.StartsWith(frameworkPrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var relativeName = normalizedName[frameworkPrefix.Length..];
+                if (relativeName.Contains('/')
+                    || !relativeName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var image = new MemoryStream();
+                    using (var entryStream = entry.Open())
+                        entryStream.CopyTo(image);
+                    image.Position = 0;
+
+                    using var peReader = new PEReader(image);
+                    if (!peReader.HasMetadata)
+                        continue;
+
+                    var reader = peReader.GetMetadataReader();
+                    if (!reader.IsAssembly)
+                        continue;
+
+                    var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
+                    var typeNames = reader.TypeDefinitions
+                        .Select(handle => GetTypeDefinitionFullName(reader, handle))
+                        .ToHashSet(StringComparer.Ordinal);
+                    assemblies.Add(new ManifestAssembly(relativeName, assemblyName, typeNames));
+                }
+                catch (BadImageFormatException)
+                {
+                    // Native and resource-only DLLs do not contribute a managed manifest identity.
+                }
+            }
+        }
+
+        if (assemblies.Count == 0)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyNotFound,
+                $"NuGet package '{Path.GetFileName(nupkgPath)}' contains no managed assembly manifests " +
+                $"in lib/{packageMetadata.TargetFramework}. No package was uploaded.");
+        }
+
+        var configuredTypeNames = config.AllTypeNames
+            .Concat(config.Types.Select(type => type.TypeName))
+            .Concat(config.CustomApis?.Select(api => api.PluginTypeName) ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var typeOwners = assemblies
+            .Where(assembly => configuredTypeNames.Any(assembly.TypeNames.Contains))
+            .ToList();
+
+        if (typeOwners.Count > 1)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyAmbiguous,
+                $"Configured plugin types span multiple package assemblies: {FormatAssemblyNames(typeOwners)}. " +
+                "PPDS deploys one primary assembly per package configuration. No package was uploaded.");
+        }
+
+        if (typeOwners.Count == 1)
+            return typeOwners[0].Name;
+
+        var identityMatches = assemblies
+            .Where(assembly => string.Equals(assembly.Name, config.Name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (identityMatches.Count == 1)
+            return identityMatches[0].Name;
+
+        if (identityMatches.Count > 1)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyAmbiguous,
+                $"NuGet package '{Path.GetFileName(nupkgPath)}' contains multiple managed DLLs with assembly " +
+                $"identity '{config.Name}': {FormatAssemblyNames(identityMatches)}. No package was uploaded.");
+        }
+
+        // With one managed DLL its manifest is unambiguous and gives the mismatch diagnostic its
+        // actual assembly name. For multi-DLL packages without configured type evidence, fail
+        // closed rather than guessing that a dependency is the primary plugin assembly.
+        if (assemblies.Count == 1)
+            return assemblies[0].Name;
+
+        throw new PpdsException(
+            ErrorCodes.Plugin.PackageAssemblyMismatch,
+            $"Configured assembly '{config.Name}' does not match a managed assembly manifest in " +
+            $"'{Path.GetFileName(nupkgPath)}', and the package primary cannot be inferred from configured " +
+            $"plugin types. Package assemblies: {FormatAssemblyNames(assemblies)}. No package was uploaded.");
+    }
+
+    private static string FormatAssemblyNames(IEnumerable<ManifestAssembly> assemblies)
+        => string.Join(
+            ", ",
+            assemblies
+                .OrderBy(assembly => assembly.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(assembly => $"'{assembly.Name}' ({assembly.FileName})"));
+
+    private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        var definition = reader.GetTypeDefinition(handle);
+        var name = reader.GetString(definition.Name);
+        if (!definition.GetDeclaringType().IsNil)
+            return $"{GetTypeDefinitionFullName(reader, definition.GetDeclaringType())}+{name}";
+
+        var @namespace = reader.GetString(definition.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
     private static bool IsPlausiblePluginAssembly(PluginAssemblyConfig config)
         => config.RuntimePluginTypeNames.Count > 0
             || config.Types.Count > 0
             || config.CustomApis is { Count: > 0 };
 
     private sealed record InspectedAssembly(string FileName, PluginAssemblyConfig Config);
+
+    private sealed record ManifestAssembly(
+        string FileName,
+        string Name,
+        HashSet<string> TypeNames);
 
     /// <summary>
     /// Verifies that every entry in <paramref name="archivePath"/> extracts to a location under

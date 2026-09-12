@@ -214,6 +214,132 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
+    public void Extract_RuntimePluginInheritedThroughExternalBase_DetectsConcreteType()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "external-base.nupkg",
+            "ppds_ExternalBase",
+            new TestPackageAssembly(
+                "Contoso.PluginFramework",
+                "Contoso.PluginFramework.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Framework
+                {
+                    public abstract class PluginBase : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : Contoso.Framework.PluginBase { }
+                }
+                """,
+                ReferencesSdk: true,
+                AssemblyReferences: ["Contoso.PluginFramework"]));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+
+        Assert.Equal("Contoso.RuntimePlugins", inspection.Assembly.Name);
+        Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], inspection.Assembly.AllTypeNames);
+        Assert.Equal(2, inspection.InspectedAssemblyCount);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
+    public void Extract_RuntimePluginThroughExternalDerivedInterface_DetectsConcreteType()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "external-interface.nupkg",
+            "ppds_ExternalInterface",
+            new TestPackageAssembly(
+                "Contoso.PluginContracts",
+                "Contoso.PluginContracts.dll",
+                """
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Contracts
+                {
+                    public interface IContosoPlugin : IPlugin { }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : Contoso.Contracts.IContosoPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true,
+                AssemblyReferences: ["Contoso.PluginContracts"]));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+
+        Assert.Equal("Contoso.RuntimePlugins", inspection.Assembly.Name);
+        Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], inspection.Assembly.AllTypeNames);
+        Assert.Equal(2, inspection.InspectedAssemblyCount);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
+    public void Extract_UnresolvedExternalBase_ExplainsReferenceDirRecovery()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "missing-external-base.nupkg",
+            "ppds_MissingExternalBase",
+            new TestPackageAssembly(
+                "Contoso.ExternalFramework",
+                "Contoso.ExternalFramework.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.External
+                {
+                    public abstract class PluginBase : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true,
+                IncludeInPackage: false),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : Contoso.External.PluginBase { }
+                }
+                """,
+                ReferencesSdk: true,
+                AssemblyReferences: ["Contoso.ExternalFramework"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Operation.Dependency, exception.ErrorCode);
+        Assert.Contains("Contoso.External.PluginBase", exception.Message);
+        Assert.Contains("--reference-dir", exception.Message);
+    }
+
+    [Fact]
     public void Extract_RuntimePluginAndDependency_SelectsOnlyPluginAssembly()
     {
         var nupkgPath = PluginPackageTestFixture.Create(

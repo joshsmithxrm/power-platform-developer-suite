@@ -247,8 +247,12 @@ public static class DeployCommand
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
                 var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
                 var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
-                var packageInspection = NupkgExtractor.Inspect(assemblyPath);
-                var packageAssemblyName = packageInspection.Assembly.Name;
+                // Read manifest/type identity directly from the package rather than re-running
+                // dependency-loading extraction. Configurations authored with --reference-dir
+                // therefore remain deployable without persisting machine-specific resolver paths.
+                var packageAssemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
+                    assemblyPath,
+                    assemblyConfig);
 
                 // Validate the config against the package manifest before both dry-run and real
                 // deployment. The old path trusted assemblyConfig.Name until after UpsertPackageAsync,

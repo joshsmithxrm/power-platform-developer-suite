@@ -120,8 +120,8 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
 - PPDS inspects every supported-framework assembly and requires exactly one unambiguous primary plug-in assembly. A plausible primary contains a concrete runtime `IPlugin` implementation or PPDS registration metadata; ambiguous packages fail locally and list the candidate assembly names.
-- A runtime `IPlugin` assembly with no PPDS registration attributes uses its manifest simple name and records its concrete runtime type names in `allTypeNames`; extraction does not invent steps or annotated type registrations.
-- The configured assembly name must match the inspected manifest name case-insensitively. Both dry-run and real deploy validate this before `UpsertPackageAsync`, so a stale configuration cannot upload package content.
+- A runtime `IPlugin` assembly with no PPDS registration attributes uses its manifest simple name and records its concrete runtime type names in `allTypeNames`; extraction does not invent steps or annotated type registrations. Detection follows resolvable base classes and derived interfaces across assembly boundaries and reports unresolved inheritance with `--reference-dir` guidance.
+- The configured assembly name must match the inspected manifest name case-insensitively. Both dry-run and real deploy validate this before `UpsertPackageAsync`, so a stale configuration cannot upload package content. Deploy reads portable manifest/type identity directly from the package rather than repeating dependency-loading extraction, so a configuration produced with `--reference-dir` does not persist or later require the extraction machine's resolver paths.
 - If Dataverse unexpectedly does not expose the validated primary assembly after a successful package upload, deployment returns structured inspection, retry, and guarded-unregister recovery guidance. PPDS does not automatically roll back or destructively unregister the package.
 
 ### Validation Rules
@@ -1223,6 +1223,8 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-37 | Dry-run and real deployment reject a configured/manifest assembly-name mismatch before any package lookup or `UpsertPackageAsync` call | `DeployAssemblyAsync_MismatchedPackageAssembly_FailsBeforeAnyUpload` | ✅ |
 | AC-38 | Configured package assembly names and Dataverse assembly lookup are case-insensitive | `DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive`, `GetAssemblyIdForPackageAsync_MatchesAssemblyNameCaseInsensitively` | ✅ |
 | AC-39 | An assembly that is unexpectedly unavailable after upload returns structured recovery guidance without automatic cleanup | `DeployAssemblyAsync_AssemblyUnavailableAfterUpload_ReturnsStructuredRecoveryWithoutCleanup` | ✅ |
+| AC-40 | Runtime plug-in discovery follows resolvable external base classes and derived interfaces, and unresolved inheritance returns actionable `--reference-dir` guidance | `Extract_RuntimePluginInheritedThroughExternalBase_DetectsConcreteType`, `Extract_RuntimePluginThroughExternalDerivedInterface_DetectsConcreteType`, `Extract_UnresolvedExternalBase_ExplainsReferenceDirRecovery` | ✅ |
+| AC-41 | A configuration extracted with `--reference-dir` remains deployable after that machine-local dependency path is unavailable; deploy preflight uses package identity and still performs no upload during dry-run | `DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph` | ✅ |
 
 ### Edge Cases
 
@@ -1232,6 +1234,7 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | Zero-attribute runtime plug-in | One concrete `IPlugin`, no PPDS attributes | Manifest assembly name and runtime type in `allTypeNames`; empty `types` array |
 | Ambiguous package | Two plausible primary plug-in assemblies | Structured local error listing both candidate names |
 | Stale configured assembly name | Config name differs from package manifest | Failure before dry-run lookup or package upload |
+| External runtime base/interface | Concrete plug-in inherits `IPlugin` through a resolvable assembly reference | Concrete type included in `allTypeNames`; unresolved reference names `--reference-dir` recovery |
 | Multiple steps on one class | Class with 3 attributes | 3 step entries in config |
 | Image without StepId | Single-step class | Image associated with that step |
 | Image with mismatched StepId | StepId not matching any step | Image ignored (warning logged) |
