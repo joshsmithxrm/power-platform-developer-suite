@@ -323,10 +323,10 @@ public sealed class AssemblyExtractor : IDisposable
 
         var customApis = new List<CustomApiConfig>();
 
-        // Get all exported types (public, non-abstract, non-interface)
+        // Get all exported deployable types (public, concrete, and closed).
         foreach (var type in assembly.GetExportedTypes())
         {
-            if (type.IsAbstract || type.IsInterface)
+            if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
                 continue;
 
             var typeName = type.FullName ?? type.Name;
@@ -438,39 +438,59 @@ public sealed class AssemblyExtractor : IDisposable
                     return true;
                 }
 
+                var unresolvedBranches = new List<UnresolvedMetadataTypeException>();
                 foreach (var implementation in interfaces)
                 {
-                    if (!resolver.TryResolve(type.Assembly, implementation.Interface, out var interfaceType))
+                    try
                     {
-                        throw resolver.CreateUnresolvedTypeException(
-                            exportedTypeName,
-                            type.Assembly,
-                            implementation.Interface);
-                    }
+                        if (!resolver.TryResolve(type.Assembly, implementation.Interface, out var interfaceType))
+                        {
+                            throw resolver.CreateUnresolvedTypeException(
+                                exportedTypeName,
+                                type.Assembly,
+                                implementation.Interface);
+                        }
 
-                    if (ImplementsPlugin(interfaceType, visiting, exportedTypeName))
+                        if (ImplementsPlugin(interfaceType, visiting, exportedTypeName))
+                        {
+                            implementsPlugin[type] = true;
+                            return true;
+                        }
+                    }
+                    catch (UnresolvedMetadataTypeException ex)
                     {
-                        implementsPlugin[type] = true;
-                        return true;
+                        // A different interface or the base type may still prove this is an
+                        // IPlugin. Defer the recovery error until every inheritance branch fails.
+                        unresolvedBranches.Add(ex);
                     }
                 }
 
                 if (!definition.BaseType.IsNil)
                 {
-                    if (!resolver.TryResolve(type.Assembly, definition.BaseType, out var baseType))
+                    try
                     {
-                        throw resolver.CreateUnresolvedTypeException(
-                            exportedTypeName,
-                            type.Assembly,
-                            definition.BaseType);
-                    }
+                        if (!resolver.TryResolve(type.Assembly, definition.BaseType, out var baseType))
+                        {
+                            throw resolver.CreateUnresolvedTypeException(
+                                exportedTypeName,
+                                type.Assembly,
+                                definition.BaseType);
+                        }
 
-                    if (ImplementsPlugin(baseType, visiting, exportedTypeName))
+                        if (ImplementsPlugin(baseType, visiting, exportedTypeName))
+                        {
+                            implementsPlugin[type] = true;
+                            return true;
+                        }
+                    }
+                    catch (UnresolvedMetadataTypeException ex)
                     {
-                        implementsPlugin[type] = true;
-                        return true;
+                        unresolvedBranches.Add(ex);
                     }
                 }
+
+                if (unresolvedBranches.Count > 0)
+                    throw unresolvedBranches[0];
 
                 implementsPlugin[type] = false;
                 return false;

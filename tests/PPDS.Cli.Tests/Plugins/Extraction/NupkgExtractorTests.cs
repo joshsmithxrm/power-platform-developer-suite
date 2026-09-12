@@ -249,6 +249,52 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
+    public void Inspect_RuntimePluginWithUnresolvedInterfaceBeforeResolvableBase_KeepsPluginCandidate()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "plugin-with-unresolved-interface.nupkg",
+            "ppds_PluginWithUnresolvedInterface",
+            new TestPackageAssembly(
+                "Contoso.PluginFramework",
+                "Contoso.PluginFramework.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Framework
+                {
+                    public abstract class PluginBase : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin :
+                        Contoso.Framework.PluginBase, ITracingService
+                    {
+                        public void Trace(string format, params object[] args) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true,
+                AssemblyReferences: ["Contoso.PluginFramework"]));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+
+        Assert.Equal("Contoso.RuntimePlugins", inspection.Assembly.Name);
+        Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], inspection.Assembly.AllTypeNames);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
     public void Extract_OpenGenericRuntimePlugin_RejectsPackageWithoutDeployableCandidate()
     {
         var nupkgPath = PluginPackageTestFixture.Create(
@@ -274,6 +320,43 @@ public class NupkgExtractorTests : IDisposable
         var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
         Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_AnnotatedOpenGenericRuntimePlugin_RejectsPackageWithoutDeployableCandidate()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "annotated-open-generic-plugin.nupkg",
+            "ppds_AnnotatedOpenGenericPlugin",
+            new TestPackageAssembly(
+                "Contoso.AnnotatedOpenGenericPlugin",
+                "Contoso.AnnotatedOpenGenericPlugin.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                using PPDS.Plugins;
+                namespace Contoso.Plugins
+                {
+                    [PluginStep(
+                        Message = "Create",
+                        EntityLogicalName = "account",
+                        Stage = PluginStage.PreOperation)]
+                    [CustomApi(UniqueName = "ppds_OpenGeneric", DisplayName = "Open Generic")]
+                    public sealed class OpenPlugin<T> : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true,
+                ReferencesPpdsPlugins: true));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 PPDS-annotated types", exception.Message);
         Assert.Contains("0 runtime IPlugin types", exception.Message);
     }
 
