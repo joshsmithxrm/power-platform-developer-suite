@@ -14,6 +14,7 @@ from release_model import (  # noqa: E402
     FileChange,
     ReleaseGraph,
     SemVer,
+    Surface,
     build_release_plan,
     render_markdown,
     select_latest_tag,
@@ -87,6 +88,31 @@ class TestProjectGraphDiscovery:
 
     def test_delivery_manifest_declares_extension_bundle(self, graph: ReleaseGraph):
         assert graph.surfaces["PPDS.Extension"].bundles == {"PPDS.Cli"}
+
+    def test_direct_consumer_repropagates_new_upstream_reasons(self):
+        graph = ReleaseGraph(
+            surfaces={
+                "Z.Upstream": Surface("Z.Upstream", "z", "Z-v", "z.csproj"),
+                "A.Consumer": Surface(
+                    "A.Consumer",
+                    "a",
+                    "A-v",
+                    "a.csproj",
+                    project_dependencies=frozenset({"Z.Upstream"}),
+                ),
+                "Final": Surface(
+                    "Final",
+                    "final",
+                    "Final-v",
+                    "final.csproj",
+                    project_dependencies=frozenset({"A.Consumer"}),
+                ),
+            }
+        )
+
+        downstream = graph.downstream_of({"Z.Upstream", "A.Consumer"})
+
+        assert downstream["Final"] == {"Z.Upstream", "A.Consumer"}
 
 
 class TestImpactAnalysis:

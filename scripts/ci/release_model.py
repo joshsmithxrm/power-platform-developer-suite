@@ -346,22 +346,24 @@ class ReleaseGraph:
     def downstream_of(self, sources: Iterable[str]) -> dict[str, set[str]]:
         """Return every transitive consumer and the source(s) that reach it."""
         source_set = set(sources)
-        reached_by: dict[str, set[str]] = {}
-        frontier = list(source_set)
+        # Seed each direct source with its own identity.  Whenever a node gains
+        # another source reason, revisit it so that the larger set propagates to
+        # every transitive consumer.  The sets only grow from the finite
+        # ``source_set``, so cycles converge without losing direct identities.
+        reached_by: dict[str, set[str]] = {
+            source: {source} for source in source_set
+        }
+        frontier = sorted(source_set)
         while frontier:
             dependency = frontier.pop(0)
-            inherited = set(reached_by.get(dependency, set()))
-            if dependency in source_set:
-                # A directly changed surface keeps its own identity even when
-                # it is also downstream of another direct source.
-                inherited.add(dependency)
+            inherited = reached_by[dependency]
             for name, surface in self.surfaces.items():
                 if dependency not in surface.dependencies:
                     continue
                 reasons = reached_by.setdefault(name, set())
                 before = len(reasons)
-                reasons.update(inherited or {dependency})
-                if name not in source_set and len(reasons) != before:
+                reasons.update(inherited)
+                if len(reasons) != before:
                     frontier.append(name)
         for source in source_set:
             reached_by.pop(source, None)
