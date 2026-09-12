@@ -435,12 +435,9 @@ public sealed class AssemblyExtractor : IDisposable
                     .Select(type.Assembly.Reader.GetInterfaceImplementation)
                     .ToList();
                 if (interfaces.Any(implementation =>
-                        resolver.IsAssemblyQualifiedType(
-                            type.Assembly,
-                            implementation.Interface,
-                            DataversePluginInterfaceName,
-                            DataverseSdkAssemblyName,
-                            DataverseSdkPublicKeyToken)))
+                        IsDataversePluginInterfaceReference(
+                            type.Assembly.Reader,
+                            implementation.Interface)))
                 {
                     implementsPlugin[type] = true;
                     return true;
@@ -555,6 +552,32 @@ public sealed class AssemblyExtractor : IDisposable
             && IsExported(reader, definition.GetDeclaringType());
     }
 
+    internal static bool IsDataversePluginInterfaceReference(
+        MetadataReader reader,
+        EntityHandle handle)
+    {
+        if (handle.Kind != HandleKind.TypeReference
+            || GetTypeReferenceFullName(reader, (TypeReferenceHandle)handle) != DataversePluginInterfaceName)
+        {
+            return false;
+        }
+
+        var reference = reader.GetTypeReference((TypeReferenceHandle)handle);
+        if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+            return false;
+
+        var assemblyReference = reader.GetAssemblyReference(
+            (AssemblyReferenceHandle)reference.ResolutionScope);
+        if (!reader.StringComparer.Equals(assemblyReference.Name, DataverseSdkAssemblyName)
+            || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0)
+        {
+            return false;
+        }
+
+        var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
+        return publicKeyToken.AsSpan().SequenceEqual(DataverseSdkPublicKeyToken.AsSpan());
+    }
+
     private sealed class MetadataTypeResolver : IDisposable
     {
         private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
@@ -622,35 +645,6 @@ public sealed class AssemblyExtractor : IDisposable
         internal string? GetTypeFullName(MetadataAssembly assembly, EntityHandle handle)
         {
             return GetTypeFullName(assembly, handle, []);
-        }
-
-        internal bool IsAssemblyQualifiedType(
-            MetadataAssembly context,
-            EntityHandle handle,
-            string expectedTypeName,
-            string expectedAssemblyName,
-            ImmutableArray<byte> expectedPublicKeyToken)
-        {
-            if (handle.Kind != HandleKind.TypeReference
-                || GetTypeFullName(context, handle) != expectedTypeName)
-            {
-                return false;
-            }
-
-            var reference = context.Reader.GetTypeReference((TypeReferenceHandle)handle);
-            if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
-                return false;
-
-            var assemblyReference = context.Reader.GetAssemblyReference(
-                (AssemblyReferenceHandle)reference.ResolutionScope);
-            if (!context.Reader.StringComparer.Equals(assemblyReference.Name, expectedAssemblyName)
-                || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0)
-            {
-                return false;
-            }
-
-            var publicKeyToken = context.Reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
-            return publicKeyToken.AsSpan().SequenceEqual(expectedPublicKeyToken.AsSpan());
         }
 
         private string? GetTypeFullName(

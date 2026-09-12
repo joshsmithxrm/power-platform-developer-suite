@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using PPDS.Cli.Infrastructure.Errors;
@@ -246,7 +247,11 @@ public static class NupkgExtractor
                     var typeNames = reader.TypeDefinitions
                         .Select(handle => GetTypeDefinitionFullName(reader, handle))
                         .ToHashSet(StringComparer.Ordinal);
-                    assemblies.Add(new ManifestAssembly(relativeName, assemblyName, typeNames));
+                    assemblies.Add(new ManifestAssembly(
+                        relativeName,
+                        assemblyName,
+                        typeNames,
+                        HasPortablePluginEvidence(reader)));
                 }
                 catch (BadImageFormatException)
                 {
@@ -283,13 +288,13 @@ public static class NupkgExtractor
         }
 
         if (typeOwners.Count == 1)
-            return typeOwners[0].Name;
+            return EnsureNoAdditionalPortableCandidates(nupkgPath, assemblies, typeOwners[0]);
 
         var identityMatches = assemblies
             .Where(assembly => string.Equals(assembly.Name, config.Name, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (identityMatches.Count == 1)
-            return identityMatches[0].Name;
+            return EnsureNoAdditionalPortableCandidates(nupkgPath, assemblies, identityMatches[0]);
 
         if (identityMatches.Count > 1)
         {
@@ -312,6 +317,26 @@ public static class NupkgExtractor
             $"plugin types. Package assemblies: {FormatAssemblyNames(assemblies)}. No package was uploaded.");
     }
 
+    private static string EnsureNoAdditionalPortableCandidates(
+        string nupkgPath,
+        IReadOnlyList<ManifestAssembly> assemblies,
+        ManifestAssembly configuredPrimary)
+    {
+        var additionalCandidates = assemblies
+            .Where(assembly => !ReferenceEquals(assembly, configuredPrimary)
+                && assembly.HasPortablePluginEvidence)
+            .ToList();
+        if (additionalCandidates.Count == 0)
+            return configuredPrimary.Name;
+
+        var candidates = new[] { configuredPrimary }.Concat(additionalCandidates);
+        throw new PpdsException(
+            ErrorCodes.Plugin.PackageAssemblyAmbiguous,
+            $"NuGet package '{Path.GetFileName(nupkgPath)}' contains multiple plausible primary plugin " +
+            $"assemblies in the buffered package snapshot: {FormatAssemblyNames(candidates)}. " +
+            "Re-run 'ppds plugins extract' for the rebuilt package before deploying. No package was uploaded.");
+    }
+
     private static string FormatAssemblyNames(IEnumerable<ManifestAssembly> assemblies)
         => string.Join(
             ", ",
@@ -330,6 +355,122 @@ public static class NupkgExtractor
         return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }
 
+    private static bool HasPortablePluginEvidence(MetadataReader reader)
+    {
+        var implementsPlugin = new Dictionary<TypeDefinitionHandle, bool>();
+
+        bool ImplementsPlugin(TypeDefinitionHandle handle, HashSet<TypeDefinitionHandle> visiting)
+        {
+            if (implementsPlugin.TryGetValue(handle, out var cached))
+                return cached;
+            if (!visiting.Add(handle))
+                return false;
+
+            try
+            {
+                var definition = reader.GetTypeDefinition(handle);
+                foreach (var implementationHandle in definition.GetInterfaceImplementations())
+                {
+                    var implementation = reader.GetInterfaceImplementation(implementationHandle);
+                    if (AssemblyExtractor.IsDataversePluginInterfaceReference(reader, implementation.Interface))
+                    {
+                        implementsPlugin[handle] = true;
+                        return true;
+                    }
+
+                    if (implementation.Interface.Kind == HandleKind.TypeDefinition
+                        && ImplementsPlugin((TypeDefinitionHandle)implementation.Interface, visiting))
+                    {
+                        implementsPlugin[handle] = true;
+                        return true;
+                    }
+                }
+
+                if (definition.BaseType.Kind == HandleKind.TypeDefinition
+                    && ImplementsPlugin((TypeDefinitionHandle)definition.BaseType, visiting))
+                {
+                    implementsPlugin[handle] = true;
+                    return true;
+                }
+
+                implementsPlugin[handle] = false;
+                return false;
+            }
+            finally
+            {
+                visiting.Remove(handle);
+            }
+        }
+
+        foreach (var handle in reader.TypeDefinitions)
+        {
+            var definition = reader.GetTypeDefinition(handle);
+            var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
+            var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+            var isOpenGeneric = definition.GetGenericParameters().Count > 0;
+            if (!IsExported(reader, handle) || isAbstract || isInterface || isOpenGeneric)
+                continue;
+
+            if (ImplementsPlugin(handle, [])
+                || definition.GetCustomAttributes().Any(attribute => IsRegistrationAttribute(reader, attribute)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExported(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        var definition = reader.GetTypeDefinition(handle);
+        var visibility = definition.Attributes & TypeAttributes.VisibilityMask;
+        if (definition.GetDeclaringType().IsNil)
+            return visibility == TypeAttributes.Public;
+
+        return visibility == TypeAttributes.NestedPublic
+            && IsExported(reader, definition.GetDeclaringType());
+    }
+
+    private static bool IsRegistrationAttribute(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+
+        var typeName = attributeType.Kind switch
+        {
+            HandleKind.TypeReference => GetTypeReferenceFullName(
+                reader,
+                (TypeReferenceHandle)attributeType),
+            HandleKind.TypeDefinition => GetTypeDefinitionFullName(
+                reader,
+                (TypeDefinitionHandle)attributeType),
+            _ => null
+        };
+
+        return typeName is "PPDS.Plugins.PluginStepAttribute" or "PPDS.Plugins.CustomApiAttribute";
+    }
+
+    private static string GetTypeReferenceFullName(MetadataReader reader, TypeReferenceHandle handle)
+    {
+        var reference = reader.GetTypeReference(handle);
+        var name = reader.GetString(reference.Name);
+        if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            return $"{GetTypeReferenceFullName(reader, (TypeReferenceHandle)reference.ResolutionScope)}+{name}";
+
+        var @namespace = reader.GetString(reference.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
     private static bool IsPlausiblePluginAssembly(PluginAssemblyConfig config)
         => config.RuntimePluginTypeNames.Count > 0
             || config.Types.Count > 0
@@ -340,7 +481,8 @@ public static class NupkgExtractor
     private sealed record ManifestAssembly(
         string FileName,
         string Name,
-        HashSet<string> TypeNames);
+        HashSet<string> TypeNames,
+        bool HasPortablePluginEvidence);
 
     /// <summary>
     /// Verifies that every entry in <paramref name="archivePath"/> extracts to a location under

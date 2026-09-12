@@ -308,6 +308,116 @@ public class DeployCommandTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task DeployAssemblyAsync_RebuiltPackageAddsPlausibleAssembly_FailsBeforeLookupOrUpload(
+        bool dryRun,
+        bool useRegistrationMetadata)
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), $"ppds-ambiguous-deploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            const string firstPluginSource = """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.First
+                {
+                    public sealed class FirstPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """;
+            var deploymentPath = PluginPackageTestFixture.Create(
+                scratch,
+                "deployment-package.nupkg",
+                "ppds_RuntimePackage",
+                new TestPackageAssembly(
+                    "Contoso.FirstPlugins",
+                    "Contoso.FirstPlugins.dll",
+                    firstPluginSource,
+                    ReferencesSdk: true));
+            var config = NupkgExtractor.Extract(deploymentPath);
+
+            var secondAssembly = useRegistrationMetadata
+                ? new TestPackageAssembly(
+                    "Contoso.SecondPlugins",
+                    "Contoso.SecondPlugins.dll",
+                    """
+                    using PPDS.Plugins;
+                    namespace Contoso.Second
+                    {
+                        [PluginStep(
+                            Message = "Create",
+                            EntityLogicalName = "account",
+                            Stage = PluginStage.PreOperation)]
+                        public sealed class SecondPlugin { }
+                    }
+                    """,
+                    ReferencesPpdsPlugins: true)
+                : new TestPackageAssembly(
+                    "Contoso.SecondPlugins",
+                    "Contoso.SecondPlugins.dll",
+                    """
+                    using System;
+                    using Microsoft.Xrm.Sdk;
+                    namespace Contoso.Second
+                    {
+                        public sealed class SecondPlugin : IPlugin
+                        {
+                            public void Execute(IServiceProvider serviceProvider) { }
+                        }
+                    }
+                    """,
+                    ReferencesSdk: true);
+            var rebuiltPath = PluginPackageTestFixture.Create(
+                scratch,
+                "rebuilt-package.nupkg",
+                "ppds_RuntimePackage",
+                new TestPackageAssembly(
+                    "Contoso.FirstPlugins",
+                    "Contoso.FirstPlugins.dll",
+                    firstPluginSource,
+                    ReferencesSdk: true),
+                secondAssembly);
+            File.Copy(rebuiltPath, deploymentPath, overwrite: true);
+
+            var mock = new Mock<IPluginRegistrationService>();
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                scratch,
+                solutionOverride: null,
+                clean: false,
+                dryRun: dryRun,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyAmbiguous, result.ErrorCode);
+            Assert.Contains("Contoso.FirstPlugins", result.Error);
+            Assert.Contains("Contoso.SecondPlugins", result.Error);
+            Assert.Contains("No package was uploaded", result.Error);
+            mock.Verify(service => service.GetPackageByNameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph()
     {
