@@ -26,7 +26,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <!-- Analyzer assemblies must not reference a Roslyn API newer than the compiler that loads
+         them. The repository's supported .NET 10 SDK hosts Roslyn 5.0, while test/tooling
+         consumers use the centrally aligned 5.9 stack. Keep this compiler-hosted binary on the
+         5.0 API floor so it remains loadable without the unsupported Compilers.Toolset override. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="5.0.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
