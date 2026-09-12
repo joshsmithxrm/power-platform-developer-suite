@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Extraction;
+using PPDS.Cli.Tests.Plugins;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Extraction;
@@ -171,6 +172,131 @@ public class NupkgExtractorTests : IDisposable
         Assert.Equal("Nuget", config.Type);
         var type = Assert.Single(config.Types);
         Assert.Equal("Net48Plugin", type.TypeName);
+    }
+
+    [Fact]
+    public void Extract_ZeroAttributeRuntimePlugin_UsesManifestNameAndDoesNotInventSteps()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "ppds_RuntimePackage.1.0.0.nupkg",
+            "ppds_RuntimePackage",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "renamed-binary.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+
+                namespace Contoso.Plugins
+                {
+                    public abstract class PluginBase : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+
+                    public sealed class RuntimeOnlyPlugin : PluginBase { }
+                }
+                """,
+                ReferencesSdk: true));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+        var config = inspection.Assembly;
+
+        Assert.Equal("Contoso.RuntimePlugins", config.Name);
+        Assert.Equal("Nuget", config.Type);
+        Assert.Equal("ppds_RuntimePackage.1.0.0.nupkg", config.PackagePath);
+        Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], config.AllTypeNames);
+        Assert.Empty(config.Types);
+        Assert.Equal(1, inspection.InspectedAssemblyCount);
+        Assert.Equal(0, inspection.AnnotatedTypeCount);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
+    public void Extract_RuntimePluginAndDependency_SelectsOnlyPluginAssembly()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "package-with-dependency.nupkg",
+            "ppds_RuntimePackage",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.Dependency",
+                "Contoso.Dependency.dll",
+                "namespace Contoso.Dependency { public sealed class Helper { } }"));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+
+        Assert.Equal("Contoso.RuntimePlugins", inspection.Assembly.Name);
+        Assert.Equal(2, inspection.InspectedAssemblyCount);
+        Assert.Equal(0, inspection.AnnotatedTypeCount);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
+    public void Extract_MultiplePlausiblePluginAssemblies_RejectsWithCandidateNames()
+    {
+        static TestPackageAssembly RuntimePlugin(string assemblyName, string className) => new(
+            assemblyName,
+            $"{assemblyName}.dll",
+            $$"""
+            using System;
+            using Microsoft.Xrm.Sdk;
+            public sealed class {{className}} : IPlugin
+            {
+                public void Execute(IServiceProvider serviceProvider) { }
+            }
+            """,
+            ReferencesSdk: true);
+
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "ambiguous.nupkg",
+            "ppds_Ambiguous",
+            RuntimePlugin("Contoso.FirstPlugins", "FirstPlugin"),
+            RuntimePlugin("Contoso.SecondPlugins", "SecondPlugin"));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyAmbiguous, exception.ErrorCode);
+        Assert.Contains("Contoso.FirstPlugins", exception.Message);
+        Assert.Contains("Contoso.SecondPlugins", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_LoadablePackageWithoutPluginAssembly_RejectsWithInspectionCounts()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "not-a-plugin.nupkg",
+            "ppds_NotAPlugin",
+            new TestPackageAssembly(
+                "Contoso.Dependency",
+                "Contoso.Dependency.dll",
+                "namespace Contoso.Dependency { public sealed class Helper { } }"));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("Inspected 1 loadable assembly", exception.Message);
+        Assert.Contains("0 PPDS-annotated types", exception.Message);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+        Assert.Contains("Contoso.Dependency", exception.Message);
     }
 
     private static void CreatePluginPackage(

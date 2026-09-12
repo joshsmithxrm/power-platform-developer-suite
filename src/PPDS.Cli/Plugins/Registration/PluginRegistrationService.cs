@@ -1088,7 +1088,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
-        return assemblies.FirstOrDefault(a => a.Name == assemblyName)?.Id;
+        return assemblies.FirstOrDefault(a =>
+            string.Equals(a.Name, assemblyName, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
     /// <summary>

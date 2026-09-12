@@ -1,7 +1,7 @@
 # Plugin System
 
 **Status:** Draft
-**Last Updated:** 2026-09-10
+**Last Updated:** 2026-09-12
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** All
 
@@ -119,6 +119,10 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
+- PPDS inspects every supported-framework assembly and requires exactly one unambiguous primary plug-in assembly. A plausible primary contains a concrete runtime `IPlugin` implementation or PPDS registration metadata; ambiguous packages fail locally and list the candidate assembly names.
+- A runtime `IPlugin` assembly with no PPDS registration attributes uses its manifest simple name and records its concrete runtime type names in `allTypeNames`; extraction does not invent steps or annotated type registrations.
+- The configured assembly name must match the inspected manifest name case-insensitively. Both dry-run and real deploy validate this before `UpsertPackageAsync`, so a stale configuration cannot upload package content.
+- If Dataverse unexpectedly does not expose the validated primary assembly after a successful package upload, deployment returns structured inspection, retry, and guarded-unregister recovery guidance. PPDS does not automatically roll back or destructively unregister the package.
 
 ### Validation Rules
 
@@ -1214,12 +1218,20 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
 | AC-31 | A package containing only `lib/net48` fails locally with a structured error naming Dataverse's supported `lib/net462` and `lib/net471` groups | `Extract_Net48OnlyPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
 | AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` asset group | `Extract_Net471Package_SelectsSupportedPluginAssembly` | ✅ |
+| AC-35 | A zero-attribute runtime `IPlugin` package uses the assembly manifest simple name, includes runtime plug-in types in `allTypeNames`, and does not invent registration steps | `Extract_ZeroAttributeRuntimePlugin_UsesManifestNameAndDoesNotInventSteps` | ✅ |
+| AC-36 | Package inspection selects the only plausible primary assembly and rejects multiple plausible primaries with their candidate names | `Extract_RuntimePluginAndDependency_SelectsOnlyPluginAssembly`, `Extract_MultiplePlausiblePluginAssemblies_RejectsWithCandidateNames` | ✅ |
+| AC-37 | Dry-run and real deployment reject a configured/manifest assembly-name mismatch before any package lookup or `UpsertPackageAsync` call | `DeployAssemblyAsync_MismatchedPackageAssembly_FailsBeforeAnyUpload` | ✅ |
+| AC-38 | Configured package assembly names and Dataverse assembly lookup are case-insensitive | `DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive`, `GetAssemblyIdForPackageAsync_MatchesAssemblyNameCaseInsensitively` | ✅ |
+| AC-39 | An assembly that is unexpectedly unavailable after upload returns structured recovery guidance without automatic cleanup | `DeployAssemblyAsync_AssemblyUnavailableAfterUpload_ReturnsStructuredRecoveryWithoutCleanup` | ✅ |
 
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
-| No plugin types in assembly | Empty DLL | Empty types array in config |
+| No plug-in assembly in package | Loadable DLLs with no concrete `IPlugin` or PPDS registration metadata | Structured local error with inspection and discovery counts |
+| Zero-attribute runtime plug-in | One concrete `IPlugin`, no PPDS attributes | Manifest assembly name and runtime type in `allTypeNames`; empty `types` array |
+| Ambiguous package | Two plausible primary plug-in assemblies | Structured local error listing both candidate names |
+| Stale configured assembly name | Config name differs from package manifest | Failure before dry-run lookup or package upload |
 | Multiple steps on one class | Class with 3 attributes | 3 step entries in config |
 | Image without StepId | Single-step class | Image associated with that step |
 | Image with mismatched StepId | StepId not matching any step | Image ignored (warning logged) |

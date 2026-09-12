@@ -4,8 +4,10 @@ using Moq;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Tests.Plugins;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -186,6 +188,198 @@ public class DeployCommandTests : IDisposable
             "--dry-run " +
             "--output-format Json");
         Assert.Empty(result.Errors);
+    }
+
+    #endregion
+
+    #region NuGet package preflight tests (#1411)
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeployAssemblyAsync_MismatchedPackageAssembly_FailsBeforeAnyUpload(bool dryRun)
+    {
+        var packagePath = CreateRuntimePluginPackage();
+        try
+        {
+            var mock = new Mock<IPluginRegistrationService>();
+            var config = new PluginAssemblyConfig
+            {
+                Name = "ppds_RuntimePackage.1.0.0",
+                Type = "Nuget",
+                PackagePath = packagePath
+            };
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                Path.GetTempPath(),
+                solutionOverride: null,
+                clean: false,
+                dryRun: dryRun,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
+            Assert.Contains("No package was uploaded", result.Error);
+            Assert.Contains("Contoso.RuntimePlugins", result.Error);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            mock.Verify(service => service.GetPackageByNameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive()
+    {
+        var packagePath = CreateRuntimePluginPackage();
+        try
+        {
+            var packageId = Guid.NewGuid();
+            var assemblyId = Guid.NewGuid();
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(service => service.UpsertPackageAsync(
+                    "ppds_RuntimePackage",
+                    It.IsAny<byte[]>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(packageId);
+            mock.Setup(service => service.GetAssemblyIdForPackageAsync(
+                    packageId,
+                    "Contoso.RuntimePlugins",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            mock.Setup(service => service.ListTypesForAssemblyAsync(
+                    assemblyId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+
+            var config = new PluginAssemblyConfig
+            {
+                Name = "contoso.runtimeplugins",
+                Type = "Nuget",
+                PackagePath = packagePath
+            };
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                Path.GetTempPath(),
+                solutionOverride: null,
+                clean: false,
+                dryRun: false,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Null(result.Error);
+            mock.Verify(service => service.UpsertPackageAsync(
+                "ppds_RuntimePackage",
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            mock.Verify(service => service.GetAssemblyIdForPackageAsync(
+                packageId,
+                "Contoso.RuntimePlugins",
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeployAssemblyAsync_AssemblyUnavailableAfterUpload_ReturnsStructuredRecoveryWithoutCleanup()
+    {
+        var packagePath = CreateRuntimePluginPackage();
+        try
+        {
+            var packageId = Guid.NewGuid();
+            var mock = new Mock<IPluginRegistrationService>();
+            mock.Setup(service => service.UpsertPackageAsync(
+                    "ppds_RuntimePackage",
+                    It.IsAny<byte[]>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(packageId);
+            mock.Setup(service => service.GetAssemblyIdForPackageAsync(
+                    packageId,
+                    "Contoso.RuntimePlugins",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid?)null);
+
+            var config = new PluginAssemblyConfig
+            {
+                Name = "Contoso.RuntimePlugins",
+                Type = "Nuget",
+                PackagePath = packagePath
+            };
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                Path.GetTempPath(),
+                solutionOverride: null,
+                clean: false,
+                dryRun: false,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyUnavailableAfterUpload, result.ErrorCode);
+            Assert.Contains("may now be partially deployed", result.Error);
+            Assert.NotNull(result.RecoveryGuidance);
+            Assert.Contains("plugins get package ppds_RuntimePackage", result.RecoveryGuidance);
+            Assert.Contains(packageId.ToString(), result.RecoveryGuidance);
+            Assert.Contains("did not attempt automatic cleanup", result.RecoveryGuidance);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            mock.Verify(service => service.UnregisterPackageAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    private static string CreateRuntimePluginPackage()
+    {
+        return PluginPackageTestFixture.Create(
+            Path.GetTempPath(),
+            $"ppds-runtime-{Guid.NewGuid():N}.nupkg",
+            "ppds_RuntimePackage",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "renamed-binary.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true));
     }
 
     #endregion

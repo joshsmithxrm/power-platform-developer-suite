@@ -61,7 +61,7 @@
           "items": {
             "type": "string"
           },
-          "description": "All plugin type names in this assembly (for orphan detection)."
+          "description": "Concrete runtime IPlugin implementations and PPDS-annotated plugin type names in this assembly (for orphan detection), including runtime types with no configured steps."
         },
         "types": {
           "type": "array",

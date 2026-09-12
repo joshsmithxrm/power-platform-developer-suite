@@ -19,12 +19,21 @@ public static class NupkgExtractor
     /// <see cref="AssemblyExtractor.Create(string, IReadOnlyList{string})"/> for each candidate
     /// assembly (the <c>--reference-dir</c> option).
     /// </param>
-    /// <returns>Assembly configuration from the package.</returns>
+    /// <returns>Assembly configuration for the package's one unambiguous plugin assembly.</returns>
     /// <exception cref="PpdsException">
     /// Thrown when no plugin types could be extracted and at least one candidate assembly failed
     /// to load, so the failure is surfaced instead of silently returning an empty configuration.
     /// </exception>
     public static PluginAssemblyConfig Extract(string nupkgPath, IReadOnlyList<string>? referenceDirs = null)
+        => Inspect(nupkgPath, referenceDirs).Assembly;
+
+    /// <summary>
+    /// Inspects a package and resolves its one plausible primary plugin assembly. Inspection is
+    /// also used by deployment to validate the configured assembly identity before any upload.
+    /// </summary>
+    internal static PluginPackageInspection Inspect(
+        string nupkgPath,
+        IReadOnlyList<string>? referenceDirs = null)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"ppds-extract-{Guid.NewGuid():N}");
 
@@ -69,26 +78,20 @@ public static class NupkgExtractor
                     $"No DLL files found in package framework folder: {targetDir}");
             }
 
-            // Scan all DLLs to find those with plugin registrations
-            var allTypes = new List<PluginTypeConfig>();
-            var allTypeNames = new List<string>();
-            string? primaryAssemblyName = null;
+            // Inspect every managed DLL independently. An inspected assembly is not necessarily a
+            // plugin assembly: packages commonly include dependency DLLs. A plausible primary is
+            // one that exposes runtime IPlugin types, PPDS step registrations, or Custom APIs.
+            // Keeping those concepts separate is important for zero-attribute IPlugin packages.
+            var inspectedAssemblies = new List<InspectedAssembly>();
             var failures = new List<(string Assembly, Exception Error)>();
 
-            foreach (var dllPath in dlls)
+            foreach (var dllPath in dlls.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {
                 try
                 {
                     using var extractor = AssemblyExtractor.Create(dllPath, referenceDirs);
                     var assemblyConfig = extractor.Extract();
-
-                    if (assemblyConfig.Types.Count > 0)
-                    {
-                        // Found plugins in this assembly
-                        primaryAssemblyName ??= assemblyConfig.Name;
-                        allTypes.AddRange(assemblyConfig.Types);
-                        allTypeNames.AddRange(assemblyConfig.AllTypeNames);
-                    }
+                    inspectedAssemblies.Add(new InspectedAssembly(Path.GetFileName(dllPath), assemblyConfig));
                 }
                 catch (Exception ex)
                 {
@@ -99,20 +102,52 @@ public static class NupkgExtractor
                 }
             }
 
-            // If nothing was extracted AND at least one assembly failed to load, surface the
-            // failure instead of silently returning an empty config. This is exactly the
-            // single-file "could not find core assembly" symptom that the embedded reference
-            // assemblies fix (#1294) addresses — should it recur for any reason, the user must
-            // see the cause rather than a misleading "0 plugin types" result.
-            if (allTypes.Count == 0 && failures.Count > 0)
+            var candidates = inspectedAssemblies
+                .Where(candidate => IsPlausiblePluginAssembly(candidate.Config))
+                .ToList();
+            var annotatedTypeCount = inspectedAssemblies.Sum(item => item.Config.Types.Count);
+            var runtimePluginTypeCount = inspectedAssemblies.Sum(item => item.Config.RuntimePluginTypeNames.Count);
+
+            if (candidates.Count == 0 && failures.Count > 0)
             {
                 var first = failures[0];
                 throw new PpdsException(
                     ErrorCodes.Operation.Dependency,
                     $"Could not extract plugin registrations from '{Path.GetFileName(nupkgPath)}': " +
-                    $"{failures.Count} of {dlls.Length} assembl{(dlls.Length == 1 ? "y" : "ies")} failed to " +
-                    $"load and no plugin types were found. First failure ({first.Assembly}): {first.Error.Message}",
+                    $"successfully inspected {inspectedAssemblies.Count} of {dlls.Length} assemblies, but found " +
+                    $"no plausible primary plugin assembly ({annotatedTypeCount} PPDS-annotated types, " +
+                    $"{runtimePluginTypeCount} runtime IPlugin types). {failures.Count} assembl" +
+                    $"{(failures.Count == 1 ? "y" : "ies")} failed to load. " +
+                    $"First failure ({first.Assembly}): {first.Error.Message}",
                     first.Error);
+            }
+
+            if (candidates.Count == 0)
+            {
+                var inspectedNames = string.Join(
+                    ", ",
+                    inspectedAssemblies.Select(item => $"'{item.Config.Name}'"));
+                throw new PpdsException(
+                    ErrorCodes.Plugin.PackageAssemblyNotFound,
+                    $"NuGet package '{Path.GetFileName(nupkgPath)}' has no plausible primary plugin assembly. " +
+                    $"Inspected {inspectedAssemblies.Count} loadable assembl" +
+                    $"{(inspectedAssemblies.Count == 1 ? "y" : "ies")} ({inspectedNames}) and found " +
+                    $"{annotatedTypeCount} PPDS-annotated types and {runtimePluginTypeCount} runtime IPlugin types. " +
+                    "The primary assembly must expose an IPlugin implementation or PPDS declarative registration metadata.");
+            }
+
+            if (candidates.Count > 1)
+            {
+                var candidateNames = string.Join(
+                    ", ",
+                    candidates
+                        .OrderBy(item => item.Config.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(item => $"'{item.Config.Name}' ({item.FileName})"));
+                throw new PpdsException(
+                    ErrorCodes.Plugin.PackageAssemblyAmbiguous,
+                    $"NuGet package '{Path.GetFileName(nupkgPath)}' contains multiple plausible primary plugin assemblies: " +
+                    $"{candidateNames}. PPDS deploys one primary assembly per package configuration; " +
+                    "remove the ambiguity or deploy the assemblies separately.");
             }
 
             // Partial failure: at least one assembly yielded plugins, but others failed to load.
@@ -123,17 +158,25 @@ public static class NupkgExtractor
                     $"Warning: skipped assembly '{assemblyName}' during extraction: {error.Message}");
             }
 
-            // Build the combined config
+            // Preserve only the one primary assembly's metadata. Combining registrations from
+            // multiple DLLs under the first assembly name would target the wrong Dataverse row.
+            var primary = candidates[0].Config;
             var config = new PluginAssemblyConfig
             {
-                Name = primaryAssemblyName ?? Path.GetFileNameWithoutExtension(nupkgPath),
+                Name = primary.Name,
                 Type = "Nuget",
                 PackagePath = Path.GetFileName(nupkgPath),
-                AllTypeNames = allTypeNames,
-                Types = allTypes
+                AllTypeNames = primary.AllTypeNames.Distinct(StringComparer.Ordinal).ToList(),
+                RuntimePluginTypeNames = primary.RuntimePluginTypeNames,
+                Types = primary.Types,
+                CustomApis = primary.CustomApis
             };
 
-            return config;
+            return new PluginPackageInspection(
+                config,
+                inspectedAssemblies.Count,
+                annotatedTypeCount,
+                runtimePluginTypeCount);
         }
         finally
         {
@@ -151,6 +194,13 @@ public static class NupkgExtractor
             }
         }
     }
+
+    private static bool IsPlausiblePluginAssembly(PluginAssemblyConfig config)
+        => config.RuntimePluginTypeNames.Count > 0
+            || config.Types.Count > 0
+            || config.CustomApis is { Count: > 0 };
+
+    private sealed record InspectedAssembly(string FileName, PluginAssemblyConfig Config);
 
     /// <summary>
     /// Verifies that every entry in <paramref name="archivePath"/> extracts to a location under
@@ -194,3 +244,12 @@ public static class NupkgExtractor
         }
     }
 }
+
+/// <summary>
+/// Local package inspection facts used to keep extraction and deployment preflight aligned.
+/// </summary>
+internal sealed record PluginPackageInspection(
+    PluginAssemblyConfig Assembly,
+    int InspectedAssemblyCount,
+    int AnnotatedTypeCount,
+    int RuntimePluginTypeCount);

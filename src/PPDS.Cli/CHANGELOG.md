@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **NuGet plug-in package deployment now validates the primary assembly before upload** — PPDS discovers concrete runtime `IPlugin` types even when they have no PPDS registration attributes, uses the assembly manifest simple name, and keeps `allTypeNames` accurate without inventing steps. Package inspection now requires one unambiguous primary, reports candidate names when multiple assemblies qualify, compares configured names case-insensitively before dry-run or real deployment, and returns structured recovery guidance instead of attempting destructive rollback if Dataverse does not expose the expected assembly after upload ([#1411](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1411)).
+
 ## [1.4.1] - 2026-09-12
 
 ### Fixed

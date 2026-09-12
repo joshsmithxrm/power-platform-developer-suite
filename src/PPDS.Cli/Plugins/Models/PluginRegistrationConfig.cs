@@ -175,10 +175,18 @@ public sealed class PluginAssemblyConfig
     public string? Solution { get; set; }
 
     /// <summary>
-    /// All plugin type names in this assembly (for orphan detection).
+    /// Concrete runtime IPlugin implementations and PPDS-annotated plugin type names in this
+    /// assembly (for orphan detection). Runtime types are included even when they have no steps.
     /// </summary>
     [JsonPropertyName("allTypeNames")]
     public List<string> AllTypeNames { get; set; } = [];
+
+    /// <summary>
+    /// Runtime IPlugin implementations discovered from assembly metadata. This inspection detail
+    /// is not part of registrations.json; <see cref="AllTypeNames"/> is the serialized contract.
+    /// </summary>
+    [JsonIgnore]
+    internal List<string> RuntimePluginTypeNames { get; set; } = [];
 
     /// <summary>
     /// Plugin types with their step registrations.

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
@@ -246,28 +247,63 @@ public static class DeployCommand
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
                 var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
                 var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
+                var packageInspection = NupkgExtractor.Inspect(assemblyPath);
+                var packageAssemblyName = packageInspection.Assembly.Name;
+
+                // Validate the config against the package manifest before both dry-run and real
+                // deployment. The old path trusted assemblyConfig.Name until after UpsertPackageAsync,
+                // so a stale or incorrectly extracted name could leave a partially deployed package.
+                if (!string.Equals(
+                        assemblyConfig.Name,
+                        packageAssemblyName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Plugin.PackageAssemblyMismatch,
+                        $"Configured assembly '{assemblyConfig.Name}' does not match the package's primary assembly " +
+                        $"'{packageAssemblyName}' in '{Path.GetFileName(assemblyPath)}'. No package was uploaded. " +
+                        "Re-run 'ppds plugins extract' for this package or correct assemblies[].name before deploying.");
+                }
 
                 Guid packageId;
                 if (dryRun)
                 {
-                    var existingPkg = await service.GetPackageByNameAsync(packageName);
+                    var existingPkg = await service.GetPackageByNameAsync(packageName, cancellationToken);
                     packageId = existingPkg?.Id ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  [Dry-Run] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
                 }
                 else
                 {
-                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution);
+                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
 
                 // Get the assembly ID from the package (Dataverse creates it automatically)
-                // Use assemblyConfig.Name here since that's the assembly name inside the package
-                var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(packageId, assemblyConfig.Name);
+                // Use the inspected manifest name so config casing cannot affect lookup.
+                var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(
+                    packageId,
+                    packageAssemblyName,
+                    cancellationToken);
                 if (pkgAssemblyId == null && !dryRun)
                 {
-                    throw new InvalidOperationException($"Could not find assembly '{assemblyConfig.Name}' in package after deployment");
+                    var recoveryGuidance =
+                        $"Inspect the uploaded package with 'ppds plugins get package {packageName}'. " +
+                        "If Dataverse has materialized the assembly, re-run deploy. If the package is incomplete " +
+                        $"and safe to remove, preview 'ppds plugins unregister package {packageId}' and only then " +
+                        "repeat it with --force. PPDS did not attempt automatic cleanup.";
+                    throw new PpdsException(
+                        ErrorCodes.Plugin.PackageAssemblyUnavailableAfterUpload,
+                        $"Package '{packageName}' ({packageId}) was uploaded, but Dataverse did not return its " +
+                        $"expected assembly '{packageAssemblyName}'. The package may now be partially deployed.",
+                        new Dictionary<string, object>
+                        {
+                            ["recoveryGuidance"] = recoveryGuidance,
+                            ["packageName"] = packageName,
+                            ["packageId"] = packageId,
+                            ["assemblyName"] = packageAssemblyName
+                        });
                 }
                 // In dry-run mode for new packages, the assembly won't exist yet - use a placeholder ID
                 assemblyId = pkgAssemblyId ?? Guid.NewGuid();
@@ -554,9 +590,19 @@ public static class DeployCommand
         {
             result.Success = false;
             result.Error = ex.Message;
+            if (ex is PpdsException ppdsException)
+            {
+                result.ErrorCode = ppdsException.ErrorCode;
+                if (ppdsException.Context?.TryGetValue("recoveryGuidance", out var recovery) == true)
+                    result.RecoveryGuidance = recovery?.ToString();
+            }
 
             if (!globalOptions.IsJsonMode)
+            {
                 Console.Error.WriteLine($"  Error: {ex.Message}");
+                if (!string.IsNullOrWhiteSpace(result.RecoveryGuidance))
+                    Console.Error.WriteLine($"  Recovery: {result.RecoveryGuidance}");
+            }
         }
 
         return result;
@@ -661,6 +707,14 @@ public static class DeployCommand
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+
+        [JsonPropertyName("errorCode")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ErrorCode { get; set; }
+
+        [JsonPropertyName("recoveryGuidance")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? RecoveryGuidance { get; set; }
 
         [JsonPropertyName("stepsCreated")]
         public int StepsCreated { get; set; }

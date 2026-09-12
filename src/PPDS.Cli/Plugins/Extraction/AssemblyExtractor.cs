@@ -304,6 +304,7 @@ public sealed class AssemblyExtractor : IDisposable
     {
         var assembly = _metadataLoadContext.LoadFromAssemblyPath(_assemblyPath);
         var assemblyName = assembly.GetName();
+        var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath);
 
         var config = new PluginAssemblyConfig
         {
@@ -322,6 +323,20 @@ public sealed class AssemblyExtractor : IDisposable
             if (type.IsAbstract || type.IsInterface)
                 continue;
 
+            var typeName = type.FullName ?? type.Name;
+
+            // Runtime plugin types are part of the package identity even when they do not use
+            // PPDS registration attributes. Read this from raw metadata rather than calling
+            // Type.GetInterfaces(): a normal Dataverse package references Microsoft.Xrm.Sdk but
+            // does not bundle it, and MetadataLoadContext cannot resolve that interface from a
+            // self-contained single-file CLI. This keeps allTypeNames truthful without inventing
+            // a PluginTypeConfig (and therefore without inventing a registration step).
+            if (runtimePluginTypeNames.Contains(typeName))
+            {
+                config.AllTypeNames.Add(typeName);
+                config.RuntimePluginTypeNames.Add(typeName);
+            }
+
             // Extract Custom API if annotated
             var customApiAttr = GetCustomApiAttribute(type);
             if (customApiAttr != null)
@@ -337,11 +352,12 @@ public sealed class AssemblyExtractor : IDisposable
                 continue;
 
             // Track all plugin type names for orphan detection
-            config.AllTypeNames.Add(type.FullName ?? type.Name);
+            if (!config.AllTypeNames.Contains(typeName, StringComparer.Ordinal))
+                config.AllTypeNames.Add(typeName);
 
             var pluginType = new PluginTypeConfig
             {
-                TypeName = type.FullName ?? type.Name,
+                TypeName = typeName,
                 Steps = []
             };
 
@@ -368,6 +384,89 @@ public sealed class AssemblyExtractor : IDisposable
             config.CustomApis = customApis;
 
         return config;
+    }
+
+    /// <summary>
+    /// Reads public, concrete types that implement <c>Microsoft.Xrm.Sdk.IPlugin</c> directly,
+    /// or through a base type declared in the same assembly, without resolving the SDK assembly.
+    /// </summary>
+    private static HashSet<string> ReadRuntimePluginTypeNames(string assemblyPath)
+    {
+        const string pluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
+
+        using var stream = File.OpenRead(assemblyPath);
+        using var peReader = new PEReader(stream);
+        if (!peReader.HasMetadata)
+            return [];
+
+        var reader = peReader.GetMetadataReader();
+        var implementsPlugin = new Dictionary<TypeDefinitionHandle, bool>();
+
+        bool ImplementsPlugin(TypeDefinitionHandle handle, HashSet<TypeDefinitionHandle> visiting)
+        {
+            if (implementsPlugin.TryGetValue(handle, out var cached))
+                return cached;
+
+            if (!visiting.Add(handle))
+                return false;
+
+            var definition = reader.GetTypeDefinition(handle);
+            var direct = definition.GetInterfaceImplementations()
+                .Select(reader.GetInterfaceImplementation)
+                .Any(implementation => GetTypeFullName(reader, implementation.Interface) == pluginInterfaceName);
+
+            var inherited = !direct
+                && definition.BaseType.Kind == HandleKind.TypeDefinition
+                && ImplementsPlugin((TypeDefinitionHandle)definition.BaseType, visiting);
+
+            visiting.Remove(handle);
+            implementsPlugin[handle] = direct || inherited;
+            return direct || inherited;
+        }
+
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var handle in reader.TypeDefinitions)
+        {
+            var definition = reader.GetTypeDefinition(handle);
+            var visibility = definition.Attributes & TypeAttributes.VisibilityMask;
+            var isExported = visibility is TypeAttributes.Public or TypeAttributes.NestedPublic;
+            var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
+            var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+
+            if (isExported && !isAbstract && !isInterface && ImplementsPlugin(handle, []))
+                result.Add(GetTypeDefinitionFullName(reader, handle));
+        }
+
+        return result;
+    }
+
+    private static string? GetTypeFullName(MetadataReader reader, EntityHandle handle)
+    {
+        return handle.Kind switch
+        {
+            HandleKind.TypeDefinition => GetTypeDefinitionFullName(reader, (TypeDefinitionHandle)handle),
+            HandleKind.TypeReference => GetTypeReferenceFullName(reader, (TypeReferenceHandle)handle),
+            _ => null
+        };
+    }
+
+    private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        var definition = reader.GetTypeDefinition(handle);
+        var name = reader.GetString(definition.Name);
+        if (!definition.GetDeclaringType().IsNil)
+            return $"{GetTypeDefinitionFullName(reader, definition.GetDeclaringType())}+{name}";
+
+        var @namespace = reader.GetString(definition.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
+    private static string GetTypeReferenceFullName(MetadataReader reader, TypeReferenceHandle handle)
+    {
+        var reference = reader.GetTypeReference(handle);
+        var name = reader.GetString(reference.Name);
+        var @namespace = reader.GetString(reference.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }
 
     private List<CustomAttributeData> GetPluginStepAttributes(Type type)
