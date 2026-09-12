@@ -16,7 +16,8 @@ End-to-end release ceremony for PPDS. Produces CHANGELOGs, version bumps, tags, 
 - Scheduled release cadence
 
 Do NOT use this skill for:
-- Hot-fix a single package — use `/pr` and tag that package only
+- Implement a hot-fix — use `/pr`; after merge, use the Patch Release Procedure
+  and its explained scope advisory before choosing tags
 - Documentation-only updates — those don't need a release
 - Pre-public-release key rotation — that's a separate operation
 
@@ -60,34 +61,42 @@ Name convention:
 - Prerelease: `release/prerelease-YYYY-MM-DD`
 - Stable: `release/vMAJOR.MINOR.PATCH`
 
-### 2. Enumerate Changes Per Package
+### 2. Generate and Review the Release Scope Advisory
 
-Each package has its own lineage — find the last release tag for each and diff from there:
-
-```bash
-# For each package, get the latest release tag
-for prefix in Auth Cli Dataverse Extension Mcp Migration Plugins Query; do
-  last_tag=$(git describe --tags --match "${prefix}-v*" --abbrev=0 2>/dev/null)
-  echo "$prefix: $last_tag"
-done
-```
-
-Then enumerate commits per package since its own last tag:
+Run the shared, read-only release model against the exact release range:
 
 ```bash
-# Example: commits in PPDS.Auth since Auth-v1.0.0-beta.7
-git log Auth-v1.0.0-beta.7..HEAD --oneline -- src/PPDS.Auth/
+python scripts/ci/release_plan.py \
+  --base <base-commit> \
+  --head HEAD \
+  --release-kind <patch|minor|major> \
+  --channel <stable|prerelease> \
+  --format markdown
 ```
 
-Repeat for all 8 packages (7 NuGet + 1 Extension):
-- `src/PPDS.Auth/`
-- `src/PPDS.Cli/`
-- `src/PPDS.Dataverse/`
-- `src/PPDS.Extension/`
-- `src/PPDS.Mcp/`
-- `src/PPDS.Migration/`
-- `src/PPDS.Plugins/`
-- `src/PPDS.Query/`
+The output keeps **direct product changes**, **internal build changes**,
+**downstream deliverables**, **same-commit delivery tag prerequisites**, and
+**same-commit MinVer tag prerequisites** separate and explains every inclusion.
+Review all five lists before drafting
+CHANGELOGs. The project dependency graph comes from every MSBuild
+`ProjectReference`, including analyzer/build references that do not emit a
+runtime assembly; the Extension's bundled-CLI delivery edge is declared in
+`scripts/ci/release_surfaces.json`. Declarative MSBuild `Pack` items map README,
+icon, and other package assets to each consuming package. Other documentation,
+specs, tests, fixtures, CHANGELOGs, and comment-only changes in modeled MSBuild
+XML are ignored deterministically. C# and arbitrary XML are treated conservatively
+because comment-looking text may be runtime string or mixed-content data.
+Repository-wide .NET build inputs apply to every .NET package, and a central
+package version bump is matched to direct consumers case-insensitively only when
+residual central package-management settings are unchanged. Build-only changed
+nodes are explained but never appear as release targets; their distributable
+consumers do. An Extension-only release lists CLI as a same-commit delivery tag
+prerequisite because the Extension publisher refuses to bundle without an exact
+`Cli-v*` tag on the release commit.
+
+This command is advisory only. It never creates tags, publishes packages, or
+dispatches release workflows. Malformed release tags appear as diagnostics and
+must be resolved before version selection.
 
 ### 3. Draft CHANGELOGs (Parallel Agents)
 
@@ -137,17 +146,14 @@ pre-release channel; even minors map to the stable channel. A single git tag
 push does NOT automatically update the marketplace listing for both — see
 `extension-publish.yml` for the channel-specific publish flow.
 
-### 5. Package Lineage — discover at release time, do not hardcode
+### 5. Package Lineage — use the strict release model, do not hardcode
 
 Each package has its own lineage. Embedding the current version table here would go stale on every release. Instead, query the actual state when you need it:
 
-```bash
-# Latest published tag per package (sorted by semver, prerelease-aware)
-for prefix in Auth Cli Dataverse Extension Mcp Migration Plugins Query; do
-  last=$(git tag --list "${prefix}-v*" --sort=-v:refname | head -1)
-  echo "$prefix: $last"
-done
-```
+The advisory from Step 2 reports the latest valid tag for every surface using
+strict SemVer 2.0 precedence with ASCII digits only. Do not substitute `git --sort=-v:refname`:
+refname sorting can rank `beta.2` above stable `1.0.0` and mishandle multi-digit
+prerelease identifiers such as `beta.10`.
 
 Principles to apply when picking the next version:
 
@@ -371,14 +377,14 @@ code --install-extension JoshSmithXRM.power-platform-developer-suite  # stable
 
 ## Patch Release Procedure
 
-For a single-package patch (the common case — one bug fix or security fix in one package),
-the full ceremony above is unnecessary. Use this abbreviated single-package flow instead. See
+For a focused patch (the common case — one bug fix or security fix), the full ceremony above
+may be unnecessary. Use this abbreviated flow when the release advisory confirms the scope. See
 `specs/release-cycle.md` for the policy that decides when a `release:patch` label warrants a
 patch release.
 
 **When to use:**
 
-- Exactly one package is affected (e.g., a bug in `PPDS.Query` only)
+- The explained advisory has a focused set of direct/downstream targets
 - The change is a bug fix or security fix — not a feature
 - The merged PR is labeled `release:patch`
 
@@ -387,21 +393,24 @@ ceremony above.
 
 **Steps (abbreviated):**
 
-1. Identify the affected package from the merged PR's changed paths (the
-   `post-merge-release-check.yml` workflow does this automatically and opens an issue).
-2. Update **only that package's CHANGELOG** — add a new `[X.Y.Z] - YYYY-MM-DD` entry under
-   `[Unreleased]`. Do not touch the other 7 CHANGELOGs.
-3. Open a tiny CHANGELOG-only PR, merge it, then pull main.
-4. Push **one tag** for the affected package only:
+1. Run the Step 2 release advisory for the merged PR. Review direct changes,
+   downstream deliverables, and same-commit MinVer prerequisites separately.
+2. Update CHANGELOGs for the advisory's release targets. A prerequisite-only
+   package may state "No user-facing changes; version consistency for stable dependencies."
+3. Open a focused CHANGELOG PR, merge it, then rerun the advisory on the final commit.
+4. Push the reviewed target and prerequisite tags individually. For example, a
+   stable Query patch can require both a Dataverse prerequisite tag and a Query tag:
    ```bash
-   git tag <Prefix>-v<X.Y.Z>
-   git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
+   git tag Dataverse-v<X.Y.Z>
+   git push origin "refs/tags/Dataverse-v<X.Y.Z>"
+   git tag Query-v<X.Y.Z>
+   git push origin "refs/tags/Query-v<X.Y.Z>"
    ```
-5. Monitor the `publish-nuget.yml` workflow run that fires for that tag. **For a `PPDS.Cli` patch, `release-cli.yml` also fires on the `Cli-v*` tag** — watch both.
+5. Monitor every workflow run triggered by those tags. **For a `PPDS.Cli` patch, `release-cli.yml` also fires on the `Cli-v*` tag** — watch both.
 6. Verify the publish on NuGet.org (see Section 10 above for the verification commands).
 
-**No release PR is required for single-package patches** — the original fix PR is the audit
-trail. The CHANGELOG-only PR in step 3 provides the version-bump record.
+**No full release PR is required for a focused patch** — the original fix PR and focused
+CHANGELOG PR provide the audit trail.
 
 **Cross-reference:** for multi-package patches (rare) or any patch touching the Extension,
 follow the full ceremony in Sections 1–10 above. The abbreviated flow only applies when the

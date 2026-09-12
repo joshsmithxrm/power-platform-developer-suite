@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-12
+
+### Security
+
+- **Patched Dataverse security dependency** — now depends on PPDS.Dataverse 1.3.1, which pins `System.Security.Cryptography.Xml` 8.0.4 for the July 2026 high-severity advisories; the obsolete `NU1903` suppression is removed so future high-severity findings remain visible ([#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+
+### Changed
+
+- **Central SQL client pin is authoritative** — removed the redundant local `Microsoft.Data.SqlClient` override so future repository-wide servicing updates cannot silently bypass PPDS.Migration ([#1334](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1334)).
+
 ## [1.2.0] - 2026-06-17
 
 ### Added
@@ -46,7 +56,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **DI integration** — `AddDataverseMigration()` extension method.
 - **Security-first design** — Connection string redaction, no PII in logs.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.1...HEAD
+[1.2.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.0...Migration-v1.2.1
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.1.0...Migration-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0...Migration-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Migration-v1.0.0

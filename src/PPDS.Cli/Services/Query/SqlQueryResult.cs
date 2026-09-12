@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -15,7 +16,8 @@ public sealed class SqlQueryResult
     public required string OriginalSql { get; init; }
 
     /// <summary>
-    /// The FetchXML that the SQL was transpiled to. Null for dry-run results.
+    /// The FetchXML that the SQL was transpiled to. Dry-run results include the
+    /// planned FetchXML; this is null only when no FetchXML plan exists.
     /// </summary>
     public required string? TranspiledFetchXml { get; init; }
 
@@ -29,6 +31,12 @@ public sealed class SqlQueryResult
     /// or when DML safety options were not provided.
     /// </summary>
     public DmlSafetyResult? DmlSafetyResult { get; init; }
+
+    /// <summary>
+    /// The side-effect-free execution plan built for a DML dry-run.
+    /// Null for executed queries.
+    /// </summary>
+    public QueryPlanDescription? DryRunPlan { get; init; }
 
     /// <summary>
     /// Environments that contributed data. Single-env queries have one entry.

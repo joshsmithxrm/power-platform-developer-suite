@@ -201,6 +201,30 @@ public partial class RpcMethodHandler
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
     }
 
+    internal static QueryResultResponse MapToResponse(SqlQueryResult result)
+    {
+        var response = MapToResponse(result.Result, result.TranspiledFetchXml);
+        var safety = result.DmlSafetyResult;
+        response.QueryMode = result.ExecutionMode switch
+        {
+            QueryExecutionMode.Dataverse => "dataverse",
+            QueryExecutionMode.Tds => "tds",
+            _ => null
+        };
+
+        if (safety?.IsDryRun == true)
+        {
+            response.DryRun = true;
+            response.Plan = result.DryRunPlan == null
+                ? null
+                : QueryPlanDescriptionDto.FromDescription(result.DryRunPlan);
+            response.RowCap = safety.RowCap;
+            response.RequiresConfirmationForExecution = safety.RequiresConfirmation;
+        }
+
+        return response;
+    }
+
     private static QueryResultResponse MapToResponse(QueryResult result, string? fetchXml)
     {
         return new QueryResultResponse

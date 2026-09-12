@@ -135,3 +135,27 @@ def test_unified_tag_convention_documented(skill_text: str) -> None:
     assert "v1.1.0" in skill_text or "vX.Y.0" in skill_text, (
         "SKILL.md should show an example of a unified tag"
     )
+
+
+def test_explained_release_scope_advisory_documented(skill_text: str) -> None:
+    """AC-19: the agent runbook uses the same explained public model."""
+    assert "scripts/ci/release_plan.py" in skill_text
+    assert "direct product changes" in skill_text.lower()
+    assert "downstream deliverables" in skill_text.lower()
+    assert "same-commit minver tag prerequisites" in skill_text.lower()
+    assert "advisory only" in skill_text.lower()
+
+
+def test_refname_sort_is_rejected_for_semver_selection(skill_text: str) -> None:
+    """AC-17: version selection is delegated to strict SemVer ordering."""
+    assert "Do not substitute `git --sort=-v:refname`" in skill_text
+    assert "beta.10" in skill_text
+
+
+def test_patch_flow_reviews_minver_prerequisites(skill_text: str) -> None:
+    """AC-20: focused stable patches account for same-commit dependencies."""
+    patch_section = skill_text.split("## Patch Release Procedure", 1)[1]
+    patch_section = patch_section.split("## Stabilization Branch", 1)[0]
+    assert "MinVer prerequisites" in patch_section
+    assert "Dataverse-v" in patch_section
+    assert "Query-v" in patch_section

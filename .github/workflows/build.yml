@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      extension: ${{ steps.filter.outputs.extension }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -29,6 +30,9 @@ jobs:
               - 'Directory.Packages.props'
               - 'nuget.config'
               - 'src/PPDS.Extension/**'
+            extension:
+              - 'src/PPDS.Extension/**'
+              - '.github/workflows/build.yml'
 
   # Dependency review for PRs - checks for vulnerabilities in dependency changes
   dependency-review:
@@ -167,10 +171,60 @@ jobs:
         working-directory: src/PPDS.Extension
         run: npm test
 
+  # Monitored ramp for issue #1267. Remove continue-on-error after both matrix
+  # lanes pass three consecutive runs (PR + main) without using the startup retry.
+  # build-status already consumes this result, so removal makes the suite blocking.
+  extension-e2e:
+    needs: changes
+    if: needs.changes.outputs.extension == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode-version: [minimum, stable]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/PPDS.Extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/PPDS.Extension
+        run: npm ci
+
+      - name: Run Extension E2E tests
+        id: e2e
+        working-directory: src/PPDS.Extension
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:e2e
+        continue-on-error: true
+        env:
+          VSCODE_E2E_VERSION: ${{ matrix.vscode-version }}
+
+      - name: Upload E2E diagnostics
+        uses: actions/upload-artifact@v7
+        if: always() && steps.e2e.outcome == 'failure'
+        with:
+          name: extension-e2e-${{ matrix.vscode-version }}
+          path: |
+            src/PPDS.Extension/playwright-report/
+            src/PPDS.Extension/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report monitored-ramp failure
+        if: always() && steps.e2e.outcome == 'failure'
+        run: echo "::warning::Extension E2E failed during the monitored ramp; diagnostics were uploaded."
+
   # Gate job for branch protection
   build-status:
     runs-on: ubuntu-latest
-    needs: [changes, build, extension]
+    needs: [changes, build, extension, extension-e2e]
     if: always()
     steps:
       - name: Check build status
@@ -180,10 +234,11 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \
-             [[ "${{ needs.extension.result }}" == "success" || "${{ needs.extension.result }}" == "skipped" ]]; then
+             [[ "${{ needs.extension.result }}" == "success" || "${{ needs.extension.result }}" == "skipped" ]] && \
+             [[ "${{ needs.extension-e2e.result }}" == "success" || "${{ needs.extension-e2e.result }}" == "skipped" ]]; then
             echo "Build passed"
             exit 0
           else
-            echo "Build failed: build=${{ needs.build.result }}, extension=${{ needs.extension.result }}"
+            echo "Build failed: build=${{ needs.build.result }}, extension=${{ needs.extension.result }}, extension-e2e=${{ needs.extension-e2e.result }}"
             exit 1
           fi

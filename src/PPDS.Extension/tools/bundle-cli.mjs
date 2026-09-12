@@ -5,14 +5,18 @@
  *
  * Usage:
  *   node tools/bundle-cli.mjs --rid win-x64
- *   node tools/bundle-cli.mjs --rid linux-x64
+ *   node tools/bundle-cli.mjs --rid linux-x64 --expected-version 1.4.0
  *   node tools/bundle-cli.mjs --rid osx-arm64
  */
 
-import { execSync } from 'child_process';
-import { existsSync, mkdirSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import {
+    createBundledCliManifest,
+    verifyBundledCliVersion,
+} from './bundle-cli-version.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIR = join(__dirname, '..');
@@ -23,15 +27,27 @@ function parseArgs() {
     const args = process.argv.slice(2);
     const ridIndex = args.indexOf('--rid');
     if (ridIndex === -1 || ridIndex + 1 >= args.length) {
-        console.error('Usage: node tools/bundle-cli.mjs --rid <runtime-identifier>');
-        console.error('  e.g.: --rid win-x64, --rid linux-x64, --rid osx-x64, --rid osx-arm64');
+        console.error(
+            'Usage: node tools/bundle-cli.mjs --rid <runtime-identifier> ' +
+            '[--expected-version <version>]'
+        );
         process.exit(1);
     }
-    return args[ridIndex + 1];
+
+    const expectedVersionIndex = args.indexOf('--expected-version');
+    if (expectedVersionIndex !== -1 && expectedVersionIndex + 1 >= args.length) {
+        console.error('--expected-version requires a value');
+        process.exit(1);
+    }
+
+    return {
+        rid: args[ridIndex + 1],
+        expectedVersion: expectedVersionIndex === -1 ? undefined : args[expectedVersionIndex + 1],
+    };
 }
 
 function main() {
-    const rid = parseArgs();
+    const { rid, expectedVersion } = parseArgs();
     const isWindows = rid.startsWith('win');
     const binaryName = isWindows ? 'ppds.exe' : 'ppds';
 
@@ -41,21 +57,21 @@ function main() {
         mkdirSync(BIN_DIR, { recursive: true });
     }
 
-    const publishCmd = [
-        'dotnet', 'publish', `"${CLI_PROJECT}"`,
+    const publishArgs = [
+        'publish', CLI_PROJECT,
         '-c', 'Release',
         '-f', 'net8.0',
         '-r', rid,
         '--self-contained',
         '-p:PublishSingleFile=true',
         '-p:EnableCompressionInSingleFile=true',
-        '-o', `"${BIN_DIR}"`,
-    ].join(' ');
+        '-o', BIN_DIR,
+    ];
 
-    console.log(`Running: ${publishCmd}`);
+    console.log(`Running: dotnet ${publishArgs.join(' ')}`);
 
     try {
-        execSync(publishCmd, { stdio: 'inherit' });
+        execFileSync('dotnet', publishArgs, { stdio: 'inherit' });
     } catch (error) {
         console.error(`Failed to build CLI: ${error.message}`);
         process.exit(1);
@@ -65,6 +81,39 @@ function main() {
     if (!existsSync(binaryPath)) {
         console.error(`Expected binary not found at: ${binaryPath}`);
         process.exit(1);
+    }
+
+    if (expectedVersion) {
+        const assemblyInfoPath = join(
+            dirname(CLI_PROJECT),
+            'obj', 'Release', 'net8.0', rid, 'PPDS.Cli.AssemblyInfo.cs'
+        );
+        if (!existsSync(assemblyInfoPath)) {
+            console.error(`Generated CLI assembly metadata not found at: ${assemblyInfoPath}`);
+            process.exit(1);
+        }
+
+        try {
+            const actualVersion = verifyBundledCliVersion(
+                readFileSync(assemblyInfoPath, 'utf8'),
+                expectedVersion
+            );
+            const manifestPath = join(BIN_DIR, 'ppds.version.json');
+            writeFileSync(
+                manifestPath,
+                JSON.stringify(
+                    createBundledCliManifest(rid, expectedVersion, actualVersion),
+                    null,
+                    2
+                ) + '\n',
+                'utf8'
+            );
+            console.log(`Verified bundled CLI version: ${actualVersion}`);
+            console.log(`Wrote bundled CLI identity manifest: ${manifestPath}`);
+        } catch (error) {
+            console.error(error.message);
+            process.exit(1);
+        }
     }
 
     console.log(`CLI binary built successfully: ${binaryPath}`);
