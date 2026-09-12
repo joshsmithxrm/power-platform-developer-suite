@@ -214,6 +214,70 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
+    public void Inspect_RuntimePluginWithUnresolvedUnrelatedSdkInterface_KeepsPluginCandidate()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "plugin-with-sdk-helper.nupkg",
+            "ppds_PluginWithSdkHelper",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+
+                    public sealed class TraceHelper : ITracingService
+                    {
+                        public void Trace(string format, params object[] args) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true));
+
+        var inspection = NupkgExtractor.Inspect(nupkgPath);
+
+        Assert.Equal("Contoso.RuntimePlugins", inspection.Assembly.Name);
+        Assert.Equal(["Contoso.Plugins.RuntimeOnlyPlugin"], inspection.Assembly.AllTypeNames);
+        Assert.Equal(1, inspection.RuntimePluginTypeCount);
+    }
+
+    [Fact]
+    public void Extract_OpenGenericRuntimePlugin_RejectsPackageWithoutDeployableCandidate()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "open-generic-plugin.nupkg",
+            "ppds_OpenGenericPlugin",
+            new TestPackageAssembly(
+                "Contoso.OpenGenericPlugin",
+                "Contoso.OpenGenericPlugin.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class OpenPlugin<T> : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
     public void Extract_RuntimePluginInheritedThroughExternalBase_DetectsConcreteType()
     {
         var nupkgPath = PluginPackageTestFixture.Create(

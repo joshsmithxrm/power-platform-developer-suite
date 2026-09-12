@@ -125,6 +125,11 @@ internal static class PluginPackageTestFixture
                     {
                         void Execute(IServiceProvider serviceProvider);
                     }
+
+                    public interface ITracingService
+                    {
+                        void Trace(string format, params object[] args);
+                    }
                 }
                 """)],
             [MetadataReference.CreateFromFile(Path.Combine(referenceDirectory, "mscorlib.dll"))],

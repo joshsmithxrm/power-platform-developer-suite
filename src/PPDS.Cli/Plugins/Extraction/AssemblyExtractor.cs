@@ -408,6 +408,7 @@ public sealed class AssemblyExtractor : IDisposable
         using var resolver = new MetadataTypeResolver(resolverPaths);
         var target = resolver.LoadAssembly(assemblyPath);
         var implementsPlugin = new Dictionary<ResolvedMetadataType, bool>();
+        var unresolvedLineages = new List<UnresolvedMetadataTypeException>();
 
         bool ImplementsPlugin(
             ResolvedMetadataType type,
@@ -487,16 +488,30 @@ public sealed class AssemblyExtractor : IDisposable
             var isExported = IsExported(target.Reader, handle);
             var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
             var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+            var isOpenGeneric = definition.GetGenericParameters().Count > 0;
             var typeName = GetTypeDefinitionFullName(target.Reader, handle);
 
-            if (isExported
-                && !isAbstract
-                && !isInterface
-                && ImplementsPlugin(new ResolvedMetadataType(target, handle), [], typeName))
+            if (!isExported || isAbstract || isInterface || isOpenGeneric)
+                continue;
+
+            try
             {
-                result.Add(typeName);
+                if (ImplementsPlugin(new ResolvedMetadataType(target, handle), [], typeName))
+                    result.Add(typeName);
+            }
+            catch (UnresolvedMetadataTypeException ex)
+            {
+                // An exported helper can implement an unrelated interface whose assembly is not
+                // packaged (Microsoft.Xrm.Sdk.ITracingService is a common example). Keep that
+                // lineage failure local to the type so a separately proven IPlugin still makes
+                // the assembly a valid candidate. If no runtime plug-in can be proven, surface
+                // the first unresolved lineage with its --reference-dir recovery guidance.
+                unresolvedLineages.Add(ex);
             }
         }
+
+        if (result.Count == 0 && unresolvedLineages.Count > 0)
+            throw unresolvedLineages[0];
 
         return result;
     }
@@ -747,13 +762,13 @@ public sealed class AssemblyExtractor : IDisposable
                 byte rawTypeKind) => handle;
         }
 
-        internal InvalidOperationException CreateUnresolvedTypeException(
+        internal UnresolvedMetadataTypeException CreateUnresolvedTypeException(
             string exportedTypeName,
             MetadataAssembly context,
             EntityHandle handle)
         {
             var referencedType = GetTypeFullName(context, handle) ?? $"metadata handle {handle.Kind}";
-            return new InvalidOperationException(
+            return new UnresolvedMetadataTypeException(
                 $"Could not determine whether exported type '{exportedTypeName}' implements " +
                 $"Microsoft.Xrm.Sdk.IPlugin because referenced type '{referencedType}' could not be resolved. " +
                 "Place the dependency beside the plugin assembly or pass its directory with --reference-dir.");
@@ -927,6 +942,9 @@ public sealed class AssemblyExtractor : IDisposable
     private readonly record struct MetadataEntityHandle(
         MetadataAssembly Assembly,
         EntityHandle Handle);
+
+    private sealed class UnresolvedMetadataTypeException(string message)
+        : InvalidOperationException(message);
 
     private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
     {
