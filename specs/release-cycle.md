@@ -177,7 +177,7 @@ A merged PR does NOT warrant `release:patch`:
 
 1. **PR merges to main** with `release:patch` label
 2. **`post-merge-release-check.yml` fires**: uses the release model to analyze the exact merge diff and opens an advisory issue only when product impact exists
-3. **Issue body includes**: explained direct changes, downstream deliverables, MinVer prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
+3. **Issue body includes**: explained direct changes, internal build changes, downstream deliverables, delivery/MinVer tag prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
 4. **Maintainer reviews issue**, runs `/release` for the affected package(s)
 5. **Maintainer closes issue** after publish verification
 
@@ -206,8 +206,10 @@ PPDS uses **two layers of git tags** with distinct purposes:
 | Per-package | `{Package}-v{version}` | Source of truth for package versions (MinVer); triggers publishing workflows | `publish-nuget.yml`, `release-cli.yml`, `extension-publish.yml` |
 | Unified | `v{version}` | Trigger for docs generation; marks the coordinated release point | `docs-release.yml` |
 
-**Per-package tags** are pushed for reviewed release targets and any stable
-same-commit MinVer prerequisites. ProjectReference dependencies are discovered
+**Per-package tags** are pushed for reviewed release targets, any same-commit
+delivery prerequisites, and any stable same-commit MinVer prerequisites.
+An Extension tag requires a CLI tag on the same commit because the Extension
+publisher resolves its bundled CLI from that exact tag. ProjectReference dependencies are discovered
 from MSBuild XML; they are not maintained as a hard-coded closure. These tags
 drive MinVer version resolution and trigger the appropriate CI publishing
 workflows.
@@ -230,7 +232,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 ### Constraints
 
 - Tag push is irreversible — never auto-tag or auto-publish
-- Patch scope must explain direct changes, downstream deliverables, and prerequisite-only tags separately; a MinVer consistency tag is not misreported as a product change
+- Patch scope must explain direct changes, downstream deliverables, delivery prerequisites, and MinVer prerequisite-only tags separately; a prerequisite tag is not misreported as a product change
 - Release-scope automation is advisory and must never create/push tags, publish packages, or dispatch release workflows
 - Latest tag selection must use strict SemVer 2.0 precedence with ASCII digits only, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
@@ -261,7 +263,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
 | AC-17 | One shared strict SemVer implementation uses ASCII digits, orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
 | AC-18 | The release graph discovers publishable and build-only MSBuild projects, all `ProjectReference` edges, declarative packed inputs, and non-MSBuild delivery edges while keeping internal nodes out of release targets | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-19 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, and same-commit MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-19 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, same-commit delivery prerequisites, and MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 | AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases
@@ -275,6 +277,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | Packed README or icon changes | Include every package whose declarative MSBuild `Pack` item consumes that asset |
 | Build-only analyzer dependency changes | Explain the internal node and include its downstream CLI/MCP/Extension deliverables without making the analyzer a release target |
 | Central PackageId differs only by case | Match it to consumers using NuGet's case-insensitive identity rules |
+| Extension-only patch | List CLI as a same-commit delivery tag prerequisite because the publisher requires an exact `Cli-v*` tag before bundling |
 | Release tag has malformed SemVer | Ignore it for latest-version selection and emit a diagnostic for maintainer review |
 | Stable Query or Migration patch has no Dataverse tag on the target commit | List Dataverse separately as a same-commit MinVer prerequisite |
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |

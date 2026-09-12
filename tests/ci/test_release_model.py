@@ -266,6 +266,33 @@ class TestImpactAnalysis:
         )
         assert plan["minver_tag_prerequisites"] == []
 
+    @pytest.mark.parametrize("channel", ["stable", "prerelease"])
+    def test_extension_only_plan_includes_publisher_cli_tag_prerequisite(
+        self,
+        graph: ReleaseGraph,
+        channel: str,
+    ):
+        plan = build_release_plan(
+            graph,
+            [_change("src/PPDS.Extension/src/extension.ts")],
+            release_kind="patch",
+            channel=channel,
+        )
+
+        assert plan["release_targets"] == ["PPDS.Extension"]
+        assert plan["delivery_tag_prerequisites"] == [
+            {
+                "surface": "PPDS.Cli",
+                "required_by": ["PPDS.Extension"],
+                "reason": (
+                    "The publisher resolves this bundled deliverable from its "
+                    "release tag on the same commit; without that tag the "
+                    "publish stops before bundling."
+                ),
+            }
+        ]
+        assert plan["minver_tag_prerequisites"] == []
+
     @pytest.mark.parametrize("path", ["global.json", "NuGet.config", ".editorconfig"])
     def test_repository_wide_dotnet_inputs_include_all_packages_and_bundles(
         self,
@@ -571,6 +598,7 @@ class TestImpactAnalysis:
         assert "### Direct Product Changes" in markdown
         assert "### Internal Build Changes" in markdown
         assert "### Downstream Deliverables" in markdown
+        assert "### Same-Commit Delivery Tag Prerequisites" in markdown
         assert "### Same-Commit MinVer Tag Prerequisites" in markdown
         assert "PPDS.Query" in markdown
         assert "PPDS.Dataverse" in markdown

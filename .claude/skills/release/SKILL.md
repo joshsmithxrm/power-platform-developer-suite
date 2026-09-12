@@ -75,8 +75,9 @@ python scripts/ci/release_plan.py \
 ```
 
 The output keeps **direct product changes**, **internal build changes**,
-**downstream deliverables**, and **same-commit MinVer tag prerequisites**
-separate and explains every inclusion. Review all four lists before drafting
+**downstream deliverables**, **same-commit delivery tag prerequisites**, and
+**same-commit MinVer tag prerequisites** separate and explains every inclusion.
+Review all five lists before drafting
 CHANGELOGs. The project dependency graph comes from every MSBuild
 `ProjectReference`, including analyzer/build references that do not emit a
 runtime assembly; the Extension's bundled-CLI delivery edge is declared in
@@ -89,7 +90,9 @@ Repository-wide .NET build inputs apply to every .NET package, and a central
 package version bump is matched to direct consumers case-insensitively only when
 residual central package-management settings are unchanged. Build-only changed
 nodes are explained but never appear as release targets; their distributable
-consumers do.
+consumers do. An Extension-only release lists CLI as a same-commit delivery tag
+prerequisite because the Extension publisher refuses to bundle without an exact
+`Cli-v*` tag on the release commit.
 
 This command is advisory only. It never creates tags, publishes packages, or
 dispatches release workflows. Malformed release tags appear as diagnostics and

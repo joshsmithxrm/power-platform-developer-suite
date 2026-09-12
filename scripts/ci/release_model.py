@@ -766,6 +766,12 @@ def build_release_plan(
             "deliverables that consume those changes."
         )
 
+    delivery_prerequisites: dict[str, set[str]] = {}
+    for target in sorted(release_targets):
+        for dependency in graph.surfaces[target].bundles:
+            if dependency in graph.surfaces and dependency not in release_targets:
+                delivery_prerequisites.setdefault(dependency, set()).add(target)
+
     prerequisites: dict[str, set[str]] = {}
     if channel == "stable":
         for target in sorted(release_targets):
@@ -804,6 +810,18 @@ def build_release_plan(
         }
         for surface, required_by in sorted(prerequisites.items())
     ]
+    delivery_prerequisite_entries = [
+        {
+            "surface": surface,
+            "required_by": sorted(required_by),
+            "reason": (
+                "The publisher resolves this bundled deliverable from its "
+                "release tag on the same commit; without that tag the publish "
+                "stops before bundling."
+            ),
+        }
+        for surface, required_by in sorted(delivery_prerequisites.items())
+    ]
 
     return {
         "mode": "advisory",
@@ -817,6 +835,7 @@ def build_release_plan(
         "release_targets": sorted(release_targets),
         "release_scope_explanation": scope_explanation,
         "minver_tag_prerequisites": prerequisite_entries,
+        "delivery_tag_prerequisites": delivery_prerequisite_entries,
         "latest_tags": latest_tags,
         "ignored_changes": sorted(impact.ignored, key=lambda item: item["path"]),
         "diagnostics": sorted(set(diagnostics)),
@@ -872,6 +891,14 @@ def render_markdown(plan: dict) -> str:
         plan["downstream_deliverables"],
         "None. No deliverable consumes a directly changed product surface.",
     )
+
+    lines.extend(["", "### Same-Commit Delivery Tag Prerequisites", ""])
+    if plan["delivery_tag_prerequisites"]:
+        for entry in plan["delivery_tag_prerequisites"]:
+            required_by = ", ".join(entry["required_by"])
+            lines.append(f"- **{entry['surface']}** — required by {required_by}. {entry['reason']}")
+    else:
+        lines.append("- None.")
 
     lines.extend(["", "### Same-Commit MinVer Tag Prerequisites", ""])
     if plan["minver_tag_prerequisites"]:

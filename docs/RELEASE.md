@@ -22,7 +22,7 @@ Use `--release-kind minor` or `major` for coordinated releases, and
 `--channel prerelease` for a prerelease plan. The command is read-only: it does
 not create or push tags, publish packages, or dispatch a workflow.
 
-The advisory deliberately separates four concepts:
+The advisory deliberately separates five concepts:
 
 1. **Direct product changes** — publishable runtime/package inputs that changed.
    Deterministic documentation, specification, test, fixture, CHANGELOG, and
@@ -47,7 +47,11 @@ The advisory deliberately separates four concepts:
    build/analyzer references with `ReferenceOutputAssembly="false"`, are
    discovered from MSBuild `ProjectReference` XML; the Extension-to-CLI bundle
    relationship is declared in `scripts/ci/release_surfaces.json`.
-4. **Same-commit MinVer tag prerequisites** — unchanged library dependencies
+4. **Same-commit delivery tag prerequisites** — unchanged bundled deliverables
+   whose publisher resolves content from an exact tag on the release commit.
+   In particular, an Extension-only release requires a `Cli-v*` tag on that
+   commit or `extension-publish.yml` stops before bundling.
+5. **Same-commit MinVer tag prerequisites** — unchanged library dependencies
    that need a stable tag on the release commit. For example, a stable Query or
    Migration plan includes Dataverse as a prerequisite. Without that tag,
    MinVer derives an `alpha` version and NuGet rejects the stable package's
@@ -60,8 +64,8 @@ prereleases of the same version, numeric identifiers compare numerically
 malformed tags are surfaced as diagnostics instead of silently winning a git
 refname sort.
 
-For a patch, review the proposed direct and downstream targets plus any MinVer
-prerequisites. A coordinated minor or major intentionally plans all release
+For a patch, review the proposed direct and downstream targets plus any delivery
+or MinVer tag prerequisites. A coordinated minor or major intentionally plans all release
 surfaces, even when some have no user-facing change. Update each target's
 CHANGELOG, create tags only after review, push tags individually, monitor every
 publish workflow, and verify the public artifacts before closing the release
