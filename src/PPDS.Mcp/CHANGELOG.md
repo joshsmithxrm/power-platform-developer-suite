@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Runtime packages refreshed for the coordinated patch train** — consumes Auth 1.1.1, Dataverse 1.3.1, Migration 1.2.1, Query 1.0.1, and CLI 1.4.1. MCP query calls inherit the corrected side-effect-free DML dry-run behavior, and the runtime dependency graph carries `System.Security.Cryptography.Xml` 8.0.4 ([#1401](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1401), [#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+- **Runtime packages refreshed for the coordinated patch train** — consumes Auth 1.1.1, Dataverse 1.3.1, Migration 1.2.1, Query 1.0.1, and CLI 1.4.1, carrying `System.Security.Cryptography.Xml` 8.0.4 through the MCP runtime dependency graph ([#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
 
 ## [1.2.0] - 2026-07-15
 
