@@ -1,40 +1,31 @@
 name: Label Dependabot Major Updates
 
 on:
-  pull_request:
+  # Label writes need a base-repository token. Run trusted code from the base
+  # commit and never checkout or execute the Dependabot head revision here.
+  pull_request_target:
     types: [opened, reopened, synchronize]
 
 permissions:
-  pull-requests: write
+  contents: read
+  issues: write
+  pull-requests: read
 
 jobs:
   label-major-updates:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    # Key off PR ownership rather than the synchronizing actor so a maintainer
+    # rebase still reconciles a Dependabot PR.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
-      - name: Add needs-evaluation label for major updates
-        uses: actions/github-script@v9
+      - uses: actions/checkout@v6
         with:
-          script: |
-            const prTitle = context.payload.pull_request.title.toLowerCase();
-            const prBody = (context.payload.pull_request.body || '').toLowerCase();
-
-            // Check if this is a major version update
-            // Dependabot indicates major bumps via:
-            // - Group name in title (e.g., "Bump the major-version-updates group")
-            // - Semver metadata in body (e.g., "update-type: version-update:semver-major")
-            const isMajorUpdate =
-              prTitle.includes('major-version-updates') ||
-              prBody.includes('semver-major');
-
-            if (isMajorUpdate) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                labels: ['needs-evaluation']
-              });
-              console.log('Added needs-evaluation label to major version update PR');
-            } else {
-              console.log('Not a major version update, skipping label');
-            }
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Classify update and apply evaluation label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python scripts/ci/label_major_dependency.py --pr "$PR_NUMBER"
