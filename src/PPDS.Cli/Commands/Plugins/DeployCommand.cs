@@ -218,7 +218,8 @@ public static class DeployCommand
         bool clean,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null)
     {
         var result = new DeploymentResult
         {
@@ -245,12 +246,15 @@ public static class DeployCommand
             if (assemblyConfig.Type == "Nuget")
             {
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
-                var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+                var packageBytes = packageContentReader == null
+                    ? await File.ReadAllBytesAsync(assemblyPath, cancellationToken)
+                    : await packageContentReader(assemblyPath, cancellationToken);
                 var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
                 // Read manifest/type identity directly from the package rather than re-running
                 // dependency-loading extraction. Configurations authored with --reference-dir
                 // therefore remain deployable without persisting machine-specific resolver paths.
                 var packageAssemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
+                    packageBytes,
                     assemblyPath,
                     assemblyConfig);
 

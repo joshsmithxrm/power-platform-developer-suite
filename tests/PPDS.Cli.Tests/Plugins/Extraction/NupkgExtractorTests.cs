@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Extraction;
+using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Tests.Plugins;
 using Xunit;
 
@@ -400,6 +401,51 @@ public class NupkgExtractorTests : IDisposable
 
         Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
         Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void InspectConfiguredAssemblyIdentity_UsesBufferedPackageSnapshot()
+    {
+        var inspectedPackagePath = PluginPackageTestFixture.Create(
+            _scratch,
+            "inspected-package.nupkg",
+            "ppds_InspectedPackage",
+            new TestPackageAssembly(
+                "Contoso.InspectedPlugins",
+                "Contoso.InspectedPlugins.dll",
+                """
+                namespace Contoso.Plugins
+                {
+                    public sealed class RuntimeOnlyPlugin { }
+                }
+                """));
+        var replacementPackagePath = PluginPackageTestFixture.Create(
+            _scratch,
+            "replacement-package.nupkg",
+            "ppds_ReplacementPackage",
+            new TestPackageAssembly(
+                "Contoso.ReplacementPlugins",
+                "Contoso.ReplacementPlugins.dll",
+                """
+                namespace Contoso.Plugins
+                {
+                    public sealed class ReplacementPlugin { }
+                }
+                """));
+        var inspectedBytes = File.ReadAllBytes(inspectedPackagePath);
+        var config = new PluginAssemblyConfig
+        {
+            Name = "Contoso.InspectedPlugins",
+            Type = "Nuget",
+            PackagePath = replacementPackagePath
+        };
+
+        var assemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
+            inspectedBytes,
+            replacementPackagePath,
+            config);
+
+        Assert.Equal("Contoso.InspectedPlugins", assemblyName);
     }
 
     [Fact]

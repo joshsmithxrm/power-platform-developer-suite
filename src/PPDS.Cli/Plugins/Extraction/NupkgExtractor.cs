@@ -203,14 +203,16 @@ public static class NupkgExtractor
     /// are not persisted in registrations.json or required again during deployment.
     /// </summary>
     internal static string InspectConfiguredAssemblyIdentity(
+        byte[] nupkgContent,
         string nupkgPath,
         PluginAssemblyConfig config)
     {
-        var packageMetadata = PluginPackageMetadataReader.Read(File.ReadAllBytes(nupkgPath));
+        var packageMetadata = PluginPackageMetadataReader.Read(nupkgContent);
         var frameworkPrefix = $"lib/{packageMetadata.TargetFramework}/";
         var assemblies = new List<ManifestAssembly>();
 
-        using (var archive = ZipFile.OpenRead(nupkgPath))
+        using (var packageStream = new MemoryStream(nupkgContent, writable: false))
+        using (var archive = new ZipArchive(packageStream, ZipArchiveMode.Read))
         {
             foreach (var entry in archive.Entries.OrderBy(item => item.FullName, StringComparer.OrdinalIgnoreCase))
             {

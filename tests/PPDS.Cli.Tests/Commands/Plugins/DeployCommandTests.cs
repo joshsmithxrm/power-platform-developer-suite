@@ -241,6 +241,74 @@ public class DeployCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task DeployAssemblyAsync_PathReplacedAfterBuffering_RejectsBufferedMismatchBeforeUpload()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), $"ppds-buffered-deploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratch);
+        string? replacementPath = null;
+
+        try
+        {
+            var deploymentPath = PluginPackageTestFixture.Create(
+                scratch,
+                "deployment-package.nupkg",
+                "ppds_RuntimePackage",
+                new TestPackageAssembly(
+                    "Contoso.BufferedPayload",
+                    "Contoso.BufferedPayload.dll",
+                    """
+                    namespace Contoso.Buffered
+                    {
+                        public sealed class BufferedPayload { }
+                    }
+                    """));
+            var replacementPackagePath = CreateRuntimePluginPackage();
+            replacementPath = replacementPackagePath;
+            var mock = new Mock<IPluginRegistrationService>();
+            var config = new PluginAssemblyConfig
+            {
+                Name = "Contoso.RuntimePlugins",
+                Type = "Nuget",
+                PackagePath = deploymentPath
+            };
+
+            async Task<byte[]> ReadThenReplaceAsync(string path, CancellationToken cancellationToken)
+            {
+                var bufferedBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+                File.Copy(replacementPackagePath, path, overwrite: true);
+                return bufferedBytes;
+            }
+
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                scratch,
+                solutionOverride: null,
+                clean: false,
+                dryRun: false,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None,
+                ReadThenReplaceAsync);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
+            Assert.Contains("Contoso.BufferedPayload", result.Error);
+            Assert.Contains("No package was uploaded", result.Error);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+            if (replacementPath != null)
+                File.Delete(replacementPath);
+        }
+    }
+
+    [Fact]
     public async Task DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph()
     {
         var scratch = Path.Combine(Path.GetTempPath(), $"ppds-reference-deploy-{Guid.NewGuid():N}");
