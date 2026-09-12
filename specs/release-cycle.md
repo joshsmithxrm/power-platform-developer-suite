@@ -261,7 +261,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
 | AC-17 | One shared strict SemVer implementation orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
 | AC-18 | The release graph is discovered from publishable MSBuild projects and their `ProjectReference` XML, with declarative non-MSBuild delivery edges | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites; deterministic docs/tests/specs/CHANGELOG and modeled MSBuild comment-only changes produce no impact, while C#/arbitrary XML remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites; deterministic docs/tests/specs/CHANGELOG and modeled MSBuild comment-only changes produce no impact, while C#/arbitrary XML, repository-wide .NET build inputs, and mixed central-package semantic changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 | AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases
@@ -270,6 +270,8 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 |----------|-------------------|
 | PR has `release:patch` but contains only deterministic non-product changes | Advisory reports no impact and the workflow does not open a release issue |
 | Source change cannot be classified with certainty | Include its owning release surface conservatively and explain why |
+| Repository-wide .NET build input changes | Include every .NET surface and downstream bundled deliverables |
+| Central package version and another central-management setting change together | Map the version delta to consumers and conservatively include every .NET surface for the residual semantic change |
 | Release tag has malformed SemVer | Ignore it for latest-version selection and emit a diagnostic for maintainer review |
 | Stable Query or Migration patch has no Dataverse tag on the target commit | List Dataverse separately as a same-commit MinVer prerequisite |
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |
@@ -355,6 +357,6 @@ version-consistency tags rather than product changes.
 
 | Date | Change |
 |------|--------|
-| 2026-09-12 | Add strict SemVer and explained MSBuild-derived release impact planning (AC-17–AC-20) |
+| 2026-09-12 | Add strict SemVer and explained MSBuild-derived release impact planning, including repository-wide build inputs and mixed central-package semantics (AC-17–AC-20) |
 | 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
 | 2026-04-24 | Initial spec |

@@ -82,6 +82,9 @@ edge is declared in `scripts/ci/release_surfaces.json`. Documentation, specs,
 tests, fixtures, CHANGELOGs, and comment-only changes in modeled MSBuild XML are
 ignored deterministically. C# and arbitrary XML are treated conservatively
 because comment-looking text may be runtime string or mixed-content data.
+Repository-wide .NET build inputs apply to every .NET package, and a central
+package version bump is scoped to direct consumers only when residual central
+package-management settings are unchanged.
 
 This command is advisory only. It never creates tags, publishes packages, or
 dispatches release workflows. Malformed release tags appear as diagnostics and

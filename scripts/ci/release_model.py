@@ -231,6 +231,62 @@ def _package_versions(content: Optional[str]) -> Optional[dict[str, str]]:
     return result
 
 
+def _central_package_residual_semantics(content: Optional[str]) -> Optional[tuple]:
+    """Return central-package XML after removing simple version declarations.
+
+    ``PackageVersion`` entries whose only semantics are package identity and
+    version are classified separately by :func:`_package_versions`. Everything
+    else remains in this representation so a version bump cannot hide a
+    simultaneous repository-wide central package-management change.
+    """
+
+    root = _xml_root(content)
+    if root is None:
+        return None
+
+    def content_or_none(value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        return value
+
+    def is_simple_package_version(element: ET.Element) -> bool:
+        if _local_name(element.tag) != "PackageVersion":
+            return False
+        if content_or_none(element.text) is not None or content_or_none(element.tail) is not None:
+            return False
+        if not set(element.attrib) <= {"Include", "Update", "Version"}:
+            return False
+        if ("Include" in element.attrib) == ("Update" in element.attrib):
+            return False
+
+        children = list(element)
+        if "Version" in element.attrib:
+            return not children
+        if len(children) != 1:
+            return False
+        version = children[0]
+        return (
+            _local_name(version.tag) == "Version"
+            and not version.attrib
+            and not list(version)
+            and content_or_none(version.text) is not None
+            and content_or_none(version.tail) is None
+        )
+
+    def canonical(element: ET.Element) -> tuple:
+        attributes = tuple(sorted(element.attrib.items()))
+        text = content_or_none(element.text)
+        tail = content_or_none(element.tail)
+        children = tuple(
+            canonical(child)
+            for child in list(element)
+            if not is_simple_package_version(child)
+        )
+        return (element.tag, attributes, text, tail, children)
+
+    return canonical(root)
+
+
 @dataclass(frozen=True)
 class Surface:
     name: str
@@ -444,10 +500,18 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
             result.ignore(change.path, "semantic content unchanged after comments/XML docs were removed")
             continue
 
-        if change.path == "Directory.Packages.props":
+        path_key = change.path.casefold()
+        if path_key == "directory.packages.props":
             before_versions = _package_versions(change.before)
             after_versions = _package_versions(change.after)
-            if before_versions is None or after_versions is None:
+            before_residual = _central_package_residual_semantics(change.before)
+            after_residual = _central_package_residual_semantics(change.after)
+            if (
+                before_versions is None
+                or after_versions is None
+                or before_residual is None
+                or after_residual is None
+            ):
                 result.diagnostics.append(
                     "Directory.Packages.props could not be parsed on both sides; all .NET surfaces were conservatively included"
                 )
@@ -460,11 +524,21 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
                 for package in set(before_versions) | set(after_versions)
                 if before_versions.get(package) != after_versions.get(package)
             )
-            if not changed_packages:
-                # A semantic central-management change outside PackageVersion
-                # still affects restore/pack behavior across the .NET graph.
+            residual_changed = before_residual != after_residual
+            if residual_changed:
                 for surface in graph.dotnet_surfaces:
                     result.direct(surface, "shared central package-management settings changed")
+
+            if not changed_packages:
+                if not residual_changed:
+                    # The full XML changed but neither the version map nor the
+                    # modeled residual explains it (for example, declaration
+                    # ordering). Treat that uncertainty as repository-wide.
+                    for surface in graph.dotnet_surfaces:
+                        result.direct(
+                            surface,
+                            "central package declarations changed and could not be classified safely",
+                        )
                 continue
             matched = False
             for surface_name, surface in graph.surfaces.items():
@@ -482,9 +556,16 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
                 )
             continue
 
-        if change.path in {"Directory.Build.props", "Directory.Build.targets"}:
+        shared_dotnet_inputs = {
+            "directory.build.props",
+            "directory.build.targets",
+            "global.json",
+            "nuget.config",
+            ".editorconfig",
+        }
+        if path_key in shared_dotnet_inputs:
             for surface in graph.dotnet_surfaces:
-                result.direct(surface, f"shared MSBuild input changed: {change.path}")
+                result.direct(surface, f"repository-wide .NET build input changed: {change.path}")
             continue
 
         direct_surface = next(

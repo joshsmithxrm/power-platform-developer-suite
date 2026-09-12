@@ -30,7 +30,12 @@ The advisory deliberately separates three concepts:
    XML remain product changes because comment-looking text can be a raw string
    or mixed-content value. Uncertain product-source changes are included
    conservatively. Dot-directories such as `.github/` remain intact during path
-   normalization and are explained as automation/tooling changes.
+   normalization and are explained as automation/tooling changes. Repository-wide
+   .NET build inputs (`global.json`, `NuGet.config`, `.editorconfig`, and shared
+   MSBuild props/targets) apply to every .NET package. A central package version
+   change is scoped to its consumers only when no simultaneous central-management
+   setting changed; mixed or unclassified central changes apply to every .NET
+   package.
 2. **Downstream deliverables** — publishable projects that consume a directly
    changed project. Project dependencies are discovered from MSBuild
    `ProjectReference` XML; the Extension-to-CLI bundle relationship is declared

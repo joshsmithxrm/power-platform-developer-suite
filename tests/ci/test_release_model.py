@@ -182,6 +182,76 @@ class TestImpactAnalysis:
         )
         assert plan["minver_tag_prerequisites"] == []
 
+    @pytest.mark.parametrize("path", ["global.json", "NuGet.config", ".editorconfig"])
+    def test_repository_wide_dotnet_inputs_include_all_packages_and_bundles(
+        self,
+        graph: ReleaseGraph,
+        path: str,
+    ):
+        plan = build_release_plan(graph, [_change(path)])
+
+        direct = {entry["surface"] for entry in plan["direct_product_changes"]}
+        downstream = {entry["surface"] for entry in plan["downstream_deliverables"]}
+        assert direct == set(graph.dotnet_surfaces)
+        assert downstream == {"PPDS.Extension"}
+        assert plan["release_targets"] == sorted(graph.surfaces)
+        assert all(
+            "repository-wide .NET build input changed" in entry["reasons"][0]
+            for entry in plan["direct_product_changes"]
+        )
+
+    def test_central_version_and_settings_change_includes_all_dotnet_surfaces(
+        self,
+        graph: ReleaseGraph,
+    ):
+        before = """<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Azure.Identity" Version="1.20.0" />
+  </ItemGroup>
+</Project>"""
+        after = """<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+  </ItemGroup>
+</Project>"""
+
+        plan = build_release_plan(
+            graph,
+            [FileChange(path="Directory.Packages.props", before=before, after=after)],
+        )
+
+        direct = {
+            entry["surface"]: entry["reasons"]
+            for entry in plan["direct_product_changes"]
+        }
+        assert set(direct) == set(graph.dotnet_surfaces)
+        assert "central dependency changed: Azure.Identity" in direct["PPDS.Auth"]
+        assert "shared central package-management settings changed" in direct["PPDS.Auth"]
+        assert plan["release_targets"] == sorted(graph.surfaces)
+
+    def test_central_version_only_change_remains_scoped_to_consumers(
+        self,
+        graph: ReleaseGraph,
+    ):
+        before = '<Project><ItemGroup><PackageVersion Include="Azure.Identity" Version="1.20.0" /></ItemGroup></Project>'
+        after = '<Project><ItemGroup><PackageVersion Include="Azure.Identity" Version="1.21.0" /></ItemGroup></Project>'
+
+        plan = build_release_plan(
+            graph,
+            [FileChange(path="Directory.Packages.props", before=before, after=after)],
+        )
+
+        direct = {entry["surface"] for entry in plan["direct_product_changes"]}
+        assert direct == {"PPDS.Auth", "PPDS.Dataverse"}
+        assert "PPDS.Plugins" not in plan["release_targets"]
+
     def test_non_product_changes_have_no_impact(self, graph: ReleaseGraph):
         plan = build_release_plan(
             graph,
