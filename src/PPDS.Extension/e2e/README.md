@@ -13,6 +13,6 @@ CI runs both `minimum` and `stable` on Node 22 under `xvfb`. The harness uses a 
 
 Playwright assertion retries remain disabled. In CI only, the harness retries once when VS Code opens but the workbench fails to become ready within 60 seconds, a documented Electron UI-startup boundary. Test assertion failures are never retried. Traces and screenshots are retained on failure and uploaded by the workflow.
 
-## Monitored ramp
+## Blocking CI gate
 
-The matrix initially uses step-level `continue-on-error` while Linux CI evidence is collected. Remove that setting after both the declared-minimum and stable lanes pass three consecutive runs, including at least one pull-request run and one `main` run, without consuming the startup retry. At that point `build-status` will make the matrix blocking. If a lane fails or consumes the retry, reset the consecutive-run count after correcting the cause; the ramp must not remain advisory permanently.
+The monitored ramp was promoted to a blocking gate after four consecutive clean declared-minimum/stable matrix runs, including pull-request and `main` runs, completed without consuming the startup retry. A failure in either lane now fails `build-status`. Traces and screenshots are still uploaded on failure so a blocking failure retains its diagnostics.
