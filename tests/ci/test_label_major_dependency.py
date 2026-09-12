@@ -62,6 +62,21 @@ class TestEvaluateAndLabel:
         assert "minor" in message
         apply_label.assert_not_called()
 
+    def test_minor_update_removes_stale_evaluation_label(self):
+        pr = make_pr(
+            title="deps: Bump example from 1.2.0 to 1.3.0",
+            labels=["dependencies", "status:needs-evaluation"],
+            head_ref="dependabot/nuget/example-1.3.0",
+            files=["Directory.Packages.props"],
+        )
+        with patch.object(labeler, "apply_evaluation_label") as apply_label, \
+             patch.object(labeler, "remove_evaluation_label") as remove_label:
+            changed, message = labeler.evaluate_and_label(pr)
+        assert not changed
+        assert "minor" in message
+        apply_label.assert_not_called()
+        remove_label.assert_called_once_with(1)
+
     def test_unclassifiable_update_is_labeled_fail_closed(self):
         pr = make_pr(
             title="Update internal dependency",
@@ -108,6 +123,13 @@ class TestApplyEvaluationLabel:
             labeler.apply_evaluation_label(42)
         run_gh.assert_called_once_with([
             "pr", "edit", "42", "--add-label", "status:needs-evaluation",
+        ])
+
+    def test_removes_repository_evaluation_label(self):
+        with patch.object(labeler, "_run_gh", return_value="") as run_gh:
+            labeler.remove_evaluation_label(42)
+        run_gh.assert_called_once_with([
+            "pr", "edit", "42", "--remove-label", "status:needs-evaluation",
         ])
 
 

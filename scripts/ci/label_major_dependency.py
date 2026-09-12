@@ -53,6 +53,14 @@ def apply_evaluation_label(pr_number: int) -> None:
     ])
 
 
+def remove_evaluation_label(pr_number: int) -> None:
+    """Remove the workflow-owned evaluation label after reclassification."""
+    _run_gh([
+        "pr", "edit", str(pr_number),
+        "--remove-label", EVALUATION_LABEL,
+    ])
+
+
 def evaluate_and_label(pr: dict) -> tuple[bool, str]:
     """Classify one dependency PR and label major/uncertain updates."""
     if not classify.is_dependency_update(pr):
@@ -60,6 +68,15 @@ def evaluate_and_label(pr: dict) -> tuple[bool, str]:
 
     classification = classify.classify_pr(pr)
     if not classify.requires_major_evaluation(classification):
+        label_names = {
+            (label.get("name") or "").lower()
+            for label in (pr.get("labels") or [])
+        }
+        if EVALUATION_LABEL in label_names:
+            pr_number = int(pr.get("number", 0))
+            if pr_number <= 0:
+                raise RuntimeError("PR payload has no valid pull request number")
+            remove_evaluation_label(pr_number)
         return False, (
             f"Classified as {classification.update_type}; no evaluation label required."
         )
