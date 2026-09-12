@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,21 @@ except ImportError as e:  # pragma: no cover — only hits in broken layouts
 
 
 EVALUATION_LABEL = "status:needs-evaluation"
+_HTTP_STATUS_RE = re.compile(r"\(HTTP (?P<status>[1-5][0-9]{2})\)\s*$")
+
+
+class GitHubCliError(RuntimeError):
+    """A failed gh command with a verified HTTP status when one was reported."""
+
+    def __init__(self, command: list[str], returncode: int, stderr: str):
+        self.command = command
+        self.returncode = returncode
+        self.stderr = stderr
+        status_match = _HTTP_STATUS_RE.search(stderr)
+        self.http_status = (
+            int(status_match.group("status")) if status_match is not None else None
+        )
+        super().__init__(f"gh {' '.join(command)} failed: {stderr}")
 
 
 def _run_gh(args: list[str]) -> str:
@@ -33,7 +49,7 @@ def _run_gh(args: list[str]) -> str:
     except FileNotFoundError as e:
         raise RuntimeError(f"gh CLI not available: {e}") from e
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"gh {' '.join(args)} failed: {e.stderr.strip()}") from e
+        raise GitHubCliError(args, e.returncode, e.stderr.strip()) from e
     return out.stdout
 
 
@@ -59,11 +75,17 @@ def apply_evaluation_label(pr_number: int) -> None:
 def remove_evaluation_label(pr_number: int) -> None:
     """Remove the workflow-owned evaluation label after reclassification."""
     encoded_label = quote(EVALUATION_LABEL, safe="")
-    _run_gh([
-        "api", "--method", "DELETE",
-        f"repos/{{owner}}/{{repo}}/issues/{pr_number}/labels/{encoded_label}",
-        "--silent",
-    ])
+    try:
+        _run_gh([
+            "api", "--method", "DELETE",
+            f"repos/{{owner}}/{{repo}}/issues/{pr_number}/labels/{encoded_label}",
+            "--silent",
+        ])
+    except GitHubCliError as e:
+        # Synchronize events can race after the PR payload reports a stale label.
+        # A verified REST 404 means the desired absent state already exists.
+        if e.http_status != 404:
+            raise
 
 
 def evaluate_and_label(pr: dict) -> tuple[bool, str]:

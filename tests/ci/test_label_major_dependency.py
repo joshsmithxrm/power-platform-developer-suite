@@ -1,10 +1,12 @@
 """Behavior tests for shared-classifier dependency labeling."""
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,6 +142,53 @@ class TestApplyEvaluationLabel:
             "repos/{owner}/{repo}/issues/42/labels/status%3Aneeds-evaluation",
             "--silent",
         ])
+
+    def test_remove_is_idempotent_when_rest_reports_verified_404(self):
+        already_absent = labeler.GitHubCliError(
+            ["api", "--method", "DELETE"],
+            1,
+            "gh: Label does not exist (HTTP 404)",
+        )
+        with patch.object(labeler, "_run_gh", side_effect=already_absent):
+            labeler.remove_evaluation_label(42)
+
+    @pytest.mark.parametrize("status", [401, 403, 422, 429, 500])
+    def test_remove_surfaces_non_404_rest_failures(self, status: int):
+        failure = labeler.GitHubCliError(
+            ["api", "--method", "DELETE"],
+            1,
+            f"gh: request failed (HTTP {status})",
+        )
+        with patch.object(labeler, "_run_gh", side_effect=failure), \
+             pytest.raises(labeler.GitHubCliError) as error:
+            labeler.remove_evaluation_label(42)
+
+        assert error.value.http_status == status
+
+    def test_remove_surfaces_ambiguous_not_found_without_http_status(self):
+        failure = labeler.GitHubCliError(
+            ["api", "--method", "DELETE"],
+            1,
+            "gh: Label does not exist",
+        )
+        with patch.object(labeler, "_run_gh", side_effect=failure), \
+             pytest.raises(labeler.GitHubCliError) as error:
+            labeler.remove_evaluation_label(42)
+
+        assert error.value.http_status is None
+
+    def test_run_gh_preserves_verified_http_status(self):
+        failure = subprocess.CalledProcessError(
+            1,
+            ["gh", "api"],
+            stderr="gh: Label does not exist (HTTP 404)\n",
+        )
+        with patch.object(subprocess, "run", side_effect=failure), \
+             pytest.raises(labeler.GitHubCliError) as error:
+            labeler._run_gh(["api", "--method", "DELETE"])
+
+        assert error.value.http_status == 404
+        assert error.value.stderr == "gh: Label does not exist (HTTP 404)"
 
     def test_label_mutations_do_not_use_graphql_pr_edit(self):
         with patch.object(labeler, "_run_gh", return_value="") as run_gh:
