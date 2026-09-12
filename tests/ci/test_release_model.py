@@ -45,7 +45,14 @@ class TestStrictSemVer:
 
     @pytest.mark.parametrize(
         "value",
-        ["1.0", "v1.0.0", "01.0.0", "1.0.0-beta.01", "1.0.0+bad_metadata"],
+        [
+            "1.0",
+            "v1.0.0",
+            "01.0.0",
+            "1.0.0-beta.01",
+            "1.0.0+bad_metadata",
+            "1.0.١",
+        ],
     )
     def test_malformed_versions_are_rejected(self, value: str):
         with pytest.raises(ValueError):
@@ -67,6 +74,16 @@ class TestStrictSemVer:
         assert len(selection.diagnostics) == 1
         assert "Malformed release tag 'Query-v1.0'" in selection.diagnostics[0]
 
+    def test_unicode_digit_tag_is_diagnostic_and_cannot_outrank_stable(self):
+        selection = select_latest_tag(
+            ["Query-v1.0.0", "Query-v1.0.١"],
+            "Query-v",
+        )
+        assert selection.latest == "Query-v1.0.0"
+        assert len(selection.diagnostics) == 1
+        assert "Malformed release tag 'Query-v1.0.١'" in selection.diagnostics[0]
+        assert "expected MAJOR.MINOR.PATCH" in selection.diagnostics[0]
+
 
 class TestProjectGraphDiscovery:
     def test_publishable_projects_and_extension_are_discovered(self, graph: ReleaseGraph):
@@ -85,6 +102,37 @@ class TestProjectGraphDiscovery:
         assert graph.surfaces["PPDS.Query"].project_dependencies == {"PPDS.Dataverse"}
         assert graph.surfaces["PPDS.Migration"].project_dependencies == {"PPDS.Dataverse"}
         assert "PPDS.Plugins" in graph.surfaces["PPDS.Cli"].project_dependencies
+
+    def test_build_only_analyzer_remains_in_dependency_graph(self, graph: ReleaseGraph):
+        assert "PPDS.Analyzers" in graph.build_nodes
+        assert "PPDS.Analyzers" not in graph.surfaces
+        assert "PPDS.Analyzers" in graph.surfaces["PPDS.Cli"].project_dependencies
+        assert "PPDS.Analyzers" in graph.surfaces["PPDS.Mcp"].project_dependencies
+
+    def test_declarative_pack_items_map_package_assets(self, graph: ReleaseGraph):
+        root_asset_consumers = {
+            name
+            for name, surface in graph.surfaces.items()
+            if "icon.png" in surface.package_inputs
+        }
+        root_readme_consumers = {
+            name
+            for name, surface in graph.surfaces.items()
+            if "README.md" in surface.package_inputs
+        }
+
+        assert root_asset_consumers == {
+            "PPDS.Dataverse",
+            "PPDS.Migration",
+            "PPDS.Plugins",
+        }
+        assert root_readme_consumers == root_asset_consumers
+        assert graph.surfaces["PPDS.Auth"].package_inputs == {
+            "src/PPDS.Auth/README.md"
+        }
+        assert graph.surfaces["PPDS.Cli"].package_inputs == {
+            "src/PPDS.Cli/README.md"
+        }
 
     def test_delivery_manifest_declares_extension_bundle(self, graph: ReleaseGraph):
         assert graph.surfaces["PPDS.Extension"].bundles == {"PPDS.Cli"}
@@ -116,6 +164,42 @@ class TestProjectGraphDiscovery:
 
 
 class TestImpactAnalysis:
+    @pytest.mark.parametrize("path", ["icon.png", "README.md"])
+    def test_root_packed_assets_target_all_declared_consumers(
+        self,
+        graph: ReleaseGraph,
+        path: str,
+    ):
+        plan = build_release_plan(graph, [_change(path)])
+        direct = {entry["surface"] for entry in plan["direct_product_changes"]}
+
+        assert direct == {
+            "PPDS.Dataverse",
+            "PPDS.Migration",
+            "PPDS.Plugins",
+        }
+        assert direct <= set(plan["release_targets"])
+        assert plan["ignored_changes"] == []
+
+    @pytest.mark.parametrize(
+        ("path", "consumer"),
+        [
+            ("src/PPDS.Auth/README.md", "PPDS.Auth"),
+            ("src/PPDS.Cli/README.md", "PPDS.Cli"),
+        ],
+    )
+    def test_project_readmes_packed_by_csproj_are_product_inputs(
+        self,
+        graph: ReleaseGraph,
+        path: str,
+        consumer: str,
+    ):
+        plan = build_release_plan(graph, [_change(path)])
+        direct = {entry["surface"] for entry in plan["direct_product_changes"]}
+
+        assert direct == {consumer}
+        assert plan["ignored_changes"] == []
+
     def test_pr_1402_fixture_yields_seven_surfaces_excluding_plugins(self, graph: ReleaseGraph):
         fixture_path = Path(__file__).parent / "fixtures" / "pr_1402_changes.json"
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -251,6 +335,65 @@ class TestImpactAnalysis:
         direct = {entry["surface"] for entry in plan["direct_product_changes"]}
         assert direct == {"PPDS.Auth", "PPDS.Dataverse"}
         assert "PPDS.Plugins" not in plan["release_targets"]
+
+    def test_central_package_ids_are_matched_case_insensitively(self, graph: ReleaseGraph):
+        before = '<Project><ItemGroup><PackageVersion Include="azure.identity" Version="1.20.0" /></ItemGroup></Project>'
+        after = '<Project><ItemGroup><PackageVersion Include="azure.identity" Version="1.21.0" /></ItemGroup></Project>'
+
+        plan = build_release_plan(
+            graph,
+            [FileChange(path="Directory.Packages.props", before=before, after=after)],
+        )
+        direct = {
+            entry["surface"]: entry["reasons"]
+            for entry in plan["direct_product_changes"]
+        }
+
+        assert set(direct) == {"PPDS.Auth", "PPDS.Dataverse"}
+        assert direct["PPDS.Auth"] == ["central dependency changed: Azure.Identity"]
+
+    def test_build_only_dependency_change_propagates_to_distributables(
+        self,
+        graph: ReleaseGraph,
+    ):
+        before = '<Project><ItemGroup><PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" /></ItemGroup></Project>'
+        after = '<Project><ItemGroup><PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.15.0" /></ItemGroup></Project>'
+
+        plan = build_release_plan(
+            graph,
+            [FileChange(path="Directory.Packages.props", before=before, after=after)],
+        )
+
+        assert plan["direct_product_changes"] == []
+        assert plan["internal_build_changes"] == [
+            {
+                "surface": "PPDS.Analyzers",
+                "reasons": [
+                    "central dependency changed: Microsoft.CodeAnalysis.CSharp"
+                ],
+            }
+        ]
+        assert plan["release_targets"] == [
+            "PPDS.Cli",
+            "PPDS.Extension",
+            "PPDS.Mcp",
+        ]
+        downstream = {
+            entry["surface"]: entry["reasons"]
+            for entry in plan["downstream_deliverables"]
+        }
+        assert downstream == {
+            "PPDS.Cli": [
+                "compiled with changed internal build node(s): PPDS.Analyzers"
+            ],
+            "PPDS.Extension": [
+                "compiled with changed internal build node(s): PPDS.Analyzers"
+            ],
+            "PPDS.Mcp": [
+                "compiled with changed internal build node(s): PPDS.Analyzers"
+            ],
+        }
+        assert "PPDS.Analyzers" not in plan["release_targets"]
 
     def test_non_product_changes_have_no_impact(self, graph: ReleaseGraph):
         plan = build_release_plan(
@@ -426,6 +569,7 @@ class TestImpactAnalysis:
         )
         markdown = render_markdown(plan)
         assert "### Direct Product Changes" in markdown
+        assert "### Internal Build Changes" in markdown
         assert "### Downstream Deliverables" in markdown
         assert "### Same-Commit MinVer Tag Prerequisites" in markdown
         assert "PPDS.Query" in markdown

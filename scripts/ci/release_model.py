@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Shared release version and package-impact model for PPDS.
 
-This module is intentionally read-only.  It discovers publishable .NET projects
-and their dependency graph from MSBuild XML, adds non-MSBuild deliverables from
-``release_surfaces.json``, and produces an explained release *advisory*.  It
+This module is intentionally read-only.  It discovers publishable and
+build-only .NET projects, their dependency graph, and declarative package
+inputs from MSBuild XML, adds non-MSBuild deliverables from
+``release_surfaces.json``, and produces an explained release *advisory*. It
 never creates or pushes tags and never invokes a publishing workflow.
 """
 from __future__ import annotations
@@ -19,11 +20,11 @@ from typing import Iterable, Optional, Sequence
 
 
 _SEMVER_RE = re.compile(
-    r"^(0|[1-9]\d*)\."
-    r"(0|[1-9]\d*)\."
-    r"(0|[1-9]\d*)"
-    r"(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
-    r"(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?"
+    r"^(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)"
+    r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?"
     r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 
@@ -84,8 +85,8 @@ class SemVer:
         for own_part, other_part in zip(self.prerelease, other.prerelease):
             if own_part == other_part:
                 continue
-            own_numeric = own_part.isdigit()
-            other_numeric = other_part.isdigit()
+            own_numeric = own_part.isascii() and own_part.isdigit()
+            other_numeric = other_part.isascii() and other_part.isdigit()
             if own_numeric and other_numeric:
                 return -1 if int(own_part) < int(other_part) else 1
             if own_numeric != other_numeric:
@@ -227,7 +228,10 @@ def _package_versions(content: Optional[str]) -> Optional[dict[str, str]]:
                 if _local_name(child.tag) == "Version":
                     version = (child.text or "").strip()
                     break
-        result[package] = version or ""
+        # NuGet package identifiers are case-insensitive. Normalising at the
+        # boundary makes central version comparisons and consumer matching
+        # obey the same identity rules.
+        result[package.casefold()] = version or ""
     return result
 
 
@@ -295,6 +299,8 @@ class Surface:
     project_path: Optional[str]
     project_dependencies: frozenset[str] = frozenset()
     package_references: frozenset[str] = frozenset()
+    package_inputs: frozenset[str] = frozenset()
+    unresolved_package_inputs: frozenset[str] = frozenset()
     bundles: frozenset[str] = frozenset()
     is_tool: bool = False
 
@@ -306,12 +312,18 @@ class Surface:
 @dataclass(frozen=True)
 class ReleaseGraph:
     surfaces: dict[str, Surface]
+    build_nodes: dict[str, Surface] = field(default_factory=dict)
+
+    @property
+    def nodes(self) -> dict[str, Surface]:
+        """All build nodes, while ``surfaces`` remains release-target only."""
+        return {**self.build_nodes, **self.surfaces}
 
     @classmethod
     def discover(cls, repo_root: Path) -> "ReleaseGraph":
         repo_root = repo_root.resolve()
         discovered: dict[str, dict] = {}
-        project_to_surface: dict[str, str] = {}
+        project_to_node: dict[str, str] = {}
 
         for project in sorted((repo_root / "src").glob("PPDS.*/*.csproj")):
             try:
@@ -321,15 +333,13 @@ class ReleaseGraph:
 
             tag_prefix = _first_element_text(root, "MinVerTagPrefix")
             package_id = _first_element_text(root, "PackageId")
-            if not tag_prefix or not package_id:
-                # Build-only projects such as PPDS.Analyzers are not release
-                # surfaces, though their references are still harmless to parse.
-                continue
-
             project_path = _normalise_repo_path(project.relative_to(repo_root))
-            project_to_surface[project_path.casefold()] = package_id
+            node_name = package_id or project.stem
+            project_to_node[project_path.casefold()] = node_name
             package_references: set[str] = set()
-            project_references: list[tuple[str, bool]] = []
+            project_references: list[str] = []
+            package_inputs: set[str] = set()
+            unresolved_package_inputs: set[str] = set()
             for element in root.iter():
                 name = _local_name(element.tag)
                 if name == "PackageReference":
@@ -338,38 +348,89 @@ class ReleaseGraph:
                         package_references.add(package)
                 elif name == "ProjectReference":
                     include = element.attrib.get("Include")
-                    if not include:
-                        continue
-                    reference_output = element.attrib.get("ReferenceOutputAssembly", "true").casefold()
-                    project_references.append((include, reference_output != "false"))
+                    if include:
+                        # ReferenceOutputAssembly=false still participates in
+                        # compilation for analyzer/build-asset references.
+                        project_references.append(include)
 
-            discovered[package_id] = {
-                "name": package_id,
+                if name in {"PackageReference", "ProjectReference"}:
+                    continue
+
+                include = element.attrib.get("Include") or element.attrib.get("Update")
+                pack = element.attrib.get("Pack")
+                if pack is None:
+                    pack = next(
+                        (
+                            child.text
+                            for child in element
+                            if _local_name(child.tag) == "Pack"
+                        ),
+                        None,
+                    )
+                if not include or (pack or "").strip().casefold() != "true":
+                    continue
+                for declared_input in include.split(";"):
+                    declared_input = declared_input.strip()
+                    if not declared_input:
+                        continue
+                    if any(token in declared_input for token in ("$(", "@(", "%(", "*", "?")):
+                        unresolved_package_inputs.add(declared_input)
+                        continue
+                    try:
+                        input_path = (
+                            project.parent / declared_input.replace("\\", "/")
+                        ).resolve().relative_to(repo_root)
+                    except (OSError, ValueError):
+                        unresolved_package_inputs.add(declared_input)
+                    else:
+                        package_inputs.add(_normalise_repo_path(input_path))
+
+            discovered[node_name] = {
+                "name": node_name,
                 "root": _normalise_repo_path(project.parent.relative_to(repo_root)),
-                "tag_prefix": tag_prefix,
+                "tag_prefix": tag_prefix or "",
                 "project_path": project_path,
                 "raw_project_references": project_references,
                 "package_references": frozenset(package_references),
+                "package_inputs": frozenset(package_inputs),
+                "unresolved_package_inputs": frozenset(unresolved_package_inputs),
                 "is_tool": (_first_element_text(root, "PackAsTool") or "false").casefold() == "true",
+                "is_release_surface": bool(tag_prefix and package_id),
             }
 
         surfaces: dict[str, Surface] = {}
+        build_nodes: dict[str, Surface] = {}
         for name, values in discovered.items():
             project_dir = (repo_root / values["project_path"]).parent
             dependencies: set[str] = set()
-            for include, is_runtime_reference in values.pop("raw_project_references"):
-                if not is_runtime_reference:
-                    continue
-                dependency_path = _normalise_repo_path(
-                    (project_dir / include.replace("\\", "/")).resolve().relative_to(repo_root)
-                )
-                dependency = project_to_surface.get(dependency_path.casefold())
-                if dependency:
-                    dependencies.add(dependency)
-            surfaces[name] = Surface(
+            for include in values.pop("raw_project_references"):
+                try:
+                    dependency_path = _normalise_repo_path(
+                        (project_dir / include.replace("\\", "/"))
+                        .resolve()
+                        .relative_to(repo_root)
+                    )
+                except (OSError, ValueError) as exc:
+                    raise ValueError(
+                        f"ProjectReference {include!r} in {values['project_path']} "
+                        "cannot be mapped inside the repository"
+                    ) from exc
+                dependency = project_to_node.get(dependency_path.casefold())
+                if not dependency:
+                    raise ValueError(
+                        f"ProjectReference {include!r} in {values['project_path']} "
+                        f"targets undiscovered project {dependency_path}"
+                    )
+                dependencies.add(dependency)
+            is_release_surface = values.pop("is_release_surface")
+            node = Surface(
                 **values,
                 project_dependencies=frozenset(dependencies),
             )
+            if is_release_surface:
+                surfaces[name] = node
+            else:
+                build_nodes[name] = node
 
         manifest_path = repo_root / "scripts" / "ci" / "release_surfaces.json"
         if manifest_path.exists():
@@ -377,7 +438,7 @@ class ReleaseGraph:
             for item in manifest.get("deliverables", []):
                 bundles: set[str] = set()
                 for project_path in item.get("bundlesProjects", []):
-                    dependency = project_to_surface.get(_normalise_repo_path(project_path).casefold())
+                    dependency = project_to_node.get(_normalise_repo_path(project_path).casefold())
                     if not dependency:
                         raise ValueError(
                             f"Delivery surface {item['name']} references unknown project {project_path}"
@@ -393,7 +454,7 @@ class ReleaseGraph:
 
         if not surfaces:
             raise ValueError(f"No release surfaces discovered below {repo_root / 'src'}")
-        return cls(surfaces=surfaces)
+        return cls(surfaces=surfaces, build_nodes=build_nodes)
 
     @property
     def dotnet_surfaces(self) -> frozenset[str]:
@@ -413,7 +474,7 @@ class ReleaseGraph:
         while frontier:
             dependency = frontier.pop(0)
             inherited = reached_by[dependency]
-            for name, surface in self.surfaces.items():
+            for name, surface in self.nodes.items():
                 if dependency not in surface.dependencies:
                     continue
                 reasons = reached_by.setdefault(name, set())
@@ -423,7 +484,11 @@ class ReleaseGraph:
                     frontier.append(name)
         for source in source_set:
             reached_by.pop(source, None)
-        return reached_by
+        return {
+            name: sources
+            for name, sources in reached_by.items()
+            if name in self.surfaces
+        }
 
 
 @dataclass(frozen=True)
@@ -436,11 +501,15 @@ class FileChange:
 @dataclass
 class _ImpactAccumulator:
     direct_reasons: dict[str, list[str]] = field(default_factory=dict)
+    internal_reasons: dict[str, list[str]] = field(default_factory=dict)
     ignored: list[dict[str, str]] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
 
     def direct(self, surface: str, reason: str) -> None:
         self.direct_reasons.setdefault(surface, []).append(reason)
+
+    def internal(self, node: str, reason: str) -> None:
+        self.internal_reasons.setdefault(node, []).append(reason)
 
     def ignore(self, path: str, reason: str) -> None:
         self.ignored.append({"path": path, "reason": reason})
@@ -481,10 +550,19 @@ def _content_is_comment_only(change: FileChange) -> bool:
 def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -> _ImpactAccumulator:
     result = _ImpactAccumulator()
     roots = sorted(
-        ((surface.root.rstrip("/") + "/", name) for name, surface in graph.surfaces.items()),
+        ((node.root.rstrip("/") + "/", name) for name, node in graph.nodes.items()),
         key=lambda item: len(item[0]),
         reverse=True,
     )
+    package_consumers: dict[str, set[str]] = {}
+    for surface_name, surface in graph.surfaces.items():
+        for package_input in surface.package_inputs:
+            package_consumers.setdefault(package_input.casefold(), set()).add(surface_name)
+    unresolved_package_consumers = {
+        surface_name: surface.unresolved_package_inputs
+        for surface_name, surface in graph.surfaces.items()
+        if surface.unresolved_package_inputs
+    }
 
     for raw_change in changes:
         change = FileChange(
@@ -492,15 +570,19 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
             before=raw_change.before,
             after=raw_change.after,
         )
-        ignored_reason = _is_deterministic_non_product(change.path)
-        if ignored_reason:
-            result.ignore(change.path, ignored_reason)
+        path_key = change.path.casefold()
+        packed_by = package_consumers.get(path_key, set())
+        if packed_by:
+            for surface_name in sorted(packed_by):
+                result.direct(
+                    surface_name,
+                    f"packed package asset changed: {change.path}",
+                )
             continue
         if _content_is_comment_only(change):
             result.ignore(change.path, "semantic content unchanged after comments/XML docs were removed")
             continue
 
-        path_key = change.path.casefold()
         if path_key == "directory.packages.props":
             before_versions = _package_versions(change.before)
             after_versions = _package_versions(change.after)
@@ -541,17 +623,22 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
                         )
                 continue
             matched = False
-            for surface_name, surface in graph.surfaces.items():
-                used = sorted(set(changed_packages) & set(surface.package_references))
+            for node_name, node in graph.nodes.items():
+                used = sorted(
+                    package
+                    for package in node.package_references
+                    if package.casefold() in changed_packages
+                )
                 if used:
                     matched = True
-                    result.direct(
-                        surface_name,
-                        f"central dependency changed: {', '.join(used)}",
-                    )
+                    reason = f"central dependency changed: {', '.join(used)}"
+                    if node_name in graph.surfaces:
+                        result.direct(node_name, reason)
+                    else:
+                        result.internal(node_name, reason)
             if not matched:
                 result.diagnostics.append(
-                    "Central package version changed but no publishable project references it directly: "
+                    "Central package version changed but no project references it directly: "
                     + ", ".join(changed_packages)
                 )
             continue
@@ -568,16 +655,41 @@ def _detect_direct_changes(graph: ReleaseGraph, changes: Sequence[FileChange]) -
                 result.direct(surface, f"repository-wide .NET build input changed: {change.path}")
             continue
 
-        direct_surface = next(
+        # An MSBuild expression cannot be safely resolved without evaluation.
+        # Known central/shared inputs have already been handled above; for any
+        # remaining change, fail conservatively for release projects that have
+        # an unresolved declarative Pack input.
+        if unresolved_package_consumers:
+            result.diagnostics.append(
+                f"Change {change.path!r} could not be excluded from declarative Pack inputs; "
+                "packages with unresolved Pack expressions were conservatively included"
+            )
+            for surface_name, declarations in sorted(unresolved_package_consumers.items()):
+                result.direct(
+                    surface_name,
+                    "could match unresolved Pack input(s): " + ", ".join(sorted(declarations)),
+                )
+            continue
+
+        ignored_reason = _is_deterministic_non_product(change.path)
+        if ignored_reason:
+            result.ignore(change.path, ignored_reason)
+            continue
+
+        direct_node = next(
             (name for root, name in roots if change.path.startswith(root)),
             None,
         )
-        if direct_surface:
+        if direct_node:
             if change.before is None or change.after is None:
                 detail = "source added/deleted or content unavailable; included conservatively"
             else:
                 detail = "runtime/package source changed"
-            result.direct(direct_surface, f"{change.path}: {detail}")
+            reason = f"{change.path}: {detail}"
+            if direct_node in graph.surfaces:
+                result.direct(direct_node, reason)
+            else:
+                result.internal(direct_node, reason)
             continue
 
         if change.path.startswith("src/"):
@@ -624,13 +736,21 @@ def build_release_plan(
 
     impact = _detect_direct_changes(graph, changes)
     direct_names = set(impact.direct_reasons)
-    downstream_sources = graph.downstream_of(direct_names)
-    downstream_reasons = {
-        surface: [
-            "consumes changed surface(s): " + ", ".join(sorted(sources))
-        ]
-        for surface, sources in downstream_sources.items()
-    }
+    internal_names = set(impact.internal_reasons)
+    downstream_sources = graph.downstream_of(direct_names | internal_names)
+    downstream_reasons: dict[str, list[str]] = {}
+    for surface, sources in downstream_sources.items():
+        release_sources = sorted(sources & direct_names)
+        internal_sources = sorted(sources & internal_names)
+        reasons: list[str] = []
+        if release_sources:
+            reasons.append("consumes changed surface(s): " + ", ".join(release_sources))
+        if internal_sources:
+            reasons.append(
+                "compiled with changed internal build node(s): "
+                + ", ".join(internal_sources)
+            )
+        downstream_reasons[surface] = reasons
     affected = direct_names | set(downstream_reasons)
 
     if release_kind in {"minor", "major"}:
@@ -659,10 +779,10 @@ def build_release_plan(
                 if dependency in visited:
                     continue
                 visited.add(dependency)
-                dependency_surface = graph.surfaces[dependency]
-                if dependency not in release_targets:
+                dependency_node = graph.nodes[dependency]
+                if dependency in graph.surfaces and dependency not in release_targets:
                     prerequisites.setdefault(dependency, set()).add(target)
-                frontier.extend(dependency_surface.project_dependencies)
+                frontier.extend(dependency_node.project_dependencies)
 
     tag_list = list(tags)
     latest_tags: dict[str, Optional[str]] = {}
@@ -691,6 +811,7 @@ def build_release_plan(
         "channel": channel,
         "release_needed": bool(release_targets),
         "direct_product_changes": _reason_entries(impact.direct_reasons),
+        "internal_build_changes": _reason_entries(impact.internal_reasons),
         "downstream_deliverables": _reason_entries(downstream_reasons),
         "affected_surfaces": sorted(affected),
         "release_targets": sorted(release_targets),
@@ -741,6 +862,11 @@ def render_markdown(plan: dict) -> str:
             lines.append(f"- **{entry['surface']}** — {'; '.join(entry['reasons'])}")
 
     add_reason_entries(plan["direct_product_changes"], "None.")
+    lines.extend(["", "### Internal Build Changes", ""])
+    add_reason_entries(
+        plan["internal_build_changes"],
+        "None. No build-only project changed.",
+    )
     lines.extend(["", "### Downstream Deliverables", ""])
     add_reason_entries(
         plan["downstream_deliverables"],

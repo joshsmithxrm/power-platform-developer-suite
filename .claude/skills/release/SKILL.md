@@ -74,17 +74,22 @@ python scripts/ci/release_plan.py \
   --format markdown
 ```
 
-The output keeps **direct product changes**, **downstream deliverables**, and
-**same-commit MinVer tag prerequisites** separate and explains every inclusion.
-Review all three lists before drafting CHANGELOGs. The project dependency graph
-comes from MSBuild `ProjectReference` XML; the Extension's bundled-CLI delivery
-edge is declared in `scripts/ci/release_surfaces.json`. Documentation, specs,
-tests, fixtures, CHANGELOGs, and comment-only changes in modeled MSBuild XML are
-ignored deterministically. C# and arbitrary XML are treated conservatively
+The output keeps **direct product changes**, **internal build changes**,
+**downstream deliverables**, and **same-commit MinVer tag prerequisites**
+separate and explains every inclusion. Review all four lists before drafting
+CHANGELOGs. The project dependency graph comes from every MSBuild
+`ProjectReference`, including analyzer/build references that do not emit a
+runtime assembly; the Extension's bundled-CLI delivery edge is declared in
+`scripts/ci/release_surfaces.json`. Declarative MSBuild `Pack` items map README,
+icon, and other package assets to each consuming package. Other documentation,
+specs, tests, fixtures, CHANGELOGs, and comment-only changes in modeled MSBuild
+XML are ignored deterministically. C# and arbitrary XML are treated conservatively
 because comment-looking text may be runtime string or mixed-content data.
 Repository-wide .NET build inputs apply to every .NET package, and a central
-package version bump is scoped to direct consumers only when residual central
-package-management settings are unchanged.
+package version bump is matched to direct consumers case-insensitively only when
+residual central package-management settings are unchanged. Build-only changed
+nodes are explained but never appear as release targets; their distributable
+consumers do.
 
 This command is advisory only. It never creates tags, publishes packages, or
 dispatches release workflows. Malformed release tags appear as diagnostics and
@@ -143,7 +148,7 @@ push does NOT automatically update the marketplace listing for both — see
 Each package has its own lineage. Embedding the current version table here would go stale on every release. Instead, query the actual state when you need it:
 
 The advisory from Step 2 reports the latest valid tag for every surface using
-strict SemVer 2.0 precedence. Do not substitute `git --sort=-v:refname`:
+strict SemVer 2.0 precedence with ASCII digits only. Do not substitute `git --sort=-v:refname`:
 refname sorting can rank `beta.2` above stable `1.0.0` and mishandle multi-digit
 prerelease identifiers such as `beta.10`.
 

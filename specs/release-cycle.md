@@ -232,7 +232,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 - Tag push is irreversible — never auto-tag or auto-publish
 - Patch scope must explain direct changes, downstream deliverables, and prerequisite-only tags separately; a MinVer consistency tag is not misreported as a product change
 - Release-scope automation is advisory and must never create/push tags, publish packages, or dispatch release workflows
-- Latest tag selection must use strict SemVer 2.0 precedence, never git refname sorting
+- Latest tag selection must use strict SemVer 2.0 precedence with ASCII digits only, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
 - Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the `/release` skill's pre-merge verification step
@@ -259,9 +259,9 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
 | AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
 | AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
-| AC-17 | One shared strict SemVer implementation orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
-| AC-18 | The release graph is discovered from publishable MSBuild projects and their `ProjectReference` XML, with declarative non-MSBuild delivery edges | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-19 | Release advisories separate explained direct changes, downstream deliverables, and same-commit MinVer prerequisites; deterministic docs/tests/specs/CHANGELOG and modeled MSBuild comment-only changes produce no impact, while C#/arbitrary XML, repository-wide .NET build inputs, and mixed central-package semantic changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-17 | One shared strict SemVer implementation uses ASCII digits, orders stable/prerelease and numeric prerelease identifiers correctly, ignores build metadata for precedence, and reports malformed release tags | `tests/ci/test_release_model.py::TestStrictSemVer` | ✅ |
+| AC-18 | The release graph discovers publishable and build-only MSBuild projects, all `ProjectReference` edges, declarative packed inputs, and non-MSBuild delivery edges while keeping internal nodes out of release targets | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
+| AC-19 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, and same-commit MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 | AC-20 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 
 ### Edge Cases
@@ -272,6 +272,9 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | Source change cannot be classified with certainty | Include its owning release surface conservatively and explain why |
 | Repository-wide .NET build input changes | Include every .NET surface and downstream bundled deliverables |
 | Central package version and another central-management setting change together | Map the version delta to consumers and conservatively include every .NET surface for the residual semantic change |
+| Packed README or icon changes | Include every package whose declarative MSBuild `Pack` item consumes that asset |
+| Build-only analyzer dependency changes | Explain the internal node and include its downstream CLI/MCP/Extension deliverables without making the analyzer a release target |
+| Central PackageId differs only by case | Match it to consumers using NuGet's case-insensitive identity rules |
 | Release tag has malformed SemVer | Ignore it for latest-version selection and emit a diagnostic for maintainer review |
 | Stable Query or Migration patch has no Dataverse tag on the target commit | List Dataverse separately as a same-commit MinVer prerequisite |
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |
@@ -357,6 +360,6 @@ version-consistency tags rather than product changes.
 
 | Date | Change |
 |------|--------|
-| 2026-09-12 | Add strict SemVer and explained MSBuild-derived release impact planning, including repository-wide build inputs and mixed central-package semantics (AC-17–AC-20) |
+| 2026-09-12 | Add strict ASCII SemVer and explained MSBuild-derived release impact planning, including packed package assets, build-only dependency nodes, repository-wide build inputs, and central-package semantics (AC-17–AC-20) |
 | 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
 | 2026-04-24 | Initial spec |

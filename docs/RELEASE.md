@@ -22,31 +22,39 @@ Use `--release-kind minor` or `major` for coordinated releases, and
 `--channel prerelease` for a prerelease plan. The command is read-only: it does
 not create or push tags, publish packages, or dispatch a workflow.
 
-The advisory deliberately separates three concepts:
+The advisory deliberately separates four concepts:
 
 1. **Direct product changes** — publishable runtime/package inputs that changed.
    Deterministic documentation, specification, test, fixture, CHANGELOG, and
-   comment-only changes in modeled MSBuild XML are excluded. C# and arbitrary
+   comment-only changes in modeled MSBuild XML are excluded unless a file is
+   declared as a packed package input in a project. Packed README/icon assets
+   are product inputs for every package that includes them. C# and arbitrary
    XML remain product changes because comment-looking text can be a raw string
    or mixed-content value. Uncertain product-source changes are included
    conservatively. Dot-directories such as `.github/` remain intact during path
    normalization and are explained as automation/tooling changes. Repository-wide
    .NET build inputs (`global.json`, `NuGet.config`, `.editorconfig`, and shared
-   MSBuild props/targets) apply to every .NET package. A central package version
+   MSBuild props/targets) apply to every .NET package. NuGet package IDs are
+   matched case-insensitively. A central package version
    change is scoped to its consumers only when no simultaneous central-management
    setting changed; mixed or unclassified central changes apply to every .NET
    package.
-2. **Downstream deliverables** — publishable projects that consume a directly
-   changed project. Project dependencies are discovered from MSBuild
-   `ProjectReference` XML; the Extension-to-CLI bundle relationship is declared
-   in `scripts/ci/release_surfaces.json`.
-3. **Same-commit MinVer tag prerequisites** — unchanged library dependencies
+2. **Internal build changes** — non-publishable projects that changed, such as
+   analyzers. These nodes are never release targets themselves, but their
+   publishable consumers are.
+3. **Downstream deliverables** — publishable projects that consume a directly
+   changed project or internal build node. Project dependencies, including
+   build/analyzer references with `ReferenceOutputAssembly="false"`, are
+   discovered from MSBuild `ProjectReference` XML; the Extension-to-CLI bundle
+   relationship is declared in `scripts/ci/release_surfaces.json`.
+4. **Same-commit MinVer tag prerequisites** — unchanged library dependencies
    that need a stable tag on the release commit. For example, a stable Query or
    Migration plan includes Dataverse as a prerequisite. Without that tag,
    MinVer derives an `alpha` version and NuGet rejects the stable package's
    prerelease dependency.
 
-The latest-tag section uses strict SemVer 2.0 ordering. Stable versions outrank
+The latest-tag section uses strict SemVer 2.0 ordering with ASCII digits only.
+Stable versions outrank
 prereleases of the same version, numeric identifiers compare numerically
 (`beta.10` after `beta.2`), build metadata does not affect precedence, and
 malformed tags are surfaced as diagnostics instead of silently winning a git
