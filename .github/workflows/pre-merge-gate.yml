@@ -18,6 +18,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
   checks: read

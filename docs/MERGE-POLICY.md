@@ -104,7 +104,7 @@ For dependency PRs (label `dependencies` OR author `app/dependabot` / `dependabo
 | npm | `Build / extension` | Extension typecheck, lint, build, and tests ran |
 | GitHub Actions | `Python Tests / workflow-tests` | Executable workflow-policy regression tests ran |
 
-The gate matches both workflow and job name, so an unrelated generic `test` check cannot satisfy the rule. It blocks when the required job is `SKIPPED`, failed, still pending, or absent. If the ecosystem cannot be determined from labels, Dependabot branch naming, or a single dependency-manifest/workflow surface, the gate also blocks rather than choosing an unrelated test.
+The gate matches both workflow and job name, so an unrelated generic `test` check cannot satisfy the rule. It evaluates only the newest matching GitHub Actions attempt, ordered by start time, workflow-run ID, run-attempt number, and job ID; an older success cannot mask a newer failure or in-progress rerun. It blocks when the required job is `SKIPPED`, failed, still pending, absent, or missing unambiguous ordering metadata. If the ecosystem cannot be determined from labels, Dependabot branch naming, or a single dependency-manifest/workflow surface, the gate also blocks rather than choosing an unrelated test.
 
 `.github/workflows/dependabot-label.yml` uses the same classifier to apply `status:needs-evaluation` to major or unclassifiable Dependabot PRs. Do not duplicate version heuristics in workflow YAML.
 

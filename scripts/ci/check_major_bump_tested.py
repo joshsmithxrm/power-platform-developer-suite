@@ -29,9 +29,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -72,6 +74,7 @@ REQUIRED_EVIDENCE_BY_ECOSYSTEM = {
 
 PASSING_STATES = frozenset({"SUCCESS", "PASS"})
 RUNNING_STATES = frozenset({"PENDING", "IN_PROGRESS", "QUEUED", ""})
+_ACTIONS_JOB_LINK_RE = re.compile(r"/actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)(?:[/?#]|$)")
 
 
 def _run_gh(args: list[str]) -> str:
@@ -95,13 +98,52 @@ def fetch_pr_payload(pr_number: int) -> dict:
     return json.loads(raw)
 
 
-def fetch_pr_checks(pr_number: int) -> list[dict]:
-    """Return job name, state, and workflow identity for the PR's checks."""
+def _enrich_attempt_metadata(check: dict) -> dict:
+    """Add GitHub Actions run-attempt metadata for deterministic ordering."""
+    enriched = dict(check)
+    match = _ACTIONS_JOB_LINK_RE.search(str(check.get("link") or ""))
+    if match is None:
+        return enriched
+
+    job_id = int(match.group("job_id"))
+    linked_run_id = int(match.group("run_id"))
+    raw = _run_gh([
+        "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}",
+    ])
+    metadata = json.loads(raw)
+    if metadata.get("id") != job_id or metadata.get("run_id") != linked_run_id:
+        # Do not trust ordering metadata that does not describe the linked check.
+        # Leaving it absent makes the policy gate fail closed.
+        return enriched
+    enriched.update({
+        "runId": metadata.get("run_id"),
+        "runAttempt": metadata.get("run_attempt"),
+        "jobId": metadata.get("id"),
+        "startedAt": metadata.get("started_at") or check.get("startedAt"),
+        "completedAt": metadata.get("completed_at") or check.get("completedAt"),
+    })
+    return enriched
+
+
+def fetch_pr_checks(
+    pr_number: int,
+    evidence: Optional[RequiredEvidence] = None,
+) -> list[dict]:
+    """Return PR checks, enriching required-job attempts with ordering data."""
     raw = _run_gh([
         "pr", "checks", str(pr_number),
-        "--json", "name,state,workflow",
+        "--json", "name,state,workflow,startedAt,completedAt,link",
     ])
-    return json.loads(raw) if raw.strip() else []
+    checks = json.loads(raw) if raw.strip() else []
+    if evidence is None:
+        return checks
+    return [
+        _enrich_attempt_metadata(check)
+        if (check.get("name") or "") == evidence.job
+        and (check.get("workflow") or "") == evidence.workflow
+        else check
+        for check in checks
+    ]
 
 
 def required_evidence_for(
@@ -122,41 +164,75 @@ def check_required_evidence(
     checks: list[dict],
     evidence: RequiredEvidence,
 ) -> tuple[bool, str]:
-    """Pass iff the exact ecosystem-specific workflow job ran successfully."""
-    matching_states = [
-        (check.get("state") or "").upper()
+    """Pass iff the newest exact workflow/job attempt ran successfully."""
+    matching_checks = [
+        check
         for check in checks
         if (check.get("name") or "") == evidence.job
         and (check.get("workflow") or "") == evidence.workflow
     ]
     check_name = f"{evidence.workflow} / {evidence.job}"
 
-    # A successful rerun is sufficient even if an older attempt is also
-    # present in the rollup.
-    if any(state in PASSING_STATES for state in matching_states):
-        return True, (
-            "Major or unclassifiable dependency update detected; required "
-            f"{evidence.description} ({check_name}) ran and passed."
-        )
-
-    if not matching_states:
+    if not matching_checks:
         return False, (
             "Major or unclassifiable dependency update detected, but required "
             f"{evidence.description} ({check_name}) did not run on this PR."
         )
 
-    if any(state in RUNNING_STATES for state in matching_states):
-        state_text = ", ".join(state or "UNKNOWN" for state in matching_states)
-        return False, f"Required check {check_name} is still running ({state_text})."
+    ordered: list[tuple[tuple[datetime, int, int, int], dict]] = []
+    for check in matching_checks:
+        try:
+            started_at = datetime.fromisoformat(
+                str(check["startedAt"]).replace("Z", "+00:00")
+            )
+            if started_at.tzinfo is None or started_at.utcoffset() is None:
+                raise ValueError("startedAt must include a timezone")
+            run_id = int(check["runId"])
+            run_attempt = int(check["runAttempt"])
+            job_id = int(check["jobId"])
+            if run_id <= 0 or run_attempt <= 0 or job_id <= 0:
+                raise ValueError("ordering identifiers must be positive")
+        except (KeyError, TypeError, ValueError):
+            return False, (
+                f"Required check {check_name} is missing valid attempt/order "
+                "metadata; cannot determine the newest validation attempt."
+            )
+        ordered.append(((started_at, run_id, run_attempt, job_id), check))
 
-    if all(state == "SKIPPED" for state in matching_states):
+    newest_key = max(key for key, _ in ordered)
+    newest = [check for key, check in ordered if key == newest_key]
+    newest_states = {(check.get("state") or "").upper() for check in newest}
+    if len(newest_states) != 1:
         return False, (
-            f"Required check {check_name} was SKIPPED; major dependency updates "
-            "must run the relevant test surface."
+            f"Required check {check_name} has conflicting duplicate states for "
+            "the newest attempt; cannot accept ambiguous evidence."
         )
 
-    state_text = ", ".join(state or "UNKNOWN" for state in matching_states)
-    return False, f"Required check {check_name} did not pass (state={state_text})."
+    state = newest_states.pop()
+    newest_attempt = int(newest[0]["runAttempt"])
+    if state in PASSING_STATES:
+        return True, (
+            "Major or unclassifiable dependency update detected; required "
+            f"{evidence.description} ({check_name}) newest attempt "
+            f"#{newest_attempt} ran and passed."
+        )
+
+    if state in RUNNING_STATES:
+        return False, (
+            f"Required check {check_name} newest attempt #{newest_attempt} "
+            f"is still running ({state or 'UNKNOWN'})."
+        )
+
+    if state == "SKIPPED":
+        return False, (
+            f"Required check {check_name} newest attempt #{newest_attempt} was "
+            "SKIPPED; major dependency updates must run the relevant test surface."
+        )
+
+    return False, (
+        f"Required check {check_name} newest attempt #{newest_attempt} did not "
+        f"pass (state={state or 'UNKNOWN'})."
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -187,7 +263,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     try:
-        checks = fetch_pr_checks(args.pr)
+        checks = fetch_pr_checks(args.pr, evidence)
     except (RuntimeError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
