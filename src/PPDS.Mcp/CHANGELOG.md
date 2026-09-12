@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-12
+
+### Changed
+
+- **Runtime packages refreshed for the coordinated patch train** — consumes Auth 1.1.1, Dataverse 1.3.1, Migration 1.2.1, Query 1.0.1, and CLI 1.4.1. MCP query calls inherit the corrected side-effect-free DML dry-run behavior, and the runtime dependency graph carries `System.Security.Cryptography.Xml` 8.0.4 ([#1401](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1401), [#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+
 ## [1.2.0] - 2026-07-15
 
 ### Added
@@ -50,7 +56,8 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Structured MCP error responses** — All tool exceptions now surface `errorCode`, `userMessage`, and `context`, giving MCP clients machine-readable failure details ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.1...HEAD
+[1.2.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.0...Mcp-v1.2.1
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.1.0...Mcp-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...Mcp-v1.1.0
 [1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.0...Mcp-v1.0.1
