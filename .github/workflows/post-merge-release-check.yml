@@ -29,10 +29,12 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout main
+      - name: Checkout analyzed merge commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          # Keep ReleaseGraph discovery on the same revision as the semantic
+          # diff below, even if another PR lands before this job starts.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -40,122 +42,64 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Get changed files
-        run: |
-          gh pr diff ${{ github.event.pull_request.number }} --name-only > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
-
-      - name: Map files to packages
-        run: |
-          python scripts/ci/map_files_to_packages.py < changed_files.txt > packages.json
-          echo "Affected packages:"
-          cat packages.json
-
-      - name: Evaluate packages and set warning
+      - name: Build explained release advisory
         id: evaluate
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          python - <<'EOF'
-          import json, os
-
-          packages = json.load(open("packages.json"))
-
-          if packages == ["unknown"]:
-              warning = "No recognized PPDS package paths found — triage manually"
-          else:
-              warning = ""
-
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"AFFECTED_PACKAGES={json.dumps(packages)}\n")
-              f.write(f"WARNING={warning}\n")
-              # Comma-separated package list for the issue title
-              if packages == ["unknown"]:
-                  f.write("PACKAGES_DISPLAY=unknown\n")
-              else:
-                  f.write(f"PACKAGES_DISPLAY={', '.join(packages)}\n")
-          EOF
-
-      - name: Resolve latest tags per package
-        id: tags
-        run: |
-          python - <<'EOF'
-          import json, subprocess, os
-
-          packages = json.loads(os.environ["AFFECTED_PACKAGES"])
-
-          tag_lines = []
-          if packages != ["unknown"]:
-              for pkg in packages:
-                  # e.g. PPDS.Query -> prefix Query-v*
-                  prefix = pkg.split(".", 1)[1]  # strip "PPDS."
-                  result = subprocess.run(
-                      ["git", "tag", "--list", f"{prefix}-v*", "--sort=-v:refname"],
-                      capture_output=True, text=True,
-                  )
-                  tags = [t.strip() for t in result.stdout.splitlines() if t.strip()]
-                  latest = tags[0] if tags else "(no tag found)"
-                  tag_lines.append(f"- **{pkg}**: current tag → `{latest}`")
-
-          tag_summary = "\n".join(tag_lines) if tag_lines else "- No recognized packages; tag lookup skipped."
-
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              # Multiline env var via delimiter
-              delimiter = "EOF_TAGS"
-              f.write(f"TAG_SUMMARY<<{delimiter}\n{tag_summary}\n{delimiter}\n")
-          EOF
-
-      - name: Build package bullet list
-        run: |
-          python - <<'EOF'
-          import json, os
-
-          packages = json.loads(os.environ["AFFECTED_PACKAGES"])
-          if packages == ["unknown"]:
-              bullets = "- unknown (no recognized src/PPDS.* paths)"
-          else:
-              bullets = "\n".join(f"- {p}" for p in packages)
-
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              delimiter = "EOF_BULLETS"
-              f.write(f"PACKAGE_BULLETS<<{delimiter}\n{bullets}\n{delimiter}\n")
-          EOF
+          python scripts/ci/release_plan.py \
+            --base "${MERGE_SHA}^" \
+            --head "${MERGE_SHA}" \
+            --release-kind patch \
+            --channel stable \
+            --format json > release-plan.json
+          python scripts/ci/release_plan.py \
+            --base "${MERGE_SHA}^" \
+            --head "${MERGE_SHA}" \
+            --release-kind patch \
+            --channel stable \
+            --format markdown > release-plan.md
+          echo "release_needed=$(jq -r '.release_needed' release-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "Release advisory:"
+          cat release-plan.json
 
       - name: Create patch release issue
+        if: steps.evaluate.outputs.release_needed == 'true'
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          WARNING_SECTION=""
-          if [ -n "$WARNING" ]; then
-            WARNING_SECTION="
-          > [!WARNING]
-          > $WARNING"
-          fi
+          TITLE=$(python scripts/ci/release_plan.py \
+            --base "${MERGE_SHA}^" \
+            --head "${MERGE_SHA}" \
+            --release-kind patch \
+            --channel stable \
+            --format title)
+          PR_URL=$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")
+          PR_TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+
+          printf '%s\n' \
+            "A PR labeled \`release:patch\` merged to main. Review this explained scope before taking any release action." \
+            "" \
+            "**Merged PR:** ${PR_URL}" \
+            "**PR title:** ${PR_TITLE}" \
+            "" > issue-body.md
+          cat release-plan.md >> issue-body.md
+          printf '%s\n' \
+            "### Maintainer Checklist" \
+            "" \
+            "- [ ] Confirm direct changes, downstream deliverables, and MinVer prerequisites" \
+            "- [ ] Update CHANGELOGs for release targets" \
+            "- [ ] Follow the public [release procedure](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/RELEASE.md#release-scope-analysis)" \
+            "- [ ] Verify every publish before closing this issue" >> issue-body.md
 
           gh issue create \
-            --title "Patch release needed: $PACKAGES_DISPLAY" \
+            --title "$TITLE" \
             --label "release:patch" \
-            --body "## Patch Release Needed
+            --body-file issue-body.md
 
-          A PR labeled \`release:patch\` has merged to main and requires a patch release.
-
-          **Merged PR:** ${{ github.event.pull_request.html_url }}
-          **PR Title:** ${{ github.event.pull_request.title }}
-          ${WARNING_SECTION}
-
-          ### Affected Package(s)
-
-          ${PACKAGE_BULLETS}
-
-          ### Latest Tags (current → maintainer picks next patch)
-
-          ${TAG_SUMMARY}
-
-          ### Release Checklist
-
-          - [ ] Update CHANGELOG for affected package(s)
-          - [ ] Push tag(s) (e.g., \`Query-v1.0.1\`)
-          - [ ] Verify NuGet/Marketplace publish succeeds
-          - [ ] Close this issue
-
-          > **Procedure:** Follow the [Patch Release Procedure](.claude/skills/release/SKILL.md#patch-release-procedure) in the \`/release\` skill."
+      - name: Log no-product-impact decision
+        if: steps.evaluate.outputs.release_needed != 'true'
+        run: echo "No product release issue opened; the advisory found only deterministic non-product changes."
 
   extension-corelease-detection:
     name: Detect missing Extension bundled-CLI refresh

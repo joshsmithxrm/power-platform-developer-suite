@@ -1,0 +1,12 @@
+{
+  "deliverables": [
+    {
+      "name": "PPDS.Extension",
+      "root": "src/PPDS.Extension",
+      "tagPrefix": "Extension-v",
+      "bundlesProjects": [
+        "src/PPDS.Cli/PPDS.Cli.csproj"
+      ]
+    }
+  ]
+}
