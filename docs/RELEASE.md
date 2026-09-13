@@ -84,12 +84,14 @@ independent records.
 
 The workflow uses `pull_request_target` so merged PRs from forks receive the
 base repository's issue-write token. Its trust boundary is intentionally narrow:
-every executable repository script and delivery manifest is checked out from
-`github.workflow_sha`, checkout credentials are not persisted, and the original
-merge commit is a separate data-only checkout used for semantic diff and MSBuild
-XML inspection. No code, action, or script from that historical checkout is
-executed. This also keeps old merges analyzable without substituting a moving
-`main` graph.
+every executable repository script comes from `github.workflow_sha`, checkout
+credentials are not persisted, and the original merge commit is a separate
+data-only checkout used for semantic diff, MSBuild XML, and its contemporaneous
+delivery manifest. No code, action, or script from that historical checkout is
+executed. If the old revision predates the manifest, the trusted workflow
+revision supplies a fallback; project references that did not exist historically
+are mapped conservatively to all historical build nodes. This keeps old merges
+analyzable without substituting a moving `main` graph or silently under-reporting.
 
 Workflow-owned release labels are declared in
 `scripts/ci/release_labels.json`. Release workflows reconcile all four labels

@@ -75,12 +75,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
     )
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument(
+    manifest_group = parser.add_mutually_exclusive_group()
+    manifest_group.add_argument(
         "--delivery-manifest",
         type=Path,
+        help="Explicit release_surfaces.json to use instead of the repository copy",
+    )
+    manifest_group.add_argument(
+        "--fallback-delivery-manifest",
+        type=Path,
         help=(
-            "Optional release_surfaces.json supplied by the pinned automation "
-            "revision when analyzing a historical commit"
+            "Trusted current release_surfaces.json used only when the analyzed "
+            "repository has no manifest; missing historical project paths are "
+            "mapped conservatively"
         ),
     )
     parser.add_argument("--base", help="Base git revision for semantic diff analysis")
@@ -109,10 +116,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     delivery_manifest = (
         args.delivery_manifest.resolve() if args.delivery_manifest else None
     )
+    fallback_delivery_manifest = (
+        args.fallback_delivery_manifest.resolve()
+        if args.fallback_delivery_manifest
+        else None
+    )
     plan = build_release_plan(
         ReleaseGraph.discover(
             repo_root,
             delivery_manifest_path=delivery_manifest,
+            fallback_delivery_manifest_path=fallback_delivery_manifest,
         ),
         changes,
         release_kind=args.release_kind,

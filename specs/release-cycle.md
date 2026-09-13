@@ -243,7 +243,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 - Release-scope automation is advisory and must never create/push tags, publish packages, or dispatch release workflows
 - Workflow-owned release labels come from one checked-in manifest and are created or reconciled idempotently before use
 - Untrusted event text is rendered by tested Python helpers and issue bodies are passed to GitHub through files, never interpolated into shell commands
-- Merged fork PRs use a least-privilege `pull_request_target` path: strict merged/base/action/label gates apply, executable repository automation comes only from `github.workflow_sha`, checkout credentials are not persisted, and the historical merge checkout is data-only
+- Merged fork PRs use a least-privilege `pull_request_target` path: strict merged/base/action/label gates apply, executable repository automation comes only from `github.workflow_sha`, checkout credentials are not persisted, and the historical merge checkout (including its delivery manifest) is data-only; when that manifest is absent, a trusted current fallback maps missing project references conservatively
 - Latest tag selection must use strict SemVer 2.0 precedence with ASCII digits only, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
@@ -287,7 +287,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-27 | Tested Python builds patch titles and bodies, hostile PR titles remain inert, GitHub receives the body through `--body-file`, and the public release runbook is linked | `tests/ci/test_patch_release_issue.py::TestSafeIssueRendering` | ✅ |
 | AC-28 | One authoritative manifest defines all four workflow-owned release labels and synchronization creates or updates them idempotently with precise failure diagnostics | `tests/ci/test_release_labels.py` | ✅ |
 | AC-29 | Milestone helper failures stop issue creation instead of being swallowed | `tests/ci/test_milestone_release_check.py::TestWorkflowFailureHandling` | ✅ |
-| AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, and strict event gates remain | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary` | ✅ |
+| AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
 
 ### Edge Cases
 

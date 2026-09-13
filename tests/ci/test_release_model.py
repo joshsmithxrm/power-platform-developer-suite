@@ -30,6 +30,21 @@ def _change(path: str) -> FileChange:
     return FileChange(path=path, before="old runtime content", after="new runtime content")
 
 
+def _write_minimal_project(repo_root: Path) -> None:
+    project = repo_root / "src" / "PPDS.Legacy" / "PPDS.Legacy.csproj"
+    project.parent.mkdir(parents=True)
+    project.write_text(
+        """<Project>
+  <PropertyGroup>
+    <PackageId>PPDS.Legacy</PackageId>
+    <MinVerTagPrefix>Legacy-v</MinVerTagPrefix>
+  </PropertyGroup>
+</Project>
+""",
+        encoding="utf-8",
+    )
+
+
 class TestStrictSemVer:
     def test_stable_has_higher_precedence_than_prerelease(self):
         assert SemVer.parse("1.0.0") > SemVer.parse("1.0.0-rc.99")
@@ -168,6 +183,89 @@ class TestProjectGraphDiscovery:
         assert historical.surfaces["PPDS.HistoricalExtension"].bundles == {
             "PPDS.Cli"
         }
+
+    def test_historical_delivery_manifest_precedes_current_fallback(
+        self, tmp_path: Path
+    ):
+        _write_minimal_project(tmp_path)
+        historical_manifest = tmp_path / "scripts" / "ci" / "release_surfaces.json"
+        historical_manifest.parent.mkdir(parents=True)
+        historical_manifest.write_text(
+            json.dumps(
+                {
+                    "deliverables": [
+                        {
+                            "name": "PPDS.LegacyExtension",
+                            "root": "src/PPDS.Extension",
+                            "tagPrefix": "Extension-v",
+                            "bundlesProjects": [
+                                "src/PPDS.Legacy/PPDS.Legacy.csproj"
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        incompatible_fallback = tmp_path / "current-release-surfaces.json"
+        incompatible_fallback.write_text(
+            json.dumps(
+                {
+                    "deliverables": [
+                        {
+                            "name": "PPDS.CurrentExtension",
+                            "root": "src/PPDS.Extension",
+                            "tagPrefix": "Extension-v",
+                            "bundlesProjects": ["src/PPDS.New/PPDS.New.csproj"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        historical = ReleaseGraph.discover(
+            tmp_path,
+            fallback_delivery_manifest_path=incompatible_fallback,
+        )
+
+        assert "PPDS.CurrentExtension" not in historical.surfaces
+        assert historical.surfaces["PPDS.LegacyExtension"].bundles == {
+            "PPDS.Legacy"
+        }
+
+    def test_current_fallback_conservatively_maps_missing_historical_project(
+        self, tmp_path: Path
+    ):
+        _write_minimal_project(tmp_path)
+        fallback_manifest = tmp_path / "current-release-surfaces.json"
+        fallback_manifest.write_text(
+            json.dumps(
+                {
+                    "deliverables": [
+                        {
+                            "name": "PPDS.Extension",
+                            "root": "src/PPDS.Extension",
+                            "tagPrefix": "Extension-v",
+                            "bundlesProjects": ["src/PPDS.New/PPDS.New.csproj"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        historical = ReleaseGraph.discover(
+            tmp_path,
+            fallback_delivery_manifest_path=fallback_manifest,
+        )
+
+        assert historical.surfaces["PPDS.Extension"].bundles == {"PPDS.Legacy"}
+        plan = build_release_plan(
+            historical,
+            [_change("src/PPDS.Legacy/Runtime.cs")],
+        )
+        assert "PPDS.Extension" in plan["release_targets"]
 
     def test_direct_consumer_repropagates_new_upstream_reasons(self):
         graph = ReleaseGraph(

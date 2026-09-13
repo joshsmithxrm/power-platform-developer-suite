@@ -325,7 +325,16 @@ class ReleaseGraph:
         repo_root: Path,
         *,
         delivery_manifest_path: Optional[Path] = None,
+        fallback_delivery_manifest_path: Optional[Path] = None,
     ) -> "ReleaseGraph":
+        if (
+            delivery_manifest_path is not None
+            and fallback_delivery_manifest_path is not None
+        ):
+            raise ValueError(
+                "delivery_manifest_path and fallback_delivery_manifest_path "
+                "are mutually exclusive"
+            )
         repo_root = repo_root.resolve()
         discovered: dict[str, dict] = {}
         project_to_node: dict[str, str] = {}
@@ -437,9 +446,22 @@ class ReleaseGraph:
             else:
                 build_nodes[name] = node
 
-        manifest_path = delivery_manifest_path or (
-            repo_root / "scripts" / "ci" / "release_surfaces.json"
+        repository_manifest = repo_root / "scripts" / "ci" / "release_surfaces.json"
+        using_fallback_manifest = False
+        if delivery_manifest_path is not None:
+            manifest_path = delivery_manifest_path
+        elif repository_manifest.exists():
+            manifest_path = repository_manifest
+        elif fallback_delivery_manifest_path is not None:
+            manifest_path = fallback_delivery_manifest_path
+            using_fallback_manifest = True
+        else:
+            manifest_path = repository_manifest
+        manifest_was_required = (
+            delivery_manifest_path is not None or using_fallback_manifest
         )
+        if manifest_was_required and not manifest_path.exists():
+            raise ValueError(f"Delivery manifest does not exist: {manifest_path}")
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             for item in manifest.get("deliverables", []):
@@ -447,6 +469,15 @@ class ReleaseGraph:
                 for project_path in item.get("bundlesProjects", []):
                     dependency = project_to_node.get(_normalise_repo_path(project_path).casefold())
                     if not dependency:
+                        if using_fallback_manifest:
+                            # A trusted current manifest can outlive project
+                            # paths in the historical tree. Conservatively
+                            # connect that delivery surface to every historical
+                            # build node rather than failing or under-reporting.
+                            bundles.update(
+                                name for name in discovered if name != item["name"]
+                            )
+                            continue
                         raise ValueError(
                             f"Delivery surface {item['name']} references unknown project {project_path}"
                         )

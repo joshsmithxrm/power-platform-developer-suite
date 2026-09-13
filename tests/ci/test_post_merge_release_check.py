@@ -139,7 +139,10 @@ class TestOpensIssueOnPatchLabel:
         )
         assert "automation/scripts/ci/release_plan.py" in build_step["run"]
         assert "--repo-root analyzed" in build_step["run"]
-        assert "--delivery-manifest automation/scripts/ci/release_surfaces.json" in build_step["run"]
+        assert (
+            "--fallback-delivery-manifest "
+            "automation/scripts/ci/release_surfaces.json"
+        ) in build_step["run"]
 
     def test_release_plan_rejects_graph_revision_skew(self, monkeypatch):
         """Defense in depth: the CLI refuses a diff/graph revision mismatch."""

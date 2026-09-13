@@ -73,7 +73,7 @@ jobs:
         run: |
           python automation/scripts/ci/release_plan.py \
             --repo-root analyzed \
-            --delivery-manifest automation/scripts/ci/release_surfaces.json \
+            --fallback-delivery-manifest automation/scripts/ci/release_surfaces.json \
             --base "${MERGE_SHA}^" \
             --head "${MERGE_SHA}" \
             --release-kind patch \
@@ -81,7 +81,7 @@ jobs:
             --format json > release-plan.json
           python automation/scripts/ci/release_plan.py \
             --repo-root analyzed \
-            --delivery-manifest automation/scripts/ci/release_surfaces.json \
+            --fallback-delivery-manifest automation/scripts/ci/release_surfaces.json \
             --base "${MERGE_SHA}^" \
             --head "${MERGE_SHA}" \
             --release-kind patch \
