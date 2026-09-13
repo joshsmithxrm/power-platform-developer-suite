@@ -52,6 +52,11 @@
           "type": "string",
           "description": "Relative path to the NuGet package (for Nuget type only)."
         },
+        "packageContentSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "description": "SHA-256 of the NuGet package snapshot used to extract this configuration."
+        },
         "solution": {
           "type": "string",
           "description": "Solution unique name to add components to."

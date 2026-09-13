@@ -5,6 +5,7 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Plugins;
 
@@ -19,6 +20,9 @@ public sealed class AssemblyExtractor : IDisposable
     private const string DataverseSdkAssemblyName = "Microsoft.Xrm.Sdk";
     private static readonly ImmutableArray<byte> DataverseSdkPublicKeyToken =
         [0x31, 0xbf, 0x38, 0x56, 0xad, 0x36, 0x4e, 0x35];
+    private const string PpdsPluginsAssemblyName = "PPDS.Plugins";
+    private static readonly ImmutableArray<byte> PpdsPluginsPublicKeyToken =
+        [0x0b, 0x08, 0x09, 0xfa, 0xff, 0x13, 0x57, 0x78];
 
     /// <summary>
     /// Logical name of the embedded resource holding the zipped .NET Framework 4.6.2
@@ -316,6 +320,7 @@ public sealed class AssemblyExtractor : IDisposable
         var assembly = _metadataLoadContext.LoadFromAssemblyPath(_assemblyPath);
         var assemblyName = assembly.GetName();
         var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath, _resolverPaths);
+        var trustedRegistrationAttributes = ReadTrustedRegistrationAttributes(_assemblyPath);
 
         var config = new PluginAssemblyConfig
         {
@@ -348,8 +353,18 @@ public sealed class AssemblyExtractor : IDisposable
                 config.RuntimePluginTypeNames.Add(typeName);
             }
 
+            var customApiAttr = GetCustomApiAttribute(type, trustedRegistrationAttributes);
+            var stepAttributes = GetPluginStepAttributes(type, trustedRegistrationAttributes);
+            if ((customApiAttr != null || stepAttributes.Count > 0)
+                && !runtimePluginTypeNames.Contains(typeName))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Type '{typeName}' uses official PPDS PluginStep or CustomApi metadata but is not a " +
+                    "concrete runtime Microsoft.Xrm.Sdk.IPlugin implementation.");
+            }
+
             // Extract Custom API if annotated
-            var customApiAttr = GetCustomApiAttribute(type);
             if (customApiAttr != null)
             {
                 var parameterAttributes = GetCustomApiParameterAttributes(type);
@@ -358,7 +373,6 @@ public sealed class AssemblyExtractor : IDisposable
             }
 
             // Check if type has plugin step attributes
-            var stepAttributes = GetPluginStepAttributes(type);
             if (stepAttributes.Count == 0)
                 continue;
 
@@ -576,6 +590,166 @@ public sealed class AssemblyExtractor : IDisposable
 
         var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
         return publicKeyToken.AsSpan().SequenceEqual(DataverseSdkPublicKeyToken.AsSpan());
+    }
+
+    /// <summary>
+    /// Returns whether a raw metadata custom attribute is a supported PPDS registration
+    /// attribute referenced directly from the official strong-named PPDS.Plugins assembly.
+    /// Local lookalikes, wrong-token assemblies, and forwarding shims do not qualify.
+    /// </summary>
+    internal static bool IsOfficialPpdsRegistrationAttribute(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+
+        if (attributeType.Kind != HandleKind.TypeReference)
+            return false;
+
+        var typeReferenceHandle = (TypeReferenceHandle)attributeType;
+        var typeName = GetTypeReferenceFullName(reader, typeReferenceHandle);
+        if (typeName is not "PPDS.Plugins.PluginStepAttribute"
+            and not "PPDS.Plugins.CustomApiAttribute")
+        {
+            return false;
+        }
+
+        var typeReference = reader.GetTypeReference(typeReferenceHandle);
+        if (typeReference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+            return false;
+
+        var assemblyReference = reader.GetAssemblyReference(
+            (AssemblyReferenceHandle)typeReference.ResolutionScope);
+        if (!reader.StringComparer.Equals(assemblyReference.Name, PpdsPluginsAssemblyName)
+            || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0
+            || !string.IsNullOrEmpty(reader.GetString(assemblyReference.Culture)))
+        {
+            return false;
+        }
+
+        var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
+        return publicKeyToken.AsSpan().SequenceEqual(PpdsPluginsPublicKeyToken.AsSpan());
+    }
+
+    /// <summary>
+    /// Compares a metadata AssemblyRef with an assembly definition using the strong-binding
+    /// identity fields. Version is matched exactly because no runtime binding redirects are
+    /// available during static extraction.
+    /// </summary>
+    internal static bool AssemblyReferenceMatchesDefinition(
+        MetadataReader referenceReader,
+        AssemblyReferenceHandle referenceHandle,
+        MetadataReader definitionReader)
+    {
+        if (!definitionReader.IsAssembly)
+            return false;
+
+        var reference = referenceReader.GetAssemblyReference(referenceHandle);
+        var definition = definitionReader.GetAssemblyDefinition();
+        if (!string.Equals(
+                referenceReader.GetString(reference.Name),
+                definitionReader.GetString(definition.Name),
+                StringComparison.OrdinalIgnoreCase)
+            || reference.Version != definition.Version
+            || !string.Equals(
+                referenceReader.GetString(reference.Culture),
+                definitionReader.GetString(definition.Culture),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var referenceToken = GetPublicKeyToken(
+            referenceReader.GetBlobBytes(reference.PublicKeyOrToken),
+            (reference.Flags & AssemblyFlags.PublicKey) != 0);
+        var definitionToken = GetPublicKeyToken(
+            definitionReader.GetBlobBytes(definition.PublicKey),
+            hasFullPublicKey: true);
+        return referenceToken.AsSpan().SequenceEqual(definitionToken);
+    }
+
+    private static byte[] GetPublicKeyToken(byte[] keyOrToken, bool hasFullPublicKey)
+    {
+        if (!hasFullPublicKey || keyOrToken.Length == 0)
+            return keyOrToken;
+
+        var hash = SHA1.HashData(keyOrToken);
+        var token = new byte[8];
+        for (var index = 0; index < token.Length; index++)
+            token[index] = hash[hash.Length - 1 - index];
+        return token;
+    }
+
+    private static HashSet<RegistrationAttributeKey> ReadTrustedRegistrationAttributes(string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var peReader = new PEReader(stream);
+        if (!peReader.HasMetadata)
+            return [];
+
+        var reader = peReader.GetMetadataReader();
+        var trust = new Dictionary<RegistrationAttributeKey, RegistrationAttributeTrust>();
+        foreach (var typeHandle in reader.TypeDefinitions)
+        {
+            var typeName = GetTypeDefinitionFullName(reader, typeHandle);
+            var definition = reader.GetTypeDefinition(typeHandle);
+            foreach (var attributeHandle in definition.GetCustomAttributes())
+            {
+                var attributeName = GetPpdsRegistrationAttributeName(reader, attributeHandle);
+                if (attributeName == null)
+                    continue;
+
+                var key = new RegistrationAttributeKey(typeName, attributeName);
+                trust.TryGetValue(key, out var state);
+                if (IsOfficialPpdsRegistrationAttribute(reader, attributeHandle))
+                    state = state with { HasOfficial = true };
+                else
+                    state = state with { HasUntrusted = true };
+                trust[key] = state;
+            }
+        }
+
+        return trust
+            .Where(pair => pair.Value is { HasOfficial: true, HasUntrusted: false })
+            .Select(pair => pair.Key)
+            .ToHashSet();
+    }
+
+    private static string? GetPpdsRegistrationAttributeName(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+        var typeName = attributeType.Kind switch
+        {
+            HandleKind.TypeReference => GetTypeReferenceFullName(
+                reader,
+                (TypeReferenceHandle)attributeType),
+            HandleKind.TypeDefinition => GetTypeDefinitionFullName(
+                reader,
+                (TypeDefinitionHandle)attributeType),
+            _ => null
+        };
+
+        return typeName is "PPDS.Plugins.PluginStepAttribute" or "PPDS.Plugins.CustomApiAttribute"
+            ? typeName
+            : null;
     }
 
     private sealed class MetadataTypeResolver : IDisposable
@@ -870,8 +1044,7 @@ public sealed class AssemblyExtractor : IDisposable
             {
                 var assemblyReference = context.Reader.GetAssemblyReference(
                     (AssemblyReferenceHandle)reference.ResolutionScope);
-                var assemblyName = context.Reader.GetString(assemblyReference.Name);
-                if (!TryFindAssemblyPath(assemblyName, out var path))
+                if (!TryFindAssemblyPath(context.Reader, (AssemblyReferenceHandle)reference.ResolutionScope, out var path))
                 {
                     resolved = default;
                     return false;
@@ -904,12 +1077,16 @@ public sealed class AssemblyExtractor : IDisposable
             return false;
         }
 
-        private bool TryFindAssemblyPath(string assemblyName, out string path)
+        private bool TryFindAssemblyPath(
+            MetadataReader referenceReader,
+            AssemblyReferenceHandle referenceHandle,
+            out string path)
         {
+            var assemblyReference = referenceReader.GetAssemblyReference(referenceHandle);
+            var assemblyName = referenceReader.GetString(assemblyReference.Name);
             if (_pathsByAssemblyName.TryGetValue(assemblyName, out path!))
             {
-                var actualName = TryReadAssemblyName(path);
-                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase))
+                if (AssemblyReferenceMatchesPath(referenceReader, referenceHandle, path))
                     return true;
 
                 _pathsByAssemblyName.Remove(assemblyName);
@@ -920,11 +1097,12 @@ public sealed class AssemblyExtractor : IDisposable
             // inaccessible, or resource-only DLLs that are unrelated to the required type.
             foreach (var candidate in _resolverPaths)
             {
-                var actualName = TryReadAssemblyName(candidate);
+                var actualName = TryReadAssemblySimpleName(candidate);
                 if (!string.IsNullOrEmpty(actualName))
                     _pathsByAssemblyName.TryAdd(actualName, candidate);
 
-                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase)
+                    && AssemblyReferenceMatchesPath(referenceReader, referenceHandle, candidate))
                 {
                     path = candidate;
                     return true;
@@ -935,7 +1113,28 @@ public sealed class AssemblyExtractor : IDisposable
             return false;
         }
 
-        private static string? TryReadAssemblyName(string path)
+        private static bool AssemblyReferenceMatchesPath(
+            MetadataReader referenceReader,
+            AssemblyReferenceHandle referenceHandle,
+            string path)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var peReader = new PEReader(stream);
+                return peReader.HasMetadata
+                    && AssemblyReferenceMatchesDefinition(
+                        referenceReader,
+                        referenceHandle,
+                        peReader.GetMetadataReader());
+            }
+            catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        private static string? TryReadAssemblySimpleName(string path)
         {
             try
             {
@@ -994,6 +1193,10 @@ public sealed class AssemblyExtractor : IDisposable
         MetadataAssembly Assembly,
         EntityHandle Handle);
 
+    private readonly record struct RegistrationAttributeKey(string TypeName, string AttributeName);
+
+    private readonly record struct RegistrationAttributeTrust(bool HasOfficial, bool HasUntrusted);
+
     private sealed class UnresolvedMetadataTypeException(string message)
         : InvalidOperationException(message);
 
@@ -1019,10 +1222,19 @@ public sealed class AssemblyExtractor : IDisposable
         return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }
 
-    private List<CustomAttributeData> GetPluginStepAttributes(Type type)
+    private static List<CustomAttributeData> GetPluginStepAttributes(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
     {
+        var key = new RegistrationAttributeKey(
+            type.FullName ?? type.Name,
+            typeof(PluginStepAttribute).FullName!);
+        if (!trustedRegistrationAttributes.Contains(key))
+            return [];
+
         return type.CustomAttributes
-            .Where(a => a.AttributeType.FullName == typeof(PluginStepAttribute).FullName)
+            .Where(a => a.AttributeType.FullName == typeof(PluginStepAttribute).FullName
+                && HasOfficialPpdsPluginsIdentity(a.AttributeType.Assembly.GetName()))
             .ToList();
     }
 
@@ -1033,11 +1245,26 @@ public sealed class AssemblyExtractor : IDisposable
             .ToList();
     }
 
-    private CustomAttributeData? GetCustomApiAttribute(Type type)
+    private static CustomAttributeData? GetCustomApiAttribute(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
     {
+        var key = new RegistrationAttributeKey(
+            type.FullName ?? type.Name,
+            typeof(CustomApiAttribute).FullName!);
+        if (!trustedRegistrationAttributes.Contains(key))
+            return null;
+
         return type.CustomAttributes
-            .FirstOrDefault(a => a.AttributeType.FullName == typeof(CustomApiAttribute).FullName);
+            .FirstOrDefault(a => a.AttributeType.FullName == typeof(CustomApiAttribute).FullName
+                && HasOfficialPpdsPluginsIdentity(a.AttributeType.Assembly.GetName()));
     }
+
+    private static bool HasOfficialPpdsPluginsIdentity(AssemblyName assemblyName)
+        => string.Equals(assemblyName.Name, PpdsPluginsAssemblyName, StringComparison.Ordinal)
+            && string.IsNullOrEmpty(assemblyName.CultureName)
+            && assemblyName.GetPublicKeyToken() is { } token
+            && token.AsSpan().SequenceEqual(PpdsPluginsPublicKeyToken.AsSpan());
 
     private List<CustomAttributeData> GetCustomApiParameterAttributes(Type type)
     {

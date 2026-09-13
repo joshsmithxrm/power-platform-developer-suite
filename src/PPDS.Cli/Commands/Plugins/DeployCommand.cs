@@ -78,7 +78,7 @@ public static class DeployCommand
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
+    internal static async Task<int> ExecuteAsync(
         FileInfo configFile,
         string? profile,
         string? environment,
@@ -86,7 +86,9 @@ public static class DeployCommand
         bool clean,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
+        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -111,14 +113,28 @@ public static class DeployCommand
             // Validate configuration
             config!.Validate();
 
+            var configDir = configFile.DirectoryName ?? ".";
+
+            // Validate and buffer every configured artifact before authentication, environment
+            // resolution, or any Dataverse request. The retained package bytes are the exact
+            // bytes later inspected and uploaded, so one failing assembly aborts the entire
+            // configuration without partially applying a later assembly or Custom API.
+            var deploymentPreflights = await PreflightAssembliesAsync(
+                config.Assemblies,
+                configDir,
+                cancellationToken,
+                preflightPackageContentReader);
+
             // Connect to Dataverse
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = serviceProviderFactory == null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
@@ -136,13 +152,13 @@ public static class DeployCommand
                 }
             }
 
-            var configDir = configFile.DirectoryName ?? ".";
             var results = new List<DeploymentResult>();
 
             if (config.Assemblies != null)
             {
-                foreach (var assemblyConfig in config.Assemblies)
+                for (var index = 0; index < config.Assemblies.Count; index++)
                 {
+                    var assemblyConfig = config.Assemblies[index];
                     var result = await DeployAssemblyAsync(
                         registrationService,
                         assemblyConfig,
@@ -151,7 +167,8 @@ public static class DeployCommand
                         clean,
                         dryRun,
                         globalOptions,
-                        cancellationToken);
+                        cancellationToken,
+                        deploymentPreflight: deploymentPreflights[index]);
 
                     results.Add(result);
                 }
@@ -191,12 +208,99 @@ public static class DeployCommand
 
             return results.Any(r => !r.Success) ? ExitCodes.Failure : ExitCodes.Success;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Resolves and buffers every configured deployment artifact as one local, fail-closed phase.
+    /// </summary>
+    internal static async Task<IReadOnlyList<AssemblyDeploymentPreflight>> PreflightAssembliesAsync(
+        IReadOnlyList<PluginAssemblyConfig>? assemblies,
+        string configDir,
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null)
+    {
+        if (assemblies == null || assemblies.Count == 0)
+            return [];
+
+        var pathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var configuredPaths = new HashSet<string>(pathComparer);
+        var packagePathsById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var preflights = new List<AssemblyDeploymentPreflight>(assemblies.Count);
+
+        foreach (var assembly in assemblies)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var assemblyPath = ResolveAssemblyPath(assembly, configDir);
+            if (assemblyPath == null || !File.Exists(assemblyPath))
+            {
+                throw new FileNotFoundException(
+                    $"Assembly file not found: {assembly.Path ?? assembly.PackagePath}");
+            }
+
+            var canonicalPath = Path.GetFullPath(assemblyPath);
+            if (!configuredPaths.Add(canonicalPath))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Deployment artifact '{canonicalPath}' is configured more than once. " +
+                    "Each package or assembly path must appear exactly once. No changes were applied.");
+            }
+
+            var artifactBytes = packageContentReader == null
+                ? await File.ReadAllBytesAsync(canonicalPath, cancellationToken)
+                : await packageContentReader(canonicalPath, cancellationToken);
+
+            if (!string.Equals(assembly.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
+            {
+                preflights.Add(new AssemblyDeploymentPreflight(assembly, canonicalPath, artifactBytes));
+                continue;
+            }
+
+            var packageName = PluginPackageMetadataReader.Read(artifactBytes).Id;
+            var packageAssemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
+                artifactBytes,
+                canonicalPath,
+                assembly);
+
+            if (!string.Equals(assembly.Name, packageAssemblyName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Plugin.PackageAssemblyMismatch,
+                    $"Configured assembly '{assembly.Name}' does not match the package's primary assembly " +
+                    $"'{packageAssemblyName}' in '{Path.GetFileName(canonicalPath)}'. No package was uploaded. " +
+                    "Re-run 'ppds plugins extract' for this package or correct assemblies[].name before deploying.");
+            }
+
+            if (packagePathsById.TryGetValue(packageName, out var existingPath))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"NuGet package ID '{packageName}' is configured from both '{existingPath}' and " +
+                    $"'{canonicalPath}'. Each package ID must have one deployment source. No changes were applied.");
+            }
+
+            packagePathsById.Add(packageName, canonicalPath);
+            preflights.Add(new AssemblyDeploymentPreflight(
+                assembly,
+                canonicalPath,
+                artifactBytes,
+                packageName,
+                packageAssemblyName));
+        }
+
+        return preflights;
     }
 
     /// <summary>
@@ -215,7 +319,8 @@ public static class DeployCommand
         bool dryRun,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken,
-        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null)
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null,
+        AssemblyDeploymentPreflight? deploymentPreflight = null)
     {
         var result = new DeploymentResult
         {
@@ -230,44 +335,28 @@ public static class DeployCommand
             if (!globalOptions.IsJsonMode)
                 Console.Error.WriteLine($"Deploying assembly: {assemblyConfig.Name}");
 
-            // Resolve assembly path
-            var assemblyPath = ResolveAssemblyPath(assemblyConfig, configDir);
-            if (assemblyPath == null || !File.Exists(assemblyPath))
+            deploymentPreflight ??= (await PreflightAssembliesAsync(
+                [assemblyConfig],
+                configDir,
+                cancellationToken,
+                packageContentReader))[0];
+            if (!ReferenceEquals(deploymentPreflight.Assembly, assemblyConfig))
             {
-                throw new FileNotFoundException($"Assembly file not found: {assemblyConfig.Path ?? assemblyConfig.PackagePath}");
+                throw new ArgumentException(
+                    "The deployment preflight does not belong to the supplied assembly configuration.",
+                    nameof(deploymentPreflight));
             }
+
+            var assemblyPath = deploymentPreflight.AssemblyPath;
 
             // Deploy assembly or package based on type
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
             {
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
-                var packageBytes = packageContentReader == null
-                    ? await File.ReadAllBytesAsync(assemblyPath, cancellationToken)
-                    : await packageContentReader(assemblyPath, cancellationToken);
-                var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
-                // Read manifest/type identity directly from the package rather than re-running
-                // dependency-loading extraction. Configurations authored with --reference-dir
-                // therefore remain deployable without persisting machine-specific resolver paths.
-                var packageAssemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
-                    packageBytes,
-                    assemblyPath,
-                    assemblyConfig);
-
-                // Validate the config against the package manifest before both dry-run and real
-                // deployment. The old path trusted assemblyConfig.Name until after UpsertPackageAsync,
-                // so a stale or incorrectly extracted name could leave a partially deployed package.
-                if (!string.Equals(
-                        assemblyConfig.Name,
-                        packageAssemblyName,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new PpdsException(
-                        ErrorCodes.Plugin.PackageAssemblyMismatch,
-                        $"Configured assembly '{assemblyConfig.Name}' does not match the package's primary assembly " +
-                        $"'{packageAssemblyName}' in '{Path.GetFileName(assemblyPath)}'. No package was uploaded. " +
-                        "Re-run 'ppds plugins extract' for this package or correct assemblies[].name before deploying.");
-                }
+                var packageBytes = deploymentPreflight.ArtifactBytes;
+                var packageName = deploymentPreflight.PackageName!;
+                var packageAssemblyName = deploymentPreflight.PackageAssemblyName!;
 
                 Guid packageId;
                 if (dryRun)
@@ -293,10 +382,12 @@ public static class DeployCommand
                 if (pkgAssemblyId == null && !dryRun)
                 {
                     var recoveryGuidance =
-                        $"Inspect the uploaded package with 'ppds plugins get package {packageName}'. " +
+                        $"The uploaded package ID is {packageId}. Inspect it with " +
+                        $"'ppds plugins get package {packageName}'. " +
+                        $"Use 'ppds plugins list --package {packageName}' to inspect materialized assemblies. " +
                         "If Dataverse has materialized the assembly, re-run deploy. If the package is incomplete " +
-                        $"and safe to remove, preview 'ppds plugins unregister package {packageId}' and only then " +
-                        "repeat it with --force. PPDS did not attempt automatic cleanup.";
+                        "and cleanup is appropriate, 'ppds plugins unregister package' is destructive and must " +
+                        "be run separately with normal environment confirmation. PPDS did not attempt automatic cleanup.";
                     throw new PpdsException(
                         ErrorCodes.Plugin.PackageAssemblyUnavailableAfterUpload,
                         $"Package '{packageName}' ({packageId}) was uploaded, but Dataverse did not return its " +
@@ -315,7 +406,7 @@ public static class DeployCommand
             else
             {
                 // For classic assemblies, upload the DLL directly
-                var assemblyBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+                var assemblyBytes = deploymentPreflight.ArtifactBytes;
 
                 if (dryRun)
                 {
@@ -590,6 +681,10 @@ public static class DeployCommand
                 result.Error = string.Join("; ", stepErrors);
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             result.Success = false;
@@ -726,6 +821,13 @@ public static class DeployCommand
     }
 
     #region Result Models
+
+    internal sealed record AssemblyDeploymentPreflight(
+        PluginAssemblyConfig Assembly,
+        string AssemblyPath,
+        byte[] ArtifactBytes,
+        string? PackageName = null,
+        string? PackageAssemblyName = null);
 
     internal sealed class DeploymentResult
     {

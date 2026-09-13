@@ -168,6 +168,15 @@ public sealed class PluginAssemblyConfig
     public string? PackagePath { get; set; }
 
     /// <summary>
+    /// SHA-256 of the immutable NuGet package snapshot used during extraction. This lets deploy
+    /// preserve --reference-dir portability while detecting changed content whose primary
+    /// plug-in identity cannot be proven from package-local metadata alone.
+    /// </summary>
+    [JsonPropertyName("packageContentSha256")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PackageContentSha256 { get; set; }
+
+    /// <summary>
     /// Solution unique name to add components to.
     /// Required for Nuget type, optional for Assembly type.
     /// </summary>

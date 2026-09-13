@@ -1,7 +1,9 @@
+using System.Collections.Immutable;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Services.Plugins;
@@ -36,21 +38,32 @@ public static class NupkgExtractor
     internal static PluginPackageInspection Inspect(
         string nupkgPath,
         IReadOnlyList<string>? referenceDirs = null)
+        => Inspect(File.ReadAllBytes(nupkgPath), nupkgPath, referenceDirs);
+
+    /// <summary>
+    /// Inspects one immutable package snapshot. The path is used only for diagnostics and for the
+    /// relative packagePath written to configuration.
+    /// </summary>
+    internal static PluginPackageInspection Inspect(
+        byte[] nupkgContent,
+        string nupkgPath,
+        IReadOnlyList<string>? referenceDirs = null)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"ppds-extract-{Guid.NewGuid():N}");
 
         try
         {
-            var packageMetadata = PluginPackageMetadataReader.Read(File.ReadAllBytes(nupkgPath));
+            var packageMetadata = PluginPackageMetadataReader.Read(nupkgContent);
             Directory.CreateDirectory(tempDir);
 
             // Validate every destination before extraction so containment does not depend on
             // the runtime's ZipFile implementation rejecting traversal entries first.
-            AssertExtractedEntriesContained(nupkgPath, tempDir);
+            AssertExtractedEntriesContained(nupkgContent, nupkgPath, tempDir);
 
             // Extract the nupkg (it's a zip file). Use the 3-arg overload with
             // overwriteFiles: false as a second layer of zip-slip protection.
-            ZipFile.ExtractToDirectory(nupkgPath, tempDir, overwriteFiles: false);
+            using (var packageStream = new MemoryStream(nupkgContent, writable: false))
+                ZipFile.ExtractToDirectory(packageStream, tempDir, overwriteFiles: false);
 
             // Find plugin DLLs in the lib folder
             // Plugin packages target a supported .NET Framework version.
@@ -110,6 +123,13 @@ public static class NupkgExtractor
             var annotatedTypeCount = inspectedAssemblies.Sum(item => item.Config.Types.Count);
             var runtimePluginTypeCount = inspectedAssemblies.Sum(item => item.Config.RuntimePluginTypeNames.Count);
 
+            var validationFailure = failures
+                .Select(failure => failure.Error)
+                .OfType<PpdsException>()
+                .FirstOrDefault(error => error.ErrorCode == ErrorCodes.Validation.InvalidValue);
+            if (validationFailure != null)
+                throw validationFailure;
+
             if (candidates.Count == 0 && failures.Count > 0)
             {
                 var first = failures[0];
@@ -168,6 +188,7 @@ public static class NupkgExtractor
                 Name = primary.Name,
                 Type = "Nuget",
                 PackagePath = Path.GetFileName(nupkgPath),
+                PackageContentSha256 = Convert.ToHexString(SHA256.HashData(nupkgContent)).ToLowerInvariant(),
                 AllTypeNames = primary.AllTypeNames.Distinct(StringComparer.Ordinal).ToList(),
                 RuntimePluginTypeNames = primary.RuntimePluginTypeNames,
                 Types = primary.Types,
@@ -210,7 +231,7 @@ public static class NupkgExtractor
     {
         var packageMetadata = PluginPackageMetadataReader.Read(nupkgContent);
         var frameworkPrefix = $"lib/{packageMetadata.TargetFramework}/";
-        var assemblies = new List<ManifestAssembly>();
+        var assemblyImages = new List<BufferedAssemblyImage>();
 
         using (var packageStream = new MemoryStream(nupkgContent, writable: false))
         using (var archive = new ZipArchive(packageStream, ZipArchiveMode.Read))
@@ -243,15 +264,7 @@ public static class NupkgExtractor
                     if (!reader.IsAssembly)
                         continue;
 
-                    var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
-                    var typeNames = reader.TypeDefinitions
-                        .Select(handle => GetTypeDefinitionFullName(reader, handle))
-                        .ToHashSet(StringComparer.Ordinal);
-                    assemblies.Add(new ManifestAssembly(
-                        relativeName,
-                        assemblyName,
-                        typeNames,
-                        HasPortablePluginEvidence(reader)));
+                    assemblyImages.Add(new BufferedAssemblyImage(relativeName, image.ToArray()));
                 }
                 catch (BadImageFormatException)
                 {
@@ -259,6 +272,23 @@ public static class NupkgExtractor
                 }
             }
         }
+
+        using var metadataResolver = new BufferedPackageMetadataResolver(assemblyImages);
+        var assemblies = metadataResolver.Assemblies
+            .Select(assembly =>
+            {
+                var evidence = metadataResolver.GetPortablePluginEvidence(assembly);
+                return new ManifestAssembly(
+                    assembly.FileName,
+                    assembly.Name,
+                    assembly.Reader.TypeDefinitions
+                        .Select(handle => GetTypeDefinitionFullName(assembly.Reader, handle))
+                        .ToHashSet(StringComparer.Ordinal),
+                    evidence.HasPlausiblePrimary,
+                    evidence.HasOfficialRegistrationWithoutRuntimePlugin,
+                    evidence.HasInvalidMetadata);
+            })
+            .ToList();
 
         if (assemblies.Count == 0)
         {
@@ -288,13 +318,27 @@ public static class NupkgExtractor
         }
 
         if (typeOwners.Count == 1)
-            return EnsureNoAdditionalPortableCandidates(nupkgPath, assemblies, typeOwners[0]);
+        {
+            return EnsureNoAdditionalPortableCandidates(
+                nupkgContent,
+                nupkgPath,
+                config,
+                assemblies,
+                typeOwners[0]);
+        }
 
         var identityMatches = assemblies
             .Where(assembly => string.Equals(assembly.Name, config.Name, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (identityMatches.Count == 1)
-            return EnsureNoAdditionalPortableCandidates(nupkgPath, assemblies, identityMatches[0]);
+        {
+            return EnsureNoAdditionalPortableCandidates(
+                nupkgContent,
+                nupkgPath,
+                config,
+                assemblies,
+                identityMatches[0]);
+        }
 
         if (identityMatches.Count > 1)
         {
@@ -318,23 +362,66 @@ public static class NupkgExtractor
     }
 
     private static string EnsureNoAdditionalPortableCandidates(
+        byte[] nupkgContent,
         string nupkgPath,
+        PluginAssemblyConfig config,
         IReadOnlyList<ManifestAssembly> assemblies,
         ManifestAssembly configuredPrimary)
     {
         var additionalCandidates = assemblies
             .Where(assembly => !ReferenceEquals(assembly, configuredPrimary)
-                && assembly.HasPortablePluginEvidence)
+                && (assembly.HasPortablePluginEvidence
+                    || assembly.HasOfficialRegistrationWithoutRuntimePlugin
+                    || assembly.HasInvalidMetadata))
             .ToList();
-        if (additionalCandidates.Count == 0)
+        if (additionalCandidates.Count > 0)
+        {
+            var candidates = new[] { configuredPrimary }.Concat(additionalCandidates);
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyAmbiguous,
+                $"NuGet package '{Path.GetFileName(nupkgPath)}' contains multiple plausible primary plugin " +
+                $"assemblies in the buffered package snapshot: {FormatAssemblyNames(candidates)}. " +
+                "Re-run 'ppds plugins extract' for the rebuilt package before deploying. No package was uploaded.");
+        }
+
+        if (configuredPrimary.HasInvalidMetadata)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Configured primary assembly '{configuredPrimary.Name}' in '{Path.GetFileName(nupkgPath)}' " +
+                "contains cyclic, malformed, or ambiguously resolved package-local type metadata. " +
+                "Correct the package and re-run extraction before deploying. No package was uploaded.");
+        }
+
+        if (configuredPrimary.HasPortablePluginEvidence)
             return configuredPrimary.Name;
 
-        var candidates = new[] { configuredPrimary }.Concat(additionalCandidates);
+        var contentHash = Convert.ToHexString(SHA256.HashData(nupkgContent)).ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(config.PackageContentSha256)
+            && string.Equals(config.PackageContentSha256, contentHash, StringComparison.OrdinalIgnoreCase))
+        {
+            // Extraction may have proven runtime IPlugin inheritance through --reference-dir.
+            // An unchanged content digest preserves that proof without persisting or reloading
+            // the machine-specific dependency path.
+            return configuredPrimary.Name;
+        }
+
+        if (configuredPrimary.HasOfficialRegistrationWithoutRuntimePlugin)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Configured primary assembly '{configuredPrimary.Name}' in '{Path.GetFileName(nupkgPath)}' " +
+                "contains official PPDS PluginStep or CustomApi metadata on a concrete type that cannot be " +
+                "proven to implement Microsoft.Xrm.Sdk.IPlugin. Re-run extraction after correcting the handler. " +
+                "No package was uploaded.");
+        }
+
         throw new PpdsException(
-            ErrorCodes.Plugin.PackageAssemblyAmbiguous,
-            $"NuGet package '{Path.GetFileName(nupkgPath)}' contains multiple plausible primary plugin " +
-            $"assemblies in the buffered package snapshot: {FormatAssemblyNames(candidates)}. " +
-            "Re-run 'ppds plugins extract' for the rebuilt package before deploying. No package was uploaded.");
+            ErrorCodes.Plugin.PackageAssemblyMismatch,
+            $"Configured primary assembly '{configuredPrimary.Name}' in '{Path.GetFileName(nupkgPath)}' no " +
+            "longer exposes package-local runtime IPlugin evidence, and its content does not match the " +
+            "snapshot used for extraction. Re-run 'ppds plugins extract' with any required --reference-dir " +
+            "before deploying. No package was uploaded.");
     }
 
     private static string FormatAssemblyNames(IEnumerable<ManifestAssembly> assemblies)
@@ -355,71 +442,297 @@ public static class NupkgExtractor
         return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }
 
-    private static bool HasPortablePluginEvidence(MetadataReader reader)
+    /// <summary>
+    /// Resolves inheritance only across the assemblies already present in the buffered package.
+    /// References outside the package are deliberately left unresolved so deploy remains portable
+    /// for configurations authored with --reference-dir; malformed or ambiguous package-local
+    /// references fail closed and make the assembly a plausible candidate.
+    /// </summary>
+    private sealed class BufferedPackageMetadataResolver : IDisposable
     {
-        var implementsPlugin = new Dictionary<TypeDefinitionHandle, bool>();
+        private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
+        private readonly Dictionary<string, List<BufferedMetadataAssembly>> _assembliesByName =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ResolvedPackageType, bool> _implementsPlugin = [];
 
-        bool ImplementsPlugin(TypeDefinitionHandle handle, HashSet<TypeDefinitionHandle> visiting)
+        internal BufferedPackageMetadataResolver(IEnumerable<BufferedAssemblyImage> images)
         {
-            if (implementsPlugin.TryGetValue(handle, out var cached))
+            foreach (var image in images)
+            {
+                var assembly = new BufferedMetadataAssembly(image);
+                Assemblies.Add(assembly);
+                if (!_assembliesByName.TryGetValue(assembly.Name, out var matches))
+                {
+                    matches = [];
+                    _assembliesByName.Add(assembly.Name, matches);
+                }
+
+                matches.Add(assembly);
+            }
+        }
+
+        internal List<BufferedMetadataAssembly> Assemblies { get; } = [];
+
+        internal PortablePluginEvidence GetPortablePluginEvidence(BufferedMetadataAssembly assembly)
+        {
+            try
+            {
+                var hasPlausiblePrimary = false;
+                var hasOfficialRegistrationWithoutRuntimePlugin = false;
+                foreach (var handle in assembly.Reader.TypeDefinitions)
+                {
+                    var definition = assembly.Reader.GetTypeDefinition(handle);
+                    var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
+                    var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+                    var isOpenGeneric = definition.GetGenericParameters().Count > 0;
+                    if (!IsExported(assembly.Reader, handle) || isAbstract || isInterface || isOpenGeneric)
+                        continue;
+
+                    var implementsPlugin = ImplementsPlugin(new ResolvedPackageType(assembly, handle), []);
+                    var hasOfficialRegistration = definition.GetCustomAttributes().Any(attribute =>
+                        AssemblyExtractor.IsOfficialPpdsRegistrationAttribute(assembly.Reader, attribute));
+                    hasPlausiblePrimary |= implementsPlugin;
+                    hasOfficialRegistrationWithoutRuntimePlugin |= hasOfficialRegistration && !implementsPlugin;
+                }
+
+                return new PortablePluginEvidence(
+                    hasPlausiblePrimary,
+                    hasOfficialRegistrationWithoutRuntimePlugin,
+                    HasInvalidMetadata: false);
+            }
+            catch (BadImageFormatException)
+            {
+                // A managed package assembly with malformed or ambiguous package-local type
+                // metadata cannot be proven safe as a dependency. Treat it as a candidate so
+                // the caller rejects the package before any Dataverse request.
+                return new PortablePluginEvidence(
+                    HasPlausiblePrimary: false,
+                    HasOfficialRegistrationWithoutRuntimePlugin: false,
+                    HasInvalidMetadata: true);
+            }
+        }
+
+        private bool ImplementsPlugin(
+            ResolvedPackageType type,
+            HashSet<ResolvedPackageType> visiting)
+        {
+            if (_implementsPlugin.TryGetValue(type, out var cached))
                 return cached;
-            if (!visiting.Add(handle))
-                return false;
+            if (!visiting.Add(type))
+                throw new BadImageFormatException("Cyclic package-local type inheritance metadata was detected.");
 
             try
             {
-                var definition = reader.GetTypeDefinition(handle);
+                var definition = type.Assembly.Reader.GetTypeDefinition(type.Handle);
                 foreach (var implementationHandle in definition.GetInterfaceImplementations())
                 {
-                    var implementation = reader.GetInterfaceImplementation(implementationHandle);
-                    if (AssemblyExtractor.IsDataversePluginInterfaceReference(reader, implementation.Interface))
+                    var implementation = type.Assembly.Reader.GetInterfaceImplementation(implementationHandle);
+                    if (AssemblyExtractor.IsDataversePluginInterfaceReference(
+                            type.Assembly.Reader,
+                            implementation.Interface))
                     {
-                        implementsPlugin[handle] = true;
+                        _implementsPlugin[type] = true;
                         return true;
                     }
 
-                    if (implementation.Interface.Kind == HandleKind.TypeDefinition
-                        && ImplementsPlugin((TypeDefinitionHandle)implementation.Interface, visiting))
+                    if (TryResolve(type.Assembly, implementation.Interface, [], out var interfaceType)
+                        && ImplementsPlugin(interfaceType, visiting))
                     {
-                        implementsPlugin[handle] = true;
+                        _implementsPlugin[type] = true;
                         return true;
                     }
                 }
 
-                if (definition.BaseType.Kind == HandleKind.TypeDefinition
-                    && ImplementsPlugin((TypeDefinitionHandle)definition.BaseType, visiting))
+                if (!definition.BaseType.IsNil
+                    && TryResolve(type.Assembly, definition.BaseType, [], out var baseType)
+                    && ImplementsPlugin(baseType, visiting))
                 {
-                    implementsPlugin[handle] = true;
+                    _implementsPlugin[type] = true;
                     return true;
                 }
 
-                implementsPlugin[handle] = false;
+                _implementsPlugin[type] = false;
                 return false;
             }
             finally
             {
-                visiting.Remove(handle);
+                visiting.Remove(type);
             }
         }
 
-        foreach (var handle in reader.TypeDefinitions)
+        private bool TryResolve(
+            BufferedMetadataAssembly context,
+            EntityHandle handle,
+            HashSet<PackageEntityHandle> visiting,
+            out ResolvedPackageType resolved)
         {
-            var definition = reader.GetTypeDefinition(handle);
-            var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
-            var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
-            var isOpenGeneric = definition.GetGenericParameters().Count > 0;
-            if (!IsExported(reader, handle) || isAbstract || isInterface || isOpenGeneric)
-                continue;
+            var key = new PackageEntityHandle(context, handle);
+            if (!visiting.Add(key))
+                throw new BadImageFormatException("Cyclic package-local type reference metadata was detected.");
 
-            if (ImplementsPlugin(handle, [])
-                || definition.GetCustomAttributes().Any(attribute => IsRegistrationAttribute(reader, attribute)))
+            try
             {
-                return true;
+                switch (handle.Kind)
+                {
+                    case HandleKind.TypeDefinition:
+                        resolved = new ResolvedPackageType(context, (TypeDefinitionHandle)handle);
+                        return true;
+                    case HandleKind.TypeReference:
+                        return TryResolveTypeReference(
+                            context,
+                            (TypeReferenceHandle)handle,
+                            visiting,
+                            out resolved);
+                    case HandleKind.TypeSpecification:
+                        var namedType = context.Reader.GetTypeSpecification((TypeSpecificationHandle)handle)
+                            .DecodeSignature(TypeSpecificationDecoder, genericContext: null);
+                        if (namedType.IsNil)
+                            throw new BadImageFormatException("Package type specification has no named type.");
+                        return TryResolve(context, namedType, visiting, out resolved);
+                    default:
+                        resolved = default;
+                        return false;
+                }
+            }
+            finally
+            {
+                visiting.Remove(key);
             }
         }
 
-        return false;
+        private bool TryResolveTypeReference(
+            BufferedMetadataAssembly context,
+            TypeReferenceHandle handle,
+            HashSet<PackageEntityHandle> visiting,
+            out ResolvedPackageType resolved)
+        {
+            var reference = context.Reader.GetTypeReference(handle);
+            if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            {
+                if (!TryResolve(context, reference.ResolutionScope, visiting, out var declaringType))
+                {
+                    resolved = default;
+                    return false;
+                }
+
+                foreach (var nestedHandle in declaringType.Assembly.Reader
+                    .GetTypeDefinition(declaringType.Handle)
+                    .GetNestedTypes())
+                {
+                    var nested = declaringType.Assembly.Reader.GetTypeDefinition(nestedHandle);
+                    if (StringComparer.Ordinal.Equals(
+                            declaringType.Assembly.Reader.GetString(nested.Name),
+                            context.Reader.GetString(reference.Name)))
+                    {
+                        resolved = new ResolvedPackageType(declaringType.Assembly, nestedHandle);
+                        return true;
+                    }
+                }
+
+                throw new BadImageFormatException("A package-local nested type reference could not be resolved.");
+            }
+
+            BufferedMetadataAssembly target;
+            if (reference.ResolutionScope.Kind is HandleKind.ModuleDefinition or HandleKind.ModuleReference)
+            {
+                target = context;
+            }
+            else if (reference.ResolutionScope.Kind == HandleKind.AssemblyReference)
+            {
+                var assemblyReference = context.Reader.GetAssemblyReference(
+                    (AssemblyReferenceHandle)reference.ResolutionScope);
+                var assemblyName = context.Reader.GetString(assemblyReference.Name);
+                if (!_assembliesByName.TryGetValue(assemblyName, out var matches))
+                {
+                    // The dependency is outside the package (for example a --reference-dir
+                    // base class). Portable preflight deliberately does not reload it.
+                    resolved = default;
+                    return false;
+                }
+
+                var identityMatches = matches
+                    .Where(match => AssemblyExtractor.AssemblyReferenceMatchesDefinition(
+                        context.Reader,
+                        (AssemblyReferenceHandle)reference.ResolutionScope,
+                        match.Reader))
+                    .ToList();
+                if (identityMatches.Count != 1)
+                {
+                    throw new BadImageFormatException(
+                        $"Package-local assembly reference '{assemblyName}' has no single full-identity match.");
+                }
+
+                target = identityMatches[0];
+            }
+            else
+            {
+                resolved = default;
+                return false;
+            }
+
+            foreach (var typeHandle in target.Reader.TypeDefinitions)
+            {
+                var definition = target.Reader.GetTypeDefinition(typeHandle);
+                if (StringComparer.Ordinal.Equals(
+                        target.Reader.GetString(definition.Name),
+                        context.Reader.GetString(reference.Name))
+                    && StringComparer.Ordinal.Equals(
+                        target.Reader.GetString(definition.Namespace),
+                        context.Reader.GetString(reference.Namespace)))
+                {
+                    resolved = new ResolvedPackageType(target, typeHandle);
+                    return true;
+                }
+            }
+
+            throw new BadImageFormatException(
+                $"Package-local type reference '{GetTypeReferenceFullName(context.Reader, handle)}' could not be resolved.");
+        }
+
+        public void Dispose()
+        {
+            foreach (var assembly in Assemblies)
+                assembly.Dispose();
+        }
+
+        private sealed class TypeSpecificationProvider : ISignatureTypeProvider<EntityHandle, object?>
+        {
+            public EntityHandle GetArrayType(EntityHandle elementType, ArrayShape shape) => default;
+            public EntityHandle GetByReferenceType(EntityHandle elementType) => default;
+            public EntityHandle GetFunctionPointerType(MethodSignature<EntityHandle> signature) => default;
+            public EntityHandle GetGenericInstantiation(
+                EntityHandle genericType,
+                ImmutableArray<EntityHandle> typeArguments) => genericType;
+            public EntityHandle GetGenericMethodParameter(object? genericContext, int index) => default;
+            public EntityHandle GetGenericTypeParameter(object? genericContext, int index) => default;
+            public EntityHandle GetModifiedType(
+                EntityHandle modifier,
+                EntityHandle unmodifiedType,
+                bool isRequired) => unmodifiedType;
+            public EntityHandle GetPinnedType(EntityHandle elementType) => default;
+            public EntityHandle GetPointerType(EntityHandle elementType) => default;
+            public EntityHandle GetPrimitiveType(PrimitiveTypeCode typeCode) => default;
+            public EntityHandle GetSZArrayType(EntityHandle elementType) => default;
+            public EntityHandle GetTypeFromDefinition(
+                MetadataReader reader,
+                TypeDefinitionHandle handle,
+                byte rawTypeKind) => handle;
+            public EntityHandle GetTypeFromReference(
+                MetadataReader reader,
+                TypeReferenceHandle handle,
+                byte rawTypeKind) => handle;
+            public EntityHandle GetTypeFromSpecification(
+                MetadataReader reader,
+                object? genericContext,
+                TypeSpecificationHandle handle,
+                byte rawTypeKind) => handle;
+        }
     }
+
+    private static bool IsPlausiblePluginAssembly(PluginAssemblyConfig config)
+        => config.RuntimePluginTypeNames.Count > 0
+            || config.Types.Count > 0
+            || config.CustomApis is { Count: > 0 };
 
     private static bool IsExported(MetadataReader reader, TypeDefinitionHandle handle)
     {
@@ -430,34 +743,6 @@ public static class NupkgExtractor
 
         return visibility == TypeAttributes.NestedPublic
             && IsExported(reader, definition.GetDeclaringType());
-    }
-
-    private static bool IsRegistrationAttribute(
-        MetadataReader reader,
-        CustomAttributeHandle handle)
-    {
-        var attribute = reader.GetCustomAttribute(handle);
-        EntityHandle attributeType = attribute.Constructor.Kind switch
-        {
-            HandleKind.MemberReference => reader.GetMemberReference(
-                (MemberReferenceHandle)attribute.Constructor).Parent,
-            HandleKind.MethodDefinition => reader.GetMethodDefinition(
-                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
-            _ => default
-        };
-
-        var typeName = attributeType.Kind switch
-        {
-            HandleKind.TypeReference => GetTypeReferenceFullName(
-                reader,
-                (TypeReferenceHandle)attributeType),
-            HandleKind.TypeDefinition => GetTypeDefinitionFullName(
-                reader,
-                (TypeDefinitionHandle)attributeType),
-            _ => null
-        };
-
-        return typeName is "PPDS.Plugins.PluginStepAttribute" or "PPDS.Plugins.CustomApiAttribute";
     }
 
     private static string GetTypeReferenceFullName(MetadataReader reader, TypeReferenceHandle handle)
@@ -471,26 +756,74 @@ public static class NupkgExtractor
         return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
     }
 
-    private static bool IsPlausiblePluginAssembly(PluginAssemblyConfig config)
-        => config.RuntimePluginTypeNames.Count > 0
-            || config.Types.Count > 0
-            || config.CustomApis is { Count: > 0 };
-
     private sealed record InspectedAssembly(string FileName, PluginAssemblyConfig Config);
+
+    private sealed record BufferedAssemblyImage(string FileName, byte[] Content);
+
+    private sealed class BufferedMetadataAssembly : IDisposable
+    {
+        private readonly MemoryStream _stream;
+        private readonly PEReader _peReader;
+
+        internal BufferedMetadataAssembly(BufferedAssemblyImage image)
+        {
+            FileName = image.FileName;
+            _stream = new MemoryStream(image.Content, writable: false);
+            _peReader = new PEReader(_stream);
+            if (!_peReader.HasMetadata)
+                throw new BadImageFormatException($"Assembly '{image.FileName}' has no managed metadata.");
+
+            Reader = _peReader.GetMetadataReader();
+            if (!Reader.IsAssembly)
+                throw new BadImageFormatException($"File '{image.FileName}' is not an assembly manifest.");
+
+            Name = Reader.GetString(Reader.GetAssemblyDefinition().Name);
+        }
+
+        internal string FileName { get; }
+
+        internal string Name { get; }
+
+        internal MetadataReader Reader { get; }
+
+        public void Dispose()
+        {
+            _peReader.Dispose();
+            _stream.Dispose();
+        }
+    }
+
+    private readonly record struct ResolvedPackageType(
+        BufferedMetadataAssembly Assembly,
+        TypeDefinitionHandle Handle);
+
+    private readonly record struct PackageEntityHandle(
+        BufferedMetadataAssembly Assembly,
+        EntityHandle Handle);
+
+    private readonly record struct PortablePluginEvidence(
+        bool HasPlausiblePrimary,
+        bool HasOfficialRegistrationWithoutRuntimePlugin,
+        bool HasInvalidMetadata);
 
     private sealed record ManifestAssembly(
         string FileName,
         string Name,
         HashSet<string> TypeNames,
-        bool HasPortablePluginEvidence);
+        bool HasPortablePluginEvidence,
+        bool HasOfficialRegistrationWithoutRuntimePlugin,
+        bool HasInvalidMetadata);
 
     /// <summary>
-    /// Verifies that every entry in <paramref name="archivePath"/> extracts to a location under
+    /// Verifies that every entry in <paramref name="archiveContent"/> extracts to a location under
     /// <paramref name="destinationDir"/>. Guards against zip-slip entries that escape the temp
     /// directory via ".." or absolute path segments, even if the platform's default mitigation
     /// regresses.
     /// </summary>
-    private static void AssertExtractedEntriesContained(string archivePath, string destinationDir)
+    private static void AssertExtractedEntriesContained(
+        byte[] archiveContent,
+        string archivePath,
+        string destinationDir)
     {
         var canonicalDest = Path.GetFullPath(destinationDir);
         if (!canonicalDest.EndsWith(Path.DirectorySeparatorChar))
@@ -508,7 +841,8 @@ public static class NupkgExtractor
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-        using var archive = ZipFile.OpenRead(archivePath);
+        using var archiveStream = new MemoryStream(archiveContent, writable: false);
+        using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
         foreach (var entry in archive.Entries)
         {
             // Directory entries have an empty Name and end with a separator. Still validate them

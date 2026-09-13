@@ -1,4 +1,10 @@
+using System.Collections.Immutable;
 using System.IO.Compression;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -13,7 +19,9 @@ internal sealed record TestPackageAssembly(
     bool ReferencesSdk = false,
     bool ReferencesPpdsPlugins = false,
     bool IncludeInPackage = true,
-    IReadOnlyList<string>? AssemblyReferences = null);
+    IReadOnlyList<string>? AssemblyReferences = null,
+    byte[]? StrongNamePublicKey = null,
+    byte[]? PrecompiledImage = null);
 
 internal static class PluginPackageTestFixture
 {
@@ -40,7 +48,10 @@ internal static class PluginPackageTestFixture
         foreach (var assembly in assemblies)
         {
             var image = Compile(assembly, compiledAssemblies);
-            compiledAssemblies.Add(assembly.AssemblyName, image);
+            // Replacing an earlier reference image lets adversarial tests compile against one
+            // strong-name identity and then package a same-simple-name assembly with a different
+            // identity. Normal fixtures still use unique names.
+            compiledAssemblies[assembly.AssemblyName] = image;
 
             if (assembly.IncludeInPackage)
             {
@@ -69,6 +80,9 @@ internal static class PluginPackageTestFixture
         TestPackageAssembly source,
         IReadOnlyDictionary<string, byte[]> compiledAssemblies)
     {
+        if (source.PrecompiledImage != null)
+            return source.PrecompiledImage;
+
         var referenceDirectory = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory();
         if (referenceDirectory == null)
             throw new InvalidOperationException("The embedded net462 reference assemblies are unavailable.");
@@ -101,11 +115,19 @@ internal static class PluginPackageTestFixture
             }
         }
 
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
+        if (source.StrongNamePublicKey is { Length: > 0 })
+        {
+            options = options
+                .WithCryptoPublicKey(ImmutableArray.Create(source.StrongNamePublicKey))
+                .WithPublicSign(true);
+        }
+
         var compilation = CSharpCompilation.Create(
             source.AssemblyName,
             [CSharpSyntaxTree.ParseText(source.Source)],
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            options);
 
         using var output = new MemoryStream();
         var result = compilation.Emit(output);
@@ -116,5 +138,82 @@ internal static class PluginPackageTestFixture
         }
 
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// Emits the minimal metadata shape C# cannot preserve: a concrete class whose only
+    /// InterfaceImpl is an externally declared derived interface. Roslyn flattens IPlugin onto
+    /// the class, which would bypass the external AssemblyRef identity branch this fixture is
+    /// intended to exercise.
+    /// </summary>
+    internal static byte[] CreateExternalDerivedInterfaceConsumerImage(
+        string referencedAssemblyName,
+        byte[] referencedAssemblyPublicKey)
+    {
+        var metadata = new MetadataBuilder();
+        metadata.AddModule(
+            generation: 0,
+            metadata.GetOrAddString("Contoso.RuntimePlugins.dll"),
+            metadata.GetOrAddGuid(Guid.NewGuid()),
+            default,
+            default);
+        metadata.AddAssembly(
+            metadata.GetOrAddString("Contoso.RuntimePlugins"),
+            new Version(1, 0, 0, 0),
+            default,
+            default,
+            (AssemblyFlags)0,
+            AssemblyHashAlgorithm.None);
+
+        var mscorlib = metadata.AddAssemblyReference(
+            metadata.GetOrAddString("mscorlib"),
+            new Version(4, 0, 0, 0),
+            default,
+            metadata.GetOrAddBlob(new byte[] { 0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89 }),
+            (AssemblyFlags)0,
+            default);
+        var frameworkToken = SHA1.HashData(referencedAssemblyPublicKey)[^8..];
+        Array.Reverse(frameworkToken);
+        var framework = metadata.AddAssemblyReference(
+            metadata.GetOrAddString(referencedAssemblyName),
+            new Version(0, 0, 0, 0),
+            default,
+            metadata.GetOrAddBlob(frameworkToken),
+            (AssemblyFlags)0,
+            default);
+        var objectType = metadata.AddTypeReference(
+            mscorlib,
+            metadata.GetOrAddString("System"),
+            metadata.GetOrAddString("Object"));
+        var derivedInterface = metadata.AddTypeReference(
+            framework,
+            metadata.GetOrAddString("Contoso.Framework"),
+            metadata.GetOrAddString("IDerivedPlugin"));
+
+        metadata.AddTypeDefinition(
+            TypeAttributes.NotPublic,
+            default,
+            metadata.GetOrAddString("<Module>"),
+            default,
+            MetadataTokens.FieldDefinitionHandle(1),
+            MetadataTokens.MethodDefinitionHandle(1));
+        var runtimePlugin = metadata.AddTypeDefinition(
+            TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.BeforeFieldInit,
+            metadata.GetOrAddString("Contoso"),
+            metadata.GetOrAddString("RuntimePlugin"),
+            objectType,
+            MetadataTokens.FieldDefinitionHandle(1),
+            MetadataTokens.MethodDefinitionHandle(1));
+        metadata.AddInterfaceImplementation(runtimePlugin, derivedInterface);
+
+        var pe = new ManagedPEBuilder(
+            new PEHeaderBuilder(
+                imageCharacteristics: Characteristics.ExecutableImage | Characteristics.Dll),
+            new MetadataRootBuilder(metadata),
+            new BlobBuilder(),
+            flags: CorFlags.ILOnly);
+        var image = new BlobBuilder();
+        pe.Serialize(image);
+        return image.ToArray();
     }
 }

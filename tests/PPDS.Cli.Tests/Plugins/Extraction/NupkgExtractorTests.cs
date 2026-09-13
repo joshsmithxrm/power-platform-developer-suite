@@ -414,11 +414,17 @@ public class NupkgExtractorTests : IDisposable
                 "Contoso.InspectedPlugins",
                 "Contoso.InspectedPlugins.dll",
                 """
+                using System;
+                using Microsoft.Xrm.Sdk;
                 namespace Contoso.Plugins
                 {
-                    public sealed class RuntimeOnlyPlugin { }
+                    public sealed class RuntimeOnlyPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
                 }
-                """));
+                """,
+                ReferencesSdk: true));
         var replacementPackagePath = PluginPackageTestFixture.Create(
             _scratch,
             "replacement-package.nupkg",
@@ -873,6 +879,235 @@ public class NupkgExtractorTests : IDisposable
         Assert.Contains("Contoso.Dependency", exception.Message);
     }
 
+    [Fact]
+    public void Inspect_BufferedSnapshotDoesNotReopenReplacedPackagePath()
+    {
+        var originalPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "snapshot.nupkg",
+            "ppds_SnapshotPackage",
+            new TestPackageAssembly(
+                "Contoso.SnapshotPlugins",
+                "Contoso.SnapshotPlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                public sealed class SnapshotPlugin : IPlugin
+                {
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+                """,
+                ReferencesSdk: true));
+        var snapshot = File.ReadAllBytes(originalPath);
+        var replacementPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "replacement.nupkg",
+            "ppds_ReplacementPackage",
+            new TestPackageAssembly(
+                "Contoso.Replacement",
+                "Contoso.Replacement.dll",
+                "public sealed class Replacement { }"));
+        File.Copy(replacementPath, originalPath, overwrite: true);
+
+        var inspection = NupkgExtractor.Inspect(snapshot, originalPath);
+
+        Assert.Equal("Contoso.SnapshotPlugins", inspection.Assembly.Name);
+        Assert.Equal("snapshot.nupkg", inspection.Assembly.PackagePath);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(snapshot)).ToLowerInvariant(),
+            inspection.Assembly.PackageContentSha256);
+    }
+
+    [Theory]
+    [InlineData("PluginStepAttribute")]
+    [InlineData("CustomApiAttribute")]
+    public void Extract_LookalikeRegistrationAttribute_DoesNotQualifyAssembly(string attributeName)
+    {
+        var fakeAttributeSource = $$"""
+            namespace PPDS.Plugins
+            {
+                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = true)]
+                public sealed class {{attributeName}} : System.Attribute { }
+            }
+            """;
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"lookalike-{attributeName}.nupkg",
+            "ppds_LookalikeAttributes",
+            new TestPackageAssembly(
+                "Contoso.FakeAttributes",
+                "Contoso.FakeAttributes.dll",
+                fakeAttributeSource),
+            new TestPackageAssembly(
+                "Contoso.LookalikeHandler",
+                "Contoso.LookalikeHandler.dll",
+                $$"""
+                [PPDS.Plugins.{{attributeName}}]
+                public sealed class LookalikeHandler { }
+                """,
+                AssemblyReferences: ["Contoso.FakeAttributes"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 PPDS-annotated types", exception.Message);
+        Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_SameNameWrongTokenPpdsAttribute_DoesNotQualifyAssembly()
+    {
+        var sdkPublicKey = System.Reflection.AssemblyName
+            .GetAssemblyName(Path.Combine(
+                AppContext.BaseDirectory,
+                "TestAssets",
+                "Microsoft.Xrm.Sdk.net462.dll"))
+            .GetPublicKey();
+        Assert.NotNull(sdkPublicKey);
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "wrong-token-ppds-attribute.nupkg",
+            "ppds_WrongTokenAttributes",
+            new TestPackageAssembly(
+                "PPDS.Plugins",
+                "PPDS.Plugins.dll",
+                """
+                namespace PPDS.Plugins
+                {
+                    public sealed class PluginStepAttribute : System.Attribute { }
+                }
+                """,
+                StrongNamePublicKey: sdkPublicKey),
+            new TestPackageAssembly(
+                "Contoso.WrongTokenHandler",
+                "Contoso.WrongTokenHandler.dll",
+                "[PPDS.Plugins.PluginStep] public sealed class WrongTokenHandler { }",
+                AssemblyReferences: ["PPDS.Plugins"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
+        Assert.Contains("0 PPDS-annotated types", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Extract_WrongTokenSameNameInheritanceDependency_DoesNotProvePlugin(bool derivedInterface)
+    {
+        var correctPublicKey = typeof(PPDS.Plugins.PluginStepAttribute).Assembly.GetName().GetPublicKey();
+        var wrongPublicKey = System.Reflection.AssemblyName
+            .GetAssemblyName(Path.Combine(
+                AppContext.BaseDirectory,
+                "TestAssets",
+                "Microsoft.Xrm.Sdk.net462.dll"))
+            .GetPublicKey();
+        Assert.NotNull(correctPublicKey);
+        Assert.NotNull(wrongPublicKey);
+        var correctFrameworkSource = derivedInterface
+            ? """
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Framework { public interface IDerivedPlugin : IPlugin { } }
+                """
+            : """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Framework
+                {
+                    public abstract class PluginBase : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """;
+        var wrongFrameworkSource = derivedInterface
+            ? "namespace Contoso.Framework { public interface IDerivedPlugin { } }"
+            : "namespace Contoso.Framework { public abstract class PluginBase { } }";
+        var pluginSource = derivedInterface
+            ? "namespace Contoso { public sealed class RuntimePlugin : Contoso.Framework.IDerivedPlugin { public void Execute(System.IServiceProvider serviceProvider) { } } }"
+            : "namespace Contoso { public sealed class RuntimePlugin : Contoso.Framework.PluginBase { } }";
+        var runtimePluginAssembly = derivedInterface
+            ? new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                string.Empty,
+                PrecompiledImage: PluginPackageTestFixture.CreateExternalDerivedInterfaceConsumerImage(
+                    "Contoso.IdentityFramework",
+                    correctPublicKey))
+            : new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                pluginSource,
+                ReferencesSdk: true,
+                AssemblyReferences: ["Contoso.IdentityFramework"]);
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"wrong-token-inheritance-{derivedInterface}.nupkg",
+            "ppds_WrongTokenInheritance",
+            new TestPackageAssembly(
+                "Contoso.KnownPlugins",
+                "Contoso.KnownPlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Known
+                {
+                    public sealed class KnownPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.IdentityFramework",
+                "correct-reference.dll",
+                correctFrameworkSource,
+                ReferencesSdk: true,
+                IncludeInPackage: false,
+                StrongNamePublicKey: correctPublicKey),
+            runtimePluginAssembly,
+            new TestPackageAssembly(
+                "Contoso.IdentityFramework",
+                "Contoso.IdentityFramework.dll",
+                wrongFrameworkSource,
+                StrongNamePublicKey: wrongPublicKey));
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        Assert.Equal("Contoso.KnownPlugins", config.Name);
+        Assert.Equal(["Contoso.Known.KnownPlugin"], config.RuntimePluginTypeNames);
+        Assert.DoesNotContain("Contoso.RuntimePlugins", config.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Extract_OfficialRegistrationOnNonPluginHandler_RejectsPackage(bool customApi)
+    {
+        var annotation = customApi
+            ? "[CustomApi(UniqueName = \"ppds_Invalid\", DisplayName = \"Invalid\")]"
+            : "[PluginStep(Message = \"Create\", EntityLogicalName = \"account\", Stage = PluginStage.PreOperation)]";
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"non-plugin-handler-{customApi}.nupkg",
+            "ppds_NonPluginHandler",
+            new TestPackageAssembly(
+                "Contoso.NonPluginHandler",
+                "Contoso.NonPluginHandler.dll",
+                $$"""
+                using PPDS.Plugins;
+                {{annotation}}
+                public sealed class NonPluginHandler { }
+                """,
+                ReferencesPpdsPlugins: true));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("not a concrete runtime", exception.Message);
+    }
+
     private static void CreatePluginPackage(
         string nupkgPath,
         string framework,
@@ -918,10 +1153,15 @@ public class NupkgExtractorTests : IDisposable
         Assert.NotNull(referenceDirectory);
 
         var syntaxTree = CSharpSyntaxTree.ParseText("""
+            using System;
+            using Microsoft.Xrm.Sdk;
             using PPDS.Plugins;
 
             [PluginStep(Message = "Create", EntityLogicalName = "account", Stage = PluginStage.PreOperation)]
-            public class Net48Plugin { }
+            public class Net48Plugin : IPlugin
+            {
+                public void Execute(IServiceProvider serviceProvider) { }
+            }
             """);
 
         var compilation = CSharpCompilation.Create(
@@ -929,6 +1169,10 @@ public class NupkgExtractorTests : IDisposable
             [syntaxTree],
             [
                 MetadataReference.CreateFromFile(Path.Combine(referenceDirectory!, "mscorlib.dll")),
+                MetadataReference.CreateFromFile(Path.Combine(
+                    AppContext.BaseDirectory,
+                    "TestAssets",
+                    "Microsoft.Xrm.Sdk.net462.dll")),
                 MetadataReference.CreateFromFile(typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location)
             ],
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
