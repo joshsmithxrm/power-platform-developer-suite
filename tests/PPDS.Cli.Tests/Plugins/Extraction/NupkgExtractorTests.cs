@@ -356,9 +356,8 @@ public class NupkgExtractorTests : IDisposable
 
         var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
-        Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
-        Assert.Contains("0 PPDS-annotated types", exception.Message);
-        Assert.Contains("0 runtime IPlugin types", exception.Message);
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("public, concrete, closed runtime", exception.Message);
     }
 
     [Fact]
@@ -529,6 +528,32 @@ public class NupkgExtractorTests : IDisposable
 
         Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
         Assert.Contains("0 runtime IPlugin types", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Extract_IPluginFromMicrosoftXrmSdkWithInvalidVersionOrCulture_RejectsPackage(
+        bool invalidVersion)
+    {
+        var image = PluginPackageTestFixture.CreateDirectPluginInterfaceConsumerImage(
+            invalidVersion ? new Version(8, 2, 0, 0) : new Version(9, 0, 0, 0),
+            invalidVersion ? null : "en-US");
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"invalid-sdk-identity-{invalidVersion}.nupkg",
+            "ppds_InvalidSdkIdentity",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                string.Empty,
+                PrecompiledImage: image));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Operation.Dependency, exception.ErrorCode);
+        Assert.Contains("Microsoft.Xrm.Sdk.IPlugin", exception.Message);
+        Assert.Contains("--reference-dir", exception.Message);
     }
 
     [Fact]
@@ -1073,11 +1098,11 @@ public class NupkgExtractorTests : IDisposable
                 wrongFrameworkSource,
                 StrongNamePublicKey: wrongPublicKey));
 
-        var config = NupkgExtractor.Extract(nupkgPath);
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
-        Assert.Equal("Contoso.KnownPlugins", config.Name);
-        Assert.Equal(["Contoso.Known.KnownPlugin"], config.RuntimePluginTypeNames);
-        Assert.DoesNotContain("Contoso.RuntimePlugins", config.Name, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ErrorCodes.Operation.Dependency, exception.ErrorCode);
+        Assert.Contains("Contoso.RuntimePlugins", exception.Message);
+        Assert.Contains("--reference-dir", exception.Message);
     }
 
     [Theory]
@@ -1105,7 +1130,79 @@ public class NupkgExtractorTests : IDisposable
         var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
         Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
-        Assert.Contains("not a concrete runtime", exception.Message);
+        Assert.Contains("public, concrete, closed runtime", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(TestPluginTypeShape.Concrete, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.Abstract, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.Interface, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.OpenGeneric, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.Static, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.Concrete, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.Abstract, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.Interface, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.OpenGeneric, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.Static, "CustomApiAttribute")]
+    public void Extract_MixedValidPluginAndInvalidOfficialHandler_RejectsPackage(
+        TestPluginTypeShape shape,
+        string attributeName)
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"mixed-invalid-{shape}-{attributeName}.nupkg",
+            "ppds_MixedInvalidHandler",
+            new TestPackageAssembly(
+                "Contoso.RuntimePlugins",
+                "Contoso.RuntimePlugins.dll",
+                string.Empty,
+                PrecompiledImage: PluginPackageTestFixture.CreateMixedPluginImage(
+                    shape,
+                    secondaryImplementsPlugin: shape != TestPluginTypeShape.Concrete,
+                    officialAttributeName: attributeName)));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("Contoso.Plugins.ConfiguredPlugin", exception.Message);
+        Assert.Contains("public, concrete, closed runtime", exception.Message);
+    }
+
+    [Fact]
+    public void Extract_MixedPackageWithUnresolvedCandidateAncestry_FailsClosed()
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            "mixed-unresolved-candidate.nupkg",
+            "ppds_MixedUnresolvedCandidate",
+            new TestPackageAssembly(
+                "Contoso.KnownPlugins",
+                "Contoso.KnownPlugins.dll",
+                """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                public sealed class KnownPlugin : IPlugin
+                {
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+                """,
+                ReferencesSdk: true),
+            new TestPackageAssembly(
+                "Contoso.ExternalFramework",
+                "Contoso.ExternalFramework.dll",
+                "namespace Contoso.External { public abstract class PluginBase { } }",
+                IncludeInPackage: false),
+            new TestPackageAssembly(
+                "Contoso.UnresolvedCandidate",
+                "Contoso.UnresolvedCandidate.dll",
+                "namespace Contoso { public sealed class PossiblePlugin : Contoso.External.PluginBase { } }",
+                AssemblyReferences: ["Contoso.ExternalFramework"]));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Operation.Dependency, exception.ErrorCode);
+        Assert.Contains("Contoso.UnresolvedCandidate.dll", exception.Message);
+        Assert.Contains("--reference-dir", exception.Message);
     }
 
     private static void CreatePluginPackage(

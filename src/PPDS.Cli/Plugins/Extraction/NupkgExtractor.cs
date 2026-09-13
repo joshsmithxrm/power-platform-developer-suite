@@ -130,6 +130,18 @@ public static class NupkgExtractor
             if (validationFailure != null)
                 throw validationFailure;
 
+            var unresolvedCandidateFailure = failures
+                .FirstOrDefault(failure => failure.Error is AssemblyExtractor.UnresolvedMetadataTypeException);
+            if (unresolvedCandidateFailure.Error != null)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Operation.Dependency,
+                    $"Could not safely exclude assembly '{unresolvedCandidateFailure.Assembly}' as a plugin " +
+                    $"candidate while inspecting '{Path.GetFileName(nupkgPath)}': " +
+                    unresolvedCandidateFailure.Error.Message,
+                    unresolvedCandidateFailure.Error);
+            }
+
             if (candidates.Count == 0 && failures.Count > 0)
             {
                 var first = failures[0];
@@ -284,7 +296,8 @@ public static class NupkgExtractor
                     assembly.Reader.TypeDefinitions
                         .Select(handle => GetTypeDefinitionFullName(assembly.Reader, handle))
                         .ToHashSet(StringComparer.Ordinal),
-                    evidence.HasPlausiblePrimary,
+                    evidence.RuntimePluginTypeNames,
+                    evidence.UnresolvedCandidateTypeNames,
                     evidence.HasOfficialRegistrationWithoutRuntimePlugin,
                     evidence.HasInvalidMetadata);
             })
@@ -382,11 +395,15 @@ public static class NupkgExtractor
         IReadOnlyList<ManifestAssembly> assemblies,
         ManifestAssembly configuredPrimary)
     {
+        var contentHash = Convert.ToHexString(SHA256.HashData(nupkgContent)).ToLowerInvariant();
+        var contentMatchesExtraction = !string.IsNullOrWhiteSpace(config.PackageContentSha256)
+            && string.Equals(config.PackageContentSha256, contentHash, StringComparison.OrdinalIgnoreCase);
         var additionalCandidates = assemblies
             .Where(assembly => !ReferenceEquals(assembly, configuredPrimary)
                 && (assembly.HasPortablePluginEvidence
                     || assembly.HasOfficialRegistrationWithoutRuntimePlugin
-                    || assembly.HasInvalidMetadata))
+                    || assembly.HasInvalidMetadata
+                    || (!contentMatchesExtraction && assembly.HasUnresolvedCandidateAncestry)))
             .ToList();
         if (additionalCandidates.Count > 0)
         {
@@ -407,19 +424,6 @@ public static class NupkgExtractor
                 "Correct the package and re-run extraction before deploying. No package was uploaded.");
         }
 
-        if (configuredPrimary.HasPortablePluginEvidence)
-            return configuredPrimary.Name;
-
-        var contentHash = Convert.ToHexString(SHA256.HashData(nupkgContent)).ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(config.PackageContentSha256)
-            && string.Equals(config.PackageContentSha256, contentHash, StringComparison.OrdinalIgnoreCase))
-        {
-            // Extraction may have proven runtime IPlugin inheritance through --reference-dir.
-            // An unchanged content digest preserves that proof without persisting or reloading
-            // the machine-specific dependency path.
-            return configuredPrimary.Name;
-        }
-
         if (configuredPrimary.HasOfficialRegistrationWithoutRuntimePlugin)
         {
             throw new PpdsException(
@@ -428,6 +432,47 @@ public static class NupkgExtractor
                 "contains official PPDS PluginStep or CustomApi metadata on a concrete type that cannot be " +
                 "proven to implement Microsoft.Xrm.Sdk.IPlugin. Re-run extraction after correcting the handler. " +
                 "No package was uploaded.");
+        }
+
+        var configuredTypeNames = config.AllTypeNames
+            .Concat(config.Types.Select(type => type.TypeName))
+            .Concat(config.CustomApis?.Select(api => api.PluginTypeName) ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var unprovenConfiguredTypes = configuredTypeNames
+            .Where(typeName => !configuredPrimary.PortablePluginTypeNames.Contains(typeName))
+            .OrderBy(typeName => typeName, StringComparer.Ordinal)
+            .ToList();
+        var contradictoryConfiguredTypes = unprovenConfiguredTypes
+            .Where(typeName => !configuredPrimary.UnresolvedCandidateTypeNames.Contains(typeName))
+            .ToList();
+        if (contradictoryConfiguredTypes.Count > 0)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyMismatch,
+                $"Configured types in primary assembly '{configuredPrimary.Name}' are no longer public, concrete, " +
+                "closed runtime Microsoft.Xrm.Sdk.IPlugin implementations in the buffered package snapshot: " +
+                $"{string.Join(", ", contradictoryConfiguredTypes.Select(name => $"'{name}'"))}. " +
+                "Re-run 'ppds plugins extract' for the rebuilt package before deploying. No package was uploaded.");
+        }
+
+        if ((unprovenConfiguredTypes.Count > 0 || configuredPrimary.HasUnresolvedCandidateAncestry)
+            && !contentMatchesExtraction)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyMismatch,
+                $"Configured primary assembly '{configuredPrimary.Name}' in '{Path.GetFileName(nupkgPath)}' has " +
+                "unresolved external ancestry in a changed or unverified package snapshot. Re-run 'ppds plugins " +
+                "extract' with the required --reference-dir before deploying. No package was uploaded.");
+        }
+
+        if (configuredPrimary.HasPortablePluginEvidence || contentMatchesExtraction)
+        {
+            // Only unresolved external ancestry can rely on the unchanged extraction digest.
+            // Missing/non-deployable types, invalid annotations, and malformed metadata have
+            // already failed above and can never be waived by a matching hash.
+            return configuredPrimary.Name;
         }
 
         throw new PpdsException(
@@ -467,7 +512,7 @@ public static class NupkgExtractor
         private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
         private readonly Dictionary<string, List<BufferedMetadataAssembly>> _assembliesByName =
             new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<ResolvedPackageType, bool> _implementsPlugin = [];
+        private readonly Dictionary<ResolvedPackageType, TypePluginEvidence> _pluginEvidence = [];
 
         internal BufferedPackageMetadataResolver(IEnumerable<BufferedAssemblyImage> images)
         {
@@ -491,26 +536,47 @@ public static class NupkgExtractor
         {
             try
             {
-                var hasPlausiblePrimary = false;
+                var runtimePluginTypeNames = new HashSet<string>(StringComparer.Ordinal);
+                var unresolvedCandidateTypeNames = new HashSet<string>(StringComparer.Ordinal);
                 var hasOfficialRegistrationWithoutRuntimePlugin = false;
                 foreach (var handle in assembly.Reader.TypeDefinitions)
                 {
                     var definition = assembly.Reader.GetTypeDefinition(handle);
+                    var typeName = GetTypeDefinitionFullName(assembly.Reader, handle);
+                    var hasOfficialRegistration = definition.GetCustomAttributes().Any(attribute =>
+                        AssemblyExtractor.IsOfficialPpdsRegistrationAttribute(assembly.Reader, attribute));
                     var isAbstract = (definition.Attributes & TypeAttributes.Abstract) != 0;
                     var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
                     var isOpenGeneric = definition.GetGenericParameters().Count > 0;
-                    if (!IsExported(assembly.Reader, handle) || isAbstract || isInterface || isOpenGeneric)
+                    var isDeployable = IsExported(assembly.Reader, handle)
+                        && !isAbstract
+                        && !isInterface
+                        && !isOpenGeneric;
+                    if (!isDeployable)
+                    {
+                        hasOfficialRegistrationWithoutRuntimePlugin |= hasOfficialRegistration;
                         continue;
+                    }
 
-                    var implementsPlugin = ImplementsPlugin(new ResolvedPackageType(assembly, handle), []);
-                    var hasOfficialRegistration = definition.GetCustomAttributes().Any(attribute =>
-                        AssemblyExtractor.IsOfficialPpdsRegistrationAttribute(assembly.Reader, attribute));
-                    hasPlausiblePrimary |= implementsPlugin;
-                    hasOfficialRegistrationWithoutRuntimePlugin |= hasOfficialRegistration && !implementsPlugin;
+                    var evidence = GetPluginEvidence(new ResolvedPackageType(assembly, handle), []);
+                    if (evidence.ImplementsPlugin)
+                    {
+                        runtimePluginTypeNames.Add(typeName);
+                    }
+                    else if (evidence.HasUnresolvedAncestry)
+                    {
+                        unresolvedCandidateTypeNames.Add(typeName);
+                    }
+
+                    hasOfficialRegistrationWithoutRuntimePlugin |=
+                        hasOfficialRegistration
+                        && !evidence.ImplementsPlugin
+                        && !evidence.HasUnresolvedAncestry;
                 }
 
                 return new PortablePluginEvidence(
-                    hasPlausiblePrimary,
+                    runtimePluginTypeNames,
+                    unresolvedCandidateTypeNames,
                     hasOfficialRegistrationWithoutRuntimePlugin,
                     HasInvalidMetadata: false);
             }
@@ -520,17 +586,18 @@ public static class NupkgExtractor
                 // metadata cannot be proven safe as a dependency. Treat it as a candidate so
                 // the caller rejects the package before any Dataverse request.
                 return new PortablePluginEvidence(
-                    HasPlausiblePrimary: false,
+                    RuntimePluginTypeNames: [],
+                    UnresolvedCandidateTypeNames: [],
                     HasOfficialRegistrationWithoutRuntimePlugin: false,
                     HasInvalidMetadata: true);
             }
         }
 
-        private bool ImplementsPlugin(
+        private TypePluginEvidence GetPluginEvidence(
             ResolvedPackageType type,
             HashSet<ResolvedPackageType> visiting)
         {
-            if (_implementsPlugin.TryGetValue(type, out var cached))
+            if (_pluginEvidence.TryGetValue(type, out var cached))
                 return cached;
             if (!visiting.Add(type))
                 throw new BadImageFormatException("Cyclic package-local type inheritance metadata was detected.");
@@ -538,6 +605,7 @@ public static class NupkgExtractor
             try
             {
                 var definition = type.Assembly.Reader.GetTypeDefinition(type.Handle);
+                var hasUnresolvedAncestry = false;
                 foreach (var implementationHandle in definition.GetInterfaceImplementations())
                 {
                     var implementation = type.Assembly.Reader.GetInterfaceImplementation(implementationHandle);
@@ -545,33 +613,88 @@ public static class NupkgExtractor
                             type.Assembly.Reader,
                             implementation.Interface))
                     {
-                        _implementsPlugin[type] = true;
-                        return true;
+                        var directEvidence = new TypePluginEvidence(
+                            ImplementsPlugin: true,
+                            HasUnresolvedAncestry: false);
+                        _pluginEvidence[type] = directEvidence;
+                        return directEvidence;
                     }
 
-                    if (TryResolve(type.Assembly, implementation.Interface, [], out var interfaceType)
-                        && ImplementsPlugin(interfaceType, visiting))
+                    if (TryResolve(type.Assembly, implementation.Interface, [], out var interfaceType))
                     {
-                        _implementsPlugin[type] = true;
-                        return true;
+                        var interfaceEvidence = GetPluginEvidence(interfaceType, visiting);
+                        if (interfaceEvidence.ImplementsPlugin)
+                        {
+                            _pluginEvidence[type] = interfaceEvidence;
+                            return interfaceEvidence;
+                        }
+
+                        hasUnresolvedAncestry |= interfaceEvidence.HasUnresolvedAncestry;
+                    }
+                    else
+                    {
+                        hasUnresolvedAncestry |= IsPotentialPluginAncestry(
+                            type.Assembly,
+                            implementation.Interface);
                     }
                 }
 
-                if (!definition.BaseType.IsNil
-                    && TryResolve(type.Assembly, definition.BaseType, [], out var baseType)
-                    && ImplementsPlugin(baseType, visiting))
+                if (!definition.BaseType.IsNil)
                 {
-                    _implementsPlugin[type] = true;
-                    return true;
+                    if (TryResolve(type.Assembly, definition.BaseType, [], out var baseType))
+                    {
+                        var baseEvidence = GetPluginEvidence(baseType, visiting);
+                        if (baseEvidence.ImplementsPlugin)
+                        {
+                            _pluginEvidence[type] = baseEvidence;
+                            return baseEvidence;
+                        }
+
+                        hasUnresolvedAncestry |= baseEvidence.HasUnresolvedAncestry;
+                    }
+                    else
+                    {
+                        hasUnresolvedAncestry |= IsPotentialPluginAncestry(type.Assembly, definition.BaseType);
+                    }
                 }
 
-                _implementsPlugin[type] = false;
-                return false;
+                var finalEvidence = new TypePluginEvidence(
+                    ImplementsPlugin: false,
+                    HasUnresolvedAncestry: hasUnresolvedAncestry);
+                _pluginEvidence[type] = finalEvidence;
+                return finalEvidence;
             }
             finally
             {
                 visiting.Remove(type);
             }
+        }
+
+        private static bool IsPotentialPluginAncestry(
+            BufferedMetadataAssembly context,
+            EntityHandle handle)
+        {
+            if (handle.Kind == HandleKind.TypeSpecification)
+            {
+                handle = context.Reader.GetTypeSpecification((TypeSpecificationHandle)handle)
+                    .DecodeSignature(TypeSpecificationDecoder, genericContext: null);
+            }
+
+            if (handle.Kind != HandleKind.TypeReference)
+                return true;
+
+            var reference = context.Reader.GetTypeReference((TypeReferenceHandle)handle);
+            if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+                return true;
+
+            var assemblyReference = context.Reader.GetAssemblyReference(
+                (AssemblyReferenceHandle)reference.ResolutionScope);
+            var assemblyName = context.Reader.GetString(assemblyReference.Name);
+            return !assemblyName.Equals("mscorlib", StringComparison.OrdinalIgnoreCase)
+                && !assemblyName.Equals("System", StringComparison.OrdinalIgnoreCase)
+                && !assemblyName.StartsWith("System.", StringComparison.OrdinalIgnoreCase)
+                && !assemblyName.Equals("netstandard", StringComparison.OrdinalIgnoreCase)
+                && !assemblyName.Equals("Microsoft.Xrm.Sdk", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool TryResolve(
@@ -815,8 +938,13 @@ public static class NupkgExtractor
         BufferedMetadataAssembly Assembly,
         EntityHandle Handle);
 
+    private readonly record struct TypePluginEvidence(
+        bool ImplementsPlugin,
+        bool HasUnresolvedAncestry);
+
     private readonly record struct PortablePluginEvidence(
-        bool HasPlausiblePrimary,
+        HashSet<string> RuntimePluginTypeNames,
+        HashSet<string> UnresolvedCandidateTypeNames,
         bool HasOfficialRegistrationWithoutRuntimePlugin,
         bool HasInvalidMetadata);
 
@@ -824,9 +952,14 @@ public static class NupkgExtractor
         string FileName,
         string Name,
         HashSet<string> TypeNames,
-        bool HasPortablePluginEvidence,
+        HashSet<string> PortablePluginTypeNames,
+        HashSet<string> UnresolvedCandidateTypeNames,
         bool HasOfficialRegistrationWithoutRuntimePlugin,
-        bool HasInvalidMetadata);
+        bool HasInvalidMetadata)
+    {
+        internal bool HasPortablePluginEvidence => PortablePluginTypeNames.Count > 0;
+        internal bool HasUnresolvedCandidateAncestry => UnresolvedCandidateTypeNames.Count > 0;
+    }
 
     /// <summary>
     /// Verifies that every entry in <paramref name="archiveContent"/> extracts to a location under

@@ -18,6 +18,7 @@ public sealed class AssemblyExtractor : IDisposable
 {
     private const string DataversePluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
     private const string DataverseSdkAssemblyName = "Microsoft.Xrm.Sdk";
+    private static readonly Version DataverseSdkAssemblyVersion = new(9, 0, 0, 0);
     private static readonly ImmutableArray<byte> DataverseSdkPublicKeyToken =
         [0x31, 0xbf, 0x38, 0x56, 0xad, 0x36, 0x4e, 0x35];
     private const string PpdsPluginsAssemblyName = "PPDS.Plugins";
@@ -322,6 +323,18 @@ public sealed class AssemblyExtractor : IDisposable
         var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath, _resolverPaths);
         var trustedRegistrationAttributes = ReadTrustedRegistrationAttributes(_assemblyPath);
 
+        var invalidAnnotatedTypeName = trustedRegistrationAttributes
+            .Select(attribute => attribute.TypeName)
+            .Distinct(StringComparer.Ordinal)
+            .FirstOrDefault(typeName => !runtimePluginTypeNames.Contains(typeName));
+        if (invalidAnnotatedTypeName != null)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Type '{invalidAnnotatedTypeName}' uses official PPDS PluginStep or CustomApi metadata but is " +
+                "not a public, concrete, closed runtime Microsoft.Xrm.Sdk.IPlugin implementation.");
+        }
+
         var config = new PluginAssemblyConfig
         {
             Name = assemblyName.Name ?? Path.GetFileNameWithoutExtension(_assemblyPath),
@@ -355,15 +368,6 @@ public sealed class AssemblyExtractor : IDisposable
 
             var customApiAttr = GetCustomApiAttribute(type, trustedRegistrationAttributes);
             var stepAttributes = GetPluginStepAttributes(type, trustedRegistrationAttributes);
-            if ((customApiAttr != null || stepAttributes.Count > 0)
-                && !runtimePluginTypeNames.Contains(typeName))
-            {
-                throw new PpdsException(
-                    ErrorCodes.Validation.InvalidValue,
-                    $"Type '{typeName}' uses official PPDS PluginStep or CustomApi metadata but is not a " +
-                    "concrete runtime Microsoft.Xrm.Sdk.IPlugin implementation.");
-            }
-
             // Extract Custom API if annotated
             if (customApiAttr != null)
             {
@@ -414,7 +418,7 @@ public sealed class AssemblyExtractor : IDisposable
     /// <summary>
     /// Reads public, concrete types that implement <c>Microsoft.Xrm.Sdk.IPlugin</c> directly or
     /// through resolvable base classes and derived interfaces. The SDK interface itself is matched
-    /// by metadata name, so a normal Dataverse package does not need to bundle Microsoft.Xrm.Sdk.
+    /// by its stable v9 strong-name identity, so a normal Dataverse package does not need to bundle Microsoft.Xrm.Sdk.
     /// Other referenced types are resolved from the same ordered paths as MetadataLoadContext,
     /// including caller-supplied <c>--reference-dir</c> paths.
     /// </summary>
@@ -583,10 +587,14 @@ public sealed class AssemblyExtractor : IDisposable
         var assemblyReference = reader.GetAssemblyReference(
             (AssemblyReferenceHandle)reference.ResolutionScope);
         if (!reader.StringComparer.Equals(assemblyReference.Name, DataverseSdkAssemblyName)
+            || assemblyReference.Version != DataverseSdkAssemblyVersion
             || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0)
         {
             return false;
         }
+
+        if (!string.IsNullOrEmpty(reader.GetString(assemblyReference.Culture)))
+            return false;
 
         var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
         return publicKeyToken.AsSpan().SequenceEqual(DataverseSdkPublicKeyToken.AsSpan());
@@ -1197,7 +1205,7 @@ public sealed class AssemblyExtractor : IDisposable
 
     private readonly record struct RegistrationAttributeTrust(bool HasOfficial, bool HasUntrusted);
 
-    private sealed class UnresolvedMetadataTypeException(string message)
+    internal sealed class UnresolvedMetadataTypeException(string message)
         : InvalidOperationException(message);
 
     private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
