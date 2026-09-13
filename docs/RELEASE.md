@@ -105,6 +105,41 @@ The repository's optional `.claude/skills/release/SKILL.md` documents the same
 ceremony for supported agents; this public document remains the authoritative,
 tool-neutral entry point for generated GitHub issues.
 
+## CLI/Extension Co-release Reconciliation
+
+The VS Code Extension bundles the CLI selected from an exact `Cli-v*` tag on
+the Extension release commit. The automated guard therefore treats the
+relationship as satisfied only when a strict-SemVer `Extension-v*` tag and the
+highest stable strict-SemVer `Cli-v*` tag point to the same commit. It does not
+compare tag timestamps or the two independent version numbers.
+
+Both CLI and Extension tag pushes trigger one serialized reconciliation. If the
+CLI arrives first, the workflow may create an advisory issue containing a
+stable marker keyed to that CLI tag. When the co-located Extension tag arrives,
+the workflow comments on and closes the matching open issue. If the Extension
+arrives first, the later CLI event observes both refs and remains silent. A
+higher stable CLI release closes older open alerts as superseded and creates at
+most one new alert for the current CLI when its co-located Extension tag is
+still missing. The replacement is created before the old alert closes, so a
+partial GitHub failure cannot remove the only actionable warning. Closed
+workflow records are not reopened.
+
+Alerts created before CLI-keyed markers were introduced are migrated from the
+workflow's exact legacy `Latest stable Cli tag` table field. The workflow-owned
+label is still mandatory, so unrelated issues containing similar prose do not
+participate in reconciliation.
+
+The comparison uses peeled commits, so annotated and lightweight tags behave
+the same way. CLI prereleases do not require a Marketplace refresh; malformed
+CLI or Extension release tags are reported as diagnostics and cannot outrank a
+valid tag. This automation only manages advisory issues. It never creates a tag,
+publishes an artifact, or invokes a release workflow.
+
+The weekly cadence check similarly validates release-looking tags through the
+shared strict SemVer implementation, discovers valid package tag prefixes from
+the release graph, and normalizes git's ISO-strict timestamps and the current
+time to UTC before calculating elapsed weeks.
+
 ## Automated Public Artifact Verification
 
 Every publish workflow finishes by validating the artifact through the same

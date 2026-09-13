@@ -34,11 +34,13 @@ jobs:
       - name: Get latest release tag and date
         id: tag-info
         run: |
-          LAST_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/ | head -1)
-          LAST_TAG_DATE=$(git for-each-ref --sort=-creatordate --format='%(creatordate:iso-strict)' refs/tags/ | head -1)
+          TAG_INFO=$(python scripts/ci/check_release_cadence.py --find-latest-release)
+          echo "Release tag selection: ${TAG_INFO}"
+          LAST_TAG=$(echo "${TAG_INFO}" | jq -r '.latest_tag // empty')
+          LAST_TAG_DATE=$(echo "${TAG_INFO}" | jq -r '.latest_tag_date // empty')
 
           if [ -z "$LAST_TAG" ]; then
-            echo "No release tags found; skipping cadence check."
+            echo "No valid strict-SemVer release tags found; skipping cadence check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"

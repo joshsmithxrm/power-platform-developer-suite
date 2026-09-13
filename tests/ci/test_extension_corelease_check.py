@@ -1,22 +1,8 @@
-"""Unit tests for scripts/ci/check_extension_corelease.py.
-
-Run with: python -m pytest tests/ci/test_extension_corelease_check.py -v
-
-Guards the co-release rule: a `Cli-v*` release includes an `Extension-v*`
-bundled-CLI refresh in the same train. Each test exercises the public functions
-directly — no source-code inspection, no string matching on implementation text —
-in the style of tests/ci/test_release_cadence_check.py.
-
-The three behaviors the task calls out:
-  (a) Cli tag newer than Extension tag  -> flagged with the exact message
-  (b) Extension tag current or newer    -> silent
-  (c) prerelease Cli tags ignored
-Plus dedup, no-tag edge cases, and the workflow trigger/wiring.
-"""
+"""Behavior tests for CLI/Extension co-release alert reconciliation."""
 from __future__ import annotations
 
+import subprocess
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,253 +10,374 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
 import check_extension_corelease as cec  # noqa: E402
+import release_model  # noqa: E402
 
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "post-merge-release-check.yml"
+LABEL = cec.CORELEASE_LABEL
 
 
-# Fixed reference instant; tags are dated relative to it (Date.now() is avoided).
-NOW = datetime(2026, 7, 14, 12, 0, 0)
+def tag(name: str, commit: str) -> cec.ReleaseTag:
+    return cec.ReleaseTag(name=name, commit=commit)
 
 
-# ---------------------------------------------------------------------------
-# (a) Cli tag newer than Extension tag -> flagged with the exact message
-# ---------------------------------------------------------------------------
-
-class TestCliNewerThanExtensionIsFlagged:
-    """A stable Cli tag dated after the latest Extension tag must be flagged."""
-
-    def test_flags_when_cli_newer(self):
-        cli = ("Cli-v1.3.0", NOW)
-        ext = ("Extension-v1.4.0", NOW - timedelta(days=30))
-
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=False)
-
-        assert result["should_open_issue"] is True
-        assert result["reason"] == "extension stale"
-        assert result["cli_tag"] == "Cli-v1.3.0"
-        assert result["extension_tag"] == "Extension-v1.4.0"
-
-    def test_flag_message_is_exact(self):
-        """The surfaced message must match the wording the task specifies."""
-        msg = cec.build_flag_message("Cli-v1.3.0", "Extension-v1.4.0")
-        assert msg == (
-            "Extension bundled-CLI refresh missing for Cli-v1.3.0 "
-            "(latest Extension-v1.4.0 predates it)"
-        )
-
-    def test_incident_scenario_end_to_end(self):
-        """The exact Cli-v1.3.0 / Extension-v1.4.0 incident: flag + message."""
-        cli = cec.select_latest_stable_cli([
-            ("Cli-v1.2.0", NOW - timedelta(days=90)),
-            ("Cli-v1.3.0", NOW),
-        ])
-        ext = cec.select_latest_extension([
-            ("Extension-v1.4.0", NOW - timedelta(days=20)),
-        ])
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=False)
-
-        assert result["should_open_issue"] is True
-        message = cec.build_flag_message(result["cli_tag"], result["extension_tag"])
-        assert message == (
-            "Extension bundled-CLI refresh missing for Cli-v1.3.0 "
-            "(latest Extension-v1.4.0 predates it)"
-        )
+def issue(
+    number: int,
+    cli_tag: str,
+    *,
+    state: str = "OPEN",
+    labeled: bool = True,
+) -> cec.ExistingIssue:
+    return cec.ExistingIssue(
+        number=number,
+        state=state,
+        body=cec.issue_marker(cli_tag),
+        labels=frozenset({LABEL} if labeled else set()),
+    )
 
 
-# ---------------------------------------------------------------------------
-# (b) Extension tag current or newer -> silent
-# ---------------------------------------------------------------------------
-
-class TestExtensionCurrentIsSilent:
-    """When the Extension tag is at least as new as the Cli tag, stay silent."""
-
-    def test_silent_when_extension_newer(self):
-        cli = ("Cli-v1.3.0", NOW - timedelta(days=5))
-        ext = ("Extension-v1.4.1", NOW)
-
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=False)
-
-        assert result["should_open_issue"] is False
-        assert result["reason"] == "extension current"
-
-    def test_silent_when_same_train_same_instant(self):
-        """Same-train Extension tagged at the same instant (>=) stays silent."""
-        cli = ("Cli-v1.3.0", NOW)
-        ext = ("Extension-v1.4.2", NOW)
-
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=False)
-
-        assert result["should_open_issue"] is False
-        assert result["reason"] == "extension current"
+def legacy_issue(
+    number: int,
+    cli_tag: str,
+    *,
+    state: str = "OPEN",
+    labeled: bool = True,
+) -> cec.ExistingIssue:
+    return cec.ExistingIssue(
+        number=number,
+        state=state,
+        body=(
+            "## Extension Bundled-CLI Refresh Missing\n\n"
+            "| Field | Value |\n"
+            "|-------|-------|\n"
+            f"| Latest stable Cli tag | `{cli_tag}` |\n"
+            "| Latest Extension tag | `Extension-v1.4.1` |\n"
+        ),
+        labels=frozenset({LABEL} if labeled else set()),
+    )
 
 
-# ---------------------------------------------------------------------------
-# (c) prerelease Cli tags ignored
-# ---------------------------------------------------------------------------
-
-class TestPrereleaseCliTagsIgnored:
-    """A newer -rc./-beta. Cli tag must not mask the last stable release."""
-
-    def test_is_stable_cli_tag_classification(self):
-        assert cec.is_stable_cli_tag("Cli-v1.3.0") is True
-        assert cec.is_stable_cli_tag("Cli-v1.4.0-rc.1") is False
-        assert cec.is_stable_cli_tag("Cli-v1.4.0-beta.2") is False
-
-    def test_prerelease_cli_excluded_from_selection(self):
-        """The newest -rc. tag is skipped; the last stable tag is selected."""
-        tags = [
-            ("Cli-v1.3.0", NOW - timedelta(days=10)),
-            ("Cli-v1.4.0-rc.1", NOW),  # newer, but prerelease
-        ]
-        selected = cec.select_latest_stable_cli(tags)
-        assert selected is not None
-        assert selected[0] == "Cli-v1.3.0"
-
-    def test_prerelease_cli_does_not_flag_when_stable_is_covered(self):
-        """
-        With a newer -rc. Cli tag but a stable Cli older than the Extension,
-        the guard stays silent — proving the prerelease is ignored. Were the
-        prerelease counted, the newer rc date would flag a stale Extension.
-        """
-        cli = cec.select_latest_stable_cli([
-            ("Cli-v1.3.0", NOW - timedelta(days=10)),
-            ("Cli-v1.4.0-rc.1", NOW),
-        ])
-        ext = cec.select_latest_extension([
-            ("Extension-v1.4.1", NOW - timedelta(days=2)),  # newer than stable Cli
-        ])
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=False)
-
-        assert result["should_open_issue"] is False
-        assert result["reason"] == "extension current"
+def actions(plan: dict, kind: str) -> list[dict]:
+    return [action for action in plan["actions"] if action["kind"] == kind]
 
 
-# ---------------------------------------------------------------------------
-# Dedup / idempotency
-# ---------------------------------------------------------------------------
+class TestSharedStrictSemVer:
+    def test_uses_shared_semver_implementation(self):
+        assert cec.SemVer is release_model.SemVer
 
-class TestNoDuplicateIssue:
-    def test_no_duplicate_when_issue_open(self):
-        cli = ("Cli-v1.3.0", NOW)
-        ext = ("Extension-v1.4.0", NOW - timedelta(days=30))
-
-        result = cec.evaluate_corelease(cli=cli, extension=ext, has_open_issue=True)
-
-        assert result["should_open_issue"] is False
-        assert result["reason"] == "duplicate"
-
-
-# ---------------------------------------------------------------------------
-# Edge cases: missing tags
-# ---------------------------------------------------------------------------
-
-class TestMissingTags:
-    def test_no_stable_cli_tag_is_silent(self):
-        result = cec.evaluate_corelease(
-            cli=None,
-            extension=("Extension-v1.4.0", NOW),
-            has_open_issue=False,
-        )
-        assert result["should_open_issue"] is False
-        assert result["reason"] == "no stable cli tag"
-
-    def test_no_extension_tag_flags(self):
-        cli = ("Cli-v1.3.0", NOW)
-        result = cec.evaluate_corelease(cli=cli, extension=None, has_open_issue=False)
-        assert result["should_open_issue"] is True
-        assert result["reason"] == "no extension tag"
-
-    def test_flag_message_handles_missing_extension(self):
-        msg = cec.build_flag_message("Cli-v1.3.0", None)
-        assert msg == (
-            "Extension bundled-CLI refresh missing for Cli-v1.3.0 "
-            "(latest (none) predates it)"
-        )
-
-    def test_select_latest_stable_cli_all_prerelease_returns_none(self):
+    def test_stable_cli_selection_is_semver_not_ref_order(self):
         selected = cec.select_latest_stable_cli([
-            ("Cli-v1.4.0-rc.1", NOW),
-            ("Cli-v1.4.0-beta.2", NOW - timedelta(days=1)),
+            tag("Cli-v1.4.0", "a"),
+            tag("Cli-v1.10.0", "b"),
+            tag("Cli-v1.5.0-beta.10", "c"),
         ])
-        assert selected is None
+        assert selected == tag("Cli-v1.10.0", "b")
 
-    def test_select_latest_extension_empty_returns_none(self):
-        assert cec.select_latest_extension([]) is None
+    def test_prerelease_cli_and_malformed_unicode_digit_are_not_stable(self):
+        assert cec.is_stable_cli_tag("Cli-v1.4.0") is True
+        assert cec.is_stable_cli_tag("Cli-v1.5.0-beta.10") is False
+        assert cec.is_stable_cli_tag("Cli-v١.5.0") is False
+
+    def test_malformed_tag_is_diagnostic_and_cannot_outrank_stable(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.0", "release"), tag("Cli-v٩.0.0", "bad")],
+            extension_tags=[tag("Extension-v1.6.0", "release")],
+            existing_issues=[],
+        )
+        assert plan["latest_cli_tag"] == "Cli-v1.4.0"
+        assert plan["actions"] == []
+        assert any("Malformed release tag 'Cli-v٩.0.0'" in d for d in plan["diagnostics"])
 
 
-# ---------------------------------------------------------------------------
-# Selection ranks by version, not list order
-# ---------------------------------------------------------------------------
+class TestIncident1375:
+    """Cli-v1.4.0 first opened #1375; Extension-v1.6.0 shared its commit."""
 
-class TestSelectionRanksByVersion:
-    def test_latest_stable_cli_picks_highest_version(self):
-        tags = [
-            ("Cli-v1.3.0", NOW - timedelta(days=1)),
-            ("Cli-v1.10.0", NOW - timedelta(days=2)),  # highest version, out of order
-            ("Cli-v1.2.0", NOW),
+    def test_cli_first_opens_alert_keyed_by_cli_tag(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.0", "release-a")],
+            extension_tags=[tag("Extension-v1.4.1", "older")],
+            existing_issues=[],
+        )
+        create = actions(plan, "create")
+        assert len(create) == 1
+        assert create[0]["cli_tag"] == "Cli-v1.4.0"
+        assert cec.issue_marker("Cli-v1.4.0") in create[0]["body"]
+        assert "no co-located Extension-v* tag" in create[0]["title"]
+
+    def test_later_colocated_extension_comments_and_closes_1375(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.0", "318df745")],
+            extension_tags=[
+                tag("Extension-v1.4.1", "older"),
+                tag("Extension-v1.6.0", "318df745"),
+            ],
+            existing_issues=[legacy_issue(1375, "Cli-v1.4.0")],
+        )
+        close = actions(plan, "close")
+        assert len(close) == 1
+        assert close[0]["issue_number"] == 1375
+        assert close[0]["reason"] == "satisfied"
+        assert "Extension-v1.6.0" in close[0]["comment"]
+        assert actions(plan, "create") == []
+
+
+class TestIncident1410:
+    """Cli-v1.4.1 first opened #1410; Extension-v1.6.1 shared its commit."""
+
+    def test_later_extension_reconciles_1410(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.0", "old"),
+                tag("Cli-v1.4.1", "ab7b61f"),
+            ],
+            extension_tags=[
+                tag("Extension-v1.6.0", "old"),
+                tag("Extension-v1.6.1", "ab7b61f"),
+            ],
+            existing_issues=[issue(1410, "Cli-v1.4.1")],
+        )
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (1410, "satisfied"),
         ]
-        selected = cec.select_latest_stable_cli(tags)
-        assert selected[0] == "Cli-v1.10.0"
+        assert actions(plan, "create") == []
 
-    def test_latest_extension_picks_highest_version(self):
-        tags = [
-            ("Extension-v1.4.0", NOW),
-            ("Extension-v1.5.0", NOW - timedelta(days=3)),  # odd minor = pre-release channel
+    def test_closed_1410_is_a_permanent_record_not_reopened(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "release")],
+            extension_tags=[],
+            existing_issues=[legacy_issue(1410, "Cli-v1.4.1", state="CLOSED")],
+        )
+        assert plan["actions"] == []
+        assert plan["reason"] == "current CLI alert already recorded"
+
+
+class TestConvergentReconciliation:
+    def test_extension_first_then_cli_is_immediately_satisfied(self):
+        # The Extension event sees no stable CLI. The later CLI event sees both
+        # co-located refs and therefore never creates a transient alert.
+        before_cli = cec.reconcile_corelease(
+            cli_tags=[],
+            extension_tags=[tag("Extension-v1.6.1", "same")],
+            existing_issues=[],
+        )
+        after_cli = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "same")],
+            extension_tags=[tag("Extension-v1.6.1", "same")],
+            existing_issues=[],
+        )
+        assert before_cli["actions"] == []
+        assert after_cli["actions"] == []
+
+    def test_cli_first_then_extension_converges_to_no_open_alert(self):
+        before_extension = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "same")],
+            extension_tags=[],
+            existing_issues=[],
+        )
+        assert len(actions(before_extension, "create")) == 1
+
+        after_extension = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "same")],
+            extension_tags=[tag("Extension-v1.6.1", "same")],
+            existing_issues=[issue(1410, "Cli-v1.4.1")],
+        )
+        assert [(a["issue_number"], a["reason"]) for a in actions(after_extension, "close")] == [
+            (1410, "satisfied"),
         ]
-        selected = cec.select_latest_extension(tags)
-        assert selected[0] == "Extension-v1.5.0"
+        assert actions(after_extension, "create") == []
+
+    def test_same_timestamp_is_irrelevant_when_commits_differ(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "cli-commit")],
+            extension_tags=[tag("Extension-v9.0.0", "different-commit")],
+            existing_issues=[],
+        )
+        assert len(actions(plan, "create")) == 1
+
+    def test_higher_cli_closes_old_alert_and_opens_keyed_current_alert(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.0", "old"),
+                tag("Cli-v1.4.1", "new"),
+            ],
+            extension_tags=[],
+            existing_issues=[issue(1375, "Cli-v1.4.0")],
+        )
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (1375, "superseded"),
+        ]
+        create = actions(plan, "create")
+        assert len(create) == 1
+        assert create[0]["cli_tag"] == "Cli-v1.4.1"
+        assert [action["kind"] for action in plan["actions"]] == ["create", "close"]
+
+    def test_equal_precedence_build_metadata_uses_selection_tiebreak_for_supersession(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.1", "plain"),
+                tag("Cli-v1.4.1+hotfix", "hotfix"),
+            ],
+            extension_tags=[tag("Extension-v1.6.1", "hotfix")],
+            existing_issues=[issue(20, "Cli-v1.4.1")],
+        )
+        assert plan["latest_cli_tag"] == "Cli-v1.4.1+hotfix"
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (20, "superseded"),
+        ]
+        assert actions(plan, "create") == []
+
+    def test_unlabeled_spoof_marker_does_not_block_current_alert(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[issue(99, "Cli-v1.4.1", labeled=False)],
+        )
+        assert len(actions(plan, "create")) == 1
+
+    def test_unlabeled_legacy_field_does_not_block_current_alert(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[legacy_issue(99, "Cli-v1.4.1", labeled=False)],
+        )
+        assert len(actions(plan, "create")) == 1
+
+    def test_oldest_closed_record_closes_every_later_open_duplicate(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[
+                issue(10, "Cli-v1.4.1", state="CLOSED"),
+                issue(11, "Cli-v1.4.1"),
+                issue(12, "Cli-v1.4.1"),
+            ],
+        )
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (11, "duplicate"),
+            (12, "duplicate"),
+        ]
+        assert all("issue #10" in action["comment"] for action in actions(plan, "close"))
+
+    def test_oldest_open_record_remains_canonical_when_later_record_is_closed(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[
+                issue(10, "Cli-v1.4.1"),
+                issue(11, "Cli-v1.4.1", state="CLOSED"),
+            ],
+        )
+        assert plan["actions"] == []
 
 
-# ---------------------------------------------------------------------------
-# Issue body formatting
-# ---------------------------------------------------------------------------
+class TestIssueApplication:
+    def test_create_and_close_use_body_files_and_no_shell(self):
+        calls: list[list[str]] = []
 
-class TestBuildIssueBody:
-    def test_body_mentions_tags_and_bundle(self):
-        body = cec.build_issue_body("Cli-v1.3.0", "Extension-v1.4.0")
-        assert "Cli-v1.3.0" in body
-        assert "Extension-v1.4.0" in body
-        assert "bundle:cli" in body
+        def runner(args):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "", "")
 
-    def test_body_mentions_opt_out(self):
-        body = cec.build_issue_body("Cli-v1.3.0", "Extension-v1.4.0")
-        assert "opt-out" in body.lower() or "opt out" in body.lower()
+        plan = {
+            "actions": [
+                {
+                    "kind": "close",
+                    "issue_number": 1375,
+                    "cli_tag": "Cli-v1.4.0",
+                    "reason": "satisfied",
+                    "comment": "resolved",
+                },
+                {
+                    "kind": "create",
+                    "cli_tag": "Cli-v1.4.1",
+                    "reason": "missing",
+                    "title": "safe title",
+                    "body": "safe body",
+                },
+            ],
+        }
+        cec.apply_plan(plan, "owner/repo", runner=runner)
+        assert [call[:3] for call in calls] == [
+            ["gh", "issue", "comment"],
+            ["gh", "issue", "close"],
+            ["gh", "issue", "create"],
+        ]
+        assert "--body-file" in calls[0]
+        assert "--body-file" in calls[2]
+        assert all(isinstance(call, list) for call in calls)
 
-    def test_body_links_public_tool_neutral_release_runbook(self):
-        body = cec.build_issue_body("Cli-v1.3.0", "Extension-v1.4.0")
-        assert "docs/RELEASE.md#release-scope-analysis" in body
+    def test_nonzero_github_result_stops_reconciliation(self):
+        def runner(args):
+            return subprocess.CompletedProcess(args, 1, "", "permission denied")
+
+        with pytest.raises(RuntimeError, match="permission denied"):
+            cec.apply_plan({
+                "actions": [{
+                    "kind": "create",
+                    "cli_tag": "Cli-v1.4.1",
+                    "reason": "missing",
+                    "title": "title",
+                    "body": "body",
+                }],
+            }, "owner/repo", runner=runner)
+
+    def test_failed_replacement_create_leaves_old_alert_untouched(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.0", "old"),
+                tag("Cli-v1.4.1", "new"),
+            ],
+            extension_tags=[],
+            existing_issues=[legacy_issue(1375, "Cli-v1.4.0")],
+        )
+        calls: list[list[str]] = []
+
+        def runner(args):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 1, "", "create failed")
+
+        with pytest.raises(RuntimeError, match="create failed"):
+            cec.apply_plan(plan, "owner/repo", runner=runner)
+        assert [call[:3] for call in calls] == [["gh", "issue", "create"]]
+
+    def test_generated_issue_links_only_public_runbook(self):
+        body = cec.build_issue_body("Cli-v1.4.1", "Extension-v1.6.0")
+        assert "docs/RELEASE.md#cli-extension-co-release-reconciliation" in body
         assert ".claude/" not in body
 
 
-# ---------------------------------------------------------------------------
-# Workflow wiring — the guard is actually reachable from CI
-# ---------------------------------------------------------------------------
-
 class TestWorkflowWiring:
-    """The guard is worthless unless the workflow can see a Cli tag push."""
-
     def _load_workflow(self) -> dict:
         try:
             import yaml  # type: ignore
-            with WORKFLOW_PATH.open(encoding="utf-8") as f:
-                return yaml.safe_load(f)
         except ImportError:
-            pytest.skip("PyYAML not installed; cannot parse workflow YAML")
+            pytest.skip("PyYAML not installed")
+        return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
-    def test_workflow_triggers_on_cli_tag_push(self):
-        wf = self._load_workflow()
-        on = wf.get("on") or wf.get(True)  # some loaders parse `on` as True
-        push = on.get("push", {}) if isinstance(on, dict) else {}
-        tags = push.get("tags") or []
-        assert any("Cli-v" in str(t) for t in tags), (
-            f"Workflow must trigger on a Cli-v* tag push; got tags={tags!r}"
-        )
+    def test_workflow_triggers_on_both_cli_and_extension_tags(self):
+        workflow = self._load_workflow()
+        on = workflow.get("on") or workflow.get(True)
+        tags = on["push"]["tags"]
+        assert "Cli-v*" in tags
+        assert "Extension-v*" in tags
 
-    def test_corelease_job_files_issue_with_label(self):
-        text = WORKFLOW_PATH.read_text(encoding="utf-8")
-        assert "check_extension_corelease.py" in text, (
-            "Workflow must invoke the co-release guard script"
+    def test_workflow_serializes_reconciliation_and_lists_all_records(self):
+        workflow = self._load_workflow()
+        job = workflow["jobs"]["extension-corelease-detection"]
+        assert job["concurrency"]["cancel-in-progress"] is False
+        runs = "\n".join(
+            str(step.get("run", "")) for step in job["steps"]
         )
-        assert "release:extension-corelease" in text, (
-            "Workflow must file/dedup on the release:extension-corelease label"
+        assert "--state all" in runs
+        assert "--apply" in runs
+        assert "--has-open-issue" not in runs
+        assert "gh issue create" not in runs
+        assert "gh issue close" not in runs
+        checkout = next(
+            step for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
         )
+        assert checkout["with"]["persist-credentials"] is False
+
+    def test_workflow_retains_least_permissions(self):
+        workflow = self._load_workflow()
+        assert workflow["permissions"] == {"contents": "read", "issues": "write"}
