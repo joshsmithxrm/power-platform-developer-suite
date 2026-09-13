@@ -271,7 +271,7 @@ def reconcile_corelease(
             latest_cli is not None
             and cli_version is not None
             and latest_version is not None
-            and cli_version < latest_version
+            and (cli_version, cli_name) < (latest_version, latest_cli.name)
         ):
             for issue in open_issues:
                 actions.append(_close_action(
