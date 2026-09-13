@@ -34,6 +34,10 @@ PUBLIC_RELEASE_RUNBOOK = (
 _MARKER_RE = re.compile(
     rf"<!--\s*{re.escape(MARKER_PREFIX)}(Cli-v[^\s<>]+)\s*-->",
 )
+_LEGACY_TAG_FIELD_RE = re.compile(
+    r"^\|\s*Latest stable Cli tag\s*\|\s*`(Cli-v[^`\s<>]+)`\s*\|\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -113,13 +117,20 @@ def issue_marker(cli_tag: str) -> str:
 
 
 def marker_cli_tag(issue: ExistingIssue) -> Optional[str]:
-    """Return the owned CLI key, requiring both the label and valid marker."""
+    """Return the owned CLI key from a current marker or exact legacy field.
+
+    The label is required for both formats. Before stable markers existed, the
+    workflow emitted an exact ``Latest stable Cli tag`` table row. Recognizing
+    that narrowly modeled row migrates open and closed audit records without
+    treating arbitrary prose as workflow-owned state.
+    """
     if CORELEASE_LABEL not in issue.labels:
         return None
-    match = _MARKER_RE.search(issue.body)
-    if match is None or not is_stable_cli_tag(match.group(1)):
-        return None
-    return match.group(1)
+    for pattern in (_MARKER_RE, _LEGACY_TAG_FIELD_RE):
+        match = pattern.search(issue.body)
+        if match is not None and is_stable_cli_tag(match.group(1)):
+            return match.group(1)
+    return None
 
 
 def build_flag_message(cli_tag: str) -> str:
@@ -318,8 +329,11 @@ def reconcile_corelease(
                 ),
             })
 
+    # A replacement is created before its superseded predecessor is closed.
+    # If GitHub rejects the create, the old actionable alert remains visible
+    # and the failed tag run can be rerun safely.
     actions.sort(key=lambda action: (
-        0 if action["kind"] == "close" else 1,
+        0 if action["kind"] == "create" else 1,
         int(action.get("issue_number", 0)),
         action["cli_tag"],
     ))
