@@ -82,12 +82,15 @@ class TestOpensIssueOnPatchLabel:
         )
 
     def test_workflow_trigger_is_pr_closed_on_main(self):
-        """Workflow must fire on pull_request closed events targeting main."""
+        """Workflow must fire on closed and late-labeled events targeting main."""
         wf = _load_workflow()
         on = wf.get("on") or wf.get(True)  # YAML parses `on` as True in some loaders
         pr_trigger = on.get("pull_request", {}) if isinstance(on, dict) else {}
         assert "closed" in (pr_trigger.get("types") or []), (
             "Workflow trigger must include pull_request type: closed"
+        )
+        assert "labeled" in (pr_trigger.get("types") or []), (
+            "Workflow trigger must include pull_request type: labeled"
         )
         assert "main" in (pr_trigger.get("branches") or []), (
             "Workflow trigger must target branch: main"
@@ -111,8 +114,31 @@ class TestOpensIssueOnPatchLabel:
         """The graph cannot come from a newer moving main checkout."""
         wf = _load_workflow()
         job = wf["jobs"]["patch-release-detection"]
-        checkout = next(step for step in job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+        checkout = next(
+            step for step in job["steps"]
+            if step.get("name") == "Checkout analyzed merge commit"
+        )
         assert "github.event.pull_request.merge_commit_sha" in checkout["with"]["ref"]
+        assert checkout["with"]["path"] == "analyzed"
+
+    def test_late_event_uses_pinned_current_tools_with_historical_graph(self):
+        """Old merges need current helpers without substituting a newer graph."""
+        wf = _load_workflow()
+        steps = wf["jobs"]["patch-release-detection"]["steps"]
+        tools_checkout = next(
+            step for step in steps
+            if step.get("name") == "Checkout pinned release automation"
+        )
+        assert "github.workflow_sha" in tools_checkout["with"]["ref"]
+        assert tools_checkout["with"]["path"] == "automation"
+
+        build_step = next(
+            step for step in steps
+            if step.get("name") == "Build explained release advisory"
+        )
+        assert "automation/scripts/ci/release_plan.py" in build_step["run"]
+        assert "--repo-root analyzed" in build_step["run"]
+        assert "--delivery-manifest automation/scripts/ci/release_surfaces.json" in build_step["run"]
 
     def test_release_plan_rejects_graph_revision_skew(self, monkeypatch):
         """Defense in depth: the CLI refuses a diff/graph revision mismatch."""
@@ -209,10 +235,10 @@ class TestUnknownPackageWarning:
         wf = _load_workflow()
         steps = wf["jobs"]["patch-release-detection"]["steps"]
         create_step = next(step for step in steps if step.get("name") == "Create patch release issue")
-        log_step = next(step for step in steps if step.get("name") == "Log no-product-impact decision")
-        assert create_step["if"] == "steps.evaluate.outputs.release_needed == 'true'"
-        assert log_step["if"] == "steps.evaluate.outputs.release_needed != 'true'"
-        assert "No product release issue opened" in log_step["run"]
+        log_step = next(step for step in steps if step.get("name") == "Log decision when no issue is opened")
+        assert create_step["if"] == "steps.prepare.outputs.should_create == 'true'"
+        assert log_step["if"] == "steps.prepare.outputs.should_create != 'true'"
+        assert "No patch release issue opened" in log_step["run"]
 
     def test_workflow_does_not_use_git_refname_as_semver(self):
         assert "--sort=-v:refname" not in _workflow_text()

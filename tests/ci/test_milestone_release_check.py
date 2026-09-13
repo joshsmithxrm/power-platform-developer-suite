@@ -17,6 +17,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
 
 import check_milestone_completion as cmc  # noqa: E402
 
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "milestone-release-check.yml"
+
 
 # ---------------------------------------------------------------------------
 # AC-03: opens issue when milestone has merged PRs
@@ -121,13 +123,14 @@ class TestBuildIssueBodyDeferred:
 
 class TestBuildIssueBodyChecklist:
     def test_body_includes_release_checklist(self):
-        """build_issue_body includes a checklist item referencing /release."""
+        """build_issue_body links the public, tool-neutral release runbook."""
         body = cmc.build_issue_body(
             "v1.1.0",
             "",
             [{"number": 1, "title": "some PR"}],
         )
-        assert "/release" in body
+        assert "docs/RELEASE.md" in body
+        assert ".claude/skills" not in body
 
 
 class TestMainWritesToStdout:
@@ -153,4 +156,26 @@ class TestMainWritesToStdout:
         assert "v2.0.0" in captured.out
         assert "#10" in captured.out
         assert "Add feature X" in captured.out
-        assert "/release" in captured.out
+        assert "docs/RELEASE.md" in captured.out
+
+
+class TestWorkflowFailureHandling:
+    def test_helper_returns_nonzero_for_invalid_merged_pr_json(
+        self, tmp_path, capsys
+    ):
+        prs_file = tmp_path / "merged_prs.json"
+        prs_file.write_text("not-json", encoding="utf-8")
+
+        rc = cmc.main([
+            "--milestone", "v2.0.0",
+            "--merged-prs", str(prs_file),
+            "--out", str(tmp_path / "issue.md"),
+        ])
+
+        assert rc == 1
+        assert "could not read merged PRs" in capsys.readouterr().err
+
+    def test_workflow_does_not_swallow_helper_failure(self):
+        text = WORKFLOW_PATH.read_text(encoding="utf-8")
+        assert "check_milestone_completion.py" in text
+        assert "--out issue_body.md || true" not in text

@@ -320,7 +320,12 @@ class ReleaseGraph:
         return {**self.build_nodes, **self.surfaces}
 
     @classmethod
-    def discover(cls, repo_root: Path) -> "ReleaseGraph":
+    def discover(
+        cls,
+        repo_root: Path,
+        *,
+        delivery_manifest_path: Optional[Path] = None,
+    ) -> "ReleaseGraph":
         repo_root = repo_root.resolve()
         discovered: dict[str, dict] = {}
         project_to_node: dict[str, str] = {}
@@ -432,7 +437,9 @@ class ReleaseGraph:
             else:
                 build_nodes[name] = node
 
-        manifest_path = repo_root / "scripts" / "ci" / "release_surfaces.json"
+        manifest_path = delivery_manifest_path or (
+            repo_root / "scripts" / "ci" / "release_surfaces.json"
+        )
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             for item in manifest.get("deliverables", []):

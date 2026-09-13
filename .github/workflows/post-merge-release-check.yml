@@ -2,7 +2,7 @@ name: Post-Merge Release Check
 
 on:
   pull_request:
-    types: [closed]
+    types: [closed, labeled]
     branches: [main]
   # The co-release guard (extension-corelease-detection job below) compares the
   # latest Cli-v* and Extension-v* tags. A tag push is not a pull_request event,
@@ -23,7 +23,13 @@ jobs:
   patch-release-detection:
     name: Detect patch release need
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release:patch')
+    if: >-
+      github.event.pull_request.merged == true &&
+      ((github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'release:patch')) ||
+       (github.event.action == 'labeled' && github.event.label.name == 'release:patch'))
+    concurrency:
+      group: patch-release-record-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,24 +42,41 @@ jobs:
           # diff below, even if another PR lands before this job starts.
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
+          path: analyzed
+
+      - name: Checkout pinned release automation
+        uses: actions/checkout@v4
+        with:
+          # A late label can target a merge that predates these scripts. Pin
+          # helpers to the revision containing the workflow that is executing.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          path: automation
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
+      - name: Ensure workflow-owned release labels
+        run: python automation/scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
+
       - name: Build explained release advisory
         id: evaluate
         env:
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          python scripts/ci/release_plan.py \
+          python automation/scripts/ci/release_plan.py \
+            --repo-root analyzed \
+            --delivery-manifest automation/scripts/ci/release_surfaces.json \
             --base "${MERGE_SHA}^" \
             --head "${MERGE_SHA}" \
             --release-kind patch \
             --channel stable \
             --format json > release-plan.json
-          python scripts/ci/release_plan.py \
+          python automation/scripts/ci/release_plan.py \
+            --repo-root analyzed \
+            --delivery-manifest automation/scripts/ci/release_surfaces.json \
             --base "${MERGE_SHA}^" \
             --head "${MERGE_SHA}" \
             --release-kind patch \
@@ -63,43 +86,43 @@ jobs:
           echo "Release advisory:"
           cat release-plan.json
 
-      - name: Create patch release issue
-        if: steps.evaluate.outputs.release_needed == 'true'
-        env:
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Find all existing patch release records
         run: |
-          TITLE=$(python scripts/ci/release_plan.py \
-            --base "${MERGE_SHA}^" \
-            --head "${MERGE_SHA}" \
-            --release-kind patch \
-            --channel stable \
-            --format title)
-          PR_URL=$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")
-          PR_TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --limit 10000 \
+            --json number,state,body \
+            > existing-release-records.json
 
-          printf '%s\n' \
-            "A PR labeled \`release:patch\` merged to main. Review this explained scope before taking any release action." \
-            "" \
-            "**Merged PR:** ${PR_URL}" \
-            "**PR title:** ${PR_TITLE}" \
-            "" > issue-body.md
-          cat release-plan.md >> issue-body.md
-          printf '%s\n' \
-            "### Maintainer Checklist" \
-            "" \
-            "- [ ] Confirm direct changes, downstream deliverables, and MinVer prerequisites" \
-            "- [ ] Update CHANGELOGs for release targets" \
-            "- [ ] Follow the public [release procedure](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/RELEASE.md#release-scope-analysis)" \
-            "- [ ] Verify every publish before closing this issue" >> issue-body.md
+      - name: Prepare idempotent patch release record
+        id: prepare
+        run: |
+          python automation/scripts/ci/patch_release_issue.py \
+            --event "$GITHUB_EVENT_PATH" \
+            --plan-json release-plan.json \
+            --plan-markdown release-plan.md \
+            --existing-issues existing-release-records.json \
+            --title-out issue-title.txt \
+            --body-out issue-body.md \
+            --decision-out issue-decision.json
+          echo "should_create=$(jq -r '.should_create' issue-decision.json)" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' issue-decision.json)" >> "$GITHUB_OUTPUT"
 
+      - name: Create patch release issue
+        if: steps.prepare.outputs.should_create == 'true'
+        env:
+          ISSUE_TITLE_FILE: issue-title.txt
+        run: |
           gh issue create \
-            --title "$TITLE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$(cat "$ISSUE_TITLE_FILE")" \
             --label "release:patch" \
             --body-file issue-body.md
 
-      - name: Log no-product-impact decision
-        if: steps.evaluate.outputs.release_needed != 'true'
-        run: echo "No product release issue opened; the advisory found only deterministic non-product changes."
+      - name: Log decision when no issue is opened
+        if: steps.prepare.outputs.should_create != 'true'
+        run: echo "No patch release issue opened. Reason=${{ steps.prepare.outputs.reason }}"
 
   extension-corelease-detection:
     name: Detect missing Extension bundled-CLI refresh
@@ -121,6 +144,9 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Ensure workflow-owned release labels
+        run: python scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
 
       - name: Check for existing open co-release issue
         id: open-issue
@@ -146,13 +172,6 @@ jobs:
       - name: File Extension refresh issue
         if: steps.evaluate.outputs.should_open == 'true'
         run: |
-          # Ensure the dedup label exists (this is a new label; --force upserts
-          # idempotently so the create below never fails on a missing label).
-          gh label create "release:extension-corelease" \
-            --color BFD4F2 \
-            --description "A Cli-v* release shipped without an Extension bundled-CLI refresh" \
-            --force
-
           # Title/body derive only from the tag state, not the dedup flag, so we
           # regenerate them here without --has-open-issue.
           TITLE=$(python scripts/ci/check_extension_corelease.py --format title)

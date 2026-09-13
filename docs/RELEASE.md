@@ -71,6 +71,27 @@ CHANGELOG, create tags only after review, push tags individually, monitor every
 publish workflow, and verify the public artifacts before closing the release
 record.
 
+### Patch release records
+
+`post-merge-release-check.yml` evaluates a merged PR when `release:patch` is
+already present at merge time or when the label is added later. Each generated
+issue contains a stable marker derived only from the PR number. Reruns and label
+removal/re-addition search both open and closed issues for that marker, so an
+existing audit record is neither duplicated nor reopened. Runs are serialized
+per PR to keep simultaneous close/label events from racing; different PRs retain
+independent records. For historical late-label events, the source and MSBuild
+graph come from the original merge commit while the helper scripts and
+non-MSBuild delivery manifest are pinned to the exact workflow revision. This
+keeps old merges analyzable without substituting a moving `main` graph.
+
+Workflow-owned release labels are declared in
+`scripts/ci/release_labels.json`. Release workflows reconcile all four labels
+from that manifest before use and stop with an explicit setup error if GitHub
+does not permit the create/update operation. Patch issue titles and bodies are
+built by `scripts/ci/patch_release_issue.py`. PR titles are treated as untrusted
+text, and issue bodies reach GitHub through `--body-file` rather than shell
+interpolation.
+
 The repository's optional `.claude/skills/release/SKILL.md` documents the same
 ceremony for supported agents; this public document remains the authoritative,
 tool-neutral entry point for generated GitHub issues.

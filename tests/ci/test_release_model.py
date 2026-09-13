@@ -137,6 +137,38 @@ class TestProjectGraphDiscovery:
     def test_delivery_manifest_declares_extension_bundle(self, graph: ReleaseGraph):
         assert graph.surfaces["PPDS.Extension"].bundles == {"PPDS.Cli"}
 
+    def test_explicit_delivery_manifest_can_model_a_historical_checkout(
+        self, tmp_path: Path
+    ):
+        manifest = tmp_path / "release_surfaces.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "deliverables": [
+                        {
+                            "name": "PPDS.HistoricalExtension",
+                            "root": "src/PPDS.Extension",
+                            "tagPrefix": "Extension-v",
+                            "bundlesProjects": [
+                                "src/PPDS.Cli/PPDS.Cli.csproj"
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        historical = ReleaseGraph.discover(
+            REPO_ROOT,
+            delivery_manifest_path=manifest,
+        )
+
+        assert "PPDS.Extension" not in historical.surfaces
+        assert historical.surfaces["PPDS.HistoricalExtension"].bundles == {
+            "PPDS.Cli"
+        }
+
     def test_direct_consumer_repropagates_new_upstream_reasons(self):
         graph = ReleaseGraph(
             surfaces={
