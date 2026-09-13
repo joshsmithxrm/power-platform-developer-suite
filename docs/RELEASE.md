@@ -71,6 +71,36 @@ CHANGELOG, create tags only after review, push tags individually, monitor every
 publish workflow, and verify the public artifacts before closing the release
 record.
 
+### Patch release records
+
+`post-merge-release-check.yml` evaluates a merged PR when `release:patch` is
+already present at merge time or when the label is added later. Each generated
+issue contains a stable marker derived only from the PR number. Reruns and label
+removal/re-addition search both open and closed `release:patch` issues for that
+marker, so an unlabeled issue cannot spoof a workflow-owned audit record and an
+existing labeled record is neither duplicated nor reopened. Runs are serialized
+per PR to keep simultaneous close/label events from racing; different PRs retain
+independent records.
+
+The workflow uses `pull_request_target` so merged PRs from forks receive the
+base repository's issue-write token. Its trust boundary is intentionally narrow:
+every executable repository script comes from `github.workflow_sha`, checkout
+credentials are not persisted, and the original merge commit is a separate
+data-only checkout used for semantic diff, MSBuild XML, and its contemporaneous
+delivery manifest. No code, action, or script from that historical checkout is
+executed. If the old revision predates the manifest, the trusted workflow
+revision supplies a fallback; project references that did not exist historically
+are mapped conservatively to all historical build nodes. This keeps old merges
+analyzable without substituting a moving `main` graph or silently under-reporting.
+
+Workflow-owned release labels are declared in
+`scripts/ci/release_labels.json`. Release workflows reconcile all four labels
+from that manifest before use and stop with an explicit setup error if GitHub
+does not permit the create/update operation. Patch issue titles and bodies are
+built by `scripts/ci/patch_release_issue.py`. PR titles are treated as untrusted
+text, and issue bodies reach GitHub through `--body-file` rather than shell
+interpolation.
+
 The repository's optional `.claude/skills/release/SKILL.md` documents the same
 ceremony for supported agents; this public document remains the authoritative,
 tool-neutral entry point for generated GitHub issues.

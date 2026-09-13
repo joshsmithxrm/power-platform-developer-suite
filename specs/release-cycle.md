@@ -156,7 +156,7 @@ For multi-package patches or patches that touch the Extension:
 
 ### Severity-Based Patch Trigger
 
-Human policy — the `release:patch` label is applied by the maintainer at PR merge time based on judgment. The criteria below are guidelines, not automated enforcement.
+Human policy — the `release:patch` label is applied by the maintainer based on judgment. It may be present when the PR merges or added to an already-merged PR. The criteria below are guidelines, not automated enforcement.
 
 A merged PR warrants the `release:patch` label when any of these apply:
 
@@ -176,11 +176,17 @@ A merged PR does NOT warrant `release:patch`:
 
 **Flow 1 — Patch release (label-triggered):**
 
-1. **PR merges to main** with `release:patch` label
+1. **PR merges to main** with `release:patch`, or the label is added to the merged PR later
 2. **`post-merge-release-check.yml` fires**: uses the release model to analyze the exact merge diff and opens an advisory issue only when product impact exists
-3. **Issue body includes**: explained direct changes, internal build changes, downstream deliverables, delivery/MinVer tag prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
+3. **Issue body includes**: a stable per-PR marker, explained direct changes, internal build changes, downstream deliverables, delivery/MinVer tag prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
 4. **Maintainer reviews issue**, runs `/release` for the affected package(s)
 5. **Maintainer closes issue** after publish verification
+
+Patch records are permanent audit records. Reruns and label toggles search both
+open and closed `release:patch` issues for the per-PR marker. Only a labeled,
+workflow-owned record can deduplicate a run; an unlabeled issue containing a
+copied marker has no authority. An existing labeled record is never duplicated
+or reopened; a different merged PR receives a different marker and record.
 
 **Flow 2 — Minor release (milestone-driven):**
 
@@ -235,6 +241,9 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 - Tag push is irreversible — never auto-tag or auto-publish
 - Patch scope must explain direct changes, downstream deliverables, delivery prerequisites, and MinVer prerequisite-only tags separately; a prerequisite tag is not misreported as a product change
 - Release-scope automation is advisory and must never create/push tags, publish packages, or dispatch release workflows
+- Workflow-owned release labels come from one checked-in manifest and are created or reconciled idempotently before use
+- Untrusted event text is rendered by tested Python helpers and issue bodies are passed to GitHub through files, never interpolated into shell commands
+- Merged fork PRs use a least-privilege `pull_request_target` path: strict merged/base/action/label gates apply, executable repository automation comes only from `github.workflow_sha`, checkout credentials are not persisted, and the historical merge checkout (including its delivery manifest) is data-only; when that manifest is absent, a trusted current fallback maps missing project references conservatively
 - Latest tag selection must use strict SemVer 2.0 precedence with ASCII digits only, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
@@ -273,12 +282,24 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-22 | The release graph discovers publishable and build-only MSBuild projects, all `ProjectReference` edges, declarative packed inputs, and non-MSBuild delivery edges while keeping internal nodes out of release targets | `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
 | AC-23 | Release advisories separate explained direct changes, internal build changes, downstream deliverables, same-commit delivery prerequisites, and MinVer prerequisites; packed assets override documentation suppression, NuGet IDs match case-insensitively, deterministic non-product changes produce no impact, and uncertain source/build changes remain conservative | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
 | AC-24 | A production-shaped PR #1402 fixture yields seven affected surfaces excluding Plugins; stable Query/Migration plans require Dataverse; coordinated minors plan all surfaces | `tests/ci/test_release_model.py::TestImpactAnalysis` | ✅ |
+| AC-25 | Patch detection handles both merge-time labels and `release:patch` added to an already-merged PR, including the production-shaped PR #1399 event and merged PRs originating from forks | `tests/ci/test_patch_release_issue.py::TestEventEligibility` | ✅ |
+| AC-26 | Each patch record contains a stable PR marker; only labeled workflow records deduplicate, reruns, label removal/re-addition, and closed records do not duplicate or reopen it, and different PRs remain independent | `tests/ci/test_patch_release_issue.py::TestPatchRecordIdempotency` | ✅ |
+| AC-27 | Tested Python builds patch titles and bodies, hostile PR titles remain inert, GitHub receives the body through `--body-file`, and the public release runbook is linked | `tests/ci/test_patch_release_issue.py::TestSafeIssueRendering` | ✅ |
+| AC-28 | One authoritative manifest defines all four workflow-owned release labels and synchronization creates or updates them idempotently with precise failure diagnostics | `tests/ci/test_release_labels.py` | ✅ |
+| AC-29 | Milestone helper failures stop issue creation instead of being swallowed | `tests/ci/test_milestone_release_check.py::TestWorkflowFailureHandling` | ✅ |
+| AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
 
 ### Edge Cases
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
 | PR has `release:patch` but contains only deterministic non-product changes | Advisory reports no impact and the workflow does not open a release issue |
+| `release:patch` is added after merge | The labeled event analyzes the original merge commit and creates the same per-PR record the close event would have created |
+| A patch workflow is rerun or its label is removed and re-added | Search open and closed records for the stable marker; do not create or reopen anything when one exists |
+| An unlabeled issue copies a valid patch-record marker | Ignore it; only an issue carrying the workflow-owned `release:patch` label can deduplicate a record |
+| A merged PR originated from a fork | Use the trusted base workflow and issue-write token; inspect the merged revision only as data and never execute repository content from that checkout |
+| A PR title contains shell or Markdown metacharacters and newlines | Render it as escaped text in Python and pass the issue body by file so it cannot affect command execution or issue structure |
+| A workflow-owned label is missing or has drifted | Create or reconcile it from the checked-in manifest; stop with the exact label and command error if synchronization fails |
 | Source change cannot be classified with certainty | Include its owning release surface conservatively and explain why |
 | Repository-wide .NET build input changes | Include every .NET surface and downstream bundled deliverables |
 | Central package version and another central-management setting change together | Map the version delta to consumers and conservatively include every .NET surface for the residual semantic change |
@@ -373,6 +394,7 @@ version-consistency tags rather than product changes.
 
 | Date | Change |
 |------|--------|
+| 2026-09-12 | Make patch release records late-label and fork aware, label-authenticated and permanently idempotent per PR, safe for untrusted event text, and backed by one reconciled release-label manifest; keep historical merge content data-only and stop swallowing milestone helper failures (AC-25 through AC-30) |
 | 2026-09-12 | Add bounded, read-only public artifact verification after NuGet, CLI GitHub Release, and four-target Marketplace publication (AC-17 through AC-20) |
 | 2026-09-12 | Add strict ASCII SemVer and explained MSBuild-derived release impact planning, including packed package assets, build-only dependency nodes, repository-wide build inputs, and central-package semantics (AC-21–AC-24) |
 | 2026-04-25 | Add security review gate (AC-13), extension auto-dispatch (AC-14), docs PR GitHub App setup (AC-15), unified tag convention (AC-16) |
