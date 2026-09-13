@@ -200,9 +200,29 @@ or reopened; a different merged PR receives a different marker and record.
 **Flow 3 — Cadence floor (scheduled):**
 
 1. **Weekly cron** (`release-cadence-check.yml`) runs on Monday
-2. **Checks**: last release tag date vs. today, commit count since last tag
-3. **If >8 weeks and >0 unreleased commits**: opens issue titled "Release check-in: {N} commits unreleased, {W} weeks since last release"
-4. **Maintainer triages**: release now, defer with reason, or close as not-needed
+2. **Discovers** release prefixes from the product graph, rejects malformed tags
+   with the shared strict SemVer model, and selects the most recently created
+   valid release tag across the independent package version lines
+3. **Normalizes** git's ISO-strict tag timestamp and the current time to UTC,
+   then checks the elapsed time and commit count since that exact tag
+4. **If >8 weeks and >0 unreleased commits**: opens issue titled "Release check-in: {N} commits unreleased, {W} weeks since last release"
+5. **Maintainer triages**: release now, defer with reason, or close as not-needed
+
+**Flow 4 — CLI/Extension co-release reconciliation (tag-driven):**
+
+1. **Either `Cli-v*` or `Extension-v*` tag arrives** and triggers the same
+   serialized reconciliation job
+2. **Strict SemVer selection** identifies the highest stable CLI tag; CLI
+   prereleases and malformed tags do not displace it
+3. **Commit co-location**, not tag creation time or independent version
+   comparison, proves satisfaction: an `Extension-v*` tag must point to the
+   same commit as that stable CLI tag
+4. **Missing relationship** creates one workflow-owned issue keyed by a stable
+   CLI-tag marker; open and closed records both prevent duplicate/reopened alerts
+5. **Later reconciliation** comments and closes an open alert when its
+   co-located Extension tag arrives. A higher stable CLI closes older open
+   alerts as superseded and becomes the only current alert if it is also missing
+   an Extension tag. Either tag-push order converges to the same actionable state
 
 ### Tag Convention
 
@@ -288,6 +308,8 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-28 | One authoritative manifest defines all four workflow-owned release labels and synchronization creates or updates them idempotently with precise failure diagnostics | `tests/ci/test_release_labels.py` | ✅ |
 | AC-29 | Milestone helper failures stop issue creation instead of being swallowed | `tests/ci/test_milestone_release_check.py::TestWorkflowFailureHandling` | ✅ |
 | AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
+| AC-31 | Cadence selection accepts production ISO-strict offsets, normalizes elapsed-time calculations to UTC, filters malformed release tags through the shared strict SemVer model, and fails loudly on invalid timestamps | `tests/ci/test_release_cadence_check.py::TestUtcAwareProductionTimestamps`, `tests/ci/test_release_cadence_check.py::TestStrictReleaseTagSelection` | ✅ |
+| AC-32 | CLI and Extension tag events run one serialized, CLI-keyed reconciliation: exact commit co-location satisfies the relationship, later Extension tags comment/close matching alerts, and higher stable CLI tags supersede older alerts without duplicate/reopened records | `tests/ci/test_extension_corelease_check.py::TestIncident1375`, `tests/ci/test_extension_corelease_check.py::TestIncident1410`, `tests/ci/test_extension_corelease_check.py::TestConvergentReconciliation` | ✅ |
 
 ### Edge Cases
 
@@ -312,6 +334,11 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |
 | Two `release:patch` PRs merge in quick succession | Two separate issues opened — maintainer can batch into one patch release |
 | Cadence check runs but an open check-in issue already exists | No duplicate issue — workflow checks for existing open issues with the label |
+| Git tag carries an ISO-strict offset but cadence uses current UTC time | Normalize both instants to UTC before calculating complete elapsed weeks |
+| A malformed release-looking tag is newer than the last real release | Emit a diagnostic and retain the most recent valid strict-SemVer release tag |
+| CLI tag arrives before its co-located Extension tag (#1375/#1410) | Open one CLI-keyed alert, then comment and close it when the Extension event observes both tags on the same commit |
+| Extension tag arrives before its co-located CLI tag | First event is silent; the later CLI event observes the co-located pair and remains silent |
+| A higher stable CLI arrives while an older co-release alert is open | Comment/close the older alert as superseded and create at most one alert keyed to the higher CLI when needed |
 | Stabilization branch diverges from main | Maintainer merges back to main after release; conflicts resolved manually |
 | Public feed propagation is delayed | Retry every two minutes for at most 30 attempts, then fail and escalate |
 | One public target, checksum, or version differs | Fail immediately and preserve every published artifact for investigation |
@@ -394,6 +421,7 @@ version-consistency tags rather than product changes.
 
 | Date | Change |
 |------|--------|
+| 2026-09-12 | Repair cadence UTC/strict-tag handling and make CLI/Extension alerts commit-co-location based, CLI-keyed, serialized, and self-reconciling for either tag order (AC-31 and AC-32) |
 | 2026-09-12 | Make patch release records late-label and fork aware, label-authenticated and permanently idempotent per PR, safe for untrusted event text, and backed by one reconciled release-label manifest; keep historical merge content data-only and stop swallowing milestone helper failures (AC-25 through AC-30) |
 | 2026-09-12 | Add bounded, read-only public artifact verification after NuGet, CLI GitHub Release, and four-target Marketplace publication (AC-17 through AC-20) |
 | 2026-09-12 | Add strict ASCII SemVer and explained MSBuild-derived release impact planning, including packed package assets, build-only dependency nodes, repository-wide build inputs, and central-package semantics (AC-21–AC-24) |
