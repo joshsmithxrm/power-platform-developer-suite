@@ -227,7 +227,7 @@ Template: use PR #785 as reference (`gh pr view 785 --json body`).
 
 ### 8. Post-Merge: Push Tags
 
-> **Co-release rule:** A `Cli-v*` release includes an `Extension-v*` bundled-CLI refresh tag on the same commit — the vsix publisher resolves that exact co-located CLI tag, so marketplace users only receive CLI changes through an extension release. The advisory workflow runs after either tag arrives and automatically reconciles a transient CLI-keyed alert when the companion tag appears; it never creates a release tag or publishes. Opt out only with a recorded reason in the release PR (e.g. the extension is mid-pre-release cycle).
+> **Co-release rule:** A `Cli-v*` release includes an `Extension-v*` bundled-CLI refresh tag on the same commit — the vsix publisher resolves that exact co-located CLI tag, so marketplace users only receive CLI changes through an extension release. The advisory workflow runs after either tag arrives and automatically reconciles a transient CLI-keyed alert when the companion tag appears; it never creates a release tag or publishes. To opt out, comment the reason on the tag-driven advisory issue and close it (e.g. the extension is mid-pre-release cycle); a note only in the release PR is not the durable opt-out record.
 
 After the PR merges, pull main and push tags **individually** (see Gotcha 6):
 
