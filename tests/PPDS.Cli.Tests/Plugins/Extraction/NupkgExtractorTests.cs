@@ -944,6 +944,69 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Theory]
+    [InlineData("public SupportedPlugin() { }")]
+    [InlineData("public SupportedPlugin(string unsecureConfiguration) { }")]
+    [InlineData("public SupportedPlugin(string unsecureConfiguration, string secureConfiguration) { }")]
+    public void Extract_RuntimePluginWithSupportedDataverseConstructor_Succeeds(
+        string constructorDeclaration)
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"supported-constructor-{Guid.NewGuid():N}.nupkg",
+            "ppds_SupportedConstructor",
+            new TestPackageAssembly(
+                "Contoso.SupportedConstructor",
+                "Contoso.SupportedConstructor.dll",
+                $$"""
+                using System;
+                using Microsoft.Xrm.Sdk;
+                public sealed class SupportedPlugin : IPlugin
+                {
+                    {{constructorDeclaration}}
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+                """,
+                ReferencesSdk: true));
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        Assert.Contains("SupportedPlugin", config.RuntimePluginTypeNames);
+    }
+
+    [Theory]
+    [InlineData("private InvalidPlugin() { }")]
+    [InlineData("public InvalidPlugin(int unsupported) { }")]
+    [InlineData("public InvalidPlugin(string first, string second, string third) { }")]
+    [InlineData("protected InvalidPlugin() { }")]
+    public void Extract_RuntimePluginWithoutSupportedDataverseConstructor_RejectsPackage(
+        string constructorDeclaration)
+    {
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"invalid-constructor-{Guid.NewGuid():N}.nupkg",
+            "ppds_InvalidConstructor",
+            new TestPackageAssembly(
+                "Contoso.InvalidConstructor",
+                "Contoso.InvalidConstructor.dll",
+                $$"""
+                using System;
+                using Microsoft.Xrm.Sdk;
+                public class InvalidPlugin : IPlugin
+                {
+                    {{constructorDeclaration}}
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+                """,
+                ReferencesSdk: true));
+
+        var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("supported public instance constructor", exception.Message);
+        Assert.Contains("(string, string)", exception.Message);
+    }
+
+    [Theory]
     [InlineData("PluginStepAttribute")]
     [InlineData("CustomApiAttribute")]
     public void Extract_LookalikeRegistrationAttribute_DoesNotQualifyAssembly(string attributeName)
@@ -1013,6 +1076,165 @@ public class NupkgExtractorTests : IDisposable
 
         Assert.Equal(ErrorCodes.Plugin.PackageAssemblyNotFound, exception.ErrorCode);
         Assert.Contains("0 PPDS-annotated types", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Extract_LocalLookalikeSubordinateAttribute_IsNotSerialized(bool customApiParameter)
+    {
+        var topLevelAttribute = customApiParameter
+            ? "[official::PPDS.Plugins.CustomApi(UniqueName = \"ppds_Trusted\", DisplayName = \"Trusted\")]"
+            : "[official::PPDS.Plugins.PluginStep(Message = \"Update\", EntityLogicalName = \"account\", Stage = official::PPDS.Plugins.PluginStage.PostOperation)]";
+        var subordinateAttribute = customApiParameter
+            ? "[PPDS.Plugins.CustomApiParameter(Name = \"SpoofedParameter\")]"
+            : "[PPDS.Plugins.PluginImage(Name = \"SpoofedImage\")]";
+        var subordinateAttributeType = customApiParameter
+            ? "CustomApiParameterAttribute"
+            : "PluginImageAttribute";
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"local-subordinate-{customApiParameter}.nupkg",
+            "ppds_LocalSubordinate",
+            new TestPackageAssembly(
+                "Contoso.LocalSubordinate",
+                "Contoso.LocalSubordinate.dll",
+                $$"""
+                extern alias official;
+                using System;
+                using Microsoft.Xrm.Sdk;
+                {{topLevelAttribute}}
+                {{subordinateAttribute}}
+                public sealed class TrustedPlugin : IPlugin
+                {
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+
+                namespace PPDS.Plugins
+                {
+                    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+                    public sealed class {{subordinateAttributeType}} : Attribute
+                    {
+                        public string Name { get; set; } = string.Empty;
+                    }
+                }
+                """,
+                ReferencesSdk: true,
+                ReferencesPpdsPlugins: true,
+                PpdsPluginsAlias: "official"));
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        if (customApiParameter)
+            Assert.Null(Assert.Single(config.CustomApis!).Parameters);
+        else
+            Assert.Empty(Assert.Single(Assert.Single(config.Types).Steps).Images);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Extract_WrongTokenSubordinateAttribute_IsNotSerialized(bool customApiParameter)
+    {
+        var wrongPublicKey = System.Reflection.AssemblyName
+            .GetAssemblyName(Path.Combine(
+                AppContext.BaseDirectory,
+                "TestAssets",
+                "Microsoft.Xrm.Sdk.net462.dll"))
+            .GetPublicKey();
+        Assert.NotNull(wrongPublicKey);
+        var topLevelAttribute = customApiParameter
+            ? "[PPDS.Plugins.CustomApi(UniqueName = \"ppds_Trusted\", DisplayName = \"Trusted\")]"
+            : "[PPDS.Plugins.PluginStep(Message = \"Update\", EntityLogicalName = \"account\", Stage = PPDS.Plugins.PluginStage.PostOperation)]";
+        var subordinateAttribute = customApiParameter
+            ? "[spoof::PPDS.Plugins.CustomApiParameter(Name = \"SpoofedParameter\")]"
+            : "[spoof::PPDS.Plugins.PluginImage(Name = \"SpoofedImage\")]";
+        var subordinateAttributeType = customApiParameter
+            ? "CustomApiParameterAttribute"
+            : "PluginImageAttribute";
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"wrong-token-subordinate-{customApiParameter}.nupkg",
+            "ppds_WrongTokenSubordinate",
+            new TestPackageAssembly(
+                "PPDS.Plugins",
+                "Spoofed.PPDS.Plugins.dll",
+                $$"""
+                namespace PPDS.Plugins
+                {
+                    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = true)]
+                    public sealed class {{subordinateAttributeType}} : System.Attribute
+                    {
+                        public string Name { get; set; } = string.Empty;
+                    }
+                }
+                """,
+                StrongNamePublicKey: wrongPublicKey),
+            new TestPackageAssembly(
+                "Contoso.WrongTokenSubordinate",
+                "Contoso.WrongTokenSubordinate.dll",
+                $$"""
+                extern alias spoof;
+                using System;
+                using Microsoft.Xrm.Sdk;
+                {{topLevelAttribute}}
+                {{subordinateAttribute}}
+                public sealed class TrustedPlugin : IPlugin
+                {
+                    public void Execute(IServiceProvider serviceProvider) { }
+                }
+                """,
+                ReferencesSdk: true,
+                ReferencesPpdsPlugins: true,
+                AssemblyReferences: ["PPDS.Plugins"],
+                AssemblyReferenceAliases: new Dictionary<string, string>
+                {
+                    ["PPDS.Plugins"] = "spoof"
+                }));
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        if (customApiParameter)
+            Assert.Null(Assert.Single(config.CustomApis!).Parameters);
+        else
+            Assert.Empty(Assert.Single(Assert.Single(config.Types).Steps).Images);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Extract_ForwardedSubordinateAttribute_IsNotSerialized(bool customApiParameter)
+    {
+        const string forwarderAssemblyName = "Contoso.PpdsAttributeForwarder";
+        var forwardedType = customApiParameter
+            ? "CustomApiParameterAttribute"
+            : "PluginImageAttribute";
+        var nupkgPath = PluginPackageTestFixture.Create(
+            _scratch,
+            $"forwarded-subordinate-{customApiParameter}.nupkg",
+            "ppds_ForwardedSubordinate",
+            new TestPackageAssembly(
+                forwarderAssemblyName,
+                $"{forwarderAssemblyName}.dll",
+                $$"""
+                using System.Runtime.CompilerServices;
+                [assembly: TypeForwardedTo(typeof(PPDS.Plugins.{{forwardedType}}))]
+                """,
+                ReferencesPpdsPlugins: true),
+            new TestPackageAssembly(
+                "Contoso.ForwardedSubordinate",
+                "Contoso.ForwardedSubordinate.dll",
+                string.Empty,
+                PrecompiledImage: PluginPackageTestFixture.CreatePluginWithForwardedSubordinateAttribute(
+                    forwarderAssemblyName,
+                    customApiParameter)));
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        if (customApiParameter)
+            Assert.Null(Assert.Single(config.CustomApis!).Parameters);
+        else
+            Assert.Empty(Assert.Single(Assert.Single(config.Types).Steps).Images);
     }
 
     [Theory]
@@ -1139,11 +1361,17 @@ public class NupkgExtractorTests : IDisposable
     [InlineData(TestPluginTypeShape.Interface, "PluginStepAttribute")]
     [InlineData(TestPluginTypeShape.OpenGeneric, "PluginStepAttribute")]
     [InlineData(TestPluginTypeShape.Static, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.ValueType, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.PrivateConstructor, "PluginStepAttribute")]
+    [InlineData(TestPluginTypeShape.UnsupportedConstructor, "PluginStepAttribute")]
     [InlineData(TestPluginTypeShape.Concrete, "CustomApiAttribute")]
     [InlineData(TestPluginTypeShape.Abstract, "CustomApiAttribute")]
     [InlineData(TestPluginTypeShape.Interface, "CustomApiAttribute")]
     [InlineData(TestPluginTypeShape.OpenGeneric, "CustomApiAttribute")]
     [InlineData(TestPluginTypeShape.Static, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.ValueType, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.PrivateConstructor, "CustomApiAttribute")]
+    [InlineData(TestPluginTypeShape.UnsupportedConstructor, "CustomApiAttribute")]
     public void Extract_MixedValidPluginAndInvalidOfficialHandler_RejectsPackage(
         TestPluginTypeShape shape,
         string attributeName)
@@ -1165,7 +1393,10 @@ public class NupkgExtractorTests : IDisposable
 
         Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
         Assert.Contains("Contoso.Plugins.ConfiguredPlugin", exception.Message);
-        Assert.Contains("public, concrete, closed runtime", exception.Message);
+        if (shape is TestPluginTypeShape.PrivateConstructor or TestPluginTypeShape.UnsupportedConstructor)
+            Assert.Contains("supported public instance constructor", exception.Message);
+        else
+            Assert.Contains("public, concrete, closed", exception.Message);
     }
 
     [Theory]

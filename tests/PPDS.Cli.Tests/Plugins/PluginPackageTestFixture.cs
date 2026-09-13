@@ -21,7 +21,9 @@ internal sealed record TestPackageAssembly(
     bool IncludeInPackage = true,
     IReadOnlyList<string>? AssemblyReferences = null,
     byte[]? StrongNamePublicKey = null,
-    byte[]? PrecompiledImage = null);
+    byte[]? PrecompiledImage = null,
+    string? PpdsPluginsAlias = null,
+    IReadOnlyDictionary<string, string>? AssemblyReferenceAliases = null);
 
 public enum TestPluginTypeShape
 {
@@ -30,7 +32,10 @@ public enum TestPluginTypeShape
     Abstract,
     Interface,
     OpenGeneric,
-    Static
+    Static,
+    ValueType,
+    PrivateConstructor,
+    UnsupportedConstructor
 }
 
 internal static class PluginPackageTestFixture
@@ -110,7 +115,14 @@ internal static class PluginPackageTestFixture
                 "Microsoft.Xrm.Sdk.net462.dll")));
         }
         if (source.ReferencesPpdsPlugins)
-            references.Add(MetadataReference.CreateFromFile(typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location));
+        {
+            var properties = string.IsNullOrEmpty(source.PpdsPluginsAlias)
+                ? MetadataReferenceProperties.Assembly
+                : MetadataReferenceProperties.Assembly.WithAliases([source.PpdsPluginsAlias]);
+            references.Add(MetadataReference.CreateFromFile(
+                typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location,
+                properties));
+        }
         if (source.AssemblyReferences != null)
         {
             foreach (var assemblyName in source.AssemblyReferences)
@@ -121,7 +133,12 @@ internal static class PluginPackageTestFixture
                         $"Test assembly reference '{assemblyName}' must be declared before '{source.AssemblyName}'.");
                 }
 
-                references.Add(MetadataReference.CreateFromImage(image));
+                var properties = source.AssemblyReferenceAliases?.TryGetValue(
+                    assemblyName,
+                    out var alias) == true
+                        ? MetadataReferenceProperties.Assembly.WithAliases([alias])
+                        : MetadataReferenceProperties.Assembly;
+                references.Add(MetadataReference.CreateFromImage(image, properties));
             }
         }
 
@@ -215,6 +232,7 @@ internal static class PluginPackageTestFixture
             MetadataTokens.FieldDefinitionHandle(1),
             MetadataTokens.MethodDefinitionHandle(1));
         metadata.AddInterfaceImplementation(runtimePlugin, derivedInterface);
+        AddInstanceConstructor(metadata, MethodAttributes.Public);
 
         var pe = new ManagedPEBuilder(
             new PEHeaderBuilder(
@@ -289,6 +307,7 @@ internal static class PluginPackageTestFixture
             MetadataTokens.FieldDefinitionHandle(1),
             MetadataTokens.MethodDefinitionHandle(1));
         metadata.AddInterfaceImplementation(runtimePlugin, pluginInterface);
+        AddInstanceConstructor(metadata, MethodAttributes.Public);
 
         var pe = new ManagedPEBuilder(
             new PEHeaderBuilder(
@@ -365,6 +384,11 @@ internal static class PluginPackageTestFixture
             MetadataTokens.MethodDefinitionHandle(1));
         metadata.AddInterfaceImplementation(validPlugin, pluginInterface);
 
+        var valueType = metadata.AddTypeReference(
+            mscorlib,
+            metadata.GetOrAddString("System"),
+            metadata.GetOrAddString("ValueType"));
+
         var secondaryAttributes = secondaryShape switch
         {
             TestPluginTypeShape.Private => TypeAttributes.NotPublic | TypeAttributes.Class,
@@ -374,15 +398,22 @@ internal static class PluginPackageTestFixture
                 TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract,
             TestPluginTypeShape.Static =>
                 TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.Abstract | TypeAttributes.Sealed,
+            TestPluginTypeShape.ValueType =>
+                TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout,
             _ => TypeAttributes.Public | TypeAttributes.Class
         } | TypeAttributes.BeforeFieldInit;
         var secondary = metadata.AddTypeDefinition(
             secondaryAttributes,
             metadata.GetOrAddString("Contoso.Plugins"),
             metadata.GetOrAddString("ConfiguredPlugin"),
-            secondaryShape == TestPluginTypeShape.Interface ? default : objectType,
+            secondaryShape switch
+            {
+                TestPluginTypeShape.Interface => default,
+                TestPluginTypeShape.ValueType => valueType,
+                _ => objectType
+            },
             MetadataTokens.FieldDefinitionHandle(1),
-            MetadataTokens.MethodDefinitionHandle(1));
+            MetadataTokens.MethodDefinitionHandle(2));
         if (secondaryImplementsPlugin)
             metadata.AddInterfaceImplementation(secondary, pluginInterface);
         if (secondaryShape == TestPluginTypeShape.OpenGeneric)
@@ -392,6 +423,18 @@ internal static class PluginPackageTestFixture
                 GenericParameterAttributes.None,
                 metadata.GetOrAddString("T"),
                 index: 0);
+        }
+
+        AddInstanceConstructor(metadata, MethodAttributes.Public);
+        if (secondaryShape is not (TestPluginTypeShape.Interface or TestPluginTypeShape.Static))
+        {
+            var constructorAccess = secondaryShape == TestPluginTypeShape.PrivateConstructor
+                ? MethodAttributes.Private
+                : MethodAttributes.Public;
+            AddInstanceConstructor(
+                metadata,
+                constructorAccess,
+                hasUnsupportedIntParameter: secondaryShape == TestPluginTypeShape.UnsupportedConstructor);
         }
 
         if (officialAttributeName != null)
@@ -426,5 +469,134 @@ internal static class PluginPackageTestFixture
         var image = new BlobBuilder();
         pe.Serialize(image);
         return image.ToArray();
+    }
+
+    /// <summary>
+    /// Emits a valid runtime IPlugin with one official top-level PPDS registration attribute and
+    /// a subordinate attribute whose TypeRef is deliberately scoped to a forwarding shim. The CLR
+    /// can resolve the forwarded type to PPDS.Plugins, but raw registration trust must reject the
+    /// non-official AssemblyRef rather than serialize the subordinate metadata.
+    /// </summary>
+    internal static byte[] CreatePluginWithForwardedSubordinateAttribute(
+        string forwarderAssemblyName,
+        bool customApiParameter)
+    {
+        var metadata = new MetadataBuilder();
+        metadata.AddModule(
+            generation: 0,
+            metadata.GetOrAddString("Contoso.ForwardedSubordinate.dll"),
+            metadata.GetOrAddGuid(Guid.NewGuid()),
+            default,
+            default);
+        metadata.AddAssembly(
+            metadata.GetOrAddString("Contoso.ForwardedSubordinate"),
+            new Version(1, 0, 0, 0),
+            default,
+            default,
+            (AssemblyFlags)0,
+            AssemblyHashAlgorithm.None);
+
+        var mscorlib = metadata.AddAssemblyReference(
+            metadata.GetOrAddString("mscorlib"),
+            new Version(4, 0, 0, 0),
+            default,
+            metadata.GetOrAddBlob(new byte[] { 0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89 }),
+            (AssemblyFlags)0,
+            default);
+        var sdk = metadata.AddAssemblyReference(
+            metadata.GetOrAddString("Microsoft.Xrm.Sdk"),
+            new Version(9, 0, 0, 0),
+            default,
+            metadata.GetOrAddBlob(new byte[] { 0x31, 0xbf, 0x38, 0x56, 0xad, 0x36, 0x4e, 0x35 }),
+            (AssemblyFlags)0,
+            default);
+        var ppdsPlugins = metadata.AddAssemblyReference(
+            metadata.GetOrAddString("PPDS.Plugins"),
+            new Version(3, 0, 0, 0),
+            default,
+            metadata.GetOrAddBlob(new byte[] { 0x0b, 0x08, 0x09, 0xfa, 0xff, 0x13, 0x57, 0x78 }),
+            (AssemblyFlags)0,
+            default);
+        var forwarder = metadata.AddAssemblyReference(
+            metadata.GetOrAddString(forwarderAssemblyName),
+            new Version(0, 0, 0, 0),
+            default,
+            default,
+            (AssemblyFlags)0,
+            default);
+        var objectType = metadata.AddTypeReference(
+            mscorlib,
+            metadata.GetOrAddString("System"),
+            metadata.GetOrAddString("Object"));
+        var pluginInterface = metadata.AddTypeReference(
+            sdk,
+            metadata.GetOrAddString("Microsoft.Xrm.Sdk"),
+            metadata.GetOrAddString("IPlugin"));
+        var topLevelAttribute = metadata.AddTypeReference(
+            ppdsPlugins,
+            metadata.GetOrAddString("PPDS.Plugins"),
+            metadata.GetOrAddString(customApiParameter ? "CustomApiAttribute" : "PluginStepAttribute"));
+        var subordinateAttribute = metadata.AddTypeReference(
+            forwarder,
+            metadata.GetOrAddString("PPDS.Plugins"),
+            metadata.GetOrAddString(
+                customApiParameter ? "CustomApiParameterAttribute" : "PluginImageAttribute"));
+
+        metadata.AddTypeDefinition(
+            TypeAttributes.NotPublic,
+            default,
+            metadata.GetOrAddString("<Module>"),
+            default,
+            MetadataTokens.FieldDefinitionHandle(1),
+            MetadataTokens.MethodDefinitionHandle(1));
+        var plugin = metadata.AddTypeDefinition(
+            TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.BeforeFieldInit,
+            metadata.GetOrAddString("Contoso"),
+            metadata.GetOrAddString("ForwardedSubordinatePlugin"),
+            objectType,
+            MetadataTokens.FieldDefinitionHandle(1),
+            MetadataTokens.MethodDefinitionHandle(1));
+        metadata.AddInterfaceImplementation(plugin, pluginInterface);
+        AddInstanceConstructor(metadata, MethodAttributes.Public);
+
+        var constructorSignature = metadata.GetOrAddBlob(new byte[] { 0x20, 0x00, 0x01 });
+        var topLevelConstructor = metadata.AddMemberReference(
+            topLevelAttribute,
+            metadata.GetOrAddString(".ctor"),
+            constructorSignature);
+        var subordinateConstructor = metadata.AddMemberReference(
+            subordinateAttribute,
+            metadata.GetOrAddString(".ctor"),
+            constructorSignature);
+        var emptyAttributeValue = metadata.GetOrAddBlob(new byte[] { 0x01, 0x00, 0x00, 0x00 });
+        metadata.AddCustomAttribute(plugin, topLevelConstructor, emptyAttributeValue);
+        metadata.AddCustomAttribute(plugin, subordinateConstructor, emptyAttributeValue);
+
+        var pe = new ManagedPEBuilder(
+            new PEHeaderBuilder(
+                imageCharacteristics: Characteristics.ExecutableImage | Characteristics.Dll),
+            new MetadataRootBuilder(metadata),
+            new BlobBuilder(),
+            flags: CorFlags.ILOnly);
+        var image = new BlobBuilder();
+        pe.Serialize(image);
+        return image.ToArray();
+    }
+
+    private static void AddInstanceConstructor(
+        MetadataBuilder metadata,
+        MethodAttributes access,
+        bool hasUnsupportedIntParameter = false)
+    {
+        var signature = hasUnsupportedIntParameter
+            ? new byte[] { 0x20, 0x01, 0x01, 0x08 }
+            : new byte[] { 0x20, 0x00, 0x01 };
+        metadata.AddMethodDefinition(
+            access | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
+            MethodImplAttributes.Runtime,
+            metadata.GetOrAddString(".ctor"),
+            metadata.GetOrAddBlob(signature),
+            bodyOffset: 0,
+            MetadataTokens.ParameterHandle(1));
     }
 }

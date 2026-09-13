@@ -907,6 +907,79 @@ public class DeployCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_UnsupportedPluginConstructor_FailsBeforeProfileCreation()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), $"ppds-constructor-preflight-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratch);
+        try
+        {
+            var packagePath = PluginPackageTestFixture.Create(
+                scratch,
+                "deployment.nupkg",
+                "ppds_ConstructorPreflight",
+                new TestPackageAssembly(
+                    "Contoso.RuntimePlugins",
+                    "Contoso.RuntimePlugins.dll",
+                    """
+                    using System;
+                    using Microsoft.Xrm.Sdk;
+                    namespace Contoso.Plugins
+                    {
+                        public sealed class ValidPlugin : IPlugin
+                        {
+                            public void Execute(IServiceProvider serviceProvider) { }
+                        }
+                        public sealed class ConfiguredPlugin : IPlugin
+                        {
+                            public void Execute(IServiceProvider serviceProvider) { }
+                        }
+                    }
+                    """,
+                    ReferencesSdk: true));
+            var config = new PluginRegistrationConfig
+            {
+                Assemblies = [NupkgExtractor.Extract(packagePath)]
+            };
+            var rebuiltPath = PluginPackageTestFixture.Create(
+                scratch,
+                "rebuilt.nupkg",
+                "ppds_ConstructorPreflight",
+                new TestPackageAssembly(
+                    "Contoso.RuntimePlugins",
+                    "Contoso.RuntimePlugins.dll",
+                    string.Empty,
+                    PrecompiledImage: PluginPackageTestFixture.CreateMixedPluginImage(
+                        TestPluginTypeShape.UnsupportedConstructor,
+                        secondaryImplementsPlugin: true)));
+            File.Copy(rebuiltPath, packagePath, overwrite: true);
+            File.WriteAllText(_tempConfigFile, System.Text.Json.JsonSerializer.Serialize(config));
+            var serviceProviderFactoryCalls = 0;
+
+            var exitCode = await DeployCommand.ExecuteAsync(
+                new FileInfo(_tempConfigFile),
+                profile: null,
+                environment: null,
+                solutionOverride: null,
+                clean: false,
+                dryRun: false,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None,
+                serviceProviderFactory: _ =>
+                {
+                    serviceProviderFactoryCalls++;
+                    throw new InvalidOperationException("Profile creation must not run after local preflight failure.");
+                });
+
+            Assert.NotEqual(ExitCodes.Success, exitCode);
+            Assert.Equal(0, serviceProviderFactoryCalls);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PreflightAssembliesAsync_RejectsDuplicateCanonicalPath()
     {
         var packagePath = CreateRuntimePluginPackage();
@@ -1591,21 +1664,33 @@ public class DeployCommandTests : IDisposable
     [InlineData(false, TestPluginTypeShape.Interface, false)]
     [InlineData(false, TestPluginTypeShape.OpenGeneric, false)]
     [InlineData(false, TestPluginTypeShape.Static, false)]
+    [InlineData(false, TestPluginTypeShape.ValueType, false)]
+    [InlineData(false, TestPluginTypeShape.PrivateConstructor, false)]
+    [InlineData(false, TestPluginTypeShape.UnsupportedConstructor, false)]
     [InlineData(false, TestPluginTypeShape.Concrete, true)]
     [InlineData(false, TestPluginTypeShape.Abstract, true)]
     [InlineData(false, TestPluginTypeShape.Interface, true)]
     [InlineData(false, TestPluginTypeShape.OpenGeneric, true)]
     [InlineData(false, TestPluginTypeShape.Static, true)]
+    [InlineData(false, TestPluginTypeShape.ValueType, true)]
+    [InlineData(false, TestPluginTypeShape.PrivateConstructor, true)]
+    [InlineData(false, TestPluginTypeShape.UnsupportedConstructor, true)]
     [InlineData(true, TestPluginTypeShape.Concrete, false)]
     [InlineData(true, TestPluginTypeShape.Abstract, false)]
     [InlineData(true, TestPluginTypeShape.Interface, false)]
     [InlineData(true, TestPluginTypeShape.OpenGeneric, false)]
     [InlineData(true, TestPluginTypeShape.Static, false)]
+    [InlineData(true, TestPluginTypeShape.ValueType, false)]
+    [InlineData(true, TestPluginTypeShape.PrivateConstructor, false)]
+    [InlineData(true, TestPluginTypeShape.UnsupportedConstructor, false)]
     [InlineData(true, TestPluginTypeShape.Concrete, true)]
     [InlineData(true, TestPluginTypeShape.Abstract, true)]
     [InlineData(true, TestPluginTypeShape.Interface, true)]
     [InlineData(true, TestPluginTypeShape.OpenGeneric, true)]
     [InlineData(true, TestPluginTypeShape.Static, true)]
+    [InlineData(true, TestPluginTypeShape.ValueType, true)]
+    [InlineData(true, TestPluginTypeShape.PrivateConstructor, true)]
+    [InlineData(true, TestPluginTypeShape.UnsupportedConstructor, true)]
     public async Task DeployAssemblyAsync_MixedInvalidOfficialHandler_FailsBeforeServerCallsEvenWithMatchingDigest(
         bool dryRun,
         TestPluginTypeShape shape,
@@ -1685,10 +1770,16 @@ public class DeployCommandTests : IDisposable
     [InlineData(false, TestPluginTypeShape.Private)]
     [InlineData(false, TestPluginTypeShape.Abstract)]
     [InlineData(false, TestPluginTypeShape.OpenGeneric)]
+    [InlineData(false, TestPluginTypeShape.ValueType)]
+    [InlineData(false, TestPluginTypeShape.PrivateConstructor)]
+    [InlineData(false, TestPluginTypeShape.UnsupportedConstructor)]
     [InlineData(true, TestPluginTypeShape.Concrete)]
     [InlineData(true, TestPluginTypeShape.Private)]
     [InlineData(true, TestPluginTypeShape.Abstract)]
     [InlineData(true, TestPluginTypeShape.OpenGeneric)]
+    [InlineData(true, TestPluginTypeShape.ValueType)]
+    [InlineData(true, TestPluginTypeShape.PrivateConstructor)]
+    [InlineData(true, TestPluginTypeShape.UnsupportedConstructor)]
     public async Task DeployAssemblyAsync_ConfiguredTypeLosesRuntimeDeployability_FailsBeforeServerCalls(
         bool dryRun,
         TestPluginTypeShape shape)
