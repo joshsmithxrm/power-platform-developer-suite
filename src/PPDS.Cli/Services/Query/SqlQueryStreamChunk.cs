@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -40,6 +41,17 @@ public sealed class SqlQueryStreamChunk
     /// The transpiled FetchXML, if available. Non-null only on the first chunk.
     /// </summary>
     public string? TranspiledFetchXml { get; init; }
+
+    /// <summary>
+    /// DML safety metadata for a dry-run preview. Null for executed queries.
+    /// </summary>
+    public DmlSafetyResult? DmlSafetyResult { get; init; }
+
+    /// <summary>
+    /// The side-effect-free execution plan built for a DML dry-run.
+    /// Null for executed queries.
+    /// </summary>
+    public QueryPlanDescription? DryRunPlan { get; init; }
 
     /// <summary>
     /// Environments that contributed data. Non-null only on the final chunk.

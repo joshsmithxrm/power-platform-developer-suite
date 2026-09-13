@@ -20,6 +20,9 @@ on:
           - pre-release
           - stable
 
+permissions:
+  contents: read
+
 jobs:
   preflight:
     name: marketplace-listing-preflight
@@ -72,6 +75,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.ref }}
+          fetch-depth: 0  # Required for MinVer to find the co-release Cli-v* tag
+          fetch-tags: true
 
       - name: Resolve release tag SHA
         id: resolve-tag
@@ -86,6 +91,22 @@ jobs:
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve bundled CLI release
+        id: resolve-cli
+        run: |
+          cli_tag="$(git describe --tags --exact-match --match 'Cli-v*' "${{ steps.resolve-tag.outputs.sha }}" 2>/dev/null || true)"
+          if [[ -z "$cli_tag" ]]; then
+            echo "::error::Extension releases must point at a commit tagged with the intended Cli-v* release."
+            exit 1
+          fi
+          cli_version="${cli_tag#Cli-v}"
+          if [[ -z "$cli_version" || "$cli_version" == "$cli_tag" ]]; then
+            echo "::error::Could not parse a CLI version from tag '$cli_tag'."
+            exit 1
+          fi
+          echo "tag=$cli_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$cli_version" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -121,7 +142,7 @@ jobs:
 
       - name: Bundle CLI for ${{ matrix.target }}
         working-directory: src/PPDS.Extension
-        run: npm run bundle:cli -- --rid ${{ matrix.rid }}
+        run: npm run bundle:cli -- --rid ${{ matrix.rid }} --expected-version "${{ steps.resolve-cli.outputs.version }}"
 
       - name: Determine release channel
         id: channel
@@ -177,3 +198,45 @@ jobs:
         run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
+
+  verify-public-artifacts:
+    name: Verify public Marketplace artifacts
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+    steps:
+      - name: Checkout release verifier
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Resolve bundled CLI release
+        id: resolve-cli
+        shell: bash
+        run: |
+          sha="$(git rev-list -n 1 "$GITHUB_REF")"
+          cli_tag="$(git describe --tags --exact-match --match 'Cli-v*' "$sha" 2>/dev/null || true)"
+          if [[ -z "$cli_tag" ]]; then
+            echo "::error::Extension verification requires the co-located Cli-v* release tag."
+            exit 1
+          fi
+          echo "version=${cli_tag#Cli-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify all public Marketplace targets
+        run: >-
+          python scripts/ci/verify_public_release.py
+          marketplace
+          --tag "$GITHUB_REF_NAME"
+          --cli-version "${{ steps.resolve-cli.outputs.version }}"

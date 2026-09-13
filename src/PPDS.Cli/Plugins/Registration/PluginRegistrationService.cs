@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
@@ -10,6 +10,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
@@ -572,7 +573,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     {
         // Use IncludeMicrosoft: true to search all packages including Microsoft.* when looking up by exact name
         var packages = await ListPackagesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
-        return packages.FirstOrDefault();
+        return packages.FirstOrDefault(p => string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase))
+            ?? packages.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -1020,7 +1022,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Creates or updates a plugin package (for NuGet packages).
     /// </summary>
-    /// <param name="packageName">The package name from .nuspec (e.g., "ppds_MyPlugin"). This is what Dataverse uses as uniquename.</param>
+    /// <param name="packageName">The expected package name. It must match the root .nuspec ID.</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
     /// <param name="solutionName">Solution to add the package to.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1032,9 +1034,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.package.upsert");
-        // packageName comes from .nuspec <id> (parsed from .nuspec)
-        // Dataverse extracts uniquename from the nupkg content, so we use packageName for lookup
-        var existing = await GetPackageByNameAsync(packageName, cancellationToken);
+        var metadata = PluginPackageMetadataReader.Read(nupkgContent);
+        if (!string.Equals(packageName, metadata.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Package name '{packageName}' does not match the root .nuspec ID '{metadata.Id}'.");
+        }
+
+        // Dataverse extracts uniquename from the nupkg content, so the .nuspec ID is used for lookup.
+        var existing = await GetPackageByNameAsync(metadata.Id, cancellationToken);
 
         if (existing != null)
         {
@@ -1056,10 +1065,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             return existing.Id;
         }
 
-        // CREATE: Set name and content only - Dataverse extracts uniquename from .nuspec <id> inside nupkg
+        // CREATE: Version is system-required. Dataverse extracts uniquename from the package content.
         var entity = new PluginPackage
         {
-            Name = packageName,
+            Name = metadata.Id,
+            Version = metadata.Version,
             Content = Convert.ToBase64String(nupkgContent)
         };
 
@@ -2045,7 +2055,14 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Unregisters an assembly and optionally all its types, steps, and images.
     /// </summary>
-    public async Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
+    public Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
+        => UnregisterAssemblyCoreAsync(assemblyId, force, deleteAssemblyDirectly: true, cancellationToken);
+
+    private async Task<UnregisterResult> UnregisterAssemblyCoreAsync(
+        Guid assemblyId,
+        bool force,
+        bool deleteAssemblyDirectly,
+        CancellationToken cancellationToken)
     {
         _guard.EnsureCanMutate("plugins.assembly.unregister");
         // Get assembly info
@@ -2055,6 +2072,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 assemblyId.ToString(),
                 "Assembly",
                 ErrorCodes.Plugin.NotFound);
+
+        if (deleteAssemblyDirectly && assembly.PackageId.HasValue)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister assembly: {assembly.Name}. Assembly is owned by plugin package {assembly.PackageId.Value}. " +
+                $"Unregister the owning package instead: ppds plugins unregister package {assembly.PackageId.Value} --force.",
+                assembly.Name,
+                "Assembly",
+                ErrorCodes.Operation.NotSupported);
+        }
 
         // Get types and their steps
         var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
@@ -2090,9 +2117,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             result += typeResult;
         }
 
-        // Delete assembly
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, client, cancellationToken);
+        if (deleteAssemblyDirectly)
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, client, cancellationToken);
+        }
+
         result.AssembliesDeleted = 1;
 
         return result;
@@ -2131,10 +2161,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             EntityType = "Package"
         };
 
-        // Delete assemblies (and their types/steps/images) in sequence
+        // Package-owned assemblies cannot be deleted directly. Delete their manually
+        // registered descendants, then let deleting the package cascade the assemblies.
         foreach (var assembly in assemblies)
         {
-            var assemblyResult = await UnregisterAssemblyAsync(assembly.Id, force: true, cancellationToken);
+            var assemblyResult = await UnregisterAssemblyCoreAsync(
+                assembly.Id,
+                force: true,
+                deleteAssemblyDirectly: false,
+                cancellationToken);
             result += assemblyResult;
         }
 
