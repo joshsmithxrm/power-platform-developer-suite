@@ -56,11 +56,26 @@ public sealed class AssemblyExtractorTests : IDisposable
     private string CompileTestAssembly(string pluginClassSource, bool copyPluginsAssemblyToOutputDir)
     {
         var pluginsAssemblyPath = typeof(PPDS.Plugins.PluginStepAttribute).Assembly.Location;
+        var sdkAssemblyPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "TestAssets",
+            "Microsoft.Xrm.Sdk.net462.dll");
+        var runtimePluginSource = System.Text.RegularExpressions.Regex.Replace(
+            pluginClassSource,
+            @"public class ([A-Za-z_][A-Za-z0-9_]*)",
+            "public class $1 : global::TestRuntimePluginBase");
 
         var fullSource = $$"""
+            using System;
+            using Microsoft.Xrm.Sdk;
             using PPDS.Plugins;
 
-            {{pluginClassSource}}
+            public abstract class TestRuntimePluginBase : IPlugin
+            {
+                public void Execute(IServiceProvider serviceProvider) { }
+            }
+
+            {{runtimePluginSource}}
             """;
 
         var syntaxTree = CSharpSyntaxTree.ParseText(fullSource);
@@ -81,6 +96,7 @@ public sealed class AssemblyExtractorTests : IDisposable
         {
             MetadataReference.CreateFromFile(mscorlibPath),
             MetadataReference.CreateFromFile(pluginsAssemblyPath),
+            MetadataReference.CreateFromFile(sdkAssemblyPath),
         };
 
         var compilation = CSharpCompilation.Create(
@@ -100,6 +116,7 @@ public sealed class AssemblyExtractorTests : IDisposable
             var pluginsFileName = Path.GetFileName(pluginsAssemblyPath);
             File.Copy(pluginsAssemblyPath, Path.Combine(tempDir, pluginsFileName), overwrite: true);
         }
+        File.Copy(sdkAssemblyPath, Path.Combine(tempDir, "Microsoft.Xrm.Sdk.dll"), overwrite: true);
 
         var tempPath = Path.Combine(tempDir, "TestPlugin.dll");
 

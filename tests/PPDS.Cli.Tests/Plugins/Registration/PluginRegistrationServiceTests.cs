@@ -2808,6 +2808,26 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
+    public async Task GetAssemblyIdForPackageAsync_MatchesAssemblyNameCaseInsensitively()
+    {
+        var packageId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginAssembly
+            {
+                Id = assemblyId,
+                Name = "Contoso.RuntimePlugins",
+                Version = "1.0.0.0",
+                IsolationMode = pluginassembly_isolationmode.Sandbox
+            }
+        ]);
+
+        var result = await _sut.GetAssemblyIdForPackageAsync(packageId, "contoso.runtimeplugins");
+
+        Assert.Equal(assemblyId, result);
+    }
+
+    [Fact]
     public async Task GetAssemblyByIdAsync_ReturnsAssembly_WhenFound()
     {
         // Arrange
