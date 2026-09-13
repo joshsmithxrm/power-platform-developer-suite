@@ -303,15 +303,19 @@ def reconcile_corelease(
             reason = "current CLI has co-located Extension tag"
         elif current_records:
             reason = "current CLI alert already recorded"
-            # Corrupted/manual duplicates are reconciled without replacing the
-            # oldest actionable record.
-            for duplicate in current_open[1:]:
+            # Corrupted/manual duplicates preserve the oldest permanent record
+            # across both states. If that record is closed, every later open
+            # duplicate closes instead of reviving the recorded opt-out.
+            canonical = min(current_records, key=lambda issue: issue.number)
+            for duplicate in current_open:
+                if duplicate.number == canonical.number:
+                    continue
                 actions.append(_close_action(
                     duplicate,
                     latest_cli.name,
                     "duplicate",
                     (
-                        f"Automated reconciliation: issue #{current_open[0].number} "
+                        f"Automated reconciliation: issue #{canonical.number} "
                         f"is the canonical workflow-owned alert for `{latest_cli.name}`. "
                         "Closing this duplicate."
                     ),

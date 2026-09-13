@@ -226,6 +226,33 @@ class TestConvergentReconciliation:
         )
         assert len(actions(plan, "create")) == 1
 
+    def test_oldest_closed_record_closes_every_later_open_duplicate(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[
+                issue(10, "Cli-v1.4.1", state="CLOSED"),
+                issue(11, "Cli-v1.4.1"),
+                issue(12, "Cli-v1.4.1"),
+            ],
+        )
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (11, "duplicate"),
+            (12, "duplicate"),
+        ]
+        assert all("issue #10" in action["comment"] for action in actions(plan, "close"))
+
+    def test_oldest_open_record_remains_canonical_when_later_record_is_closed(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[
+                issue(10, "Cli-v1.4.1"),
+                issue(11, "Cli-v1.4.1", state="CLOSED"),
+            ],
+        )
+        assert plan["actions"] == []
+
 
 class TestIssueApplication:
     def test_create_and_close_use_body_files_and_no_shell(self):
