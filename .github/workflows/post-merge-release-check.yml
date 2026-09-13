@@ -1,7 +1,10 @@
 name: Post-Merge Release Check
 
 on:
-  pull_request:
+  # pull_request_target supplies the base repository's write-capable token for
+  # merged PRs from forks. The job below executes only workflow-sha automation;
+  # the merged revision is checked out separately and treated as input data.
+  pull_request_target:
     types: [closed, labeled]
     branches: [main]
   # The co-release guard (extension-corelease-detection job below) compares the
@@ -17,7 +20,6 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
 
 jobs:
   patch-release-detection:
@@ -25,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
       ((github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'release:patch')) ||
        (github.event.action == 'labeled' && github.event.label.name == 'release:patch'))
     concurrency:
@@ -43,6 +46,7 @@ jobs:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           path: analyzed
+          persist-credentials: false
 
       - name: Checkout pinned release automation
         uses: actions/checkout@v4
@@ -52,6 +56,7 @@ jobs:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           path: automation
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -90,9 +95,10 @@ jobs:
         run: |
           gh issue list \
             --repo "$GITHUB_REPOSITORY" \
+            --label "release:patch" \
             --state all \
             --limit 10000 \
-            --json number,state,body \
+            --json number,state,body,labels \
             > existing-release-records.json
 
       - name: Prepare idempotent patch release record

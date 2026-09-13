@@ -81,16 +81,17 @@ class TestOpensIssueOnPatchLabel:
             "No step found that calls 'gh issue create'"
         )
 
-    def test_workflow_trigger_is_pr_closed_on_main(self):
-        """Workflow must fire on closed and late-labeled events targeting main."""
+    def test_workflow_trigger_is_trusted_pr_target_closed_on_main(self):
+        """Fork-safe workflow fires on closed and late-labeled events for main."""
         wf = _load_workflow()
         on = wf.get("on") or wf.get(True)  # YAML parses `on` as True in some loaders
-        pr_trigger = on.get("pull_request", {}) if isinstance(on, dict) else {}
+        assert "pull_request" not in on
+        pr_trigger = on.get("pull_request_target", {}) if isinstance(on, dict) else {}
         assert "closed" in (pr_trigger.get("types") or []), (
-            "Workflow trigger must include pull_request type: closed"
+            "Workflow trigger must include pull_request_target type: closed"
         )
         assert "labeled" in (pr_trigger.get("types") or []), (
-            "Workflow trigger must include pull_request type: labeled"
+            "Workflow trigger must include pull_request_target type: labeled"
         )
         assert "main" in (pr_trigger.get("branches") or []), (
             "Workflow trigger must target branch: main"

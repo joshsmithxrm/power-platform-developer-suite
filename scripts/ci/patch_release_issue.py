@@ -119,10 +119,27 @@ def event_is_eligible(event: PatchPullRequestEvent) -> bool:
 def find_existing_record(
     issues: Sequence[dict[str, Any]], marker: str
 ) -> Optional[dict[str, Any]]:
-    """Find the permanent per-PR record regardless of open/closed state."""
+    """Find a workflow-owned per-PR record regardless of open/closed state.
+
+    The marker is not an authority boundary by itself: any user can place it
+    in an unrelated issue body. Only issues carrying the workflow-owned patch
+    label are eligible to suppress creation.
+    """
     for issue in issues:
         if not isinstance(issue, dict):
             raise ValueError("existing issue data must contain objects")
+        raw_labels = issue.get("labels")
+        if not isinstance(raw_labels, list):
+            raise ValueError("existing issue labels must be a list")
+        labels: set[str] = set()
+        for label in raw_labels:
+            if not isinstance(label, dict) or not isinstance(label.get("name"), str):
+                raise ValueError(
+                    "every existing issue label must contain a string name"
+                )
+            labels.add(label["name"])
+        if PATCH_LABEL not in labels:
+            continue
         body = issue.get("body") or ""
         if not isinstance(body, str):
             raise ValueError("existing issue body must be a string or null")

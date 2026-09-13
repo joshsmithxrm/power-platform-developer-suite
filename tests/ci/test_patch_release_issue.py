@@ -38,6 +38,15 @@ def _plan(*, release_needed: bool = True) -> dict:
     }
 
 
+def _release_record(number: int, state: str, body: str) -> dict:
+    return {
+        "number": number,
+        "state": state,
+        "body": body,
+        "labels": [{"name": pri.PATCH_LABEL}],
+    }
+
+
 class TestEventEligibility:
     def test_label_present_when_pr_merges(self) -> None:
         assert pri.event_is_eligible(pri.parse_event(_closed_payload())) is True
@@ -59,17 +68,42 @@ class TestEventEligibility:
         payload["pull_request"]["merged"] = False
         assert pri.event_is_eligible(pri.parse_event(payload)) is False
 
+    def test_label_on_non_main_pr_is_not_eligible(self) -> None:
+        payload = _late_label_payload()
+        payload["pull_request"]["base"]["ref"] = "release/maintenance"
+        assert pri.event_is_eligible(pri.parse_event(payload)) is False
+
     def test_unrelated_label_on_merged_pr_is_not_eligible(self) -> None:
         payload = _late_label_payload()
         payload["label"]["name"] = "type:bug"
         assert pri.event_is_eligible(pri.parse_event(payload)) is False
+
+    def test_merged_patch_pr_from_fork_is_eligible(self) -> None:
+        payload = _late_label_payload()
+        payload["pull_request"]["head"] = {
+            "ref": "contributor-patch",
+            "repo": {
+                "fork": True,
+                "full_name": "contributor/power-platform-developer-suite",
+            },
+        }
+
+        event = pri.parse_event(payload)
+
+        assert event.repository == "joshsmithxrm/power-platform-developer-suite"
+        assert pri.event_is_eligible(event) is True
 
     def test_workflow_triggers_on_close_and_late_label(self) -> None:
         import yaml
 
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         triggers = workflow.get("on") or workflow.get(True)
-        assert set(triggers["pull_request"]["types"]) == {"closed", "labeled"}
+        assert "pull_request" not in triggers
+        assert set(triggers["pull_request_target"]["types"]) == {
+            "closed",
+            "labeled",
+        }
+        assert triggers["pull_request_target"]["branches"] == ["main"]
 
 
 class TestPatchRecordIdempotency:
@@ -85,11 +119,7 @@ class TestPatchRecordIdempotency:
     ) -> None:
         event = pri.parse_event(_closed_payload())
         existing = [
-            {
-                "number": 77,
-                "state": state,
-                "body": f"prior body\n{event.marker}\n",
-            }
+            _release_record(77, state, f"prior body\n{event.marker}\n")
         ]
         decision = pri.decide_patch_record(event, _plan(), existing)
         assert decision == {
@@ -108,7 +138,7 @@ class TestPatchRecordIdempotency:
         decision = pri.decide_patch_record(
             event,
             _plan(),
-            [{"number": 88, "state": "CLOSED", "body": event.marker}],
+            [_release_record(88, "CLOSED", event.marker)],
         )
         assert decision["should_create"] is False
         assert decision["existing_issue_state"] == "CLOSED"
@@ -118,8 +148,22 @@ class TestPatchRecordIdempotency:
         second = pri.parse_event(_closed_payload(1401))
         assert first.marker != second.marker
 
-        existing = [{"number": 90, "state": "OPEN", "body": first.marker}]
+        existing = [_release_record(90, "OPEN", first.marker)]
         assert pri.decide_patch_record(second, _plan(), existing)["should_create"] is True
+
+    def test_unlabeled_spoof_marker_does_not_suppress_record(self) -> None:
+        event = pri.parse_event(_closed_payload())
+        spoof = {
+            "number": 91,
+            "state": "OPEN",
+            "body": event.marker,
+            "labels": [{"name": "type:bug"}],
+        }
+
+        decision = pri.decide_patch_record(event, _plan(), [spoof])
+
+        assert decision["should_create"] is True
+        assert decision["reason"] == "create-record"
 
     def test_no_product_impact_does_not_create_record(self) -> None:
         event = pri.parse_event(_closed_payload())
@@ -130,8 +174,64 @@ class TestPatchRecordIdempotency:
     def test_workflow_serializes_and_searches_all_issue_states(self) -> None:
         text = WORKFLOW.read_text(encoding="utf-8")
         assert "patch-release-record-${{ github.event.pull_request.number }}" in text
+        assert '--label "release:patch"' in text
         assert "--state all" in text
-        assert "--json number,state,body" in text
+        assert "--json number,state,body,labels" in text
+
+
+class TestWorkflowTrustBoundary:
+    def test_fork_events_use_trusted_automation_and_data_only_merge_checkout(
+        self,
+    ) -> None:
+        import yaml
+
+        workflow_text = WORKFLOW.read_text(encoding="utf-8")
+        workflow = yaml.safe_load(workflow_text)
+        assert "github.event.pull_request.head" not in workflow_text
+        triggers = workflow.get("on") or workflow.get(True)
+        assert "pull_request_target" in triggers
+        assert "pull_request" not in triggers
+        assert workflow["permissions"] == {"contents": "read", "issues": "write"}
+
+        job = workflow["jobs"]["patch-release-detection"]
+        condition = job["if"]
+        assert "github.event.pull_request.merged == true" in condition
+        assert "github.event.pull_request.base.ref == 'main'" in condition
+        assert "github.event.action == 'closed'" in condition
+        assert "github.event.action == 'labeled'" in condition
+        assert "github.event.label.name == 'release:patch'" in condition
+
+        checkouts = {
+            step["name"]: step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        }
+        analyzed = checkouts["Checkout analyzed merge commit"]["with"]
+        automation = checkouts["Checkout pinned release automation"]["with"]
+        assert analyzed["ref"] == "${{ github.event.pull_request.merge_commit_sha }}"
+        assert analyzed["path"] == "analyzed"
+        assert analyzed["persist-credentials"] is False
+        assert automation["ref"] == "${{ github.workflow_sha }}"
+        assert automation["path"] == "automation"
+        assert automation["persist-credentials"] is False
+
+        run_text = "\n".join(
+            str(step.get("run", "")) for step in job["steps"]
+        )
+        assert all(
+            not str(step.get("uses", "")).startswith("./analyzed")
+            for step in job["steps"]
+        )
+        assert all(
+            step.get("working-directory") != "analyzed" for step in job["steps"]
+        )
+        assert "python analyzed/" not in run_text
+        assert "bash analyzed/" not in run_text
+        assert "sh analyzed/" not in run_text
+        assert "./analyzed/" not in run_text
+        assert "python automation/scripts/ci/release_plan.py" in run_text
+        assert "python automation/scripts/ci/patch_release_issue.py" in run_text
+        assert "--repo-root analyzed" in run_text
 
 
 class TestSafeIssueRendering:

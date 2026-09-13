@@ -76,13 +76,20 @@ record.
 `post-merge-release-check.yml` evaluates a merged PR when `release:patch` is
 already present at merge time or when the label is added later. Each generated
 issue contains a stable marker derived only from the PR number. Reruns and label
-removal/re-addition search both open and closed issues for that marker, so an
-existing audit record is neither duplicated nor reopened. Runs are serialized
+removal/re-addition search both open and closed `release:patch` issues for that
+marker, so an unlabeled issue cannot spoof a workflow-owned audit record and an
+existing labeled record is neither duplicated nor reopened. Runs are serialized
 per PR to keep simultaneous close/label events from racing; different PRs retain
-independent records. For historical late-label events, the source and MSBuild
-graph come from the original merge commit while the helper scripts and
-non-MSBuild delivery manifest are pinned to the exact workflow revision. This
-keeps old merges analyzable without substituting a moving `main` graph.
+independent records.
+
+The workflow uses `pull_request_target` so merged PRs from forks receive the
+base repository's issue-write token. Its trust boundary is intentionally narrow:
+every executable repository script and delivery manifest is checked out from
+`github.workflow_sha`, checkout credentials are not persisted, and the original
+merge commit is a separate data-only checkout used for semantic diff and MSBuild
+XML inspection. No code, action, or script from that historical checkout is
+executed. This also keeps old merges analyzable without substituting a moving
+`main` graph.
 
 Workflow-owned release labels are declared in
 `scripts/ci/release_labels.json`. Release workflows reconcile all four labels
