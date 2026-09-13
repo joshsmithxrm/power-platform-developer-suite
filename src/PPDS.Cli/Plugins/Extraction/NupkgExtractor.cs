@@ -305,6 +305,20 @@ public static class NupkgExtractor
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+        var missingConfiguredTypeNames = configuredTypeNames
+            .Where(typeName => assemblies.All(assembly => !assembly.TypeNames.Contains(typeName)))
+            .OrderBy(typeName => typeName, StringComparer.Ordinal)
+            .ToList();
+        if (missingConfiguredTypeNames.Count > 0)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.PackageAssemblyMismatch,
+                $"NuGet package '{Path.GetFileName(nupkgPath)}' no longer contains every configured plugin " +
+                $"type in its buffered package snapshot. Missing types: " +
+                $"{string.Join(", ", missingConfiguredTypeNames.Select(name => $"'{name}'"))}. " +
+                "Re-run 'ppds plugins extract' for the rebuilt package before deploying. No package was uploaded.");
+        }
+
         var typeOwners = assemblies
             .Where(assembly => configuredTypeNames.Any(assembly.TypeNames.Contains))
             .ToList();

@@ -426,6 +426,96 @@ public class DeployCommandTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeployAssemblyAsync_RebuiltPackageRemovesConfiguredType_FailsBeforeLookupOrUpload(
+        bool dryRun)
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), $"ppds-missing-type-deploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            const string firstPluginSource = """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso.Plugins
+                {
+                    public sealed class FirstPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+
+                    public sealed class RemovedPlugin : IPlugin
+                    {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """;
+            var deploymentPath = PluginPackageTestFixture.Create(
+                scratch,
+                "deployment-package.nupkg",
+                "ppds_RuntimePackage",
+                new TestPackageAssembly(
+                    "Contoso.RuntimePlugins",
+                    "Contoso.RuntimePlugins.dll",
+                    firstPluginSource,
+                    ReferencesSdk: true));
+            var config = NupkgExtractor.Extract(deploymentPath);
+            Assert.Contains("Contoso.Plugins.RemovedPlugin", config.AllTypeNames);
+
+            var rebuiltPath = PluginPackageTestFixture.Create(
+                scratch,
+                "rebuilt-package.nupkg",
+                "ppds_RuntimePackage",
+                new TestPackageAssembly(
+                    "Contoso.RuntimePlugins",
+                    "Contoso.RuntimePlugins.dll",
+                    """
+                    using System;
+                    using Microsoft.Xrm.Sdk;
+                    namespace Contoso.Plugins
+                    {
+                        public sealed class FirstPlugin : IPlugin
+                        {
+                            public void Execute(IServiceProvider serviceProvider) { }
+                        }
+                    }
+                    """,
+                    ReferencesSdk: true));
+            File.Copy(rebuiltPath, deploymentPath, overwrite: true);
+
+            var mock = new Mock<IPluginRegistrationService>();
+            var result = await DeployCommand.DeployAssemblyAsync(
+                mock.Object,
+                config,
+                scratch,
+                solutionOverride: null,
+                clean: false,
+                dryRun: dryRun,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
+            Assert.Contains("Contoso.Plugins.RemovedPlugin", result.Error);
+            Assert.Contains("No package was uploaded", result.Error);
+            mock.Verify(service => service.GetPackageByNameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            mock.Verify(service => service.UpsertPackageAsync(
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_PathReplacedAfterGlobalPreflight_UploadsRetainedSnapshot()
     {
