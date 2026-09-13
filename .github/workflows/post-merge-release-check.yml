@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout analyzed merge commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Keep ReleaseGraph discovery on the same revision as the semantic
           # diff below, even if another PR lands before this job starts.
@@ -113,7 +113,7 @@ jobs:
 
     steps:
       - name: Checkout (full history + tags)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
