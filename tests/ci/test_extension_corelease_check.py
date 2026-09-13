@@ -35,6 +35,27 @@ def issue(
     )
 
 
+def legacy_issue(
+    number: int,
+    cli_tag: str,
+    *,
+    state: str = "OPEN",
+    labeled: bool = True,
+) -> cec.ExistingIssue:
+    return cec.ExistingIssue(
+        number=number,
+        state=state,
+        body=(
+            "## Extension Bundled-CLI Refresh Missing\n\n"
+            "| Field | Value |\n"
+            "|-------|-------|\n"
+            f"| Latest stable Cli tag | `{cli_tag}` |\n"
+            "| Latest Extension tag | `Extension-v1.4.1` |\n"
+        ),
+        labels=frozenset({LABEL} if labeled else set()),
+    )
+
+
 def actions(plan: dict, kind: str) -> list[dict]:
     return [action for action in plan["actions"] if action["kind"] == kind]
 
@@ -89,7 +110,7 @@ class TestIncident1375:
                 tag("Extension-v1.4.1", "older"),
                 tag("Extension-v1.6.0", "318df745"),
             ],
-            existing_issues=[issue(1375, "Cli-v1.4.0")],
+            existing_issues=[legacy_issue(1375, "Cli-v1.4.0")],
         )
         close = actions(plan, "close")
         assert len(close) == 1
@@ -123,7 +144,7 @@ class TestIncident1410:
         plan = cec.reconcile_corelease(
             cli_tags=[tag("Cli-v1.4.1", "release")],
             extension_tags=[],
-            existing_issues=[issue(1410, "Cli-v1.4.1", state="CLOSED")],
+            existing_issues=[legacy_issue(1410, "Cli-v1.4.1", state="CLOSED")],
         )
         assert plan["actions"] == []
         assert plan["reason"] == "current CLI alert already recorded"
@@ -187,12 +208,21 @@ class TestConvergentReconciliation:
         create = actions(plan, "create")
         assert len(create) == 1
         assert create[0]["cli_tag"] == "Cli-v1.4.1"
+        assert [action["kind"] for action in plan["actions"]] == ["create", "close"]
 
     def test_unlabeled_spoof_marker_does_not_block_current_alert(self):
         plan = cec.reconcile_corelease(
             cli_tags=[tag("Cli-v1.4.1", "new")],
             extension_tags=[],
             existing_issues=[issue(99, "Cli-v1.4.1", labeled=False)],
+        )
+        assert len(actions(plan, "create")) == 1
+
+    def test_unlabeled_legacy_field_does_not_block_current_alert(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[tag("Cli-v1.4.1", "new")],
+            extension_tags=[],
+            existing_issues=[legacy_issue(99, "Cli-v1.4.1", labeled=False)],
         )
         assert len(actions(plan, "create")) == 1
 
@@ -247,6 +277,25 @@ class TestIssueApplication:
                     "body": "body",
                 }],
             }, "owner/repo", runner=runner)
+
+    def test_failed_replacement_create_leaves_old_alert_untouched(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.0", "old"),
+                tag("Cli-v1.4.1", "new"),
+            ],
+            extension_tags=[],
+            existing_issues=[legacy_issue(1375, "Cli-v1.4.0")],
+        )
+        calls: list[list[str]] = []
+
+        def runner(args):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 1, "", "create failed")
+
+        with pytest.raises(RuntimeError, match="create failed"):
+            cec.apply_plan(plan, "owner/repo", runner=runner)
+        assert [call[:3] for call in calls] == [["gh", "issue", "create"]]
 
     def test_generated_issue_links_only_public_runbook(self):
         body = cec.build_issue_body("Cli-v1.4.1", "Extension-v1.6.0")

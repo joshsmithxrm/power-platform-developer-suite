@@ -218,11 +218,14 @@ or reopened; a different merged PR receives a different marker and record.
    comparison, proves satisfaction: an `Extension-v*` tag must point to the
    same commit as that stable CLI tag
 4. **Missing relationship** creates one workflow-owned issue keyed by a stable
-   CLI-tag marker; open and closed records both prevent duplicate/reopened alerts
+   CLI-tag marker; open and closed records both prevent duplicate/reopened
+   alerts. Pre-marker workflow records migrate only from the exact legacy CLI
+   table field and still require the workflow-owned label
 5. **Later reconciliation** comments and closes an open alert when its
    co-located Extension tag arrives. A higher stable CLI closes older open
    alerts as superseded and becomes the only current alert if it is also missing
-   an Extension tag. Either tag-push order converges to the same actionable state
+   an Extension tag. The replacement is created first so partial GitHub failure
+   leaves an actionable alert. Either tag-push order converges to the same state
 
 ### Tag Convention
 
@@ -309,7 +312,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-29 | Milestone helper failures stop issue creation instead of being swallowed | `tests/ci/test_milestone_release_check.py::TestWorkflowFailureHandling` | ✅ |
 | AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
 | AC-31 | Cadence selection accepts production ISO-strict offsets, normalizes elapsed-time calculations to UTC, filters malformed release tags through the shared strict SemVer model, and fails loudly on invalid timestamps | `tests/ci/test_release_cadence_check.py::TestUtcAwareProductionTimestamps`, `tests/ci/test_release_cadence_check.py::TestStrictReleaseTagSelection` | ✅ |
-| AC-32 | CLI and Extension tag events run one serialized, CLI-keyed reconciliation: exact commit co-location satisfies the relationship, later Extension tags comment/close matching alerts, and higher stable CLI tags supersede older alerts without duplicate/reopened records | `tests/ci/test_extension_corelease_check.py::TestIncident1375`, `tests/ci/test_extension_corelease_check.py::TestIncident1410`, `tests/ci/test_extension_corelease_check.py::TestConvergentReconciliation` | ✅ |
+| AC-32 | CLI and Extension tag events run one serialized, CLI-keyed reconciliation: exact commit co-location satisfies the relationship, legacy labeled records migrate safely, later Extension tags comment/close matching alerts, and higher stable CLI tags create their replacement before superseding older alerts | `tests/ci/test_extension_corelease_check.py::TestIncident1375`, `tests/ci/test_extension_corelease_check.py::TestIncident1410`, `tests/ci/test_extension_corelease_check.py::TestConvergentReconciliation`, `tests/ci/test_extension_corelease_check.py::TestIssueApplication` | ✅ |
 
 ### Edge Cases
 

@@ -120,7 +120,14 @@ the workflow comments on and closes the matching open issue. If the Extension
 arrives first, the later CLI event observes both refs and remains silent. A
 higher stable CLI release closes older open alerts as superseded and creates at
 most one new alert for the current CLI when its co-located Extension tag is
-still missing. Closed workflow records are not reopened.
+still missing. The replacement is created before the old alert closes, so a
+partial GitHub failure cannot remove the only actionable warning. Closed
+workflow records are not reopened.
+
+Alerts created before CLI-keyed markers were introduced are migrated from the
+workflow's exact legacy `Latest stable Cli tag` table field. The workflow-owned
+label is still mandatory, so unrelated issues containing similar prose do not
+participate in reconciliation.
 
 The comparison uses peeled commits, so annotated and lightweight tags behave
 the same way. CLI prereleases do not require a Marketplace refresh; malformed
