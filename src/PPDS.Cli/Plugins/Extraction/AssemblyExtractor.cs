@@ -1050,8 +1050,6 @@ public sealed class AssemblyExtractor : IDisposable
             }
             else if (reference.ResolutionScope.Kind == HandleKind.AssemblyReference)
             {
-                var assemblyReference = context.Reader.GetAssemblyReference(
-                    (AssemblyReferenceHandle)reference.ResolutionScope);
                 if (!TryFindAssemblyPath(context.Reader, (AssemblyReferenceHandle)reference.ResolutionScope, out var path))
                 {
                     resolved = default;

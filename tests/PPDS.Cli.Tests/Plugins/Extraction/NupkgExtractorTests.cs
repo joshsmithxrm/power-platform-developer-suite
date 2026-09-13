@@ -1168,8 +1168,11 @@ public class NupkgExtractorTests : IDisposable
         Assert.Contains("public, concrete, closed runtime", exception.Message);
     }
 
-    [Fact]
-    public void Extract_MixedPackageWithUnresolvedCandidateAncestry_FailsClosed()
+    [Theory]
+    [InlineData("Contoso.ExternalFramework")]
+    [InlineData("System.ContosoPluginFramework")]
+    public void Extract_MixedPackageWithUnresolvedCandidateAncestry_FailsClosed(
+        string missingAssemblyName)
     {
         var nupkgPath = PluginPackageTestFixture.Create(
             _scratch,
@@ -1188,15 +1191,15 @@ public class NupkgExtractorTests : IDisposable
                 """,
                 ReferencesSdk: true),
             new TestPackageAssembly(
-                "Contoso.ExternalFramework",
-                "Contoso.ExternalFramework.dll",
+                missingAssemblyName,
+                $"{missingAssemblyName}.dll",
                 "namespace Contoso.External { public abstract class PluginBase { } }",
                 IncludeInPackage: false),
             new TestPackageAssembly(
                 "Contoso.UnresolvedCandidate",
                 "Contoso.UnresolvedCandidate.dll",
                 "namespace Contoso { public sealed class PossiblePlugin : Contoso.External.PluginBase { } }",
-                AssemblyReferences: ["Contoso.ExternalFramework"]));
+                AssemblyReferences: [missingAssemblyName]));
 
         var exception = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 

@@ -1025,6 +1025,100 @@ public class DeployCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_CancellationAfterFirstAssembly_DoesNotTouchLaterAssemblyOrApis()
+    {
+        var firstPath = Path.Combine(Path.GetTempPath(), $"ppds-first-{Guid.NewGuid():N}.dll");
+        var secondPath = Path.Combine(Path.GetTempPath(), $"ppds-second-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(firstPath, [0x4d, 0x5a, 0x01]);
+        File.WriteAllBytes(secondPath, [0x4d, 0x5a, 0x02]);
+        try
+        {
+            var config = new PluginRegistrationConfig
+            {
+                Assemblies =
+                [
+                    new PluginAssemblyConfig
+                    {
+                        Name = "Contoso.FirstPlugins",
+                        Type = "Assembly",
+                        Path = firstPath
+                    },
+                    new PluginAssemblyConfig
+                    {
+                        Name = "Contoso.SecondPlugins",
+                        Type = "Assembly",
+                        Path = secondPath
+                    }
+                ],
+                CustomApis =
+                [
+                    new CustomApiConfig
+                    {
+                        UniqueName = "ppds_CancelledApi",
+                        PluginTypeName = "Contoso.SecondPlugins.ApiPlugin"
+                    }
+                ]
+            };
+            File.WriteAllText(_tempConfigFile, System.Text.Json.JsonSerializer.Serialize(config));
+
+            using var source = new CancellationTokenSource();
+            var firstAssemblyId = Guid.NewGuid();
+            var registration = new Mock<IPluginRegistrationService>();
+            registration.Setup(service => service.UpsertAssemblyAsync(
+                    "Contoso.FirstPlugins",
+                    It.IsAny<byte[]>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(firstAssemblyId);
+            registration.Setup(service => service.ListTypesForAssemblyAsync(
+                    firstAssemblyId,
+                    It.IsAny<CancellationToken>()))
+                .Callback(source.Cancel)
+                .ReturnsAsync([]);
+            var customApis = new Mock<ICustomApiService>();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                DeployCommand.ExecuteAsync(
+                    new FileInfo(_tempConfigFile),
+                    profile: null,
+                    environment: null,
+                    solutionOverride: null,
+                    clean: false,
+                    dryRun: false,
+                    new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                    source.Token,
+                    serviceProviderFactory: _ => Task.FromResult(
+                        new ServiceCollection()
+                            .AddSingleton<IPluginRegistrationService>(registration.Object)
+                            .AddSingleton<ICustomApiService>(customApis.Object)
+                            .BuildServiceProvider())));
+
+            registration.Verify(service => service.UpsertAssemblyAsync(
+                "Contoso.FirstPlugins",
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            registration.Verify(service => service.GetAssemblyByNameAsync(
+                "Contoso.SecondPlugins",
+                It.IsAny<CancellationToken>()), Times.Never);
+            registration.Verify(service => service.UpsertAssemblyAsync(
+                "Contoso.SecondPlugins",
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            registration.Verify(service => service.GetPluginTypeByNameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            customApis.VerifyNoOtherCalls();
+        }
+        finally
+        {
+            File.Delete(firstPath);
+            File.Delete(secondPath);
+        }
+    }
+
+    [Fact]
     public async Task DeployAssemblyAsync_CancellationDuringUpload_RethrowsAndStopsDeployment()
     {
         var packagePath = CreateRuntimePluginPackage();
@@ -1066,6 +1160,132 @@ public class DeployCommandTests : IDisposable
         finally
         {
             File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeployAssemblyAsync_CancellationAfterStep_DoesNotInspectOrUpsertImages()
+    {
+        var assemblyPath = Path.Combine(Path.GetTempPath(), $"ppds-step-cancel-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(assemblyPath, [0x4d, 0x5a]);
+        try
+        {
+            using var source = new CancellationTokenSource();
+            var assemblyId = Guid.NewGuid();
+            var typeId = Guid.NewGuid();
+            var stepId = Guid.NewGuid();
+            var messageId = Guid.NewGuid();
+            var filterId = Guid.NewGuid();
+            var registration = new Mock<IPluginRegistrationService>();
+            registration.Setup(service => service.UpsertAssemblyAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<byte[]>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(assemblyId);
+            registration.Setup(service => service.ListTypesForAssemblyAsync(
+                    assemblyId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([new PluginTypeInfo { Id = typeId, TypeName = "Contoso.Plugin" }]);
+            registration.Setup(service => service.ListStepsForTypeAsync(
+                    typeId,
+                    It.IsAny<PluginListOptions?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(
+                [
+                    new PluginStepInfo
+                    {
+                        Id = stepId,
+                        Name = "Contoso.Plugin: Update of account",
+                        Message = "Update",
+                        PrimaryEntity = "account",
+                        Stage = "PostOperation",
+                        Mode = "Synchronous"
+                    }
+                ]);
+            registration.Setup(service => service.UpsertPluginTypeAsync(
+                    assemblyId,
+                    "Contoso.Plugin",
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(typeId);
+            registration.Setup(service => service.GetSdkMessageIdAsync(
+                    "Update",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(messageId);
+            registration.Setup(service => service.GetSdkMessageFilterIdAsync(
+                    messageId,
+                    "account",
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(filterId);
+            registration.Setup(service => service.UpsertStepAsync(
+                    typeId,
+                    "pluginType",
+                    It.IsAny<PluginStepConfig>(),
+                    messageId,
+                    filterId,
+                    It.IsAny<string?>(),
+                    It.IsAny<StepIdentityResolution?>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback(source.Cancel)
+                .ReturnsAsync(stepId);
+
+            var config = new PluginAssemblyConfig
+            {
+                Name = "Contoso.Plugins",
+                Type = "Assembly",
+                Path = assemblyPath,
+                Types =
+                {
+                    new PluginTypeConfig
+                    {
+                        TypeName = "Contoso.Plugin",
+                        Steps =
+                        {
+                            new PluginStepConfig
+                            {
+                                Message = "Update",
+                                Entity = "account",
+                                Stage = "PostOperation",
+                                Mode = "Synchronous",
+                                Images =
+                                {
+                                    new PluginImageConfig
+                                    {
+                                        Name = "PreImage",
+                                        ImageType = "PreImage"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                DeployCommand.DeployAssemblyAsync(
+                    registration.Object,
+                    config,
+                    Path.GetTempPath(),
+                    solutionOverride: null,
+                    clean: false,
+                    dryRun: false,
+                    new GlobalOptionValues { OutputFormat = OutputFormat.Json },
+                    source.Token));
+
+            registration.Verify(service => service.ListImagesForStepAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            registration.Verify(service => service.UpsertImageAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<PluginImageConfig>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(assemblyPath);
         }
     }
 
@@ -1544,9 +1764,13 @@ public class DeployCommandTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DeployAssemblyAsync_AddedUnresolvedCandidateAncestry_FailsBeforeServerCalls(bool dryRun)
+    [InlineData(false, "Contoso.ExternalFramework")]
+    [InlineData(true, "Contoso.ExternalFramework")]
+    [InlineData(false, "System.ContosoPluginFramework")]
+    [InlineData(true, "System.ContosoPluginFramework")]
+    public async Task DeployAssemblyAsync_AddedUnresolvedCandidateAncestry_FailsBeforeServerCalls(
+        bool dryRun,
+        string missingAssemblyName)
     {
         var scratch = Path.Combine(Path.GetTempPath(), $"ppds-unresolved-candidate-deploy-{Guid.NewGuid():N}");
         Directory.CreateDirectory(scratch);
@@ -1580,15 +1804,15 @@ public class DeployCommandTests : IDisposable
                     knownPluginSource,
                     ReferencesSdk: true),
                 new TestPackageAssembly(
-                    "Contoso.ExternalFramework",
-                    "Contoso.ExternalFramework.dll",
+                    missingAssemblyName,
+                    $"{missingAssemblyName}.dll",
                     "namespace Contoso.External { public abstract class PluginBase { } }",
                     IncludeInPackage: false),
                 new TestPackageAssembly(
                     "Contoso.UnresolvedCandidate",
                     "Contoso.UnresolvedCandidate.dll",
                     "namespace Contoso { public sealed class PossiblePlugin : Contoso.External.PluginBase { } }",
-                    AssemblyReferences: ["Contoso.ExternalFramework"]));
+                    AssemblyReferences: [missingAssemblyName]));
             File.Copy(rebuiltPath, deploymentPath, overwrite: true);
             var mock = new Mock<IPluginRegistrationService>();
 

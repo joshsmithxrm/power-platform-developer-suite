@@ -126,6 +126,7 @@ public static class DeployCommand
                 preflightPackageContentReader);
 
             // Connect to Dataverse
+            cancellationToken.ThrowIfCancellationRequested();
             await using var serviceProvider = serviceProviderFactory == null
                 ? await ProfileServiceFactory.CreateFromProfilesAsync(
                     profile,
@@ -135,6 +136,7 @@ public static class DeployCommand
                     ProfileServiceFactory.DefaultDeviceCodeCallback,
                     cancellationToken)
                 : await serviceProviderFactory(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
@@ -158,6 +160,7 @@ public static class DeployCommand
             {
                 for (var index = 0; index < config.Assemblies.Count; index++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var assemblyConfig = config.Assemblies[index];
                     var result = await DeployAssemblyAsync(
                         registrationService,
@@ -173,6 +176,8 @@ public static class DeployCommand
                     results.Add(result);
                 }
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Root-level APIs can intentionally target an already registered type. APIs nested
             // under an assembly are owned by that deployment and must not bind to a stale
@@ -191,6 +196,8 @@ public static class DeployCommand
                     globalOptions,
                     cancellationToken);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (globalOptions.IsJsonMode)
             {
@@ -261,6 +268,7 @@ public static class DeployCommand
             var artifactBytes = packageContentReader == null
                 ? await File.ReadAllBytesAsync(canonicalPath, cancellationToken)
                 : await packageContentReader(canonicalPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!string.Equals(assembly.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
             {
@@ -347,7 +355,7 @@ public static class DeployCommand
                     nameof(deploymentPreflight));
             }
 
-            var assemblyPath = deploymentPreflight.AssemblyPath;
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Deploy assembly or package based on type
             Guid assemblyId;
@@ -361,6 +369,7 @@ public static class DeployCommand
                 Guid packageId;
                 if (dryRun)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var existingPkg = await service.GetPackageByNameAsync(packageName, cancellationToken);
                     packageId = existingPkg?.Id ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
@@ -368,6 +377,7 @@ public static class DeployCommand
                 }
                 else
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
@@ -375,6 +385,7 @@ public static class DeployCommand
 
                 // Get the assembly ID from the package (Dataverse creates it automatically)
                 // Use the inspected manifest name so config casing cannot affect lookup.
+                cancellationToken.ThrowIfCancellationRequested();
                 var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(
                     packageId,
                     packageAssemblyName,
@@ -410,21 +421,28 @@ public static class DeployCommand
 
                 if (dryRun)
                 {
-                    var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name, cancellationToken);
                     assemblyId = existing?.Id ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  [Dry-Run] Would {(existing == null ? "create" : "update")} assembly");
                 }
                 else
                 {
-                    assemblyId = await service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    assemblyId = await service.UpsertAssemblyAsync(
+                        assemblyConfig.Name,
+                        assemblyBytes,
+                        solution,
+                        cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Assembly registered: {assemblyId}");
                 }
             }
 
             // Get existing types and steps
-            var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId, cancellationToken);
 
             // Build a duplicate-aware type lookup. TypeName is typically the fully qualified
             // name, but collisions can happen (e.g., the same class name under different
@@ -465,6 +483,7 @@ public static class DeployCommand
             var existingPairs = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
             foreach (var existingType in existingTypes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var steps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
                 foreach (var step in steps)
                     existingPairs.Add((existingType, step));
@@ -518,7 +537,12 @@ public static class DeployCommand
                 }
                 else
                 {
-                    typeId = await service.UpsertPluginTypeAsync(assemblyId, typeConfig.TypeName, solution);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    typeId = await service.UpsertPluginTypeAsync(
+                        assemblyId,
+                        typeConfig.TypeName,
+                        solution,
+                        cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Type registered: {typeConfig.TypeName}");
                 }
@@ -526,13 +550,16 @@ public static class DeployCommand
                 // Deploy each step
                 foreach (var stepConfig in typeConfig.Steps)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     // Resolve auto-generated name if not specified. Deploy writes this name to the
                     // matched row, so a renamed environment step converges back to the configured name.
                     stepConfig.Name ??= PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
                     var stepName = stepConfig.Name;
 
                     // Lookup message and filter
-                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message, cancellationToken);
                     if (messageId == null)
                     {
                         if (!globalOptions.IsJsonMode)
@@ -540,10 +567,12 @@ public static class DeployCommand
                         continue;
                     }
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     var filterId = await service.GetSdkMessageFilterIdAsync(
                         messageId.Value,
                         stepConfig.Entity,
-                        stepConfig.SecondaryEntity);
+                        stepConfig.SecondaryEntity,
+                        cancellationToken);
 
                     // A specified entity that resolves no SDK message filter is a configuration error
                     // (typo, or unsupported message/entity combo) — the step can never be registered
@@ -584,6 +613,7 @@ public static class DeployCommand
                     }
                     else
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
@@ -593,11 +623,15 @@ public static class DeployCommand
                     }
 
                     // Deploy images (skip query in dry-run mode or for new steps since stepId doesn't exist)
-                    var existingImages = dryRun || isNew ? [] : await service.ListImagesForStepAsync(stepId);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existingImages = dryRun || isNew
+                        ? []
+                        : await service.ListImagesForStepAsync(stepId, cancellationToken);
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
 
                     foreach (var imageConfig in stepConfig.Images)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var imageIsNew = !existingImageNames.Contains(imageConfig.Name);
 
                         if (dryRun)
@@ -610,7 +644,12 @@ public static class DeployCommand
                         }
                         else
                         {
-                            await service.UpsertImageAsync(stepId, imageConfig, stepConfig.Message);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            await service.UpsertImageAsync(
+                                stepId,
+                                imageConfig,
+                                stepConfig.Message,
+                                cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
@@ -642,6 +681,7 @@ public static class DeployCommand
                         }
                         else
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
                             await service.DeleteStepAsync(orphanStep.Id, cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"    Deleted step: {orphanStep.Name}");
@@ -704,6 +744,7 @@ public static class DeployCommand
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return result;
     }
 
@@ -798,11 +839,14 @@ public static class DeployCommand
             }
             else
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var apiId = await customApiService.RegisterAsync(registration, cancellationToken: cancellationToken);
                 if (!globalOptions.IsJsonMode)
                     Console.Error.WriteLine($"  Custom API registered: {apiConfig.UniqueName} ({apiId})");
             }
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private static string? ResolveAssemblyPath(PluginAssemblyConfig config, string configDir)

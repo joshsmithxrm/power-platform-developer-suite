@@ -510,6 +510,9 @@ public static class NupkgExtractor
     private sealed class BufferedPackageMetadataResolver : IDisposable
     {
         private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
+        private static readonly Version NetFrameworkCoreAssemblyVersion = new(4, 0, 0, 0);
+        private static readonly ImmutableArray<byte> NetFrameworkCorePublicKeyToken =
+            [0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89];
         private readonly Dictionary<string, List<BufferedMetadataAssembly>> _assembliesByName =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<ResolvedPackageType, TypePluginEvidence> _pluginEvidence = [];
@@ -689,12 +692,19 @@ public static class NupkgExtractor
 
             var assemblyReference = context.Reader.GetAssemblyReference(
                 (AssemblyReferenceHandle)reference.ResolutionScope);
-            var assemblyName = context.Reader.GetString(assemblyReference.Name);
-            return !assemblyName.Equals("mscorlib", StringComparison.OrdinalIgnoreCase)
-                && !assemblyName.Equals("System", StringComparison.OrdinalIgnoreCase)
-                && !assemblyName.StartsWith("System.", StringComparison.OrdinalIgnoreCase)
-                && !assemblyName.Equals("netstandard", StringComparison.OrdinalIgnoreCase)
-                && !assemblyName.Equals("Microsoft.Xrm.Sdk", StringComparison.OrdinalIgnoreCase);
+            var isKnownNetFrameworkCore =
+                context.Reader.StringComparer.Equals(assemblyReference.Name, "mscorlib")
+                && assemblyReference.Version == NetFrameworkCoreAssemblyVersion
+                && string.IsNullOrEmpty(context.Reader.GetString(assemblyReference.Culture))
+                && (assemblyReference.Flags & AssemblyFlags.PublicKey) == 0
+                && context.Reader.GetBlobBytes(assemblyReference.PublicKeyOrToken)
+                    .AsSpan()
+                    .SequenceEqual(NetFrameworkCorePublicKeyToken.AsSpan());
+            // Dataverse packages target .NET Framework 4.6.2/4.7.1. A reference into the exact
+            // strong-named core library is terminal because mscorlib cannot depend on IPlugin.
+            // Everything else remains unresolved and therefore a possible candidate; in
+            // particular, a custom simple name beginning with "System." is not trusted.
+            return !isKnownNetFrameworkCore;
         }
 
         private bool TryResolve(
