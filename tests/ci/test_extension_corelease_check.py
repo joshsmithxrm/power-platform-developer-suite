@@ -210,6 +210,21 @@ class TestConvergentReconciliation:
         assert create[0]["cli_tag"] == "Cli-v1.4.1"
         assert [action["kind"] for action in plan["actions"]] == ["create", "close"]
 
+    def test_equal_precedence_build_metadata_uses_selection_tiebreak_for_supersession(self):
+        plan = cec.reconcile_corelease(
+            cli_tags=[
+                tag("Cli-v1.4.1", "plain"),
+                tag("Cli-v1.4.1+hotfix", "hotfix"),
+            ],
+            extension_tags=[tag("Extension-v1.6.1", "hotfix")],
+            existing_issues=[issue(20, "Cli-v1.4.1")],
+        )
+        assert plan["latest_cli_tag"] == "Cli-v1.4.1+hotfix"
+        assert [(a["issue_number"], a["reason"]) for a in actions(plan, "close")] == [
+            (20, "superseded"),
+        ]
+        assert actions(plan, "create") == []
+
     def test_unlabeled_spoof_marker_does_not_block_current_alert(self):
         plan = cec.reconcile_corelease(
             cli_tags=[tag("Cli-v1.4.1", "new")],
