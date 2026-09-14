@@ -92,9 +92,13 @@ internal static class PluginPackageMetadataReader
 
                 throw new PpdsException(
                     ErrorCodes.Validation.InvalidValue,
-                    "Plugin package does not contain a Dataverse-supported framework folder. " +
-                    "Supported folders are lib/net462 and lib/net471. " +
-                    $"Found: {found}. Retarget the plugin package project to net462 or net471.");
+                    "Dataverse cannot register this NuGet plugin package because it does not contain " +
+                    "a supported framework asset group. Dataverse currently accepts plugin packages " +
+                    "with lib/net462 or lib/net471. " +
+                    $"Found: {found}. To keep using a NuGet plugin package, retarget the plugin project " +
+                    "to net462 or net471. If the project must target net48, deploy its compiled, " +
+                    "strong-name-signed DLL as a loose plugin assembly instead; Dataverse supports " +
+                    "net48 for loose assemblies, not plugin package asset groups.");
             }
 
             return new PluginPackageMetadata(id, version, targetFramework);
