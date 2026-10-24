@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import Optional
 
 
+PUBLIC_RELEASE_RUNBOOK = (
+    "https://github.com/joshsmithxrm/power-platform-developer-suite/"
+    "blob/main/docs/RELEASE.md"
+)
+
+
 def should_open_release_issue(merged_prs: list[dict]) -> bool:
     """Return True if a release issue should be opened.
 
@@ -85,7 +91,10 @@ def build_issue_body(
 
     lines.append("### Release Checklist")
     lines.append("")
-    lines.append("- [ ] Run `/release` ceremony (CHANGELOGs, version bumps, tag push)")
+    lines.append(
+        f"- [ ] Follow the public [release procedure]({PUBLIC_RELEASE_RUNBOOK}) "
+        "(CHANGELOGs, version selection, and individual tag pushes)"
+    )
     lines.append("- [ ] Verify all packages published successfully")
     lines.append("- [ ] Close this milestone")
     lines.append("")
