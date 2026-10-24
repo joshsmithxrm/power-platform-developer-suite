@@ -1,0 +1,30 @@
+{
+  "action": "labeled",
+  "number": 1399,
+  "label": {
+    "name": "release:patch"
+  },
+  "pull_request": {
+    "number": 1399,
+    "title": "fix(plugins): create packages with nuspec version",
+    "merged": true,
+    "merge_commit_sha": "c42cc89674506643f4a0e805c44b18847c2ea1ec",
+    "base": {
+      "ref": "main"
+    },
+    "labels": [
+      {
+        "name": "type:bug"
+      },
+      {
+        "name": "area:plugins"
+      },
+      {
+        "name": "release:patch"
+      }
+    ]
+  },
+  "repository": {
+    "full_name": "joshsmithxrm/power-platform-developer-suite"
+  }
+}
