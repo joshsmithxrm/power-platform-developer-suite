@@ -222,7 +222,11 @@ public static class UpdateCommand
 
             // Read and upload package
             var content = await File.ReadAllBytesAsync(path.FullName, cancellationToken);
-            var packageId = await registrationService.UpsertPackageAsync(name, content, solution, cancellationToken);
+            var packageId = await registrationService.UpsertPackageAsync(
+                GetRequiredPackageUniqueName(existing),
+                content,
+                solution,
+                cancellationToken);
 
             var result = new UpdateResult
             {
@@ -250,6 +254,20 @@ public static class UpdateCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Returns the stable package identity used by the nupkg and Dataverse upsert boundary.
+    /// </summary>
+    /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
+    internal static string GetRequiredPackageUniqueName(PluginPackageInfo package)
+    {
+        if (!string.IsNullOrWhiteSpace(package.UniqueName))
+            return package.UniqueName;
+
+        throw new PpdsException(
+            ErrorCodes.Validation.RequiredField,
+            $"Package '{package.Name}' does not have a unique name and cannot be updated safely.");
     }
 
     #endregion

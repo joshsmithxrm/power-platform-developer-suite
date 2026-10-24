@@ -71,6 +71,7 @@ public static class ExceptionMapper
             PpdsValidationException => ExitCodes.InvalidArguments,
             PpdsAuthException => ExitCodes.AuthError,
             PpdsThrottleException => ExitCodes.ConnectionError,
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } => ExitCodes.ConfirmationRequired,
             PpdsException { ErrorCode: ErrorCodes.Operation.Timeout } => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: var code } when code.StartsWith("Plugin.") => ExitCodes.Failure,
             PpdsException { ErrorCode: var code } when code.StartsWith("Validation.") => ExitCodes.InvalidArguments,

@@ -1,8 +1,6 @@
-﻿using System.CommandLine;
-using System.IO.Compression;
+using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
@@ -10,6 +8,7 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -244,11 +243,9 @@ public static class DeployCommand
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
             {
-                // Extract package ID from .nuspec inside the nupkg - this is what Dataverse uses as uniquename
-                var packageName = GetPackageIdFromNupkg(assemblyPath);
-
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
                 var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+                var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
 
                 Guid packageId;
                 if (dryRun)
@@ -650,39 +647,6 @@ public static class DeployCommand
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Extracts the package ID from the .nuspec file inside a .nupkg.
-    /// This is the authoritative source - Dataverse uses this as the uniquename.
-    /// </summary>
-    private static string GetPackageIdFromNupkg(string nupkgPath)
-    {
-        using var archive = ZipFile.OpenRead(nupkgPath);
-
-        // Find the .nuspec file (there's exactly one at the root level)
-        var nuspecEntry = archive.Entries.FirstOrDefault(e =>
-            e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) &&
-            !e.FullName.Contains('/'));
-
-        if (nuspecEntry == null)
-        {
-            throw new InvalidOperationException($"No .nuspec file found in package: {nupkgPath}");
-        }
-
-        using var stream = nuspecEntry.Open();
-        var doc = XDocument.Load(stream);
-
-        // Nuspec namespace
-        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-        var id = doc.Root?.Element(ns + "metadata")?.Element(ns + "id")?.Value;
-
-        if (string.IsNullOrEmpty(id))
-        {
-            throw new InvalidOperationException($"No <id> element found in nuspec: {nupkgPath}");
-        }
-
-        return id;
     }
 
     #region Result Models

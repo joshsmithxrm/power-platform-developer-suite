@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-12
+
+### Fixed
+- **`ppds query sql <DML> --dry-run` no longer requires `--confirm`** — dry-run now performs the side-effect-free DML planning path directly while preserving hard safety blocks such as UPDATE/DELETE without `WHERE` and cross-environment read-only policy for every target, the configured execution row cap, and the shakedown guard's dry-run carve-out. CLI Text/JSON, daemon JSON-RPC, and service streaming responses now contain the plan, FetchXML, row cap, and execution-confirmation requirement instead of an empty result; compound scripts expand their nested DML plans and per-statement FetchXML. Actual DML remains confirmation-gated, and an unconfirmed CLI execution now returns the documented confirmation-required exit code (11) ([#1401](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1401)).
+- **`ppds plugins unregister package --force` now removes NuGet plugin packages cleanly** — PPDS deletes descendant registrations, then deletes the owning `pluginpackage` so Dataverse can cascade its package-owned assemblies instead of attempting a forbidden direct `pluginassembly` delete and leaving a partially unregistered package behind ([#1400](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1400)).
+- **Direct assembly unregistration now protects package-owned assemblies** — PPDS rejects the operation before deleting descendants and directs the user to unregister the owning package instead ([#1400](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1400)).
+- **First-time `ppds plugins deploy|register package` no longer fails with `Attribute 'version' cannot be NULL`** — PPDS now reads the root `.nuspec` ID and version through one validated package-metadata path and sends both on `pluginpackage` creation; existing packages remain content-only updates because Dataverse package name and version are immutable. NuGet packages are also preflighted for Dataverse-supported `lib/net462` or `lib/net471` assets, so a `lib/net48`-only package gets an actionable local validation error instead of a late server/PRT rejection ([#1399](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1399)).
+
+### Security
+
+- **Runtime dependency graph refreshed** — consumes Auth 1.1.1, Dataverse 1.3.1, Migration 1.2.1, and Query 1.0.1, including the `System.Security.Cryptography.Xml` 8.0.4 security update ([#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+
 ## [1.4.0] - 2026-07-15
 
 ### Added
@@ -136,7 +148,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`ppds flows get|url` accept GUID or unique name** — The `name` argument resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.1...HEAD
+[1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.0...Cli-v1.4.1
 [1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.3.0...Cli-v1.4.0
 [1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...Cli-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.1.0...Cli-v1.2.0
