@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Plugins.Registration;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -148,6 +150,30 @@ public class UpdateCommandTests : IDisposable
     {
         var result = _command.Parse($"package MyPlugin.Plugins \"{_tempNupkgFile}\"");
         Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void GetRequiredPackageUniqueName_ReturnsUniqueName_WhenDisplayNameDiffers()
+    {
+        var package = new PluginPackageInfo
+        {
+            Name = "Package Display Name",
+            UniqueName = "ppds_Package"
+        };
+
+        var result = UpdateCommand.GetRequiredPackageUniqueName(package);
+
+        Assert.Equal("ppds_Package", result);
+    }
+
+    [Fact]
+    public void GetRequiredPackageUniqueName_RejectsMissingIdentity()
+    {
+        var package = new PluginPackageInfo { Name = "Package Display Name" };
+
+        var exception = Assert.Throws<PpdsException>(() => UpdateCommand.GetRequiredPackageUniqueName(package));
+
+        Assert.Equal(ErrorCodes.Validation.RequiredField, exception.ErrorCode);
     }
 
     #endregion

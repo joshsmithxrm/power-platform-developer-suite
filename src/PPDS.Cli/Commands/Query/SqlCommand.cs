@@ -110,11 +110,13 @@ public static class SqlCommand
             }
         });
 
-        // --explain and --show-fetchxml render a plan / FetchXML blob, not a result set,
-        // so CSV is not applicable. Reject it rather than silently emitting Text (#1078).
+        // --explain, --show-fetchxml, and --dry-run render plans / FetchXML blobs, not
+        // result sets, so CSV is not applicable. Reject it rather than emitting nothing.
         command.Validators.Add(result =>
         {
-            if (!result.GetValue(showFetchXmlOption) && !result.GetValue(explainOption))
+            if (!result.GetValue(showFetchXmlOption) &&
+                !result.GetValue(explainOption) &&
+                !result.GetValue(dryRunOption))
             {
                 return;
             }
@@ -134,7 +136,8 @@ public static class SqlCommand
             if (format == OutputFormat.Csv)
             {
                 result.AddError(
-                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text.");
+                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text. " +
+                    "The same restriction applies to --dry-run.");
             }
         });
 
@@ -296,7 +299,7 @@ public static class SqlCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine("Executing query...");
+                Console.Error.WriteLine(dryRun ? "Building DML preview..." : "Executing query...");
             }
 
             var request = new SqlQueryRequest
@@ -316,6 +319,12 @@ public static class SqlCommand
             };
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
+
+            if (queryResult.DmlSafetyResult?.IsDryRun == true)
+            {
+                WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);
+                return ExitCodes.Success;
+            }
 
             switch (globalOptions.OutputFormat)
             {
@@ -365,6 +374,62 @@ public static class SqlCommand
             foreach (var rp in remoteProviders)
                 await rp.DisposeAsync();
         }
+    }
+
+    internal static void WriteDryRunOutput(
+        SqlQueryResult result,
+        OutputFormat outputFormat,
+        IOutputWriter writer)
+    {
+        var output = new DmlDryRunOutput
+        {
+            Sql = result.OriginalSql,
+            Plan = result.DryRunPlan,
+            FetchXml = result.TranspiledFetchXml,
+            RowCap = result.DmlSafetyResult?.RowCap ?? DmlSafetyGuard.DefaultRowCap,
+            RequiresConfirmationForExecution = result.DmlSafetyResult?.RequiresConfirmation == true
+        };
+
+        if (outputFormat == OutputFormat.Json)
+        {
+            writer.WriteSuccess(output);
+            return;
+        }
+
+        if (outputFormat == OutputFormat.Csv)
+        {
+            throw new PpdsValidationException(
+                "outputFormat",
+                "CSV output is not supported with a DML dry-run. Use --output-format Json or Text.");
+        }
+
+        Console.Error.WriteLine("Dry run complete. No Dataverse records were changed.");
+        Console.Error.WriteLine($"Execution row cap: {output.RowCap:N0}");
+        if (output.RequiresConfirmationForExecution)
+        {
+            Console.Error.WriteLine("Actual execution requires --confirm.");
+        }
+
+        if (output.Plan != null)
+        {
+            Console.WriteLine(PlanFormatter.Format(output.Plan));
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.FetchXml))
+        {
+            Console.WriteLine("Planned FetchXML:");
+            Console.WriteLine(output.FetchXml);
+        }
+    }
+
+    internal sealed class DmlDryRunOutput
+    {
+        public bool DryRun => true;
+        public required string Sql { get; init; }
+        public QueryPlanDescription? Plan { get; init; }
+        public string? FetchXml { get; init; }
+        public int RowCap { get; init; }
+        public bool RequiresConfirmationForExecution { get; init; }
     }
 
     internal static int DmlExitCode(QueryResult result)

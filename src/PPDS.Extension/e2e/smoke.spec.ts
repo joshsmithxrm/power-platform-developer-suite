@@ -1,43 +1,28 @@
-import { test, expect } from './fixtures.js';
+import { expect, test } from './fixtures.js';
 
-/**
- * Basic smoke test that verifies the extension loads in VS Code.
- * These tests require VS Code to be available in the environment.
- *
- * Run with: npx playwright test
- * Set VSCODE_PATH env var if code is not in PATH.
- */
-test.describe('Extension Smoke Tests', () => {
-    test('VS Code window opens', async ({ page }) => {
-        // Verify the window opened and workbench is ready
-        const title = await page.title();
-        expect(title).toBeTruthy();
-    });
+const PPDS_ACTIVITY_NAME = 'Power Platform Developer Suite';
 
-    test('activity bar has PPDS section', async ({ page }) => {
-        // Look for the PPDS activity bar icon
-        // Note: This depends on VS Code's HTML structure which may change
-        const activityBar = page.locator('[id="workbench.view.extension.ppds"]');
-        await expect(activityBar).toBeVisible({ timeout: 30000 });
-    });
+test.beforeEach(async ({ page }) => {
+    await page.keyboard.press('Escape');
 });
 
-test.describe('PPDS Extension Tests', () => {
-    test('PPDS extension is active', async ({ page }) => {
-        await page.keyboard.press('Control+Shift+X');
-        await page.waitForSelector('text=Power Platform Developer Suite', { timeout: 30000 });
-    });
+test('VS Code workbench opens with the PPDS development extension', async ({ page }) => {
+    await expect(page).toHaveTitle(/Extension Development Host/);
+    await expect(page.getByRole('tab', { name: PPDS_ACTIVITY_NAME, exact: true })).toBeVisible();
+});
 
-    test('PPDS commands are registered', async ({ page }) => {
-        await page.keyboard.press('Control+Shift+P');
-        await page.type('.quick-input-widget input', 'PPDS');
-        await expect(page.locator('text=PPDS: Data Explorer')).toBeVisible({ timeout: 10000 });
-    });
+test('PPDS activity view activates the extension and registers its tree views', async ({ page }) => {
+    await page.getByRole('tab', { name: PPDS_ACTIVITY_NAME, exact: true }).click();
 
-    test('PPDS tree view is registered', async ({ page }) => {
-        const ppdsIcon = page.locator('[id="workbench.view.extension.ppds"]');
-        await expect(ppdsIcon).toBeVisible({ timeout: 30000 });
-        await ppdsIcon.click();
-        await expect(page.locator('text=Profiles')).toBeVisible({ timeout: 10000 });
-    });
+    await expect(page.getByText('Tools', { exact: true })).toBeVisible();
+    await expect(page.getByText('Profiles', { exact: true })).toBeVisible();
+});
+
+test('PPDS commands are available from the command palette', async ({ page }) => {
+    await page.keyboard.press('Control+KeyP');
+    const commandInput = page.locator('.quick-input-widget input');
+    await expect(commandInput).toBeVisible();
+    await commandInput.fill('>PPDS: Open Data Explorer');
+
+    await expect(page.getByText('PPDS: Open Data Explorer', { exact: true }).first()).toBeVisible();
 });

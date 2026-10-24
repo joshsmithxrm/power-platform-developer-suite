@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-12
+
+### Fixed
+
+- **DML dry-run plans nested statements without executing them** — script planning now delegates nested DML to its side-effect-free planning path instead of the execution path, while actual DML remains confirmation-gated and all hard safety blocks remain enforced ([#1401](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1401)).
+
+### Changed
+
+- **Dataverse dependency updated to 1.3.1** — carries the patched `System.Security.Cryptography.Xml` 8.0.4 dependency through the query package graph ([#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. Consolidates features developed across `1.0.0-beta.1` and `1.0.0-beta.2`. Production-grade SQL query engine for Dataverse with FetchXML transpilation and an ADO.NET provider. Targets `net8.0`, `net9.0`, `net10.0`.
@@ -45,5 +55,6 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **FetchXML IntelliSense** — `FetchXmlCompletionEngine` provides cursor-aware completions (element names, attribute names, operators, filter types, boolean flags); wired through CLI daemon, TUI, and VS Code extension.
 - **Safety and protection** — DML safety guard with configurable thresholds and environment protection levels; `QueryExecutionException` with structured error codes for programmatic handling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.1...HEAD
+[1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.0...Query-v1.0.1
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Query-v1.0.0

@@ -93,6 +93,31 @@ AUTH_CRITICAL_PATH_PREFIXES = (
     "src/PPDS.Plugins/",  # strong-name signing surface
 )
 
+# Authors GitHub may report for Dependabot-authored pull requests. A
+# ``dependencies`` label also opts a human-authored PR into the policy.
+DEPENDENCY_UPDATE_AUTHORS = frozenset({
+    "dependabot",
+    "app/dependabot",
+    "dependabot[bot]",
+})
+
+# Manifest/workflow paths used only as a fallback when labels and the branch
+# name do not identify the dependency ecosystem (for example, a human-authored
+# dependency PR carrying the ``dependencies`` label). Multiple ecosystems are
+# deliberately left ambiguous so the enforcement gate fails closed.
+_NPM_DEPENDENCY_FILES = frozenset({
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+})
+_NUGET_DEPENDENCY_FILES = frozenset({
+    "directory.packages.props",
+    "packages.lock.json",
+    "nuget.config",
+})
+
 
 @dataclass(frozen=True)
 class Classification:
@@ -285,8 +310,18 @@ def classify_update_type(from_v: Optional[str], to_v: Optional[str]) -> str:
     return "patch"
 
 
-def detect_ecosystem(labels: Iterable[str], head_ref: str) -> str:
-    """Determine ecosystem from labels first, then headRefName fallback."""
+def detect_ecosystem(
+    labels: Iterable[str],
+    head_ref: str,
+    files: Iterable[str] = (),
+) -> str:
+    """Determine ecosystem from labels, branch name, then changed files.
+
+    File inference exists for labeled, human-authored dependency PRs whose
+    branch names do not follow Dependabot's convention. If the files indicate
+    more than one ecosystem, ``unknown`` is returned so callers can require
+    manual evaluation instead of choosing an unrelated test surface.
+    """
     label_set = {lbl.lower() for lbl in labels}
     if "nuget" in label_set:
         return "nuget"
@@ -305,7 +340,48 @@ def detect_ecosystem(labels: Iterable[str], head_ref: str) -> str:
             return "npm"
         if eco == "github_actions":
             return "github-actions"
+
+    inferred: set[str] = set()
+    for raw_path in files:
+        path = raw_path.replace("\\", "/")
+        lower_path = path.lower()
+        basename = lower_path.rsplit("/", 1)[-1]
+
+        if lower_path.startswith(".github/workflows/") or (
+            lower_path.startswith(".github/actions/")
+            and basename in {"action.yml", "action.yaml"}
+        ):
+            inferred.add("github-actions")
+        if basename in _NPM_DEPENDENCY_FILES:
+            inferred.add("npm")
+        if (
+            basename in _NUGET_DEPENDENCY_FILES
+            or lower_path.endswith((".csproj", ".fsproj", ".vbproj"))
+        ):
+            inferred.add("nuget")
+
+    if len(inferred) == 1:
+        return next(iter(inferred))
     return "unknown"
+
+
+def is_dependency_update(pr: dict) -> bool:
+    """Return whether a PR is in scope for dependency-update policy."""
+    labels = {(lbl.get("name") or "").lower() for lbl in (pr.get("labels") or [])}
+    if "dependencies" in labels:
+        return True
+    author = (pr.get("author") or {}).get("login", "").lower()
+    return author in DEPENDENCY_UPDATE_AUTHORS
+
+
+def requires_major_evaluation(classification: Classification) -> bool:
+    """Return whether an update needs major-version evidence and review.
+
+    ``unknown`` is intentionally included. An unparseable dependency update
+    must not escape the gate simply because its version could not be proven to
+    be non-major.
+    """
+    return classification.update_type in {"major", "unknown"}
 
 
 def is_tooling_package(pkg: Optional[str]) -> bool:
@@ -465,7 +541,7 @@ def classify_pr(pr: dict) -> Classification:
     files = [f.get("path", "") for f in pr.get("files", [])]
 
     pkg, from_v, to_v = parse_title(title)
-    ecosystem = detect_ecosystem(labels, head_ref)
+    ecosystem = detect_ecosystem(labels, head_ref, files)
     update_type = classify_update_type(from_v, to_v)
 
     # Grouped bumps — apply per-member group resolution then most-conservative-wins

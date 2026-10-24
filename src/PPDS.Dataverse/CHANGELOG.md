@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-12
+
+### Security
+
+- **Patched XML cryptography dependency** — `System.Security.Cryptography.Xml` is updated from 8.0.3 to 8.0.4, the first non-vulnerable 8.x servicing release for the July 2026 high-severity advisories ([#1402](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1402)).
+
 ## [1.3.0] - 2026-07-15
 
 ### Added
@@ -66,7 +72,8 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Default `AcquireTimeout` of 120 s** — Connection acquisition from the pool waits up to 120 s, accommodating queuing on the DOP semaphore during large imports.
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.1...HEAD
+[1.3.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.0...Dataverse-v1.3.1
 [1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.2.0...Dataverse-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...Dataverse-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0...Dataverse-v1.1.0

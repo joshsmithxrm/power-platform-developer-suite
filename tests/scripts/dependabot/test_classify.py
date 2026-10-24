@@ -165,8 +165,82 @@ class TestDetectEcosystem(unittest.TestCase):
     def test_head_ref_fallback_actions(self):
         self.assertEqual(classify.detect_ecosystem([], "dependabot/github_actions/actions/checkout-v4"), "github-actions")
 
+    def test_file_fallback_nuget(self):
+        self.assertEqual(
+            classify.detect_ecosystem([], "feature/update-sdk", ["Directory.Packages.props"]),
+            "nuget",
+        )
+
+    def test_file_fallback_npm(self):
+        self.assertEqual(
+            classify.detect_ecosystem([], "feature/update-sdk", ["src/PPDS.Extension/package.json"]),
+            "npm",
+        )
+
+    def test_file_fallback_github_actions(self):
+        self.assertEqual(
+            classify.detect_ecosystem([], "feature/update-action", [".github/workflows/build.yml"]),
+            "github-actions",
+        )
+
+    def test_mixed_file_fallback_is_unknown(self):
+        self.assertEqual(
+            classify.detect_ecosystem(
+                [],
+                "feature/update-dependencies",
+                ["Directory.Packages.props", "src/PPDS.Extension/package.json"],
+            ),
+            "unknown",
+        )
+
     def test_unknown(self):
         self.assertEqual(classify.detect_ecosystem(["random"], "feature/foo"), "unknown")
+
+
+class TestDependencyPolicySignals(unittest.TestCase):
+    def test_dependencies_label_opts_human_pr_into_policy(self):
+        pr = make_pr(labels=["dependencies"])
+        pr["author"] = {"login": "alice"}
+        self.assertTrue(classify.is_dependency_update(pr))
+
+    def test_dependabot_author_opts_unlabelled_pr_into_policy(self):
+        pr = make_pr()
+        pr["author"] = {"login": "dependabot[bot]"}
+        self.assertTrue(classify.is_dependency_update(pr))
+
+    def test_unlabelled_human_pr_is_out_of_scope(self):
+        pr = make_pr(labels=["bug"])
+        pr["author"] = {"login": "alice"}
+        self.assertFalse(classify.is_dependency_update(pr))
+
+    def test_major_classification_requires_evaluation(self):
+        classification = classify.classify_pr(make_pr(
+            title="ci: bump actions/setup-python from 6 to 7",
+            labels=["dependencies"],
+            head_ref="dependabot/github_actions/actions/setup-python-7",
+            files=[".github/workflows/workflow-tests.yml"],
+        ))
+        self.assertEqual(classification.update_type, "major")
+        self.assertTrue(classify.requires_major_evaluation(classification))
+
+    def test_unknown_classification_fails_closed(self):
+        classification = classify.classify_pr(make_pr(
+            title="Update internal dependency",
+            labels=["dependencies"],
+            files=["src/PPDS.Extension/package.json"],
+        ))
+        self.assertEqual(classification.update_type, "unknown")
+        self.assertTrue(classify.requires_major_evaluation(classification))
+
+    def test_patch_and_minor_do_not_require_major_evaluation(self):
+        for to_version in ("1.2.4", "1.3.0"):
+            with self.subTest(to_version=to_version):
+                classification = classify.classify_pr(make_pr(
+                    title=f"Bump example from 1.2.3 to {to_version}",
+                    labels=["dependencies"],
+                    files=["src/PPDS.Extension/package.json"],
+                ))
+                self.assertFalse(classify.requires_major_evaluation(classification))
 
 
 class TestClassifyPR(unittest.TestCase):

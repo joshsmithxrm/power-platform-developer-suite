@@ -236,6 +236,11 @@ class TestBuildIssueBody:
         body = cec.build_issue_body("Cli-v1.3.0", "Extension-v1.4.0")
         assert "opt-out" in body.lower() or "opt out" in body.lower()
 
+    def test_body_links_public_tool_neutral_release_runbook(self):
+        body = cec.build_issue_body("Cli-v1.3.0", "Extension-v1.4.0")
+        assert "docs/RELEASE.md#release-scope-analysis" in body
+        assert ".claude/" not in body
+
 
 # ---------------------------------------------------------------------------
 # Workflow wiring — the guard is actually reachable from CI

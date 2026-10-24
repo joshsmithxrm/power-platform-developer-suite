@@ -55,11 +55,6 @@ dependency-aware tiered import, and CMT format compatibility for automated pipel
     <PackageReference Include="MinVer" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- Suppress known vulnerability in transitive dependency until upstream fix -->
-  <PropertyGroup>
-    <NoWarn>$(NoWarn);NU1903</NoWarn>
-  </PropertyGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Migration.Tests" />
   </ItemGroup>

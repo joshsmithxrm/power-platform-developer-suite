@@ -133,9 +133,9 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 
 1. **Parse**: `SqlLexer` tokenizes input → `SqlParser` builds `ISqlStatement` AST
 2. **Extract hints**: `QueryHintParser.Parse(fragment)` extracts `-- ppds:*` hints
-3. **DML safety**: `DmlSafetyGuard.Check()` blocks unsafe DML (no-WHERE DELETE/UPDATE)
+3. **DML safety**: `DmlSafetyGuard.Check()` blocks unsafe DML (no-WHERE DELETE/UPDATE) and requires confirmation for execution. `--dry-run` is the side-effect-free preview path and never requires execution confirmation, while hard blocks (including cross-environment read-only policy) remain enforced.
 4. **Plan**: `ExecutionPlanBuilder` builds `IQueryPlanNode` tree (FetchXmlScanNode → ProjectNode for standard queries; RemoteScanNode for cross-env; TdsScanNode for TDS)
-5. **Execute plan**: Walk plan tree, dispatching to appropriate executors
+5. **Execute plan**: For dry-run, return the plan without dispatching any executor; otherwise walk the plan tree and dispatch to the appropriate executors
 6. **Expand**: `SqlQueryResultExpander` adds `*name` columns from formatted values
 7. **Return**: `SqlQueryResult` with original SQL, transpiled FetchXML, expanded `QueryResult`, `DataSources` metadata, and `ExecutionMode`
 
@@ -215,6 +215,8 @@ The VS Code extension surfaces query capabilities through webview panels served 
 **Data source banner:** When a query touches 2+ environments, a banner appears above results showing each source label styled with its environment color (e.g., "Data from: PPDS Dev (local) / QA (remote)"). Single-environment queries show no banner.
 
 **TDS Read Replica toggle:** The query panel menu includes a TDS Read Replica toggle. When enabled, queries route through the TDS Endpoint. The status text reflects the actual execution mode ("via TDS" or "via Dataverse") based on `SqlQueryResult.ExecutionMode`, not the toggle state.
+
+**DML dry-run response:** A `query/sql` request with `dmlSafety.isDryRun=true` returns the side-effect-free preview through the standard response contract. The response sets `dryRun`, `plan`, `executedFetchXml`, `rowCap`, and `requiresConfirmationForExecution`; no executor is dispatched, so `queryMode` is omitted. Compound scripts recursively expose each control-flow branch and planned data statement, with per-statement FetchXML. The dry-run fields are omitted for ordinary query responses. Service-level streaming previews expose the same plan and DML safety metadata on their single completion chunk.
 
 ---
 
@@ -400,7 +402,7 @@ The implementation ([`QueryHistoryService.cs:52-98`](../src/PPDS.Cli/Services/Hi
 | `ThrottleException` | Service protection limits | Automatic retry via connection pool |
 | `FileNotFoundException` | History file missing | Return empty list |
 | `PpdsException(DmlBlocked)` | DML without WHERE clause | Block execution, tell user to add WHERE or use `ppds truncate` |
-| `PpdsException(DmlConfirmationRequired)` | DML affects many rows | Require `--confirm` flag or interactive confirmation |
+| `PpdsException(DmlConfirmationRequired)` | Actual DML was requested without confirmation | Require `--confirm` for execution (CLI exit code 11); `--dry-run` previews without confirmation |
 | `PpdsException(TdsIncompatible)` | TDS requested but query can't use TDS | Fail with reason (DML, incompatible entity, unsupported feature) |
 | `PpdsException(TdsConnectionFailed)` | TDS endpoint disabled or unreachable | Fail with clear error, suggest disabling TDS mode |
 | Unknown environment label | `[LABEL].entity` where label not in `EnvironmentConfigStore` | Error: "No environment found matching label '{label}'" |
@@ -538,6 +540,9 @@ public sealed class SqlParseException : Exception
 - [ ] VS Code webview toolbar shows environment color as 4px left border
 - [ ] Cross-environment query results include `DataSources` metadata
 - [ ] TDS requested + incompatible query fails with clear error, no silent fallback
+- [ ] DML `--dry-run` succeeds without `--confirm`, executes no mutations, and leaves hard DML safety blocks intact
+- [ ] Daemon `query/sql` DML dry-run responses include the preview plan, FetchXML, row cap, and execution-confirmation requirement
+- [ ] Streaming DML dry-run completion chunks include the preview plan and DML safety metadata without dispatching an executor
 
 ### Edge Cases
 

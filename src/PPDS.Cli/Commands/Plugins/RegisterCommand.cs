@@ -1,13 +1,12 @@
-﻿using System.CommandLine;
-using System.IO.Compression;
+using System.CommandLine;
 using System.Text.Json.Serialization;
-using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -182,8 +181,8 @@ public static class RegisterCommand
 
         try
         {
-            var packageName = GetPackageIdFromNupkg(packageFile.FullName);
             var packageBytes = await File.ReadAllBytesAsync(packageFile.FullName, cancellationToken);
+            var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
 
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
@@ -755,40 +754,6 @@ public static class RegisterCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    #endregion
-
-    #region Helper Methods
-
-    /// <summary>
-    /// Extracts the package ID from the .nuspec file inside a .nupkg.
-    /// </summary>
-    private static string GetPackageIdFromNupkg(string nupkgPath)
-    {
-        using var archive = ZipFile.OpenRead(nupkgPath);
-
-        var nuspecEntry = archive.Entries.FirstOrDefault(e =>
-            e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) &&
-            !e.FullName.Contains('/'));
-
-        if (nuspecEntry == null)
-        {
-            throw new InvalidOperationException($"No .nuspec file found in package: {nupkgPath}");
-        }
-
-        using var stream = nuspecEntry.Open();
-        var doc = XDocument.Load(stream);
-
-        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-        var id = doc.Root?.Element(ns + "metadata")?.Element(ns + "id")?.Value;
-
-        if (string.IsNullOrEmpty(id))
-        {
-            throw new InvalidOperationException($"No <id> element found in nuspec: {nupkgPath}");
-        }
-
-        return id;
     }
 
     #endregion

@@ -2,10 +2,11 @@ name: Pre-Merge Gate
 
 # Enforces two rules before any PR is merged into main, per the v1-launch
 # retro (item #11). Each rule is its own job so failures are individually
-# diagnosable in the PR Checks tab.
+# diagnosable in the PR Checks tab. Rule 3 selects evidence by dependency
+# ecosystem; it does not require unrelated product tests.
 #
 # Rule 1 (size):       scripts/ci/check_pr_size.py
-# Rule 3 (major-bump): scripts/ci/check_major_bump_tested.py
+# Rule 3 (major dependency evidence): scripts/ci/check_major_bump_tested.py
 # (Rule 2 — workflow secret-ref drift — was retired; numbering preserved.)
 #
 # Both are ENFORCING from day one (no soft-warn) per retro recommendation.
@@ -17,6 +18,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
   checks: read
@@ -41,7 +43,7 @@ jobs:
         run: python scripts/ci/check_pr_size.py --pr "$PR_NUMBER"
 
   major-bump-tested:
-    name: Rule 3 — Major-bump test enforcement
+    name: Rule 3 — Major dependency evidence
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
