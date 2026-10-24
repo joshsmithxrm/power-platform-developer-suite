@@ -652,10 +652,11 @@
     "prepare": "cd ../.. && git config core.hooksPath scripts/hooks"
   },
   "overrides": {
-    "dompurify": "^3.4.9"
+    "dompurify": "$dompurify"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
+    "dompurify": "^3.4.17",
     "monaco-editor": "0.55.1",
     "vscode-jsonrpc": "^8.2.1"
   },
