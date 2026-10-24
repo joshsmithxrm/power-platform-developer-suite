@@ -2,8 +2,8 @@
 
 Covers:
   AC-01  Workflow opens issue on release:patch label merge
-  AC-02  Mapping changed file paths to package names
-  AC-10  Unknown-package warning when no src/PPDS.* paths found
+  AC-02  Mapping changed file paths to package names (legacy helper contract)
+  AC-10  Non-product changes produce an explained no-release advisory
   AC-12  Multi-package detection
 
 Run with: python -m pytest tests/ci/test_post_merge_release_check.py -v
@@ -19,6 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
 
 import map_files_to_packages as mfp  # noqa: E402
+import release_plan as rp  # noqa: E402
+from release_model import FileChange, ReleaseGraph, build_release_plan  # noqa: E402
 
 # Path to the workflow file under test.
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "post-merge-release-check.yml"
@@ -105,6 +107,23 @@ class TestOpensIssueOnPatchLabel:
             "Workflow must reference secrets.GITHUB_TOKEN"
         )
 
+    def test_checkout_and_analyzed_graph_use_event_merge_sha(self):
+        """The graph cannot come from a newer moving main checkout."""
+        wf = _load_workflow()
+        job = wf["jobs"]["patch-release-detection"]
+        checkout = next(step for step in job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+        assert "github.event.pull_request.merge_commit_sha" in checkout["with"]["ref"]
+
+    def test_release_plan_rejects_graph_revision_skew(self, monkeypatch):
+        """Defense in depth: the CLI refuses a diff/graph revision mismatch."""
+        def fake_git(_repo_root, *args, **_kwargs):
+            assert args[0] == "rev-parse"
+            return "newer-main\n" if args[1] == "HEAD" else "event-merge\n"
+
+        monkeypatch.setattr(rp, "_git", fake_git)
+        with pytest.raises(RuntimeError, match="graph revision mismatch"):
+            rp.ensure_graph_revision(REPO_ROOT, "event-merge")
+
 
 # ---------------------------------------------------------------------------
 # AC-02  map_files_to_packages — basic path mapping
@@ -162,23 +181,47 @@ class TestMapsPathsToPackages:
 
 
 # ---------------------------------------------------------------------------
-# AC-10  Unknown-package warning
+# AC-10  Non-product/no-release workflow behavior
 # ---------------------------------------------------------------------------
 
 class TestUnknownPackageWarning:
-    """AC-10 — unknown warning when no src/PPDS.* paths found."""
+    """Legacy mapping remains compatible while the workflow uses the model."""
 
     def test_unknown_package_warning(self):
         """Non-PPDS paths return ["unknown"] from the mapping script."""
         result = mfp.map_files_to_packages(["docs/README.md"])
         assert result == ["unknown"]
 
-    def test_workflow_contains_unknown_warning_string(self):
-        """Workflow YAML must contain the warning text for the unknown case."""
+    def test_workflow_uses_explained_release_model(self):
         text = _workflow_text()
-        assert "No recognized PPDS package paths found" in text, (
-            "Workflow must include the 'No recognized PPDS package paths found' warning text"
+        assert "scripts/ci/release_plan.py" in text
+        assert "release-plan.json" in text
+        assert "release-plan.md" in text
+
+    def test_workflow_skips_issue_when_model_finds_no_product_impact(self):
+        """AC-10 — exercise the decision and its workflow gates together."""
+        plan = build_release_plan(
+            ReleaseGraph.discover(REPO_ROOT),
+            [FileChange(path="docs/RELEASE.md", before="old", after="new")],
         )
+        assert plan["release_needed"] is False
+
+        wf = _load_workflow()
+        steps = wf["jobs"]["patch-release-detection"]["steps"]
+        create_step = next(step for step in steps if step.get("name") == "Create patch release issue")
+        log_step = next(step for step in steps if step.get("name") == "Log no-product-impact decision")
+        assert create_step["if"] == "steps.evaluate.outputs.release_needed == 'true'"
+        assert log_step["if"] == "steps.evaluate.outputs.release_needed != 'true'"
+        assert "No product release issue opened" in log_step["run"]
+
+    def test_workflow_does_not_use_git_refname_as_semver(self):
+        assert "--sort=-v:refname" not in _workflow_text()
+
+    def test_workflow_is_advisory_and_does_not_release(self):
+        text = _workflow_text()
+        assert "git tag" not in text
+        assert "gh workflow run" not in text
+        assert "gh release create" not in text
 
     def test_empty_input_returns_unknown(self):
         """Empty input list returns ["unknown"]."""

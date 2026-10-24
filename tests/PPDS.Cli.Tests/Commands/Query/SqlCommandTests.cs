@@ -1,9 +1,16 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Text.Json;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Query;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Parsing;
 using Xunit;
 
@@ -266,6 +273,17 @@ public class SqlCommandStructureTests
     }
 
     [Fact]
+    public void Parse_WithDryRunAndCsv_HasValidationError()
+    {
+        var result = _command.Parse(
+            "\"DELETE FROM account WHERE statecode = 1\" --dry-run --output-format Csv");
+
+        var error = Assert.Single(result.Errors);
+        Assert.Contains("CSV output is not supported", error.Message);
+        Assert.Contains("--dry-run", error.Message);
+    }
+
+    [Fact]
     public void Parse_WithNoLimitFlag_Succeeds()
     {
         var result = _command.Parse("\"DELETE FROM account WHERE statecode = 1\" --no-limit");
@@ -328,8 +346,89 @@ public class SqlCommandStructureTests
 /// Tests for SQL command DML exit code logic and error mapping.
 /// </summary>
 [Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
 public class SqlCommandTests
 {
+    #region DML Dry-Run Output
+
+    [Fact]
+    public void WriteDryRunOutput_Json_IncludesPlanFetchXmlAndExecutionGate()
+    {
+        using var output = new StringWriter();
+        var writer = new JsonOutputWriter(output);
+        var result = CreateDryRunResult();
+
+        SqlCommand.WriteDryRunOutput(result, OutputFormat.Json, writer);
+
+        using var json = JsonDocument.Parse(output.ToString());
+        var data = json.RootElement.GetProperty("data");
+        Assert.True(data.GetProperty("dryRun").GetBoolean());
+        Assert.Equal("UPDATE account SET name = 'preview' WHERE accountid = 'id'",
+            data.GetProperty("sql").GetString());
+        Assert.Equal("<fetch />", data.GetProperty("fetchXml").GetString());
+        Assert.Equal(DmlSafetyGuard.DefaultRowCap, data.GetProperty("rowCap").GetInt32());
+        Assert.True(data.GetProperty("requiresConfirmationForExecution").GetBoolean());
+        Assert.Equal("DmlExecuteNode", data.GetProperty("plan").GetProperty("nodeType").GetString());
+    }
+
+    [Fact]
+    public void WriteDryRunOutput_Csv_IsRejectedAsNonTabular()
+    {
+        var exception = Assert.Throws<PpdsValidationException>(() =>
+            SqlCommand.WriteDryRunOutput(
+                CreateDryRunResult(), OutputFormat.Csv, new TextOutputWriter()));
+
+        Assert.Contains("CSV output is not supported", exception.Message);
+    }
+
+    [Fact]
+    public void WriteDryRunOutput_Text_WritesPlanToStdoutAndStatusToStderr()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+
+        try
+        {
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            SqlCommand.WriteDryRunOutput(
+                CreateDryRunResult(), OutputFormat.Text, new TextOutputWriter());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+
+        Assert.Contains("Execution Plan:", stdout.ToString());
+        Assert.Contains("DmlExecute: UPDATE account", stdout.ToString());
+        Assert.Contains("Planned FetchXML:", stdout.ToString());
+        Assert.Contains("No Dataverse records were changed", stderr.ToString());
+        Assert.Contains("Actual execution requires --confirm", stderr.ToString());
+    }
+
+    private static SqlQueryResult CreateDryRunResult() => new()
+    {
+        OriginalSql = "UPDATE account SET name = 'preview' WHERE accountid = 'id'",
+        TranspiledFetchXml = "<fetch />",
+        Result = QueryResult.Empty("dry-run"),
+        DmlSafetyResult = new DmlSafetyResult
+        {
+            IsDryRun = true,
+            RequiresConfirmation = true,
+            RowCap = DmlSafetyGuard.DefaultRowCap
+        },
+        DryRunPlan = new QueryPlanDescription
+        {
+            NodeType = "DmlExecuteNode",
+            Description = "DmlExecute: UPDATE account"
+        }
+    };
+
+    #endregion
+
     #region DML Exit Code Logic
 
     [Fact]

@@ -38,18 +38,29 @@ public sealed class DmlSafetyGuard
     {
         var s = settings ?? new QuerySafetySettings();
 
-        var result = statement switch
+        var result = CheckCore(statement, options, s);
+
+        return ApplyProtectionLevel(result, options, protectionLevel);
+    }
+
+    private DmlSafetyResult CheckCore(
+        TSqlStatement statement,
+        DmlSafetyOptions options,
+        QuerySafetySettings settings)
+    {
+        return statement switch
         {
-            DeleteStatement delete => CheckDelete(delete, options, s),
-            UpdateStatement update => CheckUpdate(update, options, s),
+            DeleteStatement delete => CheckDelete(delete, options, settings),
+            UpdateStatement update => CheckUpdate(update, options, settings),
             InsertStatement => CheckRowCap(options),
+            MergeStatement => CheckRowCap(options),
             SelectStatement => new DmlSafetyResult { IsBlocked = false },
-            BeginEndBlockStatement block => CheckBlock(block, options, s),
-            IfStatement ifStmt => CheckIf(ifStmt, options, s),
+            BeginEndBlockStatement block => CheckStatements(block.StatementList.Statements, options, settings),
+            IfStatement ifStmt => CheckIf(ifStmt, options, settings),
+            WhileStatement whileStmt => CheckCore(whileStmt.Statement, options, settings),
+            TryCatchStatement tryCatch => CheckTryCatch(tryCatch, options, settings),
             _ => new DmlSafetyResult { IsBlocked = false }
         };
-
-        return ApplyProtectionLevel(result, statement, options, protectionLevel);
     }
 
     /// <summary>
@@ -80,8 +91,9 @@ public sealed class DmlSafetyGuard
     {
         var effectiveSettings = settings ?? new QuerySafetySettings();
 
-        // SELECT statements are always allowed cross-environment
-        if (statement is SelectStatement)
+        // Read-only statements are always allowed cross-environment, including
+        // compound scripts that contain no DML.
+        if (!CheckCore(statement, new DmlSafetyOptions { IsConfirmed = true }, effectiveSettings).ContainsDml)
             return new DmlSafetyResult { IsBlocked = false };
 
         if (effectiveSettings.CrossEnvironmentDmlPolicy == CrossEnvironmentDmlPolicy.ReadOnly)
@@ -89,6 +101,7 @@ public sealed class DmlSafetyGuard
             return new DmlSafetyResult
             {
                 IsBlocked = true,
+                ContainsDml = true,
                 BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Change cross_env_dml_policy to 'Prompt' or 'Allow' to enable.",
                 ErrorCode = ErrorCodes.Query.DmlBlocked
             };
@@ -99,6 +112,7 @@ public sealed class DmlSafetyGuard
         {
             return new DmlSafetyResult
             {
+                ContainsDml = true,
                 RequiresConfirmation = true,
                 ConfirmationMessage = $"Cross-environment DML: [{sourceLabel}] → [{targetLabel}] (Production). Confirm?"
             };
@@ -108,19 +122,20 @@ public sealed class DmlSafetyGuard
         {
             return new DmlSafetyResult
             {
+                ContainsDml = true,
                 RequiresConfirmation = true,
                 ConfirmationMessage = $"Cross-environment DML: [{sourceLabel}] → [{targetLabel}]. Confirm?"
             };
         }
 
-        return new DmlSafetyResult { IsBlocked = false };
+        return new DmlSafetyResult { IsBlocked = false, ContainsDml = true };
     }
 
     private static DmlSafetyResult ApplyProtectionLevel(
-        DmlSafetyResult result, TSqlStatement statement, DmlSafetyOptions options, ProtectionLevel level)
+        DmlSafetyResult result, DmlSafetyOptions options, ProtectionLevel level)
     {
-        // No DML detected (read-only or pass-through) — don't apply protection level
-        if (!result.IsBlocked && !result.RequiresConfirmation)
+        // No DML detected (read-only or pass-through) — don't apply protection level.
+        if (!result.ContainsDml)
             return result;
 
         // If already blocked, protection level doesn't change anything
@@ -132,10 +147,12 @@ public sealed class DmlSafetyGuard
             return new DmlSafetyResult
             {
                 IsBlocked = result.IsBlocked,
+                ContainsDml = result.ContainsDml,
                 BlockReason = result.BlockReason,
                 ErrorCode = result.ErrorCode,
                 EstimatedAffectedRows = result.EstimatedAffectedRows,
                 RequiresConfirmation = true,
+                ConfirmationMessage = result.ConfirmationMessage,
                 RequiresPreview = true,
                 RowCap = result.RowCap,
                 ExceedsRowCap = result.ExceedsRowCap,
@@ -148,10 +165,12 @@ public sealed class DmlSafetyGuard
             return new DmlSafetyResult
             {
                 IsBlocked = result.IsBlocked,
+                ContainsDml = result.ContainsDml,
                 BlockReason = result.BlockReason,
                 ErrorCode = result.ErrorCode,
                 EstimatedAffectedRows = result.EstimatedAffectedRows,
                 RequiresConfirmation = true,
+                ConfirmationMessage = result.ConfirmationMessage,
                 RowCap = result.RowCap,
                 ExceedsRowCap = result.ExceedsRowCap,
                 IsDryRun = result.IsDryRun
@@ -163,10 +182,12 @@ public sealed class DmlSafetyGuard
             return new DmlSafetyResult
             {
                 IsBlocked = result.IsBlocked,
+                ContainsDml = result.ContainsDml,
                 BlockReason = result.BlockReason,
                 ErrorCode = result.ErrorCode,
                 EstimatedAffectedRows = result.EstimatedAffectedRows,
-                RequiresConfirmation = false,
+                RequiresConfirmation = result.RequiresConfirmation,
+                ConfirmationMessage = result.ConfirmationMessage,
                 RowCap = result.RowCap,
                 ExceedsRowCap = result.ExceedsRowCap,
                 IsDryRun = result.IsDryRun
@@ -189,6 +210,7 @@ public sealed class DmlSafetyGuard
                 return new DmlSafetyResult
                 {
                     IsBlocked = true,
+                    ContainsDml = true,
                     BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds truncate {targetName}' for bulk deletion.",
                     ErrorCode = ErrorCodes.Query.DmlBlocked
                 };
@@ -210,6 +232,7 @@ public sealed class DmlSafetyGuard
                 return new DmlSafetyResult
                 {
                     IsBlocked = true,
+                    ContainsDml = true,
                     BlockReason = "UPDATE without WHERE is not allowed. Add a WHERE clause to limit affected records.",
                     ErrorCode = ErrorCodes.Query.DmlBlocked
                 };
@@ -222,32 +245,69 @@ public sealed class DmlSafetyGuard
         return CheckRowCap(options);
     }
 
-    private DmlSafetyResult CheckBlock(BeginEndBlockStatement block, DmlSafetyOptions options, QuerySafetySettings settings)
+    private DmlSafetyResult CheckStatements(
+        IEnumerable<TSqlStatement> statements,
+        DmlSafetyOptions options,
+        QuerySafetySettings settings)
     {
-        // Return the most restrictive result from any contained statement
-        DmlSafetyResult worst = new() { IsBlocked = false };
-        foreach (var stmt in block.StatementList.Statements)
+        var aggregate = new DmlSafetyResult { IsBlocked = false };
+        foreach (var statement in statements)
         {
-            var result = Check(stmt, options, settings);
-            if (result.IsBlocked) return result;
-            if (result.RequiresConfirmation) worst = result;
+            aggregate = Combine(aggregate, CheckCore(statement, options, settings));
+            if (aggregate.IsBlocked)
+                break;
         }
-        return worst;
+
+        return aggregate;
     }
 
     private DmlSafetyResult CheckIf(IfStatement ifStmt, DmlSafetyOptions options, QuerySafetySettings settings)
     {
-        var thenResult = Check(ifStmt.ThenStatement, options, settings);
-        if (thenResult.IsBlocked) return thenResult;
+        var result = CheckCore(ifStmt.ThenStatement, options, settings);
+        if (result.IsBlocked || ifStmt.ElseStatement == null)
+            return result;
 
-        if (ifStmt.ElseStatement != null)
+        return Combine(result, CheckCore(ifStmt.ElseStatement, options, settings));
+    }
+
+    private DmlSafetyResult CheckTryCatch(
+        TryCatchStatement tryCatch,
+        DmlSafetyOptions options,
+        QuerySafetySettings settings)
+    {
+        var tryResult = CheckStatements(tryCatch.TryStatements.Statements, options, settings);
+        if (tryResult.IsBlocked)
+            return tryResult;
+
+        return Combine(
+            tryResult,
+            CheckStatements(tryCatch.CatchStatements.Statements, options, settings));
+    }
+
+    private static DmlSafetyResult Combine(DmlSafetyResult current, DmlSafetyResult candidate)
+    {
+        if (current.IsBlocked)
+            return current;
+        if (candidate.IsBlocked)
+            return candidate;
+        if (!current.ContainsDml)
+            return candidate;
+        if (!candidate.ContainsDml)
+            return current;
+
+        return new DmlSafetyResult
         {
-            var elseResult = Check(ifStmt.ElseStatement, options, settings);
-            if (elseResult.IsBlocked) return elseResult;
-            if (elseResult.RequiresConfirmation) return elseResult;
-        }
-
-        return thenResult;
+            ContainsDml = true,
+            EstimatedAffectedRows = current.EstimatedAffectedRows < 0 || candidate.EstimatedAffectedRows < 0
+                ? -1
+                : Math.Max(current.EstimatedAffectedRows, candidate.EstimatedAffectedRows),
+            RequiresConfirmation = current.RequiresConfirmation || candidate.RequiresConfirmation,
+            ConfirmationMessage = current.ConfirmationMessage ?? candidate.ConfirmationMessage,
+            RequiresPreview = current.RequiresPreview || candidate.RequiresPreview,
+            RowCap = Math.Min(current.RowCap, candidate.RowCap),
+            ExceedsRowCap = current.ExceedsRowCap || candidate.ExceedsRowCap,
+            IsDryRun = current.IsDryRun || candidate.IsDryRun
+        };
     }
 
     private static DmlSafetyResult CheckRowCap(DmlSafetyOptions options)
@@ -257,7 +317,10 @@ public sealed class DmlSafetyGuard
         return new DmlSafetyResult
         {
             IsBlocked = false,
-            RequiresConfirmation = !options.IsConfirmed,
+            ContainsDml = true,
+            // Dry-run is a preview, so its response always describes the confirmation
+            // gate that will apply when the caller later requests actual execution.
+            RequiresConfirmation = options.IsDryRun || !options.IsConfirmed,
             RowCap = rowCap,
             ExceedsRowCap = false, // Set during execution when actual count is known
             IsDryRun = options.IsDryRun
@@ -288,6 +351,9 @@ public sealed class DmlSafetyOptions
 /// </summary>
 public sealed class DmlSafetyResult
 {
+    /// <summary>Whether the checked statement or compound script contains executable DML.</summary>
+    internal bool ContainsDml { get; init; }
+
     /// <summary>Whether the operation is completely blocked (no WHERE).</summary>
     public bool IsBlocked { get; init; }
 

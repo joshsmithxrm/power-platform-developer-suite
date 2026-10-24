@@ -1,0 +1,22 @@
+[
+  {
+    "path": "Directory.Build.props",
+    "before": "<Project><PropertyGroup><!-- old vulnerability explanation --><LangVersion>latest</LangVersion><NuGetAuditMode>direct</NuGetAuditMode></PropertyGroup></Project>",
+    "after": "<Project><PropertyGroup><!-- corrected vulnerability explanation --><LangVersion>latest</LangVersion><NuGetAuditMode>direct</NuGetAuditMode></PropertyGroup></Project>"
+  },
+  {
+    "path": "Directory.Packages.props",
+    "before": "<Project><ItemGroup><!-- old security note --><PackageVersion Include=\"System.Security.Cryptography.Xml\" Version=\"8.0.3\" /></ItemGroup></Project>",
+    "after": "<Project><ItemGroup><!-- corrected security note --><PackageVersion Include=\"System.Security.Cryptography.Xml\" Version=\"8.0.4\" /></ItemGroup></Project>"
+  },
+  {
+    "path": "src/PPDS.Auth/PPDS.Auth.csproj",
+    "before": "<Project><ItemGroup><!-- pinned to 8.0.3 --><PackageReference Include=\"System.Security.Cryptography.Xml\" /></ItemGroup></Project>",
+    "after": "<Project><ItemGroup><!-- security pin; see central versions --><PackageReference Include=\"System.Security.Cryptography.Xml\" /></ItemGroup></Project>"
+  },
+  {
+    "path": "src/PPDS.Migration/PPDS.Migration.csproj",
+    "before": "<Project><PropertyGroup><NoWarn>$(NoWarn);NU1903</NoWarn></PropertyGroup></Project>",
+    "after": "<Project />"
+  }
+]

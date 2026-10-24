@@ -1,4 +1,4 @@
-﻿using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Registration;
@@ -254,7 +254,7 @@ public interface IPluginRegistrationService
     /// <summary>
     /// Creates or updates a plugin package (for NuGet packages).
     /// </summary>
-    /// <param name="packageName">The package name from .nuspec.</param>
+    /// <param name="packageName">The expected package name. It must match the root .nuspec ID.</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
     /// <param name="solutionName">Solution to add the package to.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -72,3 +72,30 @@ def test_channel_inference_from_tag_version(workflow: dict) -> None:
     assert "Extension-v" in workflow_text and "sed" in workflow_text, (
         "Channel determination must parse minor version from Extension-v* tag"
     )
+
+
+def test_publish_checkout_fetches_full_history_and_tags(workflow: dict) -> None:
+    """MinVer must be able to see the Cli-v* co-release tag."""
+    steps = workflow["jobs"]["publish"]["steps"]
+    checkout = next(step for step in steps if step.get("name") == "Checkout code")
+    checkout_with = checkout.get("with", {})
+    assert checkout_with.get("fetch-depth") == 0, (
+        "Extension publish checkout must fetch full history for MinVer"
+    )
+    assert checkout_with.get("fetch-tags") is True, (
+        "Extension publish checkout must fetch tags for MinVer"
+    )
+
+
+def test_bundle_is_pinned_to_co_release_cli_version(workflow: dict) -> None:
+    """The release must resolve an exact Cli-v* co-tag and verify the bundle."""
+    steps = workflow["jobs"]["publish"]["steps"]
+    resolve_cli = next(step for step in steps if step.get("id") == "resolve-cli")
+    resolve_run = resolve_cli.get("run", "")
+    assert "git describe --tags --exact-match --match 'Cli-v*'" in resolve_run
+    assert "steps.resolve-tag.outputs.sha" in resolve_run
+
+    bundle = next(step for step in steps if str(step.get("name", "")).startswith("Bundle CLI"))
+    bundle_run = bundle.get("run", "")
+    assert "--expected-version" in bundle_run
+    assert "steps.resolve-cli.outputs.version" in bundle_run
