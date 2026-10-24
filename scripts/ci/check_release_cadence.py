@@ -39,6 +39,12 @@ from datetime import date, datetime
 from typing import Optional
 
 
+PUBLIC_RELEASE_RUNBOOK = (
+    "https://github.com/joshsmithxrm/power-platform-developer-suite/"
+    "blob/main/docs/RELEASE.md"
+)
+
+
 # ---------------------------------------------------------------------------
 # Core decision logic
 # ---------------------------------------------------------------------------
@@ -138,7 +144,7 @@ The release cadence floor has been triggered: no release has shipped in the last
 
 ## Options for the Maintainer
 
-- **Release now** — run `/release` to cut a patch or minor release
+- **Release now** — follow the public [release procedure]({PUBLIC_RELEASE_RUNBOOK}) to cut a patch or minor release
 - **Defer with reason** — comment on this issue explaining the deferral and close it; a new issue will open next week if the condition persists
 - **Close as not-needed** — if the unreleased commits are housekeeping/docs that don't warrant a release, close this issue with a note
 
@@ -146,7 +152,7 @@ The release cadence floor has been triggered: no release has shipped in the last
 
 - [ ] Review unreleased commits since `{last_release_tag}` — are any user-facing?
 - [ ] Decide: release now, defer, or close as not-needed
-- [ ] If releasing: run `/release` (see the skill for the full ceremony)
+- [ ] If releasing: follow the public [release procedure]({PUBLIC_RELEASE_RUNBOOK})
 - [ ] Close this issue once the decision is actioned
 """
 
