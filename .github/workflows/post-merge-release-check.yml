@@ -51,7 +51,7 @@ jobs:
           allow-unsafe-pr-checkout: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' }}
 
       - name: Checkout pinned release automation
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # A late label can target a merge that predates these scripts. Pin
           # helpers to the revision containing the workflow that is executing.
