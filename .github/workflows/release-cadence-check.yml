@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Ensure workflow-owned release labels
+        run: python scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
+
       - name: Get latest release tag and date
         id: tag-info
         run: |
@@ -94,15 +97,15 @@ jobs:
             --last-release-tag   "${LAST_TAG}" \
             --format title)
 
-          BODY=$(python scripts/ci/check_release_cadence.py \
+          python scripts/ci/check_release_cadence.py \
             --last-release-date "${{ steps.tag-info.outputs.last_tag_date }}" \
             --unreleased-commits "${{ steps.commits.outputs.unreleased }}" \
             --last-release-tag   "${LAST_TAG}" \
-            --format body)
+            --format body > issue-body.md
 
           gh issue create \
             --title "${TITLE}" \
-            --body  "${BODY}" \
+            --body-file issue-body.md \
             --label "release:cadence-check"
 
       - name: Log decision (no issue opened)
