@@ -1,0 +1,46 @@
+name: Validate PR label permissions
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label-permission-probe:
+    if: >-
+      github.repository == 'joshsmithxrm/power-platform-developer-suite' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'joshsmithxrm' &&
+      github.event.pull_request.head.ref == 'codex/fix-dependabot-label-permissions'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply, verify, and remove one label on this validation PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          endpoint="repos/$GH_REPO/issues/$PR_NUMBER/labels"
+          label='status:needs-evaluation'
+          present=$(gh api "$endpoint" --jq '[.[].name] | index("status:needs-evaluation") != null')
+          if [ "$present" != 'false' ]; then
+            echo 'Probe requires an initially absent label; no mutation performed.'
+            exit 1
+          fi
+          cleanup() {
+            gh api --method DELETE "$endpoint/status%3Aneeds-evaluation" --silent
+          }
+          trap cleanup EXIT
+          gh api --method POST "$endpoint" --field "labels[]=$label" --silent
+          present=$(gh api "$endpoint" --jq '[.[].name] | index("status:needs-evaluation") != null')
+          test "$present" = 'true'
+          cleanup
+          trap - EXIT
+          present=$(gh api "$endpoint" --jq '[.[].name] | index("status:needs-evaluation") != null')
+          test "$present" = 'false'
+          echo 'PR label POST, read-back, DELETE, and cleanup verification passed.'
