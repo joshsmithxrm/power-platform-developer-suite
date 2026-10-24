@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Ensure workflow-owned release labels
+        run: python scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
+
       - name: Query merged PRs for milestone
         env:
           MILESTONE_TITLE: ${{ github.event.milestone.title }}
@@ -46,7 +49,7 @@ jobs:
             --milestone "$MILESTONE_TITLE" \
             --description "$MILESTONE_DESC" \
             --merged-prs merged_prs.json \
-            --out issue_body.md || true
+            --out issue_body.md
 
           if [ -s issue_body.md ]; then
             echo "should_open_issue=true" >> "$GITHUB_OUTPUT"
