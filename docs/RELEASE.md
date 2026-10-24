@@ -93,6 +93,12 @@ revision supplies a fallback; project references that did not exist historically
 are mapped conservatively to all historical build nodes. This keeps old merges
 analyzable without substituting a moving `main` graph or silently under-reporting.
 
+Current checkout actions reject fork PR merge SHAs even after the PR is merged.
+The two patch-job checkouts therefore set `allow-unsafe-pr-checkout` only when
+the event confirms the PR is merged into `main`. The automation checkout needs
+the same gate because `github.workflow_sha` can equal that accepted merge SHA.
+This opt-in does not permit open-PR execution or change the data-only boundary.
+
 Workflow-owned release labels are declared in
 `scripts/ci/release_labels.json`. Release workflows reconcile all four labels
 from that manifest before use and stop with an explicit setup error if GitHub

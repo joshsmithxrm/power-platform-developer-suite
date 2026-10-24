@@ -233,6 +233,31 @@ class TestWorkflowTrustBoundary:
         assert "python automation/scripts/ci/patch_release_issue.py" in run_text
         assert "--repo-root analyzed" in run_text
 
+    def test_checkout_fork_opt_in_requires_a_merged_main_pr(self) -> None:
+        """Checkout's fork guard also rejects accepted merge SHAs by default.
+
+        Both checkouts need the narrow opt-in: the trusted workflow revision
+        can equal the just-merged SHA. Never opt in for open or unmerged PRs.
+        """
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        expected_opt_in = (
+            "${{ github.event.pull_request.merged == true && "
+            "github.event.pull_request.base.ref == 'main' }}"
+        )
+        opted_in_paths = []
+        for job_name, job in workflow["jobs"].items():
+            for step in job["steps"]:
+                inputs = step.get("with", {})
+                if "allow-unsafe-pr-checkout" not in inputs:
+                    continue
+                assert job_name == "patch-release-detection"
+                assert inputs["allow-unsafe-pr-checkout"] == expected_opt_in
+                assert inputs["persist-credentials"] is False
+                opted_in_paths.append(inputs["path"])
+        assert sorted(opted_in_paths) == ["analyzed", "automation"]
+
 
 class TestSafeIssueRendering:
     def test_hostile_title_is_data_and_cannot_change_issue_structure(self) -> None:

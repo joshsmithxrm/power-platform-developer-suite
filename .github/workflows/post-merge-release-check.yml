@@ -47,6 +47,9 @@ jobs:
           fetch-depth: 0
           path: analyzed
           persist-credentials: false
+          # Checkout rejects fork merge SHAs even after acceptance. Opt in only
+          # for a merged main PR; this checkout remains data-only.
+          allow-unsafe-pr-checkout: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' }}
 
       - name: Checkout pinned release automation
         uses: actions/checkout@v4
@@ -57,6 +60,9 @@ jobs:
           fetch-depth: 1
           path: automation
           persist-credentials: false
+          # The trusted workflow SHA can equal the just-merged fork SHA. Keep
+          # the same merged-main gate while retaining the workflow-sha pin.
+          allow-unsafe-pr-checkout: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
