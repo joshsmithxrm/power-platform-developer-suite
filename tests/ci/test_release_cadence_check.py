@@ -207,7 +207,8 @@ class TestBuildIssueTitle:
 class TestBuildIssueBody:
     def test_build_issue_body_includes_release_checklist(self):
         body = crc.build_issue_body(9, 15, "Cli-v1.0.0")
-        assert "/release" in body
+        assert "docs/RELEASE.md" in body
+        assert ".claude/skills" not in body
         assert "Cli-v1.0.0" in body
 
     def test_build_issue_body_includes_week_and_commit_counts(self):
