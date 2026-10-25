@@ -328,9 +328,11 @@ public class PluginRegistrationServiceTests
         // Assert
         var exception = await Assert.ThrowsAsync<PpdsException>(action);
         Assert.Equal(ErrorCodes.Validation.InvalidValue, exception.ErrorCode);
+        Assert.Contains("Dataverse cannot register this NuGet plugin package", exception.Message);
         Assert.Contains("lib/net462", exception.Message);
         Assert.Contains("lib/net471", exception.Message);
         Assert.Contains("lib/net48", exception.Message);
+        Assert.Contains("loose plugin assembly", exception.Message);
         _mockPooledClient.Verify(
             s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -2805,6 +2807,26 @@ public class PluginRegistrationServiceTests
 
         // Assert
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetAssemblyIdForPackageAsync_MatchesAssemblyNameCaseInsensitively()
+    {
+        var packageId = Guid.NewGuid();
+        var assemblyId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection([
+            new PluginAssembly
+            {
+                Id = assemblyId,
+                Name = "Contoso.RuntimePlugins",
+                Version = "1.0.0.0",
+                IsolationMode = pluginassembly_isolationmode.Sandbox
+            }
+        ]);
+
+        var result = await _sut.GetAssemblyIdForPackageAsync(packageId, "contoso.runtimeplugins");
+
+        Assert.Equal(assemblyId, result);
     }
 
     [Fact]

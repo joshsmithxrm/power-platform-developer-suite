@@ -342,6 +342,18 @@ public static class ErrorCodes
 
         /// <summary>Failed to enable or disable a plugin processing step.</summary>
         public const string SetStateFailed = "Plugin.SetStateFailed";
+
+        /// <summary>No plausible primary plugin assembly was found in a NuGet package.</summary>
+        public const string PackageAssemblyNotFound = "Plugin.PackageAssemblyNotFound";
+
+        /// <summary>Multiple plausible primary plugin assemblies were found in a NuGet package.</summary>
+        public const string PackageAssemblyAmbiguous = "Plugin.PackageAssemblyAmbiguous";
+
+        /// <summary>The configured assembly name does not match the inspected package assembly.</summary>
+        public const string PackageAssemblyMismatch = "Plugin.PackageAssemblyMismatch";
+
+        /// <summary>Dataverse did not expose the expected assembly after a package upload.</summary>
+        public const string PackageAssemblyUnavailableAfterUpload = "Plugin.PackageAssemblyUnavailableAfterUpload";
     }
 
     /// <summary>

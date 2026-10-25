@@ -44,7 +44,7 @@ jobs:
         run: bash scripts/docs-gen/check-open-rollover.sh
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 

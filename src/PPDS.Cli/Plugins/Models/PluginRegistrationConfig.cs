@@ -168,6 +168,15 @@ public sealed class PluginAssemblyConfig
     public string? PackagePath { get; set; }
 
     /// <summary>
+    /// SHA-256 of the immutable NuGet package snapshot used during extraction. This lets deploy
+    /// preserve --reference-dir portability while detecting changed content whose primary
+    /// plug-in identity cannot be proven from package-local metadata alone.
+    /// </summary>
+    [JsonPropertyName("packageContentSha256")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PackageContentSha256 { get; set; }
+
+    /// <summary>
     /// Solution unique name to add components to.
     /// Required for Nuget type, optional for Assembly type.
     /// </summary>
@@ -175,10 +184,18 @@ public sealed class PluginAssemblyConfig
     public string? Solution { get; set; }
 
     /// <summary>
-    /// All plugin type names in this assembly (for orphan detection).
+    /// Concrete runtime IPlugin implementations and PPDS-annotated plugin type names in this
+    /// assembly (for orphan detection). Runtime types are included even when they have no steps.
     /// </summary>
     [JsonPropertyName("allTypeNames")]
     public List<string> AllTypeNames { get; set; } = [];
+
+    /// <summary>
+    /// Runtime IPlugin implementations discovered from assembly metadata. This inspection detail
+    /// is not part of registrations.json; <see cref="AllTypeNames"/> is the serialized contract.
+    /// </summary>
+    [JsonIgnore]
+    internal List<string> RuntimePluginTypeNames { get; set; } = [];
 
     /// <summary>
     /// Plugin types with their step registrations.
