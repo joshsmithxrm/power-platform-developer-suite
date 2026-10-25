@@ -1,0 +1,24 @@
+{
+  "labels": [
+    {
+      "name": "release:patch",
+      "color": "0E8A16",
+      "description": "Merged change should be included in the next patch release"
+    },
+    {
+      "name": "release:minor",
+      "color": "5319E7",
+      "description": "Milestone is ready for a coordinated minor release"
+    },
+    {
+      "name": "release:cadence-check",
+      "color": "0E8A16",
+      "description": "Scheduled release cadence review is required"
+    },
+    {
+      "name": "release:extension-corelease",
+      "color": "BFD4F2",
+      "description": "A Cli-v* release shipped without an Extension bundled-CLI refresh"
+    }
+  ]
+}
