@@ -4,6 +4,11 @@
   "description": "End-to-end visual tests for PPDS TUI using tui-test",
   "private": true,
   "type": "module",
+  "overrides": {
+    "@microsoft/tui-test": {
+      "@homebridge/node-pty-prebuilt-multiarch": "0.14.1"
+    }
+  },
   "scripts": {
     "test": "npx @microsoft/tui-test",
     "test:update": "npx @microsoft/tui-test --updateSnapshot",

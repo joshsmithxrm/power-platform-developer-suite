@@ -7,9 +7,15 @@ Thank you for your interest in contributing to Power Platform Developer Suite! T
 ### Prerequisites
 
 - .NET SDK 8.0+
-- Node.js 20+ (for extension development)
+- Node.js 26 LTS (repository tooling; use the version selected by `.nvmrc`)
 - PowerShell 7+ (for scripts)
 - Git
+
+The development Node version is separate from the extension runtime supplied by
+VS Code. Extension code remains compatible with Node 22 and the minimum VS Code
+version declared in `src/PPDS.Extension/package.json`. Keep its Node typings and
+bundle target aligned with that compatibility contract. CI checks both Node 22
+unit compatibility and the minimum/stable VS Code hosts.
 
 ### Setting Up the Development Environment
 
