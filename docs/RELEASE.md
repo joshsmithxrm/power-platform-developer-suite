@@ -71,9 +71,80 @@ CHANGELOG, create tags only after review, push tags individually, monitor every
 publish workflow, and verify the public artifacts before closing the release
 record.
 
+### Patch release records
+
+`post-merge-release-check.yml` evaluates a merged PR when `release:patch` is
+already present at merge time or when the label is added later. Each generated
+issue contains a stable marker derived only from the PR number. Reruns and label
+removal/re-addition search both open and closed `release:patch` issues for that
+marker, so an unlabeled issue cannot spoof a workflow-owned audit record and an
+existing labeled record is neither duplicated nor reopened. Runs are serialized
+per PR to keep simultaneous close/label events from racing; different PRs retain
+independent records.
+
+The workflow uses `pull_request_target` so merged PRs from forks receive the
+base repository's issue-write token. Its trust boundary is intentionally narrow:
+every executable repository script comes from `github.workflow_sha`, checkout
+credentials are not persisted, and the original merge commit is a separate
+data-only checkout used for semantic diff, MSBuild XML, and its contemporaneous
+delivery manifest. No code, action, or script from that historical checkout is
+executed. If the old revision predates the manifest, the trusted workflow
+revision supplies a fallback; project references that did not exist historically
+are mapped conservatively to all historical build nodes. This keeps old merges
+analyzable without substituting a moving `main` graph or silently under-reporting.
+
+Current checkout actions reject fork PR merge SHAs even after the PR is merged.
+The two patch-job checkouts therefore set `allow-unsafe-pr-checkout` only when
+the event confirms the PR is merged into `main`. The automation checkout needs
+the same gate because `github.workflow_sha` can equal that accepted merge SHA.
+This opt-in does not permit open-PR execution or change the data-only boundary.
+
+Workflow-owned release labels are declared in
+`scripts/ci/release_labels.json`. Release workflows reconcile all four labels
+from that manifest before use and stop with an explicit setup error if GitHub
+does not permit the create/update operation. Patch issue titles and bodies are
+built by `scripts/ci/patch_release_issue.py`. PR titles are treated as untrusted
+text, and issue bodies reach GitHub through `--body-file` rather than shell
+interpolation.
+
 The repository's optional `.claude/skills/release/SKILL.md` documents the same
 ceremony for supported agents; this public document remains the authoritative,
 tool-neutral entry point for generated GitHub issues.
+
+## CLI/Extension Co-release Reconciliation
+
+The VS Code Extension bundles the CLI selected from an exact `Cli-v*` tag on
+the Extension release commit. The automated guard therefore treats the
+relationship as satisfied only when a strict-SemVer `Extension-v*` tag and the
+highest stable strict-SemVer `Cli-v*` tag point to the same commit. It does not
+compare tag timestamps or the two independent version numbers.
+
+Both CLI and Extension tag pushes trigger one serialized reconciliation. If the
+CLI arrives first, the workflow may create an advisory issue containing a
+stable marker keyed to that CLI tag. When the co-located Extension tag arrives,
+the workflow comments on and closes the matching open issue. If the Extension
+arrives first, the later CLI event observes both refs and remains silent. A
+higher stable CLI release closes older open alerts as superseded and creates at
+most one new alert for the current CLI when its co-located Extension tag is
+still missing. The replacement is created before the old alert closes, so a
+partial GitHub failure cannot remove the only actionable warning. Closed
+workflow records are not reopened.
+
+Alerts created before CLI-keyed markers were introduced are migrated from the
+workflow's exact legacy `Latest stable Cli tag` table field. The workflow-owned
+label is still mandatory, so unrelated issues containing similar prose do not
+participate in reconciliation.
+
+The comparison uses peeled commits, so annotated and lightweight tags behave
+the same way. CLI prereleases do not require a Marketplace refresh; malformed
+CLI or Extension release tags are reported as diagnostics and cannot outrank a
+valid tag. This automation only manages advisory issues. It never creates a tag,
+publishes an artifact, or invokes a release workflow.
+
+The weekly cadence check similarly validates release-looking tags through the
+shared strict SemVer implementation, discovers valid package tag prefixes from
+the release graph, and normalizes git's ISO-strict timestamps and the current
+time to UTC before calculating elapsed weeks.
 
 ## Automated Public Artifact Verification
 

@@ -103,6 +103,7 @@ Install `monaco-editor` as a dependency. The existing `esbuild.js` builds the ex
 - Bundle Monaco's editor worker (`editor.worker.js`) as a separate output file in `dist/`
 - The main extension host bundle (`dist/extension.js`) is unchanged — Monaco is webview-only
 - The webview loads the Monaco bundle via a `<script>` tag using `webview.asWebviewUri()`
+- Monaco's vendored DOMPurify import is redirected at build time to the explicit, patched `dompurify` npm dependency. The production bundle must include that package and exclude Monaco's vendored sanitizer; dependency overrides alone do not replace vendored source. The redirect applies only to Monaco's sanitizer import.
 
 Update `localResourceRoots` in the webview panel creation to include the `dist/` directory alongside the existing `node_modules`:
 
@@ -482,6 +483,7 @@ The status bar already has `statusText`, `rowCountEl`, and `executionTimeEl` spa
 | ME-12 | Pasting FetchXML auto-switches to XML language mode | Manual | |
 | ME-13 | Manual language toggle overrides auto-detection | Manual | |
 | ME-14 | Completion timeout (3s) prevents hanging on slow daemon | `detectLanguage` / `mapCompletionKind` unit tests | |
+| ME-15 | The production Monaco bundle uses the patched npm sanitizer and excludes the vendored copy; unrelated imports are unaffected | `bundles the npm sanitizer instead of Monaco's vendored copy` / `leaves the same relative import outside Monaco unchanged` | ✅ |
 
 Monaco edge cases:
 
