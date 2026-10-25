@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
@@ -77,7 +78,7 @@ public static class DeployCommand
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
+    internal static async Task<int> ExecuteAsync(
         FileInfo configFile,
         string? profile,
         string? environment,
@@ -85,7 +86,9 @@ public static class DeployCommand
         bool clean,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
+        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -95,20 +98,10 @@ public static class DeployCommand
             var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
             var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
 
-            // Collect custom APIs from both root-level and per-assembly sections
-            var allCustomApis = new List<CustomApiConfig>();
-            if (config?.CustomApis != null)
-                allCustomApis.AddRange(config.CustomApis);
-            if (config?.Assemblies != null)
-            {
-                foreach (var asm in config.Assemblies)
-                {
-                    if (asm.CustomApis != null)
-                        allCustomApis.AddRange(asm.CustomApis);
-                }
-            }
+            var configuredCustomApiCount = (config?.CustomApis?.Count ?? 0)
+                + (config?.Assemblies?.Sum(assembly => assembly.CustomApis?.Count ?? 0) ?? 0);
 
-            if ((config?.Assemblies == null || config.Assemblies.Count == 0) && allCustomApis.Count == 0)
+            if ((config?.Assemblies == null || config.Assemblies.Count == 0) && configuredCustomApiCount == 0)
             {
                 writer.WriteError(new StructuredError(
                     ErrorCodes.Validation.InvalidValue,
@@ -120,14 +113,30 @@ public static class DeployCommand
             // Validate configuration
             config!.Validate();
 
+            var configDir = configFile.DirectoryName ?? ".";
+
+            // Validate and buffer every configured artifact before authentication, environment
+            // resolution, or any Dataverse request. The retained package bytes are the exact
+            // bytes later inspected and uploaded, so one failing assembly aborts the entire
+            // configuration without partially applying a later assembly or Custom API.
+            var deploymentPreflights = await PreflightAssembliesAsync(
+                config.Assemblies,
+                configDir,
+                cancellationToken,
+                preflightPackageContentReader);
+
             // Connect to Dataverse
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var serviceProvider = serviceProviderFactory == null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
@@ -145,13 +154,14 @@ public static class DeployCommand
                 }
             }
 
-            var configDir = configFile.DirectoryName ?? ".";
             var results = new List<DeploymentResult>();
 
             if (config.Assemblies != null)
             {
-                foreach (var assemblyConfig in config.Assemblies)
+                for (var index = 0; index < config.Assemblies.Count; index++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var assemblyConfig = config.Assemblies[index];
                     var result = await DeployAssemblyAsync(
                         registrationService,
                         assemblyConfig,
@@ -160,11 +170,20 @@ public static class DeployCommand
                         clean,
                         dryRun,
                         globalOptions,
-                        cancellationToken);
+                        cancellationToken,
+                        deploymentPreflight: deploymentPreflights[index]);
 
                     results.Add(result);
                 }
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Root-level APIs can intentionally target an already registered type. APIs nested
+            // under an assembly are owned by that deployment and must not bind to a stale
+            // Dataverse type when the corresponding preflight or deployment failed.
+            var allCustomApis = new List<CustomApiConfig>(config.CustomApis ?? []);
+            allCustomApis.AddRange(SelectAssemblyCustomApisForDeployment(config.Assemblies, results));
 
             // Deploy custom APIs
             if (allCustomApis.Count > 0)
@@ -177,6 +196,8 @@ public static class DeployCommand
                     globalOptions,
                     cancellationToken);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (globalOptions.IsJsonMode)
             {
@@ -194,12 +215,100 @@ public static class DeployCommand
 
             return results.Any(r => !r.Success) ? ExitCodes.Failure : ExitCodes.Success;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Resolves and buffers every configured deployment artifact as one local, fail-closed phase.
+    /// </summary>
+    internal static async Task<IReadOnlyList<AssemblyDeploymentPreflight>> PreflightAssembliesAsync(
+        IReadOnlyList<PluginAssemblyConfig>? assemblies,
+        string configDir,
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null)
+    {
+        if (assemblies == null || assemblies.Count == 0)
+            return [];
+
+        var pathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var configuredPaths = new HashSet<string>(pathComparer);
+        var packagePathsById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var preflights = new List<AssemblyDeploymentPreflight>(assemblies.Count);
+
+        foreach (var assembly in assemblies)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var assemblyPath = ResolveAssemblyPath(assembly, configDir);
+            if (assemblyPath == null || !File.Exists(assemblyPath))
+            {
+                throw new FileNotFoundException(
+                    $"Assembly file not found: {assembly.Path ?? assembly.PackagePath}");
+            }
+
+            var canonicalPath = Path.GetFullPath(assemblyPath);
+            if (!configuredPaths.Add(canonicalPath))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"Deployment artifact '{canonicalPath}' is configured more than once. " +
+                    "Each package or assembly path must appear exactly once. No changes were applied.");
+            }
+
+            var artifactBytes = packageContentReader == null
+                ? await File.ReadAllBytesAsync(canonicalPath, cancellationToken)
+                : await packageContentReader(canonicalPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.Equals(assembly.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
+            {
+                preflights.Add(new AssemblyDeploymentPreflight(assembly, canonicalPath, artifactBytes));
+                continue;
+            }
+
+            var packageName = PluginPackageMetadataReader.Read(artifactBytes).Id;
+            var packageAssemblyName = NupkgExtractor.InspectConfiguredAssemblyIdentity(
+                artifactBytes,
+                canonicalPath,
+                assembly);
+
+            if (!string.Equals(assembly.Name, packageAssemblyName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Plugin.PackageAssemblyMismatch,
+                    $"Configured assembly '{assembly.Name}' does not match the package's primary assembly " +
+                    $"'{packageAssemblyName}' in '{Path.GetFileName(canonicalPath)}'. No package was uploaded. " +
+                    "Re-run 'ppds plugins extract' for this package or correct assemblies[].name before deploying.");
+            }
+
+            if (packagePathsById.TryGetValue(packageName, out var existingPath))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"NuGet package ID '{packageName}' is configured from both '{existingPath}' and " +
+                    $"'{canonicalPath}'. Each package ID must have one deployment source. No changes were applied.");
+            }
+
+            packagePathsById.Add(packageName, canonicalPath);
+            preflights.Add(new AssemblyDeploymentPreflight(
+                assembly,
+                canonicalPath,
+                artifactBytes,
+                packageName,
+                packageAssemblyName));
+        }
+
+        return preflights;
     }
 
     /// <summary>
@@ -217,7 +326,9 @@ public static class DeployCommand
         bool clean,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null,
+        AssemblyDeploymentPreflight? deploymentPreflight = null)
     {
         var result = new DeploymentResult
         {
@@ -232,42 +343,73 @@ public static class DeployCommand
             if (!globalOptions.IsJsonMode)
                 Console.Error.WriteLine($"Deploying assembly: {assemblyConfig.Name}");
 
-            // Resolve assembly path
-            var assemblyPath = ResolveAssemblyPath(assemblyConfig, configDir);
-            if (assemblyPath == null || !File.Exists(assemblyPath))
+            deploymentPreflight ??= (await PreflightAssembliesAsync(
+                [assemblyConfig],
+                configDir,
+                cancellationToken,
+                packageContentReader))[0];
+            if (!ReferenceEquals(deploymentPreflight.Assembly, assemblyConfig))
             {
-                throw new FileNotFoundException($"Assembly file not found: {assemblyConfig.Path ?? assemblyConfig.PackagePath}");
+                throw new ArgumentException(
+                    "The deployment preflight does not belong to the supplied assembly configuration.",
+                    nameof(deploymentPreflight));
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Deploy assembly or package based on type
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
             {
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
-                var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
-                var packageName = PluginPackageMetadataReader.Read(packageBytes).Id;
+                var packageBytes = deploymentPreflight.ArtifactBytes;
+                var packageName = deploymentPreflight.PackageName!;
+                var packageAssemblyName = deploymentPreflight.PackageAssemblyName!;
 
                 Guid packageId;
                 if (dryRun)
                 {
-                    var existingPkg = await service.GetPackageByNameAsync(packageName);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existingPkg = await service.GetPackageByNameAsync(packageName, cancellationToken);
                     packageId = existingPkg?.Id ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  [Dry-Run] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
                 }
                 else
                 {
-                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
 
                 // Get the assembly ID from the package (Dataverse creates it automatically)
-                // Use assemblyConfig.Name here since that's the assembly name inside the package
-                var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(packageId, assemblyConfig.Name);
+                // Use the inspected manifest name so config casing cannot affect lookup.
+                cancellationToken.ThrowIfCancellationRequested();
+                var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(
+                    packageId,
+                    packageAssemblyName,
+                    cancellationToken);
                 if (pkgAssemblyId == null && !dryRun)
                 {
-                    throw new InvalidOperationException($"Could not find assembly '{assemblyConfig.Name}' in package after deployment");
+                    var recoveryGuidance =
+                        $"The uploaded package ID is {packageId}. Inspect it with " +
+                        $"'ppds plugins get package {packageName}'. " +
+                        $"Use 'ppds plugins list --package {packageName}' to inspect materialized assemblies. " +
+                        "If Dataverse has materialized the assembly, re-run deploy. If the package is incomplete " +
+                        "and cleanup is appropriate, 'ppds plugins unregister package' is destructive and must " +
+                        "be run separately with normal environment confirmation. PPDS did not attempt automatic cleanup.";
+                    throw new PpdsException(
+                        ErrorCodes.Plugin.PackageAssemblyUnavailableAfterUpload,
+                        $"Package '{packageName}' ({packageId}) was uploaded, but Dataverse did not return its " +
+                        $"expected assembly '{packageAssemblyName}'. The package may now be partially deployed.",
+                        new Dictionary<string, object>
+                        {
+                            ["recoveryGuidance"] = recoveryGuidance,
+                            ["packageName"] = packageName,
+                            ["packageId"] = packageId,
+                            ["assemblyName"] = packageAssemblyName
+                        });
                 }
                 // In dry-run mode for new packages, the assembly won't exist yet - use a placeholder ID
                 assemblyId = pkgAssemblyId ?? Guid.NewGuid();
@@ -275,25 +417,32 @@ public static class DeployCommand
             else
             {
                 // For classic assemblies, upload the DLL directly
-                var assemblyBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+                var assemblyBytes = deploymentPreflight.ArtifactBytes;
 
                 if (dryRun)
                 {
-                    var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name, cancellationToken);
                     assemblyId = existing?.Id ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  [Dry-Run] Would {(existing == null ? "create" : "update")} assembly");
                 }
                 else
                 {
-                    assemblyId = await service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    assemblyId = await service.UpsertAssemblyAsync(
+                        assemblyConfig.Name,
+                        assemblyBytes,
+                        solution,
+                        cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Assembly registered: {assemblyId}");
                 }
             }
 
             // Get existing types and steps
-            var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId, cancellationToken);
 
             // Build a duplicate-aware type lookup. TypeName is typically the fully qualified
             // name, but collisions can happen (e.g., the same class name under different
@@ -334,6 +483,7 @@ public static class DeployCommand
             var existingPairs = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
             foreach (var existingType in existingTypes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var steps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
                 foreach (var step in steps)
                     existingPairs.Add((existingType, step));
@@ -387,7 +537,12 @@ public static class DeployCommand
                 }
                 else
                 {
-                    typeId = await service.UpsertPluginTypeAsync(assemblyId, typeConfig.TypeName, solution);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    typeId = await service.UpsertPluginTypeAsync(
+                        assemblyId,
+                        typeConfig.TypeName,
+                        solution,
+                        cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Type registered: {typeConfig.TypeName}");
                 }
@@ -395,13 +550,16 @@ public static class DeployCommand
                 // Deploy each step
                 foreach (var stepConfig in typeConfig.Steps)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     // Resolve auto-generated name if not specified. Deploy writes this name to the
                     // matched row, so a renamed environment step converges back to the configured name.
                     stepConfig.Name ??= PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
                     var stepName = stepConfig.Name;
 
                     // Lookup message and filter
-                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message, cancellationToken);
                     if (messageId == null)
                     {
                         if (!globalOptions.IsJsonMode)
@@ -409,10 +567,12 @@ public static class DeployCommand
                         continue;
                     }
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     var filterId = await service.GetSdkMessageFilterIdAsync(
                         messageId.Value,
                         stepConfig.Entity,
-                        stepConfig.SecondaryEntity);
+                        stepConfig.SecondaryEntity,
+                        cancellationToken);
 
                     // A specified entity that resolves no SDK message filter is a configuration error
                     // (typo, or unsupported message/entity combo) — the step can never be registered
@@ -453,6 +613,7 @@ public static class DeployCommand
                     }
                     else
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
@@ -462,11 +623,15 @@ public static class DeployCommand
                     }
 
                     // Deploy images (skip query in dry-run mode or for new steps since stepId doesn't exist)
-                    var existingImages = dryRun || isNew ? [] : await service.ListImagesForStepAsync(stepId);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existingImages = dryRun || isNew
+                        ? []
+                        : await service.ListImagesForStepAsync(stepId, cancellationToken);
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
 
                     foreach (var imageConfig in stepConfig.Images)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var imageIsNew = !existingImageNames.Contains(imageConfig.Name);
 
                         if (dryRun)
@@ -479,7 +644,12 @@ public static class DeployCommand
                         }
                         else
                         {
-                            await service.UpsertImageAsync(stepId, imageConfig, stepConfig.Message);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            await service.UpsertImageAsync(
+                                stepId,
+                                imageConfig,
+                                stepConfig.Message,
+                                cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
@@ -511,6 +681,7 @@ public static class DeployCommand
                         }
                         else
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
                             await service.DeleteStepAsync(orphanStep.Id, cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"    Deleted step: {orphanStep.Name}");
@@ -550,16 +721,57 @@ public static class DeployCommand
                 result.Error = string.Join("; ", stepErrors);
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             result.Success = false;
             result.Error = ex.Message;
+            if (ex is PpdsException ppdsException)
+            {
+                result.ErrorCode = ppdsException.ErrorCode;
+                if (ppdsException.Context?.TryGetValue("recoveryGuidance", out var recovery) == true)
+                    result.RecoveryGuidance = recovery?.ToString();
+            }
 
             if (!globalOptions.IsJsonMode)
+            {
                 Console.Error.WriteLine($"  Error: {ex.Message}");
+                if (!string.IsNullOrWhiteSpace(result.RecoveryGuidance))
+                    Console.Error.WriteLine($"  Recovery: {result.RecoveryGuidance}");
+            }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return result;
+    }
+
+    /// <summary>
+    /// Returns only the Custom APIs owned by assemblies whose deployment completed successfully.
+    /// The lists are positional because <see cref="ExecuteAsync"/> records one result for each
+    /// configured assembly in order.
+    /// </summary>
+    internal static IReadOnlyList<CustomApiConfig> SelectAssemblyCustomApisForDeployment(
+        IReadOnlyList<PluginAssemblyConfig>? assemblies,
+        IReadOnlyList<DeploymentResult> results)
+    {
+        if (assemblies == null || assemblies.Count == 0)
+            return [];
+
+        if (assemblies.Count != results.Count)
+        {
+            throw new ArgumentException(
+                "Assembly deployment results must align with the configured assemblies.",
+                nameof(results));
+        }
+
+        return assemblies
+            .Zip(results)
+            .Where(pair => pair.Second.Success)
+            .SelectMany(pair => pair.First.CustomApis ?? [])
+            .ToList();
     }
 
     private static async Task DeployCustomApisAsync(
@@ -627,11 +839,14 @@ public static class DeployCommand
             }
             else
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var apiId = await customApiService.RegisterAsync(registration, cancellationToken: cancellationToken);
                 if (!globalOptions.IsJsonMode)
                     Console.Error.WriteLine($"  Custom API registered: {apiConfig.UniqueName} ({apiId})");
             }
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private static string? ResolveAssemblyPath(PluginAssemblyConfig config, string configDir)
@@ -651,6 +866,13 @@ public static class DeployCommand
 
     #region Result Models
 
+    internal sealed record AssemblyDeploymentPreflight(
+        PluginAssemblyConfig Assembly,
+        string AssemblyPath,
+        byte[] ArtifactBytes,
+        string? PackageName = null,
+        string? PackageAssemblyName = null);
+
     internal sealed class DeploymentResult
     {
         [JsonPropertyName("assemblyName")]
@@ -661,6 +883,14 @@ public static class DeployCommand
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+
+        [JsonPropertyName("errorCode")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ErrorCode { get; set; }
+
+        [JsonPropertyName("recoveryGuidance")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? RecoveryGuidance { get; set; }
 
         [JsonPropertyName("stepsCreated")]
         public int StepsCreated { get; set; }
