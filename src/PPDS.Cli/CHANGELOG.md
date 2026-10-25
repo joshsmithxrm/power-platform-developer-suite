@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Unsupported NuGet plugin package frameworks now explain both valid deployment paths** — validation identifies the restriction as Dataverse package-specific and directs developers either to retarget packages to `net462`/`net471` or deploy a strong-name-signed loose assembly when `net48` is required.
+
 ## [1.4.1] - 2026-09-12
 
 ### Fixed

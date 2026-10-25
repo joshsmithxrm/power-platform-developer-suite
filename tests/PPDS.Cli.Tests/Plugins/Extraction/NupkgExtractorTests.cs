@@ -139,9 +139,11 @@ public class NupkgExtractorTests : IDisposable
         var ex = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
         Assert.Equal(ErrorCodes.Validation.InvalidValue, ex.ErrorCode);
+        Assert.Contains("Dataverse cannot register this NuGet plugin package", ex.Message);
         Assert.Contains("lib/net462", ex.Message);
         Assert.Contains("lib/net471", ex.Message);
         Assert.Contains("lib/net48", ex.Message);
+        Assert.Contains("loose plugin assembly", ex.Message);
     }
 
     [Fact]
