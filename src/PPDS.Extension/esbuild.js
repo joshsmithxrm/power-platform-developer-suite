@@ -1,6 +1,24 @@
 const esbuild = require('esbuild');
 const production = process.argv.includes('--production');
 
+// Monaco vendors DOMPurify, so npm overrides alone do not update the shipped
+// sanitizer. Resolve only its known sanitizer import to our patched dependency.
+// Remove this workaround when Monaco consumes the npm package directly.
+// https://github.com/microsoft/monaco-editor/issues/5517
+const monacoSanitizerPlugin = {
+    name: 'monaco-sanitizer',
+    setup(build) {
+        const importer = require.resolve('monaco-editor/esm/vs/base/browser/domSanitize.js');
+        build.onResolve({ filter: /^\.\/dompurify\/dompurify\.js$/ }, args => {
+            if (args.importer !== importer) return;
+            return build.resolve('dompurify', {
+                resolveDir: __dirname,
+                kind: 'import-statement',
+            });
+        });
+    },
+};
+
 // ── Build definitions ────────────────────────────────────────────────────────
 // To add a new panel: add JS + CSS entries below. No other changes needed.
 
@@ -28,6 +46,7 @@ const builds = [
         sourcesContent: false,
         platform: 'browser',
         outfile: 'dist/monaco-editor.js',
+        plugins: [monacoSanitizerPlugin],
         logLevel: 'warning',
         loader: { '.ttf': 'file' },
     },
@@ -234,4 +253,9 @@ async function main() {
     }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+// Let build regression tests exercise the same configuration used for packaging.
+module.exports = { builds };
+
+if (require.main === module) {
+    main().catch(e => { console.error(e); process.exit(1); });
+}
