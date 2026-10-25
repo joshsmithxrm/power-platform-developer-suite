@@ -1,6 +1,7 @@
 """Contracts separating contributor tooling from the supported extension host."""
 from pathlib import Path
 import json
+import re
 
 import yaml
 
@@ -45,6 +46,19 @@ def test_runtime_changes_trigger_validation():
     assert build["extension"]["if"] == build["extension-node22"]["if"]
     for event in ("push", "pull_request"):
         assert ".nvmrc" in workflow("tui-e2e.yml")["on"][event]["paths"]
+
+
+def test_extension_node_typings_preserve_the_host_contract():
+    extension = ROOT / "src/PPDS.Extension"
+    package = json.loads((extension / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((extension / "package-lock.json").read_text(encoding="utf-8"))
+    declared = package["devDependencies"]["@types/node"]
+    # Exact, tilde, and caret ranges within major 22 keep newer tooling APIs out
+    # of extension source. Broad ranges or aliases need explicit policy review.
+    assert re.fullmatch(r"[\^~]?22\.\d+\.\d+", declared), declared
+    assert lock["packages"][""]["devDependencies"]["@types/node"] == declared
+    resolved = lock["packages"]["node_modules/@types/node"]["version"]
+    assert re.fullmatch(r"22\.\d+\.\d+", resolved), resolved
 
 
 def test_compatibility_is_blocking():

@@ -31,6 +31,7 @@ the resulting extension in VS Code's own host.
 | AC-02 | The extension bundle targets Node 22.22.1 independently of the tooling version | `src/PPDS.Extension/tools/node-runtime.test.mjs` | ✅ |
 | AC-03 | Node 22 unit compatibility and minimum/stable VS Code E2E results block the build gate; the primary extension check keeps its existing name | `tests/ci/test_javascript_tooling.py::test_compatibility_is_blocking`, `tests/ci/test_extension_e2e_workflow.py` | ✅ |
 | AC-04 | The existing TUI runner can create and interact with its native PTY on the selected tooling runtime without replacing the framework | `tests/PPDS.Tui.E2eTests/tests/startup.spec.ts` | ✅ |
+| AC-05 | The extension's declared and resolved top-level Node typings remain on major 22 independently of the tooling runtime | `tests/ci/test_javascript_tooling.py::test_extension_node_typings_preserve_the_host_contract` | ✅ |
 
 ## Native terminal dependency
 
