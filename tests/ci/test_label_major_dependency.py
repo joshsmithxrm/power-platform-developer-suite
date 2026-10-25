@@ -220,7 +220,7 @@ class TestWorkflowSecurityContract:
         assert workflow["permissions"] == {
             "contents": "read",
             "issues": "write",
-            "pull-requests": "read",
+            "pull-requests": "write",
         }
 
     def test_runs_only_for_dependabot_owned_prs(self):
