@@ -23,20 +23,24 @@ Usage (workflow)
 
     # Optionally add --has-open-check-in-issue if an open issue already exists.
 
-Exit codes
-----------
-Always 0 — the caller reads the JSON ``should_open_issue`` field to decide
-whether to create an issue.  A non-zero exit would prevent ``$()`` capture
-in bash; we surface errors via stderr and still exit 0 so the workflow can
-fall through to the JSON parsing step gracefully.
+Timestamps are normalized to UTC before subtraction. Date-only and otherwise
+timezone-naive inputs are interpreted as UTC for backward compatibility; git's
+production ``creatordate:iso-strict`` offset is preserved and converted.
+
+Invalid inputs return non-zero so a broken cadence check cannot silently skip.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
-from datetime import date, datetime
+from datetime import datetime, timezone
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+
+from release_model import ReleaseGraph, SemVer
 
 
 PUBLIC_RELEASE_RUNBOOK = (
@@ -48,6 +52,103 @@ PUBLIC_RELEASE_RUNBOOK = (
 # ---------------------------------------------------------------------------
 # Core decision logic
 # ---------------------------------------------------------------------------
+
+def as_utc(value: datetime) -> datetime:
+    """Normalize a datetime to UTC, treating a missing offset as UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def parse_utc_timestamp(value: str) -> datetime:
+    """Parse an ISO-8601 date/timestamp into an aware UTC datetime."""
+    normalized = value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
+    return as_utc(datetime.fromisoformat(normalized))
+
+
+@dataclass(frozen=True)
+class ReleaseTagWithDate:
+    name: str
+    created_at: datetime
+
+
+def select_latest_cadence_release(
+    tags: list[ReleaseTagWithDate],
+    tag_prefixes: set[str],
+) -> dict:
+    """Select the most recently created strict release tag.
+
+    Package versions are independent, so cadence ranks valid releases by UTC
+    creation time rather than comparing versions across package lines. SemVer
+    is still validated through the shared strict implementation.
+    """
+    valid: list[ReleaseTagWithDate] = []
+    diagnostics: list[str] = []
+    for tag in tags:
+        prefix = next(
+            (
+                candidate for candidate in sorted(tag_prefixes, key=len, reverse=True)
+                if tag.name.startswith(candidate)
+            ),
+            None,
+        )
+        if prefix is None:
+            continue
+        try:
+            SemVer.parse(tag.name[len(prefix):])
+        except ValueError as exc:
+            diagnostics.append(f"Malformed release tag {tag.name!r}: {exc}")
+            continue
+        valid.append(tag)
+
+    selected = max(
+        valid,
+        key=lambda tag: (as_utc(tag.created_at), tag.name),
+        default=None,
+    )
+    return {
+        "latest_tag": selected.name if selected else None,
+        "latest_tag_date": (
+            as_utc(selected.created_at).isoformat() if selected else None
+        ),
+        "diagnostics": sorted(diagnostics),
+    }
+
+
+def collect_release_tags() -> list[ReleaseTagWithDate]:
+    result = subprocess.run(
+        [
+            "git",
+            "for-each-ref",
+            "--format=%(refname:short)%09%(creatordate:iso-strict)",
+            "refs/tags/",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git for-each-ref failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    tags: list[ReleaseTagWithDate] = []
+    for line in result.stdout.splitlines():
+        name, separator, raw_date = line.partition("\t")
+        if not separator:
+            continue
+        try:
+            created_at = parse_utc_timestamp(raw_date.strip())
+        except ValueError:
+            continue
+        tags.append(ReleaseTagWithDate(name=name.strip(), created_at=created_at))
+    return tags
+
+
+def discover_release_prefixes(repo_root: Path) -> set[str]:
+    graph = ReleaseGraph.discover(repo_root)
+    return {surface.tag_prefix for surface in graph.surfaces.values()} | {"v"}
 
 def evaluate_cadence(
     *,
@@ -83,7 +184,9 @@ def evaluate_cadence(
         weeks_since_release int  (floor of days / 7)
         unreleased_commits  int  (echoed from input)
     """
-    weeks_since_release = (current_date - last_release_date).days // 7
+    weeks_since_release = (
+        as_utc(current_date) - as_utc(last_release_date)
+    ).days // 7
 
     if has_open_check_in_issue:
         return {
@@ -165,26 +268,37 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate whether a release cadence check-in issue should be opened. "
-            "Outputs a JSON object to stdout; always exits 0."
+            "Outputs a JSON object to stdout and fails on invalid input."
         ),
     )
     parser.add_argument(
+        "--find-latest-release",
+        action="store_true",
+        help="Discover the most recent strict release tag and print JSON.",
+    )
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Repository root used to discover release tag prefixes.",
+    )
+    parser.add_argument(
         "--last-release-date",
-        required=True,
-        help="ISO date string (YYYY-MM-DD) of the most recent release tag.",
+        required=False,
+        help="ISO-8601 date/timestamp of the most recent release tag.",
     )
     parser.add_argument(
         "--current-date",
         default=None,
         help=(
-            "ISO date string (YYYY-MM-DD) to treat as today. "
-            "Defaults to the actual current date."
+            "ISO-8601 date/timestamp to treat as now. "
+            "Defaults to the current UTC time."
         ),
     )
     parser.add_argument(
         "--unreleased-commits",
         type=int,
-        required=True,
+        required=False,
         help="Number of commits on main since the last release tag.",
     )
     parser.add_argument(
@@ -211,20 +325,33 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
+    if args.find_latest_release:
+        selection = select_latest_cadence_release(
+            collect_release_tags(),
+            discover_release_prefixes(args.repo_root),
+        )
+        print(json.dumps(selection, sort_keys=True))
+        return 0
+
+    if args.last_release_date is None:
+        parser.error("--last-release-date is required unless --find-latest-release is used")
+    if args.unreleased_commits is None:
+        parser.error("--unreleased-commits is required unless --find-latest-release is used")
+
     try:
-        last_release_date = datetime.fromisoformat(args.last_release_date)
+        last_release_date = parse_utc_timestamp(args.last_release_date)
     except ValueError as exc:
         print(f"error: --last-release-date: {exc}", file=sys.stderr)
-        return 0  # still exit 0; JSON won't be valid but workflow reads stderr
+        return 2
 
     if args.current_date is not None:
         try:
-            current_date = datetime.fromisoformat(args.current_date)
+            current_date = parse_utc_timestamp(args.current_date)
         except ValueError as exc:
             print(f"error: --current-date: {exc}", file=sys.stderr)
-            return 0
+            return 2
     else:
-        current_date = datetime.combine(date.today(), datetime.min.time())
+        current_date = datetime.now(timezone.utc)
 
     result = evaluate_cadence(
         last_release_date=last_release_date,
