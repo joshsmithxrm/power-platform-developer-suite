@@ -47,6 +47,13 @@ mistake our runtime tests for an upstream support promise. The native package's
 0.14.1 version is npm's `latest`, but its GitHub release is marked prerelease;
 maintainer review must account for that discrepancy before adoption.
 
+The TUI project's Playwright installer is aligned to 1.61.1, the release already
+used by the extension. Its previous locked 1.57.0 release hangs extracting
+browser archives on Node 26. Playwright's upstream fix
+([microsoft/playwright#40747](https://github.com/microsoft/playwright/pull/40747))
+corrects the ZIP stream destruction lifecycle. Keep the existing browser-install
+step in TUI CI so a cold installation exercises this compatibility boundary.
+
 ## Validation before adoption
 
 Run locked installs, typechecks, lint, production packaging, and extension tests

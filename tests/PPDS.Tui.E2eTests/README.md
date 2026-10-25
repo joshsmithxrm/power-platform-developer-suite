@@ -19,6 +19,10 @@ its Windows native binary on Node 26. The replacement declares support for Node
 20 through 26 and keeps the runner's PTY API. It is npm's `latest` release, though
 [GitHub marks 0.14.1 as prerelease](https://github.com/homebridge/node-pty-prebuilt-multiarch/releases/tag/v0.14.1).
 
+Playwright is pinned to 1.61.1, matching the extension's tested release. The old
+locked 1.57.0 installer hangs extracting browser downloads on Node 26; 1.61.1
+includes the [upstream ZIP lifecycle fix](https://github.com/microsoft/playwright/pull/40747).
+
 ## Installing Node 26 (Windows)
 
 If you don't have a Node version manager, install **nvm-windows**:

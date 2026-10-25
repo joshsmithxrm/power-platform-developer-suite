@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@microsoft/tui-test": "^0.0.1-rc.5",
-    "@playwright/test": "^1.40.0",
+    "@playwright/test": "1.61.1",
     "@xterm/xterm": "^5.5.0"
   }
 }
