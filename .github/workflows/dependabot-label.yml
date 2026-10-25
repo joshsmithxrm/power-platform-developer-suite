@@ -9,7 +9,8 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  # Applying labels to pull requests requires PR write access, even via REST.
+  pull-requests: write
 
 jobs:
   label-major-updates:
