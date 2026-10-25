@@ -1,9 +1,11 @@
+using System.Collections.Immutable;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Plugins;
 
@@ -14,6 +16,22 @@ namespace PPDS.Cli.Plugins.Extraction;
 /// </summary>
 public sealed class AssemblyExtractor : IDisposable
 {
+    private const string DataversePluginInterfaceName = "Microsoft.Xrm.Sdk.IPlugin";
+    private const string DataverseSdkAssemblyName = "Microsoft.Xrm.Sdk";
+    private static readonly Version DataverseSdkAssemblyVersion = new(9, 0, 0, 0);
+    private static readonly ImmutableArray<byte> DataverseSdkPublicKeyToken =
+        [0x31, 0xbf, 0x38, 0x56, 0xad, 0x36, 0x4e, 0x35];
+    private static readonly Version NetFrameworkCoreAssemblyVersion = new(4, 0, 0, 0);
+    private static readonly ImmutableArray<byte> NetFrameworkCorePublicKeyToken =
+        [0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89];
+    private const string PpdsPluginsAssemblyName = "PPDS.Plugins";
+    private const string PluginStepAttributeName = "PPDS.Plugins.PluginStepAttribute";
+    private const string PluginImageAttributeName = "PPDS.Plugins.PluginImageAttribute";
+    private const string CustomApiAttributeName = "PPDS.Plugins.CustomApiAttribute";
+    private const string CustomApiParameterAttributeName = "PPDS.Plugins.CustomApiParameterAttribute";
+    private static readonly ImmutableArray<byte> PpdsPluginsPublicKeyToken =
+        [0x0b, 0x08, 0x09, 0xfa, 0xff, 0x13, 0x57, 0x78];
+
     /// <summary>
     /// Logical name of the embedded resource holding the zipped .NET Framework 4.6.2
     /// reference assemblies. Must stay in sync with the <c>EmbedNet462ReferenceAssemblies</c>
@@ -39,12 +57,17 @@ public sealed class AssemblyExtractor : IDisposable
 
     private readonly MetadataLoadContext _metadataLoadContext;
     private readonly string _assemblyPath;
+    private readonly IReadOnlyList<string> _resolverPaths;
     private bool _disposed;
 
-    private AssemblyExtractor(MetadataLoadContext metadataLoadContext, string assemblyPath)
+    private AssemblyExtractor(
+        MetadataLoadContext metadataLoadContext,
+        string assemblyPath,
+        IReadOnlyList<string> resolverPaths)
     {
         _metadataLoadContext = metadataLoadContext;
         _assemblyPath = assemblyPath;
+        _resolverPaths = resolverPaths;
     }
 
     /// <summary>
@@ -83,7 +106,7 @@ public sealed class AssemblyExtractor : IDisposable
         // is the more general choice — MLC binds whatever core the target actually references.
         var mlc = new MetadataLoadContext(resolver);
 
-        return new AssemblyExtractor(mlc, assemblyPath);
+        return new AssemblyExtractor(mlc, assemblyPath, assemblyPaths);
     }
 
     /// <summary>
@@ -304,6 +327,21 @@ public sealed class AssemblyExtractor : IDisposable
     {
         var assembly = _metadataLoadContext.LoadFromAssemblyPath(_assemblyPath);
         var assemblyName = assembly.GetName();
+        var runtimePluginTypeNames = ReadRuntimePluginTypeNames(_assemblyPath, _resolverPaths);
+        var trustedRegistrationAttributes = ReadTrustedRegistrationAttributes(_assemblyPath);
+
+        var invalidAnnotatedTypeName = trustedRegistrationAttributes
+            .Select(attribute => attribute.TypeName)
+            .Distinct(StringComparer.Ordinal)
+            .FirstOrDefault(typeName => !runtimePluginTypeNames.Contains(typeName));
+        if (invalidAnnotatedTypeName != null)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Type '{invalidAnnotatedTypeName}' uses official PPDS registration metadata but is not a " +
+                "public, concrete, closed runtime Microsoft.Xrm.Sdk.IPlugin implementation with a supported " +
+                "public instance constructor.");
+        }
 
         var config = new PluginAssemblyConfig
         {
@@ -316,36 +354,53 @@ public sealed class AssemblyExtractor : IDisposable
 
         var customApis = new List<CustomApiConfig>();
 
-        // Get all exported types (public, non-abstract, non-interface)
+        // Get all exported deployable types (public, concrete, and closed).
         foreach (var type in assembly.GetExportedTypes())
         {
-            if (type.IsAbstract || type.IsInterface)
+            if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
                 continue;
 
+            var typeName = type.FullName ?? type.Name;
+
+            // Runtime plugin types are part of the package identity even when they do not use
+            // PPDS registration attributes. Read this from raw metadata rather than calling
+            // Type.GetInterfaces(): a normal Dataverse package references Microsoft.Xrm.Sdk but
+            // does not bundle it, and MetadataLoadContext cannot resolve that interface from a
+            // self-contained single-file CLI. This keeps allTypeNames truthful without inventing
+            // a PluginTypeConfig (and therefore without inventing a registration step).
+            if (runtimePluginTypeNames.Contains(typeName))
+            {
+                config.AllTypeNames.Add(typeName);
+                config.RuntimePluginTypeNames.Add(typeName);
+            }
+
+            var customApiAttr = GetCustomApiAttribute(type, trustedRegistrationAttributes);
+            var stepAttributes = GetPluginStepAttributes(type, trustedRegistrationAttributes);
             // Extract Custom API if annotated
-            var customApiAttr = GetCustomApiAttribute(type);
             if (customApiAttr != null)
             {
-                var parameterAttributes = GetCustomApiParameterAttributes(type);
+                var parameterAttributes = GetCustomApiParameterAttributes(
+                    type,
+                    trustedRegistrationAttributes);
                 var apiConfig = MapCustomApiAttribute(customApiAttr, type, parameterAttributes);
                 customApis.Add(apiConfig);
             }
 
             // Check if type has plugin step attributes
-            var stepAttributes = GetPluginStepAttributes(type);
             if (stepAttributes.Count == 0)
                 continue;
 
             // Track all plugin type names for orphan detection
-            config.AllTypeNames.Add(type.FullName ?? type.Name);
+            if (!config.AllTypeNames.Contains(typeName, StringComparer.Ordinal))
+                config.AllTypeNames.Add(typeName);
 
             var pluginType = new PluginTypeConfig
             {
-                TypeName = type.FullName ?? type.Name,
+                TypeName = typeName,
                 Steps = []
             };
 
-            var imageAttributes = GetPluginImageAttributes(type);
+            var imageAttributes = GetPluginImageAttributes(type, trustedRegistrationAttributes);
 
             foreach (var stepAttr in stepAttributes)
             {
@@ -370,31 +425,1093 @@ public sealed class AssemblyExtractor : IDisposable
         return config;
     }
 
-    private List<CustomAttributeData> GetPluginStepAttributes(Type type)
+    /// <summary>
+    /// Reads public, concrete types that implement <c>Microsoft.Xrm.Sdk.IPlugin</c> directly or
+    /// through resolvable base classes and derived interfaces. The SDK interface itself is matched
+    /// by its stable v9 strong-name identity, so a normal Dataverse package does not need to bundle Microsoft.Xrm.Sdk.
+    /// Other referenced types are resolved from the same ordered paths as MetadataLoadContext,
+    /// including caller-supplied <c>--reference-dir</c> paths.
+    /// </summary>
+    private static HashSet<string> ReadRuntimePluginTypeNames(
+        string assemblyPath,
+        IReadOnlyList<string> resolverPaths)
     {
-        return type.CustomAttributes
-            .Where(a => a.AttributeType.FullName == typeof(PluginStepAttribute).FullName)
-            .ToList();
+        using var resolver = new MetadataTypeResolver(resolverPaths);
+        var target = resolver.LoadAssembly(assemblyPath);
+        var implementsPlugin = new Dictionary<ResolvedMetadataType, bool>();
+        var unresolvedLineages = new List<UnresolvedMetadataTypeException>();
+
+        bool ImplementsPlugin(
+            ResolvedMetadataType type,
+            HashSet<ResolvedMetadataType> visiting,
+            string exportedTypeName)
+        {
+            if (implementsPlugin.TryGetValue(type, out var cached))
+                return cached;
+
+            if (!visiting.Add(type))
+                return false;
+
+            try
+            {
+                var definition = type.Assembly.Reader.GetTypeDefinition(type.Handle);
+
+                // Interfaces can inherit IPlugin through other interfaces, including interfaces
+                // declared in another assembly. Check the well-known SDK metadata name before
+                // attempting resolution because Microsoft.Xrm.Sdk is intentionally not bundled.
+                var interfaces = definition.GetInterfaceImplementations()
+                    .Select(type.Assembly.Reader.GetInterfaceImplementation)
+                    .ToList();
+                if (interfaces.Any(implementation =>
+                        IsDataversePluginInterfaceReference(
+                            type.Assembly.Reader,
+                            implementation.Interface)))
+                {
+                    implementsPlugin[type] = true;
+                    return true;
+                }
+
+                var unresolvedBranches = new List<UnresolvedMetadataTypeException>();
+                foreach (var implementation in interfaces)
+                {
+                    try
+                    {
+                        if (!resolver.TryResolve(type.Assembly, implementation.Interface, out var interfaceType))
+                        {
+                            throw resolver.CreateUnresolvedTypeException(
+                                exportedTypeName,
+                                type.Assembly,
+                                implementation.Interface);
+                        }
+
+                        if (ImplementsPlugin(interfaceType, visiting, exportedTypeName))
+                        {
+                            implementsPlugin[type] = true;
+                            return true;
+                        }
+                    }
+                    catch (UnresolvedMetadataTypeException ex)
+                    {
+                        // A different interface or the base type may still prove this is an
+                        // IPlugin. Defer the recovery error until every inheritance branch fails.
+                        unresolvedBranches.Add(ex);
+                    }
+                }
+
+                if (!definition.BaseType.IsNil)
+                {
+                    try
+                    {
+                        if (!resolver.TryResolve(type.Assembly, definition.BaseType, out var baseType))
+                        {
+                            throw resolver.CreateUnresolvedTypeException(
+                                exportedTypeName,
+                                type.Assembly,
+                                definition.BaseType);
+                        }
+
+                        if (ImplementsPlugin(baseType, visiting, exportedTypeName))
+                        {
+                            implementsPlugin[type] = true;
+                            return true;
+                        }
+                    }
+                    catch (UnresolvedMetadataTypeException ex)
+                    {
+                        unresolvedBranches.Add(ex);
+                    }
+                }
+
+                if (unresolvedBranches.Count > 0)
+                    throw unresolvedBranches[0];
+
+                implementsPlugin[type] = false;
+                return false;
+            }
+            finally
+            {
+                visiting.Remove(type);
+            }
+        }
+
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var handle in target.Reader.TypeDefinitions)
+        {
+            var typeName = GetTypeDefinitionFullName(target.Reader, handle);
+
+            if (!IsPublicConcreteClosedPluginClassDefinition(target.Reader, handle))
+                continue;
+
+            try
+            {
+                if (!ImplementsPlugin(new ResolvedMetadataType(target, handle), [], typeName))
+                    continue;
+
+                if (!HasSupportedDataversePluginConstructor(target.Reader, handle))
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Validation.InvalidValue,
+                        $"Runtime plug-in type '{typeName}' does not expose a supported public instance " +
+                        "constructor. Dataverse plug-ins must declare (), (string), or (string, string).");
+                }
+
+                result.Add(typeName);
+            }
+            catch (UnresolvedMetadataTypeException ex)
+            {
+                // An exported helper can implement an unrelated interface whose assembly is not
+                // packaged (Microsoft.Xrm.Sdk.ITracingService is a common example). Keep that
+                // lineage failure local to the type so a separately proven IPlugin still makes
+                // the assembly a valid candidate. If no runtime plug-in can be proven, surface
+                // the first unresolved lineage with its --reference-dir recovery guidance.
+                unresolvedLineages.Add(ex);
+            }
+        }
+
+        if (result.Count == 0 && unresolvedLineages.Count > 0)
+            throw unresolvedLineages[0];
+
+        return result;
     }
 
-    private List<CustomAttributeData> GetPluginImageAttributes(Type type)
+    internal static bool IsDeployablePluginTypeDefinition(
+        MetadataReader reader,
+        TypeDefinitionHandle handle)
+        => IsPublicConcreteClosedPluginClassDefinition(reader, handle)
+            && HasSupportedDataversePluginConstructor(reader, handle);
+
+    private static bool IsPublicConcreteClosedPluginClassDefinition(
+        MetadataReader reader,
+        TypeDefinitionHandle handle)
     {
-        return type.CustomAttributes
-            .Where(a => a.AttributeType.FullName == typeof(PluginImageAttribute).FullName)
-            .ToList();
+        var definition = reader.GetTypeDefinition(handle);
+        return IsExported(reader, handle)
+            && (definition.Attributes & TypeAttributes.Abstract) == 0
+            && (definition.Attributes & TypeAttributes.Interface) == 0
+            && definition.GetGenericParameters().Count == 0
+            && !IsValueTypeDefinition(reader, definition);
     }
 
-    private CustomAttributeData? GetCustomApiAttribute(Type type)
+    private static bool HasSupportedDataversePluginConstructor(
+        MetadataReader reader,
+        TypeDefinitionHandle handle)
     {
-        return type.CustomAttributes
-            .FirstOrDefault(a => a.AttributeType.FullName == typeof(CustomApiAttribute).FullName);
+        var definition = reader.GetTypeDefinition(handle);
+        foreach (var methodHandle in definition.GetMethods())
+        {
+            var method = reader.GetMethodDefinition(methodHandle);
+            if (!reader.StringComparer.Equals(method.Name, ".ctor")
+                || (method.Attributes & MethodAttributes.MemberAccessMask) != MethodAttributes.Public
+                || (method.Attributes & MethodAttributes.Static) != 0
+                || (method.Attributes & MethodAttributes.SpecialName) == 0
+                || (method.Attributes & MethodAttributes.RTSpecialName) == 0
+                || method.GetGenericParameters().Count > 0)
+            {
+                continue;
+            }
+
+            var signature = method.DecodeSignature(ConstructorSignatureTypeProvider.Instance, genericContext: null);
+            if (!signature.Header.IsInstance
+                || signature.Header.CallingConvention != SignatureCallingConvention.Default
+                || signature.ReturnType != ConstructorSignatureType.Void
+                || signature.ParameterTypes.Length > 2
+                || signature.ParameterTypes.Any(type => type != ConstructorSignatureType.String))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
-    private List<CustomAttributeData> GetCustomApiParameterAttributes(Type type)
+    private static bool IsValueTypeDefinition(MetadataReader reader, TypeDefinition definition)
     {
-        return type.CustomAttributes
-            .Where(a => a.AttributeType.FullName == typeof(CustomApiParameterAttribute).FullName)
-            .ToList();
+        if (definition.BaseType.Kind != HandleKind.TypeReference)
+            return false;
+
+        var baseHandle = (TypeReferenceHandle)definition.BaseType;
+        var baseTypeName = GetTypeReferenceFullName(reader, baseHandle);
+        if (baseTypeName is not ("System.ValueType" or "System.Enum"))
+            return false;
+
+        var reference = reader.GetTypeReference(baseHandle);
+        return reference.ResolutionScope.Kind == HandleKind.AssemblyReference
+            && IsNetFrameworkCoreAssemblyReference(
+                reader,
+                (AssemblyReferenceHandle)reference.ResolutionScope);
+    }
+
+    internal static bool IsNetFrameworkCoreAssemblyReference(
+        MetadataReader reader,
+        AssemblyReferenceHandle handle)
+    {
+        var reference = reader.GetAssemblyReference(handle);
+        return reader.StringComparer.Equals(reference.Name, "mscorlib")
+            && reference.Version == NetFrameworkCoreAssemblyVersion
+            && string.IsNullOrEmpty(reader.GetString(reference.Culture))
+            && (reference.Flags & AssemblyFlags.PublicKey) == 0
+            && reader.GetBlobBytes(reference.PublicKeyOrToken)
+                .AsSpan()
+                .SequenceEqual(NetFrameworkCorePublicKeyToken.AsSpan());
+    }
+
+    private static bool IsExported(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        var definition = reader.GetTypeDefinition(handle);
+        var visibility = definition.Attributes & TypeAttributes.VisibilityMask;
+        if (definition.GetDeclaringType().IsNil)
+            return visibility == TypeAttributes.Public;
+
+        return visibility == TypeAttributes.NestedPublic
+            && IsExported(reader, definition.GetDeclaringType());
+    }
+
+    internal static bool IsDataversePluginInterfaceReference(
+        MetadataReader reader,
+        EntityHandle handle)
+    {
+        if (handle.Kind != HandleKind.TypeReference
+            || GetTypeReferenceFullName(reader, (TypeReferenceHandle)handle) != DataversePluginInterfaceName)
+        {
+            return false;
+        }
+
+        var reference = reader.GetTypeReference((TypeReferenceHandle)handle);
+        if (reference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+            return false;
+
+        var assemblyReference = reader.GetAssemblyReference(
+            (AssemblyReferenceHandle)reference.ResolutionScope);
+        if (!reader.StringComparer.Equals(assemblyReference.Name, DataverseSdkAssemblyName)
+            || assemblyReference.Version != DataverseSdkAssemblyVersion
+            || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(reader.GetString(assemblyReference.Culture)))
+            return false;
+
+        var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
+        return publicKeyToken.AsSpan().SequenceEqual(DataverseSdkPublicKeyToken.AsSpan());
+    }
+
+    /// <summary>
+    /// Returns whether a raw metadata custom attribute is a supported PPDS registration
+    /// attribute referenced directly from the official strong-named PPDS.Plugins assembly.
+    /// Local lookalikes, wrong-token assemblies, and forwarding shims do not qualify.
+    /// </summary>
+    internal static bool IsOfficialPpdsRegistrationAttribute(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+
+        if (attributeType.Kind != HandleKind.TypeReference)
+            return false;
+
+        var typeReferenceHandle = (TypeReferenceHandle)attributeType;
+        var typeName = GetTypeReferenceFullName(reader, typeReferenceHandle);
+        if (typeName is not PluginStepAttributeName and not CustomApiAttributeName)
+        {
+            return false;
+        }
+
+        return HasOfficialPpdsPluginsIdentity(reader, typeReferenceHandle);
+    }
+
+    private static bool IsOfficialPpdsAttribute(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+
+        return attributeType.Kind == HandleKind.TypeReference
+            && HasOfficialPpdsPluginsIdentity(reader, (TypeReferenceHandle)attributeType);
+    }
+
+    private static bool HasOfficialPpdsPluginsIdentity(
+        MetadataReader reader,
+        TypeReferenceHandle typeReferenceHandle)
+    {
+        var typeReference = reader.GetTypeReference(typeReferenceHandle);
+
+        if (typeReference.ResolutionScope.Kind != HandleKind.AssemblyReference)
+            return false;
+
+        var assemblyReference = reader.GetAssemblyReference(
+            (AssemblyReferenceHandle)typeReference.ResolutionScope);
+        if (!reader.StringComparer.Equals(assemblyReference.Name, PpdsPluginsAssemblyName)
+            || (assemblyReference.Flags & AssemblyFlags.PublicKey) != 0
+            || !string.IsNullOrEmpty(reader.GetString(assemblyReference.Culture)))
+        {
+            return false;
+        }
+
+        var publicKeyToken = reader.GetBlobBytes(assemblyReference.PublicKeyOrToken);
+        return publicKeyToken.AsSpan().SequenceEqual(PpdsPluginsPublicKeyToken.AsSpan());
+    }
+
+    /// <summary>
+    /// Compares a metadata AssemblyRef with an assembly definition using the strong-binding
+    /// identity fields. Version is matched exactly because no runtime binding redirects are
+    /// available during static extraction.
+    /// </summary>
+    internal static bool AssemblyReferenceMatchesDefinition(
+        MetadataReader referenceReader,
+        AssemblyReferenceHandle referenceHandle,
+        MetadataReader definitionReader)
+    {
+        if (!definitionReader.IsAssembly)
+            return false;
+
+        var reference = referenceReader.GetAssemblyReference(referenceHandle);
+        var definition = definitionReader.GetAssemblyDefinition();
+        if (!string.Equals(
+                referenceReader.GetString(reference.Name),
+                definitionReader.GetString(definition.Name),
+                StringComparison.OrdinalIgnoreCase)
+            || reference.Version != definition.Version
+            || !string.Equals(
+                referenceReader.GetString(reference.Culture),
+                definitionReader.GetString(definition.Culture),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var referenceToken = GetPublicKeyToken(
+            referenceReader.GetBlobBytes(reference.PublicKeyOrToken),
+            (reference.Flags & AssemblyFlags.PublicKey) != 0);
+        var definitionToken = GetPublicKeyToken(
+            definitionReader.GetBlobBytes(definition.PublicKey),
+            hasFullPublicKey: true);
+        return referenceToken.AsSpan().SequenceEqual(definitionToken);
+    }
+
+    private static byte[] GetPublicKeyToken(byte[] keyOrToken, bool hasFullPublicKey)
+    {
+        if (!hasFullPublicKey || keyOrToken.Length == 0)
+            return keyOrToken;
+
+        var hash = SHA1.HashData(keyOrToken);
+        var token = new byte[8];
+        for (var index = 0; index < token.Length; index++)
+            token[index] = hash[hash.Length - 1 - index];
+        return token;
+    }
+
+    private static HashSet<RegistrationAttributeKey> ReadTrustedRegistrationAttributes(string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var peReader = new PEReader(stream);
+        if (!peReader.HasMetadata)
+            return [];
+
+        var reader = peReader.GetMetadataReader();
+        var trust = new Dictionary<RegistrationAttributeKey, RegistrationAttributeTrust>();
+        foreach (var typeHandle in reader.TypeDefinitions)
+        {
+            var typeName = GetTypeDefinitionFullName(reader, typeHandle);
+            var definition = reader.GetTypeDefinition(typeHandle);
+            foreach (var attributeHandle in definition.GetCustomAttributes())
+            {
+                var attributeName = GetPpdsAttributeName(reader, attributeHandle);
+                if (attributeName == null)
+                    continue;
+
+                var key = new RegistrationAttributeKey(typeName, attributeName);
+                trust.TryGetValue(key, out var state);
+                if (IsOfficialPpdsAttribute(reader, attributeHandle))
+                    state = state with { HasOfficial = true };
+                else
+                    state = state with { HasUntrusted = true };
+                trust[key] = state;
+            }
+        }
+
+        return trust
+            .Where(pair => pair.Value is { HasOfficial: true, HasUntrusted: false })
+            .Select(pair => pair.Key)
+            .ToHashSet();
+    }
+
+    private static string? GetPpdsAttributeName(
+        MetadataReader reader,
+        CustomAttributeHandle handle)
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        EntityHandle attributeType = attribute.Constructor.Kind switch
+        {
+            HandleKind.MemberReference => reader.GetMemberReference(
+                (MemberReferenceHandle)attribute.Constructor).Parent,
+            HandleKind.MethodDefinition => reader.GetMethodDefinition(
+                (MethodDefinitionHandle)attribute.Constructor).GetDeclaringType(),
+            _ => default
+        };
+        var typeName = attributeType.Kind switch
+        {
+            HandleKind.TypeReference => GetTypeReferenceFullName(
+                reader,
+                (TypeReferenceHandle)attributeType),
+            HandleKind.TypeDefinition => GetTypeDefinitionFullName(
+                reader,
+                (TypeDefinitionHandle)attributeType),
+            _ => null
+        };
+
+        return typeName is PluginStepAttributeName
+            or PluginImageAttributeName
+            or CustomApiAttributeName
+            or CustomApiParameterAttributeName
+            ? typeName
+            : null;
+    }
+
+    private sealed class MetadataTypeResolver : IDisposable
+    {
+        private static readonly TypeSpecificationProvider TypeSpecificationDecoder = new();
+        private readonly Dictionary<string, string> _pathsByAssemblyName =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, MetadataAssembly> _assembliesByPath =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly IReadOnlyList<string> _resolverPaths;
+
+        internal MetadataTypeResolver(IEnumerable<string> resolverPaths)
+        {
+            _resolverPaths = resolverPaths.ToList();
+            foreach (var path in _resolverPaths)
+            {
+                // Assembly references conventionally match the DLL filename. Seed that cheap
+                // lookup eagerly; if a dependency DLL was renamed, TryFindAssemblyPath falls
+                // back to reading manifest identities lazily. This avoids opening unrelated
+                // resolver files merely to inspect one inheritance chain.
+                _pathsByAssemblyName.TryAdd(Path.GetFileNameWithoutExtension(path), path);
+            }
+        }
+
+        internal MetadataAssembly LoadAssembly(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (_assembliesByPath.TryGetValue(fullPath, out var existing))
+                return existing;
+
+            var stream = File.OpenRead(fullPath);
+            try
+            {
+                var peReader = new PEReader(stream);
+                try
+                {
+                    if (!peReader.HasMetadata)
+                    {
+                        throw new BadImageFormatException($"Assembly '{path}' does not contain managed metadata.");
+                    }
+
+                    var reader = peReader.GetMetadataReader();
+                    if (!reader.IsAssembly)
+                    {
+                        throw new BadImageFormatException($"File '{path}' is not a managed assembly manifest.");
+                    }
+
+                    var assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
+                    var assembly = new MetadataAssembly(stream, peReader, reader);
+                    _assembliesByPath.Add(fullPath, assembly);
+                    _pathsByAssemblyName.TryAdd(assemblyName, fullPath);
+                    return assembly;
+                }
+                catch
+                {
+                    peReader.Dispose();
+                    throw;
+                }
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        internal string? GetTypeFullName(MetadataAssembly assembly, EntityHandle handle)
+        {
+            return GetTypeFullName(assembly, handle, []);
+        }
+
+        private string? GetTypeFullName(
+            MetadataAssembly assembly,
+            EntityHandle handle,
+            HashSet<MetadataEntityHandle> visiting)
+        {
+            var key = new MetadataEntityHandle(assembly, handle);
+            if (!visiting.Add(key))
+                return null;
+
+            try
+            {
+                return handle.Kind switch
+                {
+                    HandleKind.TypeDefinition =>
+                        GetTypeDefinitionFullName(assembly.Reader, (TypeDefinitionHandle)handle),
+                    HandleKind.TypeReference =>
+                        GetTypeReferenceFullName(assembly.Reader, (TypeReferenceHandle)handle),
+                    HandleKind.TypeSpecification => GetTypeSpecificationFullName(
+                        assembly,
+                        (TypeSpecificationHandle)handle,
+                        visiting),
+                    _ => null
+                };
+            }
+            finally
+            {
+                visiting.Remove(key);
+            }
+        }
+
+        internal bool TryResolve(
+            MetadataAssembly context,
+            EntityHandle handle,
+            out ResolvedMetadataType resolved)
+        {
+            return TryResolve(context, handle, [], out resolved);
+        }
+
+        private bool TryResolve(
+            MetadataAssembly context,
+            EntityHandle handle,
+            HashSet<MetadataEntityHandle> visiting,
+            out ResolvedMetadataType resolved)
+        {
+            var key = new MetadataEntityHandle(context, handle);
+            if (!visiting.Add(key))
+            {
+                resolved = default;
+                return false;
+            }
+
+            try
+            {
+                if (handle.Kind == HandleKind.TypeDefinition)
+                {
+                    resolved = new ResolvedMetadataType(context, (TypeDefinitionHandle)handle);
+                    return true;
+                }
+
+                if (handle.Kind == HandleKind.TypeReference)
+                {
+                    return TryResolveTypeReference(
+                        context,
+                        (TypeReferenceHandle)handle,
+                        visiting,
+                        out resolved);
+                }
+
+                if (handle.Kind == HandleKind.TypeSpecification)
+                {
+                    if (!TryDecodeTypeSpecification(
+                            context.Reader,
+                            (TypeSpecificationHandle)handle,
+                            out var genericType))
+                    {
+                        resolved = default;
+                        return false;
+                    }
+
+                    return TryResolve(context, genericType, visiting, out resolved);
+                }
+
+                resolved = default;
+                return false;
+            }
+            finally
+            {
+                visiting.Remove(key);
+            }
+        }
+
+        private string? GetTypeSpecificationFullName(
+            MetadataAssembly context,
+            TypeSpecificationHandle handle,
+            HashSet<MetadataEntityHandle> visiting)
+        {
+            return TryDecodeTypeSpecification(context.Reader, handle, out var genericType)
+                ? GetTypeFullName(context, genericType, visiting)
+                : null;
+        }
+
+        private static bool TryDecodeTypeSpecification(
+            MetadataReader reader,
+            TypeSpecificationHandle handle,
+            out EntityHandle namedType)
+        {
+            try
+            {
+                namedType = reader.GetTypeSpecification(handle)
+                    .DecodeSignature(TypeSpecificationDecoder, genericContext: null);
+                return !namedType.IsNil;
+            }
+            catch (BadImageFormatException)
+            {
+                namedType = default;
+                return false;
+            }
+        }
+
+        private sealed class TypeSpecificationProvider :
+            ISignatureTypeProvider<EntityHandle, object?>
+        {
+            public EntityHandle GetArrayType(EntityHandle elementType, ArrayShape shape) => default;
+
+            public EntityHandle GetByReferenceType(EntityHandle elementType) => default;
+
+            public EntityHandle GetFunctionPointerType(MethodSignature<EntityHandle> signature) => default;
+
+            public EntityHandle GetGenericInstantiation(
+                EntityHandle genericType,
+                ImmutableArray<EntityHandle> typeArguments) => genericType;
+
+            public EntityHandle GetGenericMethodParameter(object? genericContext, int index) => default;
+
+            public EntityHandle GetGenericTypeParameter(object? genericContext, int index) => default;
+
+            public EntityHandle GetModifiedType(
+                EntityHandle modifier,
+                EntityHandle unmodifiedType,
+                bool isRequired) => unmodifiedType;
+
+            public EntityHandle GetPinnedType(EntityHandle elementType) => default;
+
+            public EntityHandle GetPointerType(EntityHandle elementType) => default;
+
+            public EntityHandle GetPrimitiveType(PrimitiveTypeCode typeCode) => default;
+
+            public EntityHandle GetSZArrayType(EntityHandle elementType) => default;
+
+            public EntityHandle GetTypeFromDefinition(
+                MetadataReader reader,
+                TypeDefinitionHandle handle,
+                byte rawTypeKind) => handle;
+
+            public EntityHandle GetTypeFromReference(
+                MetadataReader reader,
+                TypeReferenceHandle handle,
+                byte rawTypeKind) => handle;
+
+            public EntityHandle GetTypeFromSpecification(
+                MetadataReader reader,
+                object? genericContext,
+                TypeSpecificationHandle handle,
+                byte rawTypeKind) => handle;
+        }
+
+        internal UnresolvedMetadataTypeException CreateUnresolvedTypeException(
+            string exportedTypeName,
+            MetadataAssembly context,
+            EntityHandle handle)
+        {
+            var referencedType = GetTypeFullName(context, handle) ?? $"metadata handle {handle.Kind}";
+            return new UnresolvedMetadataTypeException(
+                $"Could not determine whether exported type '{exportedTypeName}' implements " +
+                $"Microsoft.Xrm.Sdk.IPlugin because referenced type '{referencedType}' could not be resolved. " +
+                "Place the dependency beside the plugin assembly or pass its directory with --reference-dir.");
+        }
+
+        private bool TryResolveTypeReference(
+            MetadataAssembly context,
+            TypeReferenceHandle handle,
+            HashSet<MetadataEntityHandle> visiting,
+            out ResolvedMetadataType resolved)
+        {
+            var reference = context.Reader.GetTypeReference(handle);
+            var name = context.Reader.GetString(reference.Name);
+
+            if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            {
+                if (!TryResolve(
+                        context,
+                        reference.ResolutionScope,
+                        visiting,
+                        out var declaringType))
+                {
+                    resolved = default;
+                    return false;
+                }
+
+                var declaringDefinition = declaringType.Assembly.Reader.GetTypeDefinition(declaringType.Handle);
+                foreach (var nestedHandle in declaringDefinition.GetNestedTypes())
+                {
+                    var nested = declaringType.Assembly.Reader.GetTypeDefinition(nestedHandle);
+                    if (declaringType.Assembly.Reader.StringComparer.Equals(nested.Name, name))
+                    {
+                        resolved = new ResolvedMetadataType(declaringType.Assembly, nestedHandle);
+                        return true;
+                    }
+                }
+
+                resolved = default;
+                return false;
+            }
+
+            MetadataAssembly targetAssembly;
+            if (reference.ResolutionScope.Kind is HandleKind.ModuleDefinition or HandleKind.ModuleReference)
+            {
+                targetAssembly = context;
+            }
+            else if (reference.ResolutionScope.Kind == HandleKind.AssemblyReference)
+            {
+                if (!TryFindAssemblyPath(context.Reader, (AssemblyReferenceHandle)reference.ResolutionScope, out var path))
+                {
+                    resolved = default;
+                    return false;
+                }
+
+                targetAssembly = LoadAssembly(path);
+            }
+            else
+            {
+                resolved = default;
+                return false;
+            }
+
+            var @namespace = context.Reader.GetString(reference.Namespace);
+            foreach (var candidateHandle in targetAssembly.Reader.TypeDefinitions)
+            {
+                var candidate = targetAssembly.Reader.GetTypeDefinition(candidateHandle);
+                if (!candidate.GetDeclaringType().IsNil)
+                    continue;
+
+                if (targetAssembly.Reader.StringComparer.Equals(candidate.Name, name)
+                    && targetAssembly.Reader.StringComparer.Equals(candidate.Namespace, @namespace))
+                {
+                    resolved = new ResolvedMetadataType(targetAssembly, candidateHandle);
+                    return true;
+                }
+            }
+
+            resolved = default;
+            return false;
+        }
+
+        private bool TryFindAssemblyPath(
+            MetadataReader referenceReader,
+            AssemblyReferenceHandle referenceHandle,
+            out string path)
+        {
+            var assemblyReference = referenceReader.GetAssemblyReference(referenceHandle);
+            var assemblyName = referenceReader.GetString(assemblyReference.Name);
+            if (_pathsByAssemblyName.TryGetValue(assemblyName, out path!))
+            {
+                if (AssemblyReferenceMatchesPath(referenceReader, referenceHandle, path))
+                    return true;
+
+                _pathsByAssemblyName.Remove(assemblyName);
+            }
+
+            // A dependency DLL can be renamed independently of its manifest identity. Only when
+            // the filename convention fails do we inspect resolver manifests, tolerating native,
+            // inaccessible, or resource-only DLLs that are unrelated to the required type.
+            foreach (var candidate in _resolverPaths)
+            {
+                var actualName = TryReadAssemblySimpleName(candidate);
+                if (!string.IsNullOrEmpty(actualName))
+                    _pathsByAssemblyName.TryAdd(actualName, candidate);
+
+                if (string.Equals(actualName, assemblyName, StringComparison.OrdinalIgnoreCase)
+                    && AssemblyReferenceMatchesPath(referenceReader, referenceHandle, candidate))
+                {
+                    path = candidate;
+                    return true;
+                }
+            }
+
+            path = string.Empty;
+            return false;
+        }
+
+        private static bool AssemblyReferenceMatchesPath(
+            MetadataReader referenceReader,
+            AssemblyReferenceHandle referenceHandle,
+            string path)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var peReader = new PEReader(stream);
+                return peReader.HasMetadata
+                    && AssemblyReferenceMatchesDefinition(
+                        referenceReader,
+                        referenceHandle,
+                        peReader.GetMetadataReader());
+            }
+            catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        private static string? TryReadAssemblySimpleName(string path)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var peReader = new PEReader(stream);
+                if (!peReader.HasMetadata)
+                    return null;
+
+                var reader = peReader.GetMetadataReader();
+                return reader.IsAssembly
+                    ? reader.GetString(reader.GetAssemblyDefinition().Name)
+                    : null;
+            }
+            catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var assembly in _assembliesByPath.Values)
+                assembly.Dispose();
+        }
+    }
+
+    private sealed class MetadataAssembly : IDisposable
+    {
+        private readonly Stream _stream;
+        private readonly PEReader _peReader;
+
+        internal MetadataAssembly(
+            Stream stream,
+            PEReader peReader,
+            MetadataReader reader)
+        {
+            _stream = stream;
+            _peReader = peReader;
+            Reader = reader;
+        }
+
+        internal MetadataReader Reader { get; }
+
+        public void Dispose()
+        {
+            _peReader.Dispose();
+            _stream.Dispose();
+        }
+    }
+
+    private readonly record struct ResolvedMetadataType(
+        MetadataAssembly Assembly,
+        TypeDefinitionHandle Handle);
+
+    private readonly record struct MetadataEntityHandle(
+        MetadataAssembly Assembly,
+        EntityHandle Handle);
+
+    private readonly record struct RegistrationAttributeKey(string TypeName, string AttributeName);
+
+    private readonly record struct RegistrationAttributeTrust(bool HasOfficial, bool HasUntrusted);
+
+    private enum ConstructorSignatureType
+    {
+        Other,
+        Void,
+        String
+    }
+
+    private sealed class ConstructorSignatureTypeProvider
+        : ISignatureTypeProvider<ConstructorSignatureType, object?>
+    {
+        internal static ConstructorSignatureTypeProvider Instance { get; } = new();
+
+        public ConstructorSignatureType GetArrayType(ConstructorSignatureType elementType, ArrayShape shape)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetByReferenceType(ConstructorSignatureType elementType)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetFunctionPointerType(
+            MethodSignature<ConstructorSignatureType> signature) => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetGenericInstantiation(
+            ConstructorSignatureType genericType,
+            ImmutableArray<ConstructorSignatureType> typeArguments) => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetGenericMethodParameter(object? genericContext, int index)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetGenericTypeParameter(object? genericContext, int index)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetModifiedType(
+            ConstructorSignatureType modifier,
+            ConstructorSignatureType unmodifiedType,
+            bool isRequired) => unmodifiedType;
+
+        public ConstructorSignatureType GetPinnedType(ConstructorSignatureType elementType) => elementType;
+
+        public ConstructorSignatureType GetPointerType(ConstructorSignatureType elementType)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetPrimitiveType(PrimitiveTypeCode typeCode)
+            => typeCode switch
+            {
+                PrimitiveTypeCode.Void => ConstructorSignatureType.Void,
+                PrimitiveTypeCode.String => ConstructorSignatureType.String,
+                _ => ConstructorSignatureType.Other
+            };
+
+        public ConstructorSignatureType GetSZArrayType(ConstructorSignatureType elementType)
+            => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetTypeFromDefinition(
+            MetadataReader reader,
+            TypeDefinitionHandle handle,
+            byte rawTypeKind) => ConstructorSignatureType.Other;
+
+        public ConstructorSignatureType GetTypeFromReference(
+            MetadataReader reader,
+            TypeReferenceHandle handle,
+            byte rawTypeKind)
+        {
+            var reference = reader.GetTypeReference(handle);
+            return GetTypeReferenceFullName(reader, handle) == "System.String"
+                && reference.ResolutionScope.Kind == HandleKind.AssemblyReference
+                && IsNetFrameworkCoreAssemblyReference(
+                    reader,
+                    (AssemblyReferenceHandle)reference.ResolutionScope)
+                    ? ConstructorSignatureType.String
+                    : ConstructorSignatureType.Other;
+        }
+
+        public ConstructorSignatureType GetTypeFromSpecification(
+            MetadataReader reader,
+            object? genericContext,
+            TypeSpecificationHandle handle,
+            byte rawTypeKind) => ConstructorSignatureType.Other;
+    }
+
+    internal sealed class UnresolvedMetadataTypeException(string message)
+        : InvalidOperationException(message);
+
+    private static string GetTypeDefinitionFullName(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        var definition = reader.GetTypeDefinition(handle);
+        var name = reader.GetString(definition.Name);
+        if (!definition.GetDeclaringType().IsNil)
+            return $"{GetTypeDefinitionFullName(reader, definition.GetDeclaringType())}+{name}";
+
+        var @namespace = reader.GetString(definition.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
+    private static string GetTypeReferenceFullName(MetadataReader reader, TypeReferenceHandle handle)
+    {
+        var reference = reader.GetTypeReference(handle);
+        var name = reader.GetString(reference.Name);
+        if (reference.ResolutionScope.Kind == HandleKind.TypeReference)
+            return $"{GetTypeReferenceFullName(reader, (TypeReferenceHandle)reference.ResolutionScope)}+{name}";
+
+        var @namespace = reader.GetString(reference.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : $"{@namespace}.{name}";
+    }
+
+    private static List<CustomAttributeData> GetPluginStepAttributes(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
+        => GetTrustedPpdsAttributes(
+            type,
+            typeof(PluginStepAttribute).FullName!,
+            trustedRegistrationAttributes);
+
+    private static List<CustomAttributeData> GetPluginImageAttributes(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
+        => GetTrustedPpdsAttributes(
+            type,
+            typeof(PluginImageAttribute).FullName!,
+            trustedRegistrationAttributes);
+
+    private static CustomAttributeData? GetCustomApiAttribute(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
+        => GetTrustedPpdsAttributes(
+            type,
+            typeof(CustomApiAttribute).FullName!,
+            trustedRegistrationAttributes).FirstOrDefault();
+
+    private static bool HasOfficialPpdsPluginsIdentity(AssemblyName assemblyName)
+        => string.Equals(assemblyName.Name, PpdsPluginsAssemblyName, StringComparison.Ordinal)
+            && string.IsNullOrEmpty(assemblyName.CultureName)
+            && assemblyName.GetPublicKeyToken() is { } token
+            && token.AsSpan().SequenceEqual(PpdsPluginsPublicKeyToken.AsSpan());
+
+    private static List<CustomAttributeData> GetCustomApiParameterAttributes(
+        Type type,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
+    {
+        return GetTrustedPpdsAttributes(
+            type,
+            typeof(CustomApiParameterAttribute).FullName!,
+            trustedRegistrationAttributes);
+    }
+
+    private static List<CustomAttributeData> GetTrustedPpdsAttributes(
+        Type type,
+        string attributeFullName,
+        IReadOnlySet<RegistrationAttributeKey> trustedRegistrationAttributes)
+    {
+        var key = new RegistrationAttributeKey(
+            type.FullName ?? type.Name,
+            attributeFullName);
+        if (!trustedRegistrationAttributes.Contains(key))
+            return [];
+
+        var result = new List<CustomAttributeData>();
+        foreach (var attribute in type.CustomAttributes)
+        {
+            try
+            {
+                if (attribute.AttributeType.FullName == attributeFullName
+                    && HasOfficialPpdsPluginsIdentity(attribute.AttributeType.Assembly.GetName()))
+                {
+                    result.Add(attribute);
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                // Raw metadata has already bound trusted registrations to the official strong-name
+                // identity. An unresolvable lookalike attribute must not prevent those trusted
+                // registrations from being read or be materialized into deployment configuration.
+            }
+        }
+
+        if (result.Count == 0)
+        {
+            throw new PpdsException(
+                ErrorCodes.Operation.Dependency,
+                $"Could not resolve trusted PPDS attribute '{attributeFullName}' on type " +
+                $"'{type.FullName ?? type.Name}'. Ensure the official PPDS.Plugins dependency is available.");
+        }
+
+        return result;
     }
 
     private static CustomApiConfig MapCustomApiAttribute(
