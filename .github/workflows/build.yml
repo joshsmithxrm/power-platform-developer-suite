@@ -63,10 +63,11 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v6
       with:
+        # Pin current SDKs to use the official versioned feed while aka.ms redirects are broken.
         dotnet-version: |
-          8.0.x
-          9.0.x
-          10.0.x
+          8.0.427
+          9.0.320
+          10.0.403
 
     - name: Cache NuGet packages
       uses: actions/cache@v6
