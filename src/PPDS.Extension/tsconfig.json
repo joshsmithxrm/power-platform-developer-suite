@@ -5,6 +5,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "lib": ["ES2022"],
+    "types": ["node"],
     "sourceMap": true,
     "strict": true,
     "noUnusedLocals": true,

@@ -171,9 +171,7 @@ jobs:
         working-directory: src/PPDS.Extension
         run: npm test
 
-  # Monitored ramp for issue #1267. Remove continue-on-error after both matrix
-  # lanes pass three consecutive runs (PR + main) without using the startup retry.
-  # build-status already consumes this result, so removal makes the suite blocking.
+  # Blocking gate for issue #1267 across the declared-minimum and stable versions.
   extension-e2e:
     needs: changes
     if: needs.changes.outputs.extension == 'true'
@@ -202,7 +200,6 @@ jobs:
         id: e2e
         working-directory: src/PPDS.Extension
         run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:e2e
-        continue-on-error: true
         env:
           VSCODE_E2E_VERSION: ${{ matrix.vscode-version }}
 
@@ -216,10 +213,6 @@ jobs:
             src/PPDS.Extension/test-results/
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Report monitored-ramp failure
-        if: always() && steps.e2e.outcome == 'failure'
-        run: echo "::warning::Extension E2E failed during the monitored ramp; diagnostics were uploaded."
 
   # Gate job for branch protection
   build-status:
