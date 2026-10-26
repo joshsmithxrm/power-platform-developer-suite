@@ -145,7 +145,7 @@ dotnet add package PPDS.Plugins
 - **.NET runtime** — .NET 8.0 or later (CLI, MCP, libraries). Loose Dataverse plug-in assemblies may target .NET Framework 4.6.2 through 4.8; NuGet plug-in packages currently require a `lib/net462` or `lib/net471` asset group. `PPDS.Plugins` targets the compatible `net462` baseline.
 - **OS** — Windows, macOS, Linux.
 - **VS Code** — 1.116 or later.
-- **Node.js** — 20 or later (contributors only).
+- **Node.js** — contributors should use the version in [CONTRIBUTING.md](../CONTRIBUTING.md) and `.nvmrc`.
 
 ---
 

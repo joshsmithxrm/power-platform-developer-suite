@@ -9,7 +9,7 @@ The suite launches the compiled extension in an isolated VS Code development hos
 - An exact version such as `1.116.0` tests that release directly.
 - `insiders` is available for investigation but is not part of CI.
 
-CI runs both `minimum` and `stable` on Node 22 under `xvfb`. The harness uses a fresh user-data, extension, and workspace directory, and disables PPDS daemon auto-start so local state and credentials cannot affect smoke results.
+CI builds and drives both `minimum` and `stable` with the tooling version in the repository's `.nvmrc` under `xvfb`. VS Code supplies the extension-host runtime: the minimum supported VS Code 1.116.0 embeds Node 22.22.1. The host bundle targets that runtime, and a separate Node 22 unit-test job checks compatibility. The harness uses a fresh user-data, extension, and workspace directory, and disables PPDS daemon auto-start so local state and credentials cannot affect smoke results.
 
 Playwright assertion retries remain disabled. In CI only, the harness retries once when VS Code opens but the workbench fails to become ready within 60 seconds, a documented Electron UI-startup boundary. Test assertion failures are never retried. Traces and screenshots are retained on failure and uploaded by the workflow.
 

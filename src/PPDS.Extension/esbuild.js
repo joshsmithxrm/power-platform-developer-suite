@@ -32,6 +32,8 @@ const builds = [
         sourcemap: !production,
         sourcesContent: false,
         platform: 'node',
+        // VS Code 1.116.0 embeds Node 22.22.1, independently of the build runtime.
+        target: 'node22.22.1',
         outfile: 'dist/extension.js',
         external: ['vscode'],
         logLevel: 'warning',

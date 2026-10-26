@@ -2,7 +2,7 @@
   "private": true,
   "description": "PPDS workspace — root proxy scripts for extension and TUI",
   "engines": {
-    "node": ">=22"
+    "node": ">=26 <27"
   },
   "dependencies": {
     "yaml": "^2.6.0",
