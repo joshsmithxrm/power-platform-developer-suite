@@ -133,10 +133,10 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
-    public void Extract_Net48OnlyPackage_ThrowsStructuredValidationError()
+    public void Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError()
     {
-        var nupkgPath = Path.Combine(_scratch, "net48-plugin.nupkg");
-        CreatePluginPackage(nupkgPath, "net48");
+        var nupkgPath = Path.Combine(_scratch, "netstandard-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, "netstandard2.0");
 
         var ex = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
@@ -145,7 +145,21 @@ public class NupkgExtractorTests : IDisposable
         Assert.Contains("lib/net462", ex.Message);
         Assert.Contains("lib/net471", ex.Message);
         Assert.Contains("lib/net48", ex.Message);
+        Assert.Contains("lib/netstandard2.0", ex.Message);
         Assert.Contains("loose plugin assembly", ex.Message);
+    }
+
+    [Fact]
+    public void Extract_Net48Package_SelectsSupportedPluginAssembly()
+    {
+        var nupkgPath = Path.Combine(_scratch, "net48-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, "net48");
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        Assert.Equal("Nuget", config.Type);
+        var type = Assert.Single(config.Types);
+        Assert.Equal("Net48Plugin", type.TypeName);
     }
 
     [Fact]

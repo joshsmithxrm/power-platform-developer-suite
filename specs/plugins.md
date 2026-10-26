@@ -107,7 +107,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 ### Constraints
 
 - Loose plugin assemblies may target a Dataverse-supported .NET Framework version (4.6.2 through 4.8)
-- NuGet plugin packages must contain a `lib/net462` or `lib/net471` asset group; Dataverse currently rejects packages containing only `lib/net48`
+- NuGet plugin packages must contain a `lib/net462`, `lib/net471`, or `lib/net48` asset group (preferred in that order when several are present)
 - Assemblies must be strong-named for Dataverse registration
 - `ExecutionOrder` must be 1-999999
 - All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
@@ -115,7 +115,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 ### NuGet Plugin Package Registration
 
 - The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
-- A `lib/net462` or `lib/net471` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
+- A `lib/net462`, `lib/net471`, or `lib/net48` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
 - First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
@@ -1219,8 +1219,8 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-28 | First-time NuGet package registration sends the root `.nuspec` ID and version with package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
 | AC-29 | Re-deploying an existing NuGet package updates content without attempting to change immutable name or version | `UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists` | ✅ |
 | AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
-| AC-31 | A package containing only `lib/net48` fails locally with a structured error naming Dataverse's supported `lib/net462` and `lib/net471` groups | `Extract_Net48OnlyPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
-| AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` asset group | `Extract_Net471Package_SelectsSupportedPluginAssembly` | ✅ |
+| AC-31 | A package with no supported framework group (e.g. only `lib/netstandard2.0`) fails locally with a structured error naming Dataverse's supported `lib/net462`, `lib/net471`, and `lib/net48` groups | `Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
+| AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` and `lib/net48` asset groups | `Extract_Net471Package_SelectsSupportedPluginAssembly`, `Extract_Net48Package_SelectsSupportedPluginAssembly` | ✅ |
 | AC-35 | A zero-attribute runtime `IPlugin` package uses the assembly manifest simple name, includes runtime plug-in types in `allTypeNames`, and does not invent registration steps | `Extract_ZeroAttributeRuntimePlugin_UsesManifestNameAndDoesNotInventSteps` | ✅ |
 | AC-36 | Package inspection selects the only plausible primary assembly and rejects multiple plausible primaries with their candidate names | `Extract_RuntimePluginAndDependency_SelectsOnlyPluginAssembly`, `Extract_MultiplePlausiblePluginAssemblies_RejectsWithCandidateNames` | ✅ |
 | AC-37 | Dry-run and real deployment reject a configured/manifest assembly-name mismatch before any package lookup or `UpsertPackageAsync` call | `DeployAssemblyAsync_MismatchedPackageAssembly_FailsBeforeAnyUpload` | ✅ |

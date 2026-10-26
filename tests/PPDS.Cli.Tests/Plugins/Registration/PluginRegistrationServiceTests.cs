@@ -320,7 +320,7 @@ public class PluginRegistrationServiceTests
     public async Task UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall()
     {
         // Arrange
-        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", "net48");
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", "netstandard2.0");
 
         // Act
         var action = () => _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
@@ -332,6 +332,7 @@ public class PluginRegistrationServiceTests
         Assert.Contains("lib/net462", exception.Message);
         Assert.Contains("lib/net471", exception.Message);
         Assert.Contains("lib/net48", exception.Message);
+        Assert.Contains("lib/netstandard2.0", exception.Message);
         Assert.Contains("loose plugin assembly", exception.Message);
         _mockPooledClient.Verify(
             s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
