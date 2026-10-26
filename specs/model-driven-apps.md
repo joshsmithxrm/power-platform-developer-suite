@@ -154,14 +154,21 @@ All write subcommands (`set-sitemap-xml`, `add-table`, `remove-table`, `set-form
 1. Resolve app → verify entity is in sitemap (error `EntityNotInApp` if not)
 2. If `--all`: call `RemoveAppComponents` for all explicit forms of that entity (resets to "include all" mode)
 3. If `--form`:
-   - Call `RemoveAppComponents` for all existing explicit forms of that entity (reset first)
-   - Lookup form IDs by name for the entity (error `ComponentNotFound` if any not found)
-   - Call `AddAppComponents` with `@odata.type: #Microsoft.Dynamics.CRM.systemform`
+   - Resolve the complete desired set by name or ID within the table before any mutation
+   - Reject missing names/IDs with ComponentNotFound and duplicate names with ComponentAmbiguous plus candidate IDs
+   - Compute additions/removals; retain already-selected IDs and deduplicate input
+   - Call AddAppComponents for additions, then RemoveAppComponents for removals
 4. If `--solution` / `--publish`: same as above
+
+### Localized sitemap titles
+
+Inspection prefers the process UI language, then LCID 1033, legacy inline Title, then remaining translations in LCID string order. Matching accepts all translated/inline titles and gives exact stable IDs priority over labels. Multiple matches raise SitemapNodeAmbiguous with candidate IDs before writes. All existing translations are preserved. Use area/group IDs for portable scripts across languages.
 
 ### Partial Failure Behavior
 
-Write operations are not transactional. If a later step fails after an earlier mutation succeeds:
+Write operations are not transactional. Invalid/missing/ambiguous component input and resolution-read failures perform zero mutations. For validated component replacements, additions precede removals. A rejected addition cannot clear prior selections; a later failure may leave some additions/removals applied. The error instructs the caller to inspect the app draft before publishing/retrying. No automatic rollback can safely overwrite concurrent draft edits. Solution/publish steps run only after replacement succeeds.
+
+If a later step fails after an earlier mutation succeeds:
 - Sitemap PATCH succeeds, then solution add fails → sitemap change persists, solution add can be retried
 - Sitemap PATCH succeeds, then publish fails → sitemap change persists, publish can be retried manually
 
@@ -300,11 +307,11 @@ ppds model-driven-app set-forms --app "PPDS MDA" --entity account \
 | AC-19 | `remove-table` removes explicit form/view/chart components via RemoveAppComponents | `RemoveTable_RemovesExplicitComponents` | 🔲 |
 | AC-20 | `remove-table` removes entity component (type 1) via RemoveAppComponents | `RemoveTable_RemovesEntityComponent` | 🔲 |
 | AC-21 | `set-forms --all` removes explicit form selections (enables include-all mode) | `SetForms_AllMode` | 🔲 |
-| AC-22 | `set-forms --form "X"` removes existing explicit forms then adds specified forms | `SetForms_SpecificMode` | 🔲 |
+| AC-22 | `set-forms --form "X"` validates and replaces explicit forms, retaining selected IDs | `SetForms_SpecificMode` | 🔲 |
 | AC-23 | `set-views --all` removes explicit view selections | `SetViews_AllMode` | 🔲 |
-| AC-24 | `set-views --view "X"` removes existing explicit views then adds specified views | `SetViews_SpecificMode` | 🔲 |
+| AC-24 | `set-views --view "X"` validates and replaces explicit views, retaining selected IDs | `SetViews_SpecificMode` | 🔲 |
 | AC-25 | `set-charts --all` removes explicit chart selections | `SetCharts_AllMode` | 🔲 |
-| AC-26 | `set-charts --chart "X"` removes existing explicit charts then adds specified charts | `SetCharts_SpecificMode` | 🔲 |
+| AC-26 | `set-charts --chart "X"` validates and replaces explicit charts, retaining selected IDs | `SetCharts_SpecificMode` | 🔲 |
 | AC-27 | `set-*` with `--all` and `--form`/`--view`/`--chart` returns mutual exclusion error | `SetComponents_MutuallyExclusive` | 🔲 |
 | AC-28 | `set-*` with entity not in app returns `EntityNotInApp` error | `SetComponents_EntityNotInApp_Error` | 🔲 |
 | AC-29 | `set-*` with neither `--all` nor specific component returns error | `SetComponents_NeitherOption_Error` | 🔲 |
@@ -582,6 +589,14 @@ guard that asserts it, so a future platform change is caught by our tests rather
 ---
 
 ## Changelog
+
+### Metadata correctness (#1448)
+
+| AC | Requirement | Test | Status |
+|---|---|---|---|
+| AC-33 | Validate entire replacement before writes and compute changes; add before remove, report later failures | `ModelDrivenAppServiceTests.Replacement_InvalidInput_DoesNotWrite`, `ModelDrivenAppServiceTests.Replacement_AddFailure_DoesNotRemove` | ✅ |
+| AC-34 | Reject ambiguous names with candidate IDs; accept table-scoped IDs | `ModelDrivenAppServiceTests.Replacement_AmbiguousName_ListsCandidates`, `ModelDrivenAppServiceTests.Replacement_ExplicitId_SelectsCandidate` | ✅ |
+| AC-35 | Resolve localized titles consistently, prefer IDs, reject ambiguity and preserve translations | `ModelDrivenAppServiceTests.LocalizedSitemap_InspectAndMatchPreserveTranslations` | ✅ |
 
 | Date | Change |
 |------|--------|

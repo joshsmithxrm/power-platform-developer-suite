@@ -34,6 +34,246 @@ namespace PPDS.Cli.Tests.Services.ModelDrivenApps;
 /// </summary>
 public class ModelDrivenAppServiceTests
 {
+    private const string LocalizedSitemap = "<SiteMap><Area Id='area_main'><Titles><Title LCID='1036' Title='Principal'/><Title LCID='1033' Title='Main'/></Titles><Group Id='group_sales'><Titles><Title LCID='1036' Title='Ventes'/><Title LCID='1033' Title='Sales'/></Titles><SubArea Id='sub_account' Entity='account'><Titles><Title LCID='1033' Title='Accounts'/></Titles></SubArea></Group></Area></SiteMap>";
+
+    [Theory]
+    [InlineData("Main", "Sales")]
+    [InlineData("Principal", "Ventes")]
+    [InlineData("area_main", "group_sales")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-35")]
+    public async Task LocalizedSitemap_InspectAndMatchPreserveTranslations(string area, string group)
+    {
+        var h = new Harness();
+        h.Setup(LocalizedSitemap, DefaultEntities);
+        var service = h.Build();
+        var sitemap = await service.GetSitemapAsync(AppName, true, CancellationToken.None);
+        sitemap.Areas[0].Title.Should().Be("Main");
+        sitemap.Areas[0].Groups[0].Title.Should().Be("Sales");
+        sitemap.Areas[0].Groups[0].SubAreas[0].Title.Should().Be("Accounts");
+        await service.AddTableAsync(AppName, ["contact"], new AddTableOptions(group, area, null, null, false), null, CancellationToken.None);
+        var written = XDocument.Parse(h.WrittenSitemapXml!);
+        written.Descendants("Area").Should().ContainSingle();
+        written.Descendants("Group").Should().ContainSingle();
+        var before = XDocument.Parse(LocalizedSitemap).Descendants("Titles").ToList();
+        written.Descendants("Titles").Zip(before).Should().OnlyContain(pair => XNode.DeepEquals(pair.First, pair.Second));
+        written.Descendants("SubArea").Should().Contain(s => (string?)s.Attribute("Entity") == "contact");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task LocalizedSitemap_PrefersCurrentLanguageThenFallback()
+    {
+        var prior = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("fr-FR");
+            var h = new Harness();
+            h.Setup(LocalizedSitemap, DefaultEntities);
+            (await h.Build().GetSitemapAsync(AppName, true, CancellationToken.None)).Areas[0].Title.Should().Be("Principal");
+            System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+            h.Setup(LocalizedSitemap.Replace("LCID='1033'", "LCID='1040'"), DefaultEntities);
+            (await h.Build().GetSitemapAsync(AppName, true, CancellationToken.None)).Areas[0].Title.Should().Be("Principal");
+        }
+        finally { System.Globalization.CultureInfo.CurrentUICulture = prior; }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Unit")]
+    public async Task LocalizedSitemap_AmbiguousTitle_DoesNotWrite(bool duplicateGroup)
+    {
+        var doc = XDocument.Parse(LocalizedSitemap);
+        var original = duplicateGroup ? doc.Descendants("Group").First() : doc.Root!.Element("Area")!;
+        var copy = new XElement(original);
+        copy.SetAttributeValue("Id", "other");
+        original.Parent!.Add(copy);
+        var h = new Harness();
+        h.Setup(doc.ToString(), DefaultEntities);
+        var ex = await FluentActions.Awaiting(() => h.Build().AddTableAsync(AppName, ["contact"],
+                new AddTableOptions("Sales", duplicateGroup ? "area_main" : "Main", null, null, false), null, CancellationToken.None))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.SitemapNodeAmbiguous);
+        ex.Which.Message.Should().Contain("other");
+        h.WrittenSitemapXml.Should().BeNull();
+        SelectionWrites(h).Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task LocalizedSitemap_IdWinsOverAnotherNodesTitle()
+    {
+        var h = new Harness();
+        h.Setup(LocalizedSitemap.Replace("</SiteMap>", "<Area Id='area_other' Title='area_main'><Group Id='other_group'/></Area></SiteMap>"), DefaultEntities);
+        await h.Build().AddTableAsync(AppName, ["contact"], new AddTableOptions("group_sales", "area_main", null, null, false), null, CancellationToken.None);
+        XDocument.Parse(h.WrittenSitemapXml!).Root!.Elements("Area").First().Descendants("SubArea")
+            .Should().Contain(s => (string?)s.Attribute("Entity") == "contact");
+    }
+
+    private static readonly Guid SelectionA = new("11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid SelectionB = new("22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+    private static (string Table, string Key, int Type) SelectionKind(string kind) => kind switch
+    {
+        "forms" => ("systemform", "formid", 60),
+        "views" => ("savedquery", "savedqueryid", 26),
+        _ => ("savedqueryvisualization", "savedqueryvisualizationid", 59)
+    };
+
+    private static Harness SelectionHarness(string kind, bool duplicateNames = false)
+    {
+        var h = new Harness();
+        h.Setup(SitemapWithAccount, DefaultEntities);
+        var (table, key, type) = SelectionKind(kind);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection([
+                new Entity(table) { [key] = SelectionA, ["name"] = "Baseline" },
+                new Entity(table) { [key] = SelectionB, ["name"] = duplicateNames ? "Baseline" : "Replacement" }
+            ]));
+        h.Client.Setup(c => c.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "appmodulecomponent" &&
+                q.Criteria.Conditions.Any(c => c.AttributeName == "componenttype" && Convert.ToInt32(c.Values[0]) == type)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection([new Entity("appmodulecomponent") { ["objectid"] = SelectionA }]));
+        return h;
+    }
+
+    private static Task SetSelection(ModelDrivenAppService service, string kind, params string[] names)
+    {
+        var options = new ComponentSelectionOptions(names.Length == 0, names, null, false);
+        return kind switch
+        {
+            "forms" => service.SetFormsAsync(AppName, "account", options, null, CancellationToken.None),
+            "views" => service.SetViewsAsync(AppName, "account", options, null, CancellationToken.None),
+            _ => service.SetChartsAsync(AppName, "account", options, null, CancellationToken.None)
+        };
+    }
+
+    private static List<OrganizationRequest> SelectionWrites(Harness h) => h.ExecutedRequests
+        .Where(r => r.RequestName is "AddAppComponents" or "RemoveAppComponents").ToList();
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-33")]
+    public async Task Replacement_InvalidInput_DoesNotWrite(string kind)
+    {
+        var h = SelectionHarness(kind);
+        var ex = await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, "Replacement", "Missing"))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.ComponentNotFound);
+        SelectionWrites(h).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-34")]
+    public async Task Replacement_AmbiguousName_ListsCandidates(string kind)
+    {
+        var h = SelectionHarness(kind, duplicateNames: true);
+        var ex = await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, "baseline"))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.ComponentAmbiguous);
+        ex.Which.Message.Should().Contain(SelectionA.ToString()).And.Contain(SelectionB.ToString());
+        SelectionWrites(h).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-34")]
+    public async Task Replacement_ExplicitId_SelectsCandidate(string kind)
+    {
+        var h = SelectionHarness(kind, duplicateNames: true);
+        await SetSelection(h.Build(), kind, "{" + SelectionB + "}", SelectionB.ToString());
+        var writes = SelectionWrites(h);
+        writes.Select(r => r.RequestName).Should().Equal("AddAppComponents", "RemoveAppComponents");
+        ((EntityReferenceCollection)writes[0]["Components"]).Should().ContainSingle(c => c.Id == SelectionB);
+        ((EntityReferenceCollection)writes[1]["Components"]).Should().ContainSingle(c => c.Id == SelectionA);
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    public async Task Replacement_UnknownId_DoesNotWrite(string kind)
+    {
+        var h = SelectionHarness(kind);
+        await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, Guid.Empty.ToString()))
+            .Should().ThrowAsync<PpdsException>();
+        SelectionWrites(h).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    public async Task Replacement_ExistingSelection_DoesNotRewriteRetainedComponents(string kind)
+    {
+        var h = SelectionHarness(kind);
+        await SetSelection(h.Build(), kind, "Baseline", "Baseline");
+        SelectionWrites(h).Should().BeEmpty();
+        await SetSelection(h.Build(), kind);
+        SelectionWrites(h).Select(r => r.RequestName).Should().Equal("RemoveAppComponents");
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-33")]
+    public async Task Replacement_AddFailure_DoesNotRemove(string kind)
+    {
+        var h = SelectionHarness(kind);
+        h.Client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "AddAppComponents"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Server rejected addition"));
+        var ex = await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, "Replacement"))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.Message.Should().Contain("Inspect the app draft");
+        h.Client.Verify(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RemoveAppComponents"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    public async Task Replacement_RemoveFailure_ReportsPossiblePartialState(string kind)
+    {
+        var h = SelectionHarness(kind);
+        h.Client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RemoveAppComponents"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Server rejected removal"));
+        var ex = await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, "Replacement"))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ModelDrivenAppErrorCodes.UpdateFailed);
+        ex.Which.Message.Should().Contain("may have applied");
+        SelectionWrites(h).Select(r => r.RequestName).Should().Equal("AddAppComponents");
+    }
+
+    [Theory]
+    [InlineData("forms")]
+    [InlineData("views")]
+    [InlineData("charts")]
+    [Trait("Category", "Unit")]
+    public async Task Replacement_ResolutionReadFailure_DoesNotWrite(string kind)
+    {
+        var h = SelectionHarness(kind);
+        var (table, _, _) = SelectionKind(kind);
+        h.Client.Setup(c => c.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Read failed"));
+        await FluentActions.Awaiting(() => SetSelection(h.Build(), kind, "Replacement")).Should().ThrowAsync<PpdsException>();
+        SelectionWrites(h).Should().BeEmpty();
+    }
+
     private static readonly Guid AppModuleId = new("aaaaaaaa-1111-1111-1111-111111111111");
     private static readonly Guid SitemapId = new("bbbbbbbb-2222-2222-2222-222222222222");
     private static readonly Guid AccountMetadataId = new("cccccccc-3333-3333-3333-333333333333");

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml.Linq;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
@@ -248,9 +249,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         XElement areaEl;
         if (!string.IsNullOrEmpty(options.Area))
         {
-            var existingArea = siteMapEl.Elements("Area")
-                .FirstOrDefault(a => string.Equals(a.Attribute("Id")?.Value, options.Area, StringComparison.OrdinalIgnoreCase)
-                                  || string.Equals(a.Attribute("Title")?.Value, options.Area, StringComparison.OrdinalIgnoreCase));
+            var existingArea = FindSitemapNode(siteMapEl.Elements("Area"), options.Area);
             if (existingArea != null)
             {
                 areaEl = existingArea;
@@ -273,9 +272,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         XElement groupEl;
         if (!string.IsNullOrEmpty(options.Group))
         {
-            var existingGroup = areaEl.Elements("Group")
-                .FirstOrDefault(g => string.Equals(g.Attribute("Id")?.Value, options.Group, StringComparison.OrdinalIgnoreCase)
-                                  || string.Equals(g.Attribute("Title")?.Value, options.Group, StringComparison.OrdinalIgnoreCase));
+            var existingGroup = FindSitemapNode(areaEl.Elements("Group"), options.Group);
             if (existingGroup != null)
             {
                 groupEl = existingGroup;
@@ -430,16 +427,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var existingFormRefs = await GetExplicitEntityComponentsAsync(
             client, appModuleId, ComponentTypeForm, "systemform", "formid", "objecttypecode", entity, ct);
 
-        if (existingFormRefs.Count > 0)
-        {
-            await RemoveAppComponentsAsync(client, appModuleId, existingFormRefs, ct);
-        }
-
-        if (!options.All)
-        {
-            var formIds = await ResolveFormIdsAsync(client, entity, options.ComponentNames, ct);
-            await AddAppComponentsAsync(client, appModuleId, "systemform", formIds, ct);
-        }
+        var desiredIds = options.All ? new List<Guid>()
+            : await ResolveFormIdsAsync(client, entity, options.ComponentNames, ct);
+        await ReplaceComponentSelectionAsync(client, appModuleId, "systemform", existingFormRefs, desiredIds, ct);
 
         if (options.Solution != null)
         {
@@ -469,16 +459,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var existingViewRefs = await GetExplicitEntityComponentsAsync(
             client, appModuleId, ComponentTypeView, "savedquery", "savedqueryid", "returnedtypecode", entity, ct);
 
-        if (existingViewRefs.Count > 0)
-        {
-            await RemoveAppComponentsAsync(client, appModuleId, existingViewRefs, ct);
-        }
-
-        if (!options.All)
-        {
-            var viewIds = await ResolveViewIdsAsync(client, entity, options.ComponentNames, ct);
-            await AddAppComponentsAsync(client, appModuleId, "savedquery", viewIds, ct);
-        }
+        var desiredIds = options.All ? new List<Guid>()
+            : await ResolveViewIdsAsync(client, entity, options.ComponentNames, ct);
+        await ReplaceComponentSelectionAsync(client, appModuleId, "savedquery", existingViewRefs, desiredIds, ct);
 
         if (options.Solution != null)
         {
@@ -508,16 +491,9 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var existingChartRefs = await GetExplicitEntityComponentsAsync(
             client, appModuleId, ComponentTypeChart, "savedqueryvisualization", "savedqueryvisualizationid", "primaryentitytypecode", entity, ct);
 
-        if (existingChartRefs.Count > 0)
-        {
-            await RemoveAppComponentsAsync(client, appModuleId, existingChartRefs, ct);
-        }
-
-        if (!options.All)
-        {
-            var chartIds = await ResolveChartIdsAsync(client, entity, options.ComponentNames, ct);
-            await AddAppComponentsAsync(client, appModuleId, "savedqueryvisualization", chartIds, ct);
-        }
+        var desiredIds = options.All ? new List<Guid>()
+            : await ResolveChartIdsAsync(client, entity, options.ComponentNames, ct);
+        await ReplaceComponentSelectionAsync(client, appModuleId, "savedqueryvisualization", existingChartRefs, desiredIds, ct);
 
         if (options.Solution != null)
         {
@@ -1394,19 +1370,49 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
         var doc = XDocument.Parse(xml);
         var areas = doc.Root?.Elements("Area").Select(areaEl => new SitemapArea(
             areaEl.Attribute("Id")?.Value ?? string.Empty,
-            areaEl.Attribute("Title")?.Value,
+            SitemapTitles(areaEl).FirstOrDefault(),
             areaEl.Elements("Group").Select(groupEl => new SitemapGroup(
                 groupEl.Attribute("Id")?.Value ?? string.Empty,
-                groupEl.Attribute("Title")?.Value,
+                SitemapTitles(groupEl).FirstOrDefault(),
                 groupEl.Elements("SubArea").Select(subEl => new SitemapSubArea(
                     subEl.Attribute("Id")?.Value ?? string.Empty,
                     subEl.Attribute("Entity")?.Value,
-                    subEl.Attribute("Title")?.Value,
+                    SitemapTitles(subEl).FirstOrDefault(),
                     subEl.Attribute("Url")?.Value)).ToList()
             )).ToList()
         )).ToList() ?? [];
 
         return new SitemapStructure(areas);
+    }
+
+    // Prefer the process UI language, then English (1033), inline legacy Title, then the
+    // remaining translations in LCID order. Matching accepts all of these labels. The same
+    // resolver powers display and matching; no existing title/translation nodes are rewritten.
+    private static IReadOnlyList<string> SitemapTitles(XElement node)
+    {
+        var titles = node.Element("Titles")?.Elements("Title").ToList() ?? [];
+        var language = CultureInfo.CurrentUICulture.LCID.ToString(CultureInfo.InvariantCulture);
+        return titles.Where(t => (string?)t.Attribute("LCID") == language)
+            .Concat(titles.Where(t => (string?)t.Attribute("LCID") == "1033"))
+            .Select(t => (string?)t.Attribute("Title"))
+            .Append((string?)node.Attribute("Title"))
+            .Concat(titles.OrderBy(t => (string?)t.Attribute("LCID"), StringComparer.Ordinal)
+                .Select(t => (string?)t.Attribute("Title")))
+            .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static XElement? FindSitemapNode(IEnumerable<XElement> nodes, string name)
+    {
+        var candidates = nodes.ToList();
+        var byId = candidates.Where(n => string.Equals((string?)n.Attribute("Id"), name, StringComparison.OrdinalIgnoreCase)).ToList();
+        var matches = byId.Count > 0 ? byId
+            : candidates.Where(n => SitemapTitles(n).Contains(name, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (matches.Count > 1)
+            throw new PpdsException(ModelDrivenAppErrorCodes.SitemapNodeAmbiguous,
+                $"Multiple sitemap {matches[0].Name} nodes match '{name}'. Specify a stable ID: " +
+                string.Join(", ", matches.Select(n => (string?)n.Attribute("Id"))));
+        return matches.SingleOrDefault();
     }
 
     private static XElement CreateAndAppendArea(XElement parent, string id, string title)
@@ -1610,11 +1616,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve forms for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities
-            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("formid"), StringComparer.OrdinalIgnoreCase);
-
-        return ResolveComponentIds(formNames, available, "form", entity);
+        return ResolveComponentIds(formNames, result.Entities, "formid", "form", entity);
     }
 
     private async Task<List<Guid>> ResolveViewIdsAsync(
@@ -1636,11 +1638,7 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve views for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities
-            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("savedqueryid"), StringComparer.OrdinalIgnoreCase);
-
-        return ResolveComponentIds(viewNames, available, "view", entity);
+        return ResolveComponentIds(viewNames, result.Entities, "savedqueryid", "view", entity);
     }
 
     private async Task<List<Guid>> ResolveChartIdsAsync(
@@ -1662,33 +1660,58 @@ public sealed class ModelDrivenAppService : IModelDrivenAppService
             throw new PpdsException(ModelDrivenAppErrorCodes.GetFailed, $"Failed to retrieve charts for entity '{entity}'.", ex);
         }
 
-        var available = result.Entities
-            .GroupBy(e => e.GetAttributeValue<string>("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().GetAttributeValue<Guid>("savedqueryvisualizationid"), StringComparer.OrdinalIgnoreCase);
-
-        return ResolveComponentIds(chartNames, available, "chart", entity);
+        return ResolveComponentIds(chartNames, result.Entities, "savedqueryvisualizationid", "chart", entity);
     }
 
     private static List<Guid> ResolveComponentIds(
         IReadOnlyList<string> names,
-        Dictionary<string, Guid> available,
+        IEnumerable<Entity> available,
+        string idField,
         string componentType,
         string entity)
     {
+        var candidates = available.ToList();
         var ids = new List<Guid>();
         foreach (var name in names)
         {
-            if (!available.TryGetValue(name, out var id))
-            {
-                var availableNames = string.Join(", ", available.Keys.Take(10));
+            var matches = Guid.TryParse(name.Trim('{', '}'), out var requestedId)
+                ? candidates.Where(e => e.GetAttributeValue<Guid>(idField) == requestedId).ToList()
+                : candidates.Where(e => string.Equals(e.GetAttributeValue<string>("name"), name, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matches.Count == 0)
                 throw new PpdsException(ModelDrivenAppErrorCodes.ComponentNotFound,
-                    $"{componentType} '{name}' not found for entity '{entity}'. Available: {availableNames}");
-            }
-
-            ids.Add(id);
+                    $"{componentType} '{name}' not found for entity '{entity}'. Use a component name or ID belonging to this table.");
+            if (matches.Count > 1)
+                throw new PpdsException(ModelDrivenAppErrorCodes.ComponentAmbiguous,
+                    $"Multiple {componentType}s named '{name}' exist for entity '{entity}'. Specify an ID: " +
+                    string.Join(", ", matches.Select(e => e.GetAttributeValue<Guid>(idField)).OrderBy(id => id)));
+            ids.Add(matches[0].GetAttributeValue<Guid>(idField));
         }
+        return ids.Distinct().ToList();
+    }
 
-        return ids;
+    private async Task ReplaceComponentSelectionAsync(
+        IPooledClient client, Guid appModuleId, string componentEntityName,
+        List<EntityReference> existing, List<Guid> desiredIds, CancellationToken ct)
+    {
+        var existingIds = existing.Select(e => e.Id).ToHashSet();
+        var desired = desiredIds.ToHashSet();
+        var additions = desiredIds.Where(id => !existingIds.Contains(id)).ToList();
+        var removals = existing.Where(e => !desired.Contains(e.Id)).ToList();
+        // Validate/resolve and compute the full difference before writes. Add first so a rejected
+        // addition cannot clear the prior selection. These actions are not an atomic transaction;
+        // a subsequent failure must be explicit rather than attempting a blind rollback that could
+        // overwrite concurrent draft edits. Solution/publish steps run only after both succeed.
+        try
+        {
+            await AddAppComponentsAsync(client, appModuleId, componentEntityName, additions, ct);
+            await RemoveAppComponentsAsync(client, appModuleId, removals, ct);
+        }
+        catch (PpdsException ex)
+        {
+            throw new PpdsException(ModelDrivenAppErrorCodes.UpdateFailed,
+                "App selection replacement did not complete. Some additions or removals may have applied. " +
+                "Inspect the app draft before publishing or retrying. " + ex.Message, ex);
+        }
     }
 
     private static void ValidateComponentOptions(ComponentSelectionOptions options, string optionName)

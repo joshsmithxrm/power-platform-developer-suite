@@ -20,6 +20,12 @@ public static class ModelDrivenAppErrorCodes
     /// <summary>A form, view, or chart component was not found for the specified entity.</summary>
     public const string ComponentNotFound = "ModelDrivenApp.ComponentNotFound";
 
+    /// <summary>Multiple components have the requested display name; use an ID.</summary>
+    public const string ComponentAmbiguous = "ModelDrivenApp.ComponentAmbiguous";
+
+    /// <summary>Multiple sitemap nodes have the requested title; use a stable node ID.</summary>
+    public const string SitemapNodeAmbiguous = "ModelDrivenApp.SitemapNodeAmbiguous";
+
     /// <summary>The specified solution was not found.</summary>
     public const string SolutionNotFound = "ModelDrivenApp.SolutionNotFound";
 
