@@ -844,7 +844,7 @@ public class ViewService : IViewService
             var name = (string?)cell.Attribute("name") ?? "";
             var width = int.TryParse((string?)cell.Attribute("width"), out var w) ? w : 150;
             var alias = name.Contains('.') ? name[..name.IndexOf('.')] : null;
-            var link = links.FirstOrDefault(l => (string?)l.Attribute("alias") == alias);
+            var link = alias == null ? null : links.FirstOrDefault(l => (string?)l.Attribute("alias") == alias);
             var isRelated = alias != null || cell.Attribute("RelatedEntityName") != null;
             var relAttr = (string?)link?.Attribute("to") ?? (string?)cell.Attribute("RelationshipName");
             var relEntity = (string?)link?.Attribute("name") ?? (string?)cell.Attribute("RelatedEntityName");

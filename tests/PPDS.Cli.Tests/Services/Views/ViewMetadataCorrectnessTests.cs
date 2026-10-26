@@ -22,6 +22,17 @@ namespace PPDS.Cli.Tests.Services.Views;
 [Trait("Category", "Unit")]
 public class ViewMetadataCorrectnessTests
 {
+    [Fact]
+    [Trait("AC", "AC-26")]
+    public void ParseLayoutXml_DirectColumnDoesNotInheritUnaliasedLinkMetadata()
+    {
+        var columns = ViewService.ParseLayoutXml(Layout, Fetch.Replace(" alias='contact'", ""));
+        columns[0].IsRelated.Should().BeFalse();
+        columns[0].RelationshipAttribute.Should().BeNull();
+        columns[0].RelatedEntityName.Should().BeNull();
+        columns[0].RelatedEntityPrimaryKeyName.Should().BeNull();
+    }
+
     private const string Fetch = "<fetch><entity name='account'><attribute name='accountid'/><attribute name='name'/><order attribute='name'/><filter><condition attribute='statecode' operator='eq' value='0'/></filter><link-entity name='contact' from='contactid' to='primarycontactid' alias='contact'><attribute name='fullname' alias='contact_name'/></link-entity></entity></fetch>";
     private const string Layout = "<grid><row id='accountid'><cell name='name' width='200'/></row></grid>";
 

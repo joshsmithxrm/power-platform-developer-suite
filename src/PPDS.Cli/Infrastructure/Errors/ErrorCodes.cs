@@ -505,10 +505,10 @@ public static class ErrorCodes
         /// <summary>PATCH to savedqueries failed.</summary>
         public const string UpdateFailed = "View.UpdateFailed";
 
-        /// <summary>Managed view's fetchxml/layout cannot be patched via the Web API — edit in the maker UI.</summary>
+        /// <summary>Dataverse rejected an XML write to a managed view, which may be locked.</summary>
         public const string ManagedComponentNotEditable = "View.ManagedComponentNotEditable";
 
-        /// <summary>Write reported success but a read-back showed the change did not persist (silent no-op).</summary>
+        /// <summary>The accepted write's draft does not match the requested XML or the record is missing.</summary>
         public const string UpdateNotPersisted = "View.UpdateNotPersisted";
 
         /// <summary>The write was accepted but draft read-back was unavailable.</summary>
