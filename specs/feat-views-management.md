@@ -120,7 +120,7 @@ Resolving the `<link-entity>` element requires a metadata lookup: the implementa
 
 If the relationship is not found in metadata, the operation throws `PpdsException(ErrorCodes.View.RelationshipNotFound, ...)`.
 
-The `RelatedEntityPrimaryKeyName` used in `layoutxml` cell attributes is the related entity's primary key attribute (derived from relationship metadata as `ReferencedEntityIdAttribute`).
+Related layout cells use `alias.attribute` identities, e.g. `parentaccountid.name`. Use that same qualified identity for update-column, remove-column and reorder-columns. Inspection derives relationship details from the FetchXML link, while retaining support for legacy layouts.
 
 ### Sort Syntax
 
@@ -163,7 +163,7 @@ Views use FetchXML. Sort `<order>` elements are positioned before `<filter>`. Co
 
 ### layoutxml Structure
 
-Base-entity columns use `<cell name="..." width="..." />`. Related columns carry additional relationship attributes:
+Base-entity columns use `<cell name="..." width="..." />`. Related cells use the FetchXML link alias:
 
 ```xml
 <grid name="resultset" object="10050" jump="hsl_name" select="1" preview="1" icon="1">
@@ -171,15 +171,18 @@ Base-entity columns use `<cell name="..." width="..." />`. Related columns carry
     <cell name="hsl_name" width="200" />
     <cell name="hsl_specialization" width="150" />
     <!-- Related column: -->
-    <cell name="hsl_specialty" width="150" disableSorting="1" LookupStyle="1"
-          RelatedEntityName="hsl_veterinarian"
-          RelatedEntityPrimaryKeyName="hsl_veterinariandid"
-          RelationshipName="hsl_veterinarian_id" />
+    <cell name="hsl_veterinarian_id.hsl_specialty" width="150" />
   </row>
 </grid>
 ```
 
 The `object` attribute on `<grid>` is the entity's OTC, resolved from `ICachedMetadataProvider`.
+
+### Projection consistency and verification
+
+Adding a column ensures both its layout cell and its FetchXML projection exist. Retrying repairs an existing layout cell with a missing projection. Existing filters, ordering, links and aliases are preserved; all-attributes already includes direct attributes. Removing/reordering cells changes the display layout and retains query projections used by other query logic.
+
+Every XML write reads back the unpublished draft up to three times and compares every written XML field with the intended state. Formatting, XML attribute order and the platform-maintained root fetch savedqueryid annotation are ignored; query attributes, filters, links and ordering remain significant. Equivalent no-op writes are valid. A missing record or different draft raises View.UpdateNotPersisted. Unavailable verification raises View.VerificationFailed; the write may have applied, so inspect the draft before retrying or publishing. Verification confirms only the observed state and does not lock out subsequent writers.
 
 ### `--publish` Behavior
 
@@ -538,6 +541,15 @@ public interface IViewService
 ---
 
 ## Changelog
+
+### Metadata correctness (#1448)
+
+| AC | Requirement | Test | Status |
+|---|---|---|---|
+| AC-25 | Add/repair direct projections without changing other query semantics or all-attributes | `ViewMetadataCorrectnessTests.AddDirectColumn_RepairsProjection` | ✅ |
+| AC-26 | Related columns use distinct alias-qualified layout identities and valid attributes across editing/inspection | `ViewMetadataCorrectnessTests.RelatedColumns_RoundTripDistinctIdentities` | ✅ |
+| AC-27 | Verify every written XML field against intended state, including missing/concurrent/partial results | `ViewMetadataCorrectnessTests.WriteVerification_RejectsIncorrectState` | ✅ |
+| AC-28 | Equivalent XML, platform-maintained fetch savedqueryid and no-ops verify successfully; unreadable results remain unverified | `ViewMetadataCorrectnessTests.WriteVerification_NormalizesPlatformAnnotation`, `ViewMetadataCorrectnessTests.WriteVerification_UnavailableReadIsExplicit` | ✅ |
 
 | Date | Change |
 |------|--------|

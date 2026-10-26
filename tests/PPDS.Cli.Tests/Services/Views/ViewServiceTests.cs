@@ -461,8 +461,9 @@ public class ViewServiceTests
     /// either throws a supplied Dataverse fault or succeeds, and whose read-back returns
     /// <paramref name="fetchAfterWrite"/> — letting tests drive every ApplyViewWriteAsync branch.
     /// </summary>
-    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string fetchAfterWrite, Action<Entity>? onUpdate = null, Exception? readBackThrows = null)
+    private static ViewService BuildViewWriteService(bool isManaged, Exception? updateThrows, string? fetchAfterWrite, Action<Entity>? onUpdate = null, Exception? readBackThrows = null)
     {
+        Entity? written = null;
         var pool = new Mock<IDataverseConnectionPool>();
         var client = new Mock<IPooledClient>();
         var metadata = new Mock<ICachedMetadataProvider>();
@@ -540,7 +541,7 @@ public class ViewServiceTests
                     {
                         { "EntityCollection", new EntityCollection(new List<Entity>
                             {
-                                new("savedquery") { ["fetchxml"] = fetchAfterWrite, ["layoutxml"] = NewLayout }
+                                new("savedquery") { ["fetchxml"] = fetchAfterWrite ?? written?.GetAttributeValue<string>("fetchxml") ?? OriginalFetch, ["layoutxml"] = written?.GetAttributeValue<string>("layoutxml") ?? OriginalLayout }
                             }) }
                     }
                 };
@@ -550,7 +551,7 @@ public class ViewServiceTests
             client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(updateThrows);
         else
             client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-                .Callback<Entity, CancellationToken>((e, _) => onUpdate?.Invoke(e))
+                .Callback<Entity, CancellationToken>((e, _) => { written = e; onUpdate?.Invoke(e); })
                 .Returns(Task.CompletedTask);
 
         return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>());
@@ -615,27 +616,20 @@ public class ViewServiceTests
     }
 
     [Fact]
-    public async Task SetFetchXml_ReadBackFails_AssumesPersisted_DoesNotThrow()
+    public async Task SetFetchXml_ReadBackFails_ReportsUnverifiedWrite()
     {
-        // The unpublished read-back itself fails (e.g. missing RetrieveUnpublished privilege).
-        // Verification is best-effort, so a successful write must not be reported as not-persisted.
-        // fetchAfterWrite=OriginalFetch would otherwise trip UpdateNotPersisted if read-back ran.
         var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: OriginalFetch,
             readBackThrows: new InvalidOperationException("PrincipalPrivilegeDenied: prvReadSavedQuery"));
-
-        await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
-            .Should().NotThrowAsync();
+        var ex = await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
+            .Should().ThrowAsync<PpdsException>();
+        ex.Which.ErrorCode.Should().Be(ErrorCodes.View.VerificationFailed);
     }
-
-    // ─── returnedtypecode carried in fetchxml writes (#1200) ────────────────────
-    // Without returnedtypecode, Dataverse rejects fetchxml updates on managed views with
-    // 0x80040216. The shared write path must include it for every fetchxml-mutating command.
 
     [Fact]
     public async Task SetFetchXml_UpdatePayload_IncludesReturnedTypeCode()
     {
         Entity? captured = null;
-        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: null,
             onUpdate: e => captured = e);
 
         await svc.SetFetchXmlAsync("contact", ViewName, NewFetch);
@@ -649,7 +643,7 @@ public class ViewServiceTests
     public async Task SetFilter_UpdatePayload_IncludesReturnedTypeCode()
     {
         Entity? captured = null;
-        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: null,
             onUpdate: e => captured = e);
 
         await svc.SetFilterAsync("contact", ViewName,
@@ -663,7 +657,7 @@ public class ViewServiceTests
     public async Task ClearSort_UpdatePayload_IncludesReturnedTypeCode()
     {
         Entity? captured = null;
-        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: null,
             onUpdate: e => captured = e);
 
         await svc.ClearSortAsync("contact", ViewName);
@@ -677,7 +671,7 @@ public class ViewServiceTests
     {
         // layoutxml-only writers now also route through the verified write path (#1200 parity).
         Entity? captured = null;
-        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: null,
             onUpdate: e => captured = e);
 
         await svc.RemoveColumnAsync("contact", ViewName, "telephone1");
@@ -690,7 +684,7 @@ public class ViewServiceTests
     public async Task UpdateColumn_UpdatePayload_IncludesReturnedTypeCode()
     {
         Entity? captured = null;
-        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: NewFetch,
+        var svc = BuildViewWriteService(isManaged: true, updateThrows: null, fetchAfterWrite: null,
             onUpdate: e => captured = e);
 
         await svc.UpdateColumnAsync("contact", ViewName, "fullname", 300);

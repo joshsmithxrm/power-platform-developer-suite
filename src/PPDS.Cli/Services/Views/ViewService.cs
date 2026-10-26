@@ -150,7 +150,7 @@ public class ViewService : IViewService
         ViewFilter? filter;
         try
         {
-            columns = ParseLayoutXml(layoutXml);
+            columns = ParseLayoutXml(layoutXml, fetchXml);
             (sorts, filter) = ParseFetchXml(fetchXml);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException)
@@ -214,24 +214,28 @@ public class ViewService : IViewService
         }
 
         var layoutDoc = XDocument.Parse(layoutXml);
-        var layoutChanged = AddCellsWithWarnings(layoutDoc, columns, isRelated, relName, relEntity, relPkName, relAlias, progressReporter);
+        AddCellsWithWarnings(layoutDoc, columns, relAlias, progressReporter);
 
-        bool fetchChanged = false;
         var fetchDoc = XDocument.Parse(fetchXml);
         if (isRelated && relName != null)
         {
             fetchDoc = AddRelatedLinkEntity(fetchDoc, relEntity!, relPkName!, viaRelationship!, relAlias!, columns);
-            fetchChanged = true;
+        }
+        else
+        {
+            var baseEntity = fetchDoc.Root?.Element("entity");
+            if (baseEntity == null)
+                throw new PpdsException(ErrorCodes.Validation.SchemaInvalid, "View FetchXML has no base entity.");
+            EnsureAttributes(baseEntity, columns);
         }
 
         var update = new Entity("savedquery", savedQueryId);
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
-        if (fetchChanged)
-            update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
+        update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "adding columns", "layoutxml",
-            layoutXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "adding columns",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -261,8 +265,8 @@ public class ViewService : IViewService
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, $"removing column '{attributeName}'", "layoutxml",
-            layoutXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, $"removing column '{attributeName}'",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -292,8 +296,8 @@ public class ViewService : IViewService
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "updating column width", "layoutxml",
-            layoutXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "updating column width",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -323,8 +327,8 @@ public class ViewService : IViewService
         update["layoutxml"] = layoutDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "reordering columns", "layoutxml",
-            layoutXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "reordering columns",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -354,8 +358,8 @@ public class ViewService : IViewService
         update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "setting sort", "fetchxml",
-            fetchXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "setting sort",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -382,8 +386,8 @@ public class ViewService : IViewService
         update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "clearing sort", "fetchxml",
-            fetchXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "clearing sort",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -418,8 +422,8 @@ public class ViewService : IViewService
         update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "setting filter", "fetchxml",
-            fetchXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "setting filter",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -446,8 +450,8 @@ public class ViewService : IViewService
         update["fetchxml"] = fetchDoc.ToString(SaveOptions.DisableFormatting);
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "clearing filter", "fetchxml",
-            fetchXml, update, entity, cancellationToken);
+            client, savedQueryId, viewName, "clearing filter",
+            update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
     }
@@ -476,8 +480,7 @@ public class ViewService : IViewService
         update["fetchxml"] = fetchXml;
 
         await ApplyViewWriteAsync(
-            client, savedQueryId, viewName, "setting fetchxml", "fetchxml",
-            entity.GetAttributeValue<string>("fetchxml") ?? string.Empty,
+            client, savedQueryId, viewName, "setting fetchxml",
             update, entity, cancellationToken);
 
         await PostMutationAsync(client, savedQueryId, entityLogicalName, publish, solution, cancellationToken);
@@ -510,8 +513,6 @@ public class ViewService : IViewService
         Guid savedQueryId,
         string viewName,
         string operation,
-        string fieldName,
-        string oldValue,
         Entity update,
         Entity source,
         CancellationToken ct)
@@ -527,7 +528,6 @@ public class ViewService : IViewService
             update["returnedtypecode"] = source["returnedtypecode"];
 
         var isManaged = source.GetAttributeValue<bool>("ismanaged");
-        var newValue = update.GetAttributeValue<string>(fieldName) ?? string.Empty;
 
         try
         {
@@ -538,90 +538,102 @@ public class ViewService : IViewService
             var fault = DescribeDataverseFault(ex);
             if (isManaged)
                 throw new PpdsException(ErrorCodes.View.ManagedComponentNotEditable,
-                    $"Cannot update {fieldName} on managed view '{viewName}' ({fault}). " +
+                    $"Cannot update XML on managed view '{viewName}' ({fault}). " +
                     "The managed component may be locked for this change (iscustomizable = false).", ex);
             throw new PpdsException(ErrorCodes.View.UpdateFailed,
                 $"Failed to update view '{viewName}' after {operation}: {fault}", ex);
         }
 
-        // Read-back verification (#1194). A managed / solution-layered savedquery can return success
-        // for the write yet not surface the change. If we intended a change but a lag-tolerant
-        // re-read still shows the pre-write value, the platform dropped the write — report it
-        // instead of a phantom success.
-        if (!XmlEquivalent(newValue, oldValue) &&
-            !await VerifyViewWritePersistedAsync(client, savedQueryId, fieldName, oldValue, ct))
-        {
-            throw new PpdsException(ErrorCodes.View.UpdateNotPersisted,
-                $"Update to view '{viewName}' reported success but did not persist " +
-                "(read-back verification failed). The platform accepted the write but the change is not " +
-                "visible — typically a solution-layering conflict. No effective change was made.");
-        }
+        // Check all XML fields together, even for equivalent no-op writes. Another writer may have
+        // changed/deleted the draft, or only one of layoutxml/fetchxml may reflect our request.
+        await VerifyViewWritePersistedAsync(client, savedQueryId, viewName, update, ct);
     }
 
     /// <summary>
-    /// Re-reads a savedquery field from the UNPUBLISHED (draft) record and returns true once it
-    /// differs from its pre-write value. A savedquery write lands in the draft version and is not
-    /// visible via a normal retrieve until <c>PublishXml</c> runs, so a published read-back would
-    /// falsely report "did not persist" for any not-yet-published change — especially on managed
-    /// views. RetrieveUnpublished reflects the write immediately while still catching a genuine
-    /// silent drop (#1194); it is also what the Power Apps maker reads back. (#1200)
-    /// Tolerates read-after-write lag with a small bounded retry. Verification is best-effort: if
-    /// the unpublished read itself fails (e.g. the caller lacks the privilege RetrieveUnpublished
-    /// requires, or a transient error), we assume the write persisted rather than block an
-    /// otherwise-successful update with a false "did not persist".
+    /// Verifies the intended XML in the unpublished draft, with bounded retries for read lag.
+    /// Unavailable reads are reported separately from observed mismatches; neither confirms success.
     /// </summary>
-    private async Task<bool> VerifyViewWritePersistedAsync(
-        IDataverseClient client, Guid savedQueryId, string fieldName, string oldValue, CancellationToken ct)
+    private async Task VerifyViewWritePersistedAsync(
+        IDataverseClient client, Guid savedQueryId, string viewName, Entity update, CancellationToken ct)
     {
+        var fields = update.Attributes.Keys.Where(k => k is "layoutxml" or "fetchxml").ToArray();
+        bool observedMismatch = false;
+        Exception? readError = null;
         const int maxAttempts = 3;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             var query = new QueryExpression("savedquery")
             {
-                ColumnSet = new ColumnSet(fieldName),
+                ColumnSet = new ColumnSet(fields),
                 Criteria = new FilterExpression
                 {
                     Conditions = { new ConditionExpression("savedqueryid", ConditionOperator.Equal, savedQueryId) }
                 }
             };
 
-            RetrieveUnpublishedMultipleResponse? response;
             try
             {
-                response = (RetrieveUnpublishedMultipleResponse?)await client.ExecuteAsync(
+                var response = (RetrieveUnpublishedMultipleResponse?)await client.ExecuteAsync(
                     new RetrieveUnpublishedMultipleRequest { Query = query }, ct);
+                var result = response?.EntityCollection;
+                if (result == null)
+                    throw new InvalidOperationException("RetrieveUnpublished returned no result collection.");
+                if (result.Entities.Count == 1 && fields.All(field =>
+                    result.Entities[0].GetAttributeValue<string>(field) is string current &&
+                    XmlEquivalent(current, update.GetAttributeValue<string>(field), field)))
+                    return;
+                observedMismatch = true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex,
-                    "Could not verify the write to savedquery {SavedQueryId} via RetrieveUnpublished; " +
-                    "assuming it persisted.", savedQueryId);
-                return true;
+                    "Could not verify the write to savedquery {SavedQueryId} via RetrieveUnpublished.", savedQueryId);
+                readError = ex;
             }
-
-            var result = response?.EntityCollection;
-            var current = result != null && result.Entities.Count > 0
-                ? result.Entities[0].GetAttributeValue<string>(fieldName) ?? string.Empty
-                : string.Empty;
-            if (!XmlEquivalent(current, oldValue))
-                return true;
             if (attempt < maxAttempts)
                 await Task.Delay(TimeSpan.FromMilliseconds(750), ct);
         }
-        return false;
+        if (observedMismatch)
+            throw new PpdsException(ErrorCodes.View.UpdateNotPersisted,
+                $"Update to view '{viewName}' was accepted, but the draft does not match the requested XML " +
+                "or the record is missing. A concurrent edit or platform normalization may have intervened. " +
+                "Inspect the unpublished view before retrying; changes may have been partially applied.");
+        throw new PpdsException(ErrorCodes.View.VerificationFailed,
+            $"Update to view '{viewName}' was accepted, but its persistence could not be verified. " +
+            "Inspect the unpublished view before publishing or retrying.", readError!);
     }
 
     /// <summary>Structural XML equality (ignores formatting); falls back to ordinal compare.</summary>
-    private static bool XmlEquivalent(string a, string b)
+    private static bool XmlEquivalent(string a, string b, string fieldName)
     {
         if (string.Equals(a, b, StringComparison.Ordinal)) return true;
         try
         {
-            return XNode.DeepEquals(XDocument.Parse(a), XDocument.Parse(b));
+            var left = XDocument.Parse(a);
+            var right = XDocument.Parse(b);
+            if (fieldName == "fetchxml")
+            {
+                // Dataverse maintains this root annotation. It does not change query semantics.
+                left.Root?.Attribute("savedqueryid")?.Remove();
+                right.Root?.Attribute("savedqueryid")?.Remove();
+            }
+            NormalizeAttributeOrder(left);
+            NormalizeAttributeOrder(right);
+            return XNode.DeepEquals(left.Root, right.Root);
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static void NormalizeAttributeOrder(XDocument document)
+    {
+        foreach (var element in document.Descendants())
+        {
+            var attributes = element.Attributes().OrderBy(a => a.Name.ToString(), StringComparer.Ordinal).ToList();
+            element.RemoveAttributes();
+            element.Add(attributes);
         }
     }
 
@@ -741,10 +753,6 @@ public class ViewService : IViewService
     private static bool AddCellsWithWarnings(
         XDocument layout,
         IReadOnlyList<ColumnSpec> columns,
-        bool isRelated,
-        string? relName,
-        string? relEntity,
-        string? relPkName,
         string? relAlias,
         IProgressReporter? progressReporter = null)
     {
@@ -754,32 +762,16 @@ public class ViewService : IViewService
         bool changed = false;
         foreach (var col in columns)
         {
+            var name = relAlias == null ? col.AttributeName : $"{relAlias}.{col.AttributeName}";
             var existing = row.Elements("cell")
-                .FirstOrDefault(c => (string?)c.Attribute("name") == col.AttributeName);
+                .FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), name, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
                 progressReporter?.ReportWarning($"Column '{col.AttributeName}' already exists in view — skipping (idempotent).");
                 continue;
             }
 
-            XElement cell;
-            if (isRelated && relName != null && relEntity != null && relPkName != null)
-            {
-                cell = new XElement("cell",
-                    new XAttribute("name", col.AttributeName),
-                    new XAttribute("width", col.Width),
-                    new XAttribute("disableSorting", "1"),
-                    new XAttribute("LookupStyle", "1"),
-                    new XAttribute("RelatedEntityName", relEntity),
-                    new XAttribute("RelatedEntityPrimaryKeyName", relPkName),
-                    new XAttribute("RelationshipName", relName));
-            }
-            else
-            {
-                cell = new XElement("cell",
-                    new XAttribute("name", col.AttributeName),
-                    new XAttribute("width", col.Width));
-            }
+            var cell = new XElement("cell", new XAttribute("name", name), new XAttribute("width", col.Width));
 
             row.Add(cell);
             changed = true;
@@ -811,36 +803,52 @@ public class ViewService : IViewService
                 new XAttribute("alias", relAlias));
             entityElem.Add(linkEntity);
         }
+        else if ((string?)linkEntity.Attribute("name") != relEntity ||
+                 (string?)linkEntity.Attribute("from") != relPkName ||
+                 (string?)linkEntity.Attribute("to") != viaRelationship)
+        {
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                $"FetchXML alias '{relAlias}' is already used by another relationship. Rename that alias before adding columns.");
+        }
 
+        EnsureAttributes(linkEntity, columns);
+        return fetch;
+    }
+
+    private static void EnsureAttributes(XElement entity, IReadOnlyList<ColumnSpec> columns)
+    {
+        if (entity.Element("all-attributes") != null) return;
         foreach (var col in columns)
         {
-            var existingAttr = linkEntity.Elements("attribute")
-                .FirstOrDefault(a => (string?)a.Attribute("name") == col.AttributeName);
+            var existingAttr = entity.Elements("attribute")
+                .FirstOrDefault(a => (string?)a.Attribute("name") == col.AttributeName && a.Attribute("alias") == null);
             if (existingAttr == null)
             {
-                linkEntity.Add(new XElement("attribute", new XAttribute("name", col.AttributeName)));
+                entity.Add(new XElement("attribute", new XAttribute("name", col.AttributeName)));
             }
         }
 
-        return fetch;
     }
 
     // ─── Internal XML helpers (pure; testable) ──────────────────────────────────
 
-    internal static List<ViewColumn> ParseLayoutXml(string layoutXml)
+    internal static List<ViewColumn> ParseLayoutXml(string layoutXml, string? fetchXml = null)
     {
         var doc = XDocument.Parse(layoutXml);
         var row = doc.Descendants("row").FirstOrDefault();
         if (row == null) return [];
 
+        var links = fetchXml == null ? [] : XDocument.Parse(fetchXml).Descendants("link-entity").ToList();
         return row.Elements("cell").Select(cell =>
         {
             var name = (string?)cell.Attribute("name") ?? "";
             var width = int.TryParse((string?)cell.Attribute("width"), out var w) ? w : 150;
-            var isRelated = cell.Attribute("RelatedEntityName") != null;
-            var relAttr = (string?)cell.Attribute("RelationshipName");
-            var relEntity = (string?)cell.Attribute("RelatedEntityName");
-            var relPkName = (string?)cell.Attribute("RelatedEntityPrimaryKeyName");
+            var alias = name.Contains('.') ? name[..name.IndexOf('.')] : null;
+            var link = links.FirstOrDefault(l => (string?)l.Attribute("alias") == alias);
+            var isRelated = alias != null || cell.Attribute("RelatedEntityName") != null;
+            var relAttr = (string?)link?.Attribute("to") ?? (string?)cell.Attribute("RelationshipName");
+            var relEntity = (string?)link?.Attribute("name") ?? (string?)cell.Attribute("RelatedEntityName");
+            var relPkName = (string?)link?.Attribute("from") ?? (string?)cell.Attribute("RelatedEntityPrimaryKeyName");
             return new ViewColumn(name, width, isRelated, relAttr, relEntity, relPkName);
         }).ToList();
     }
@@ -892,7 +900,7 @@ public class ViewService : IViewService
     {
         var row = layout.Descendants("row").FirstOrDefault();
         var cell = row?.Elements("cell")
-            .FirstOrDefault(c => (string?)c.Attribute("name") == attributeName);
+            .FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), attributeName, StringComparison.OrdinalIgnoreCase));
         if (cell == null)
             throw new PpdsException(ErrorCodes.View.ColumnNotFound,
                 $"Column '{attributeName}' not found in view layout.");
@@ -907,7 +915,7 @@ public class ViewService : IViewService
 
         var existingCells = row.Elements("cell").ToList();
         var reordered = orderedAttributes
-            .Select(attr => existingCells.FirstOrDefault(c => (string?)c.Attribute("name") == attr))
+            .Select(attr => existingCells.FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), attr, StringComparison.OrdinalIgnoreCase)))
             .Where(c => c != null)
             .ToList();
 

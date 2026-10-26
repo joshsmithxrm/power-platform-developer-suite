@@ -511,6 +511,9 @@ public static class ErrorCodes
         /// <summary>Write reported success but a read-back showed the change did not persist (silent no-op).</summary>
         public const string UpdateNotPersisted = "View.UpdateNotPersisted";
 
+        /// <summary>The write was accepted but draft read-back was unavailable.</summary>
+        public const string VerificationFailed = "View.VerificationFailed";
+
         /// <summary>PublishXmlRequest failed.</summary>
         public const string PublishFailed = "View.PublishFailed";
 
