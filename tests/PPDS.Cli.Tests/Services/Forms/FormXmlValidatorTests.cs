@@ -9,6 +9,53 @@ namespace PPDS.Cli.Tests.Services.Forms;
 
 public class FormXmlValidatorTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(5)]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-35")]
+    public void Validate_TimelineConfiguration_AmongExistingParameters(int position)
+    {
+        var doc = XDocument.Parse(TimelineFormFixture.Xml);
+        var parameters = doc.Descendants("parameters").Single();
+        var configuration = parameters.Element("UClientActivitiesConfigurationJSON")!;
+        configuration.Remove();
+        var existing = parameters.Elements().ToArray();
+        if (position == existing.Length)
+            parameters.Add(configuration);
+        else
+            existing[position].AddBeforeSelf(configuration);
+
+        var act = () => FormXmlValidator.Validate(doc);
+
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("UClientShowFilterPane", "not-a-boolean")]
+    [InlineData("UClientRecordPerPage", "-1")]
+    [InlineData("UClientActivitiesConfigurationJSON", "<nested />")]
+    [InlineData("parameters", "<UnknownTimelineParameter />")]
+    [InlineData("columns", "<bogusElement />")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-37")]
+    public void Validate_TimelineConfiguration_InvalidContentRejected(string element, string content)
+    {
+        var doc = XDocument.Parse(TimelineFormFixture.Xml);
+        var target = doc.Descendants(element).Single();
+        if (content.StartsWith('<'))
+            target.Add(XElement.Parse(content));
+        else
+            target.Value = content;
+
+        var act = () => FormXmlValidator.Validate(doc);
+
+        var exception = act.Should().Throw<PpdsValidationException>().Which;
+        exception.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+        exception.Message.Should().Contain(content.StartsWith('<') ? XElement.Parse(content).Name.LocalName : element);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string NewBraceGuid() => $"{{{Guid.NewGuid():D}}}";
