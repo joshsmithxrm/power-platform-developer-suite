@@ -337,17 +337,27 @@ public sealed class AssemblyExtractor : IDisposable
     /// files cannot mask a missing facade and existing complete caches need no migration.
     /// This detects deletion/truncation, not malicious same-length replacements (#1329).
     /// </summary>
-    private static bool IsPopulated(string directory, ZipArchive archive)
+    internal static bool IsPopulated(string directory, ZipArchive archive)
     {
         if (!File.Exists(Path.Combine(directory, CompletionSentinelFileName)))
             return false;
+
+        var cacheRoot = Path.GetFullPath(directory);
+        if (!Path.EndsInDirectorySeparator(cacheRoot))
+            cacheRoot += Path.DirectorySeparatorChar;
 
         foreach (var entry in archive.Entries)
         {
             if (entry.Name.Length == 0)
                 continue; // Directory entries do not contain reference assemblies.
 
-            var file = new FileInfo(Path.Combine(directory, entry.FullName));
+            // The ZIP is embedded, but still constrain validation to the cache. Keep the
+            // trailing separator so a sibling with the same name prefix cannot pass.
+            var path = Path.GetFullPath(Path.Combine(cacheRoot, entry.FullName));
+            if (!path.StartsWith(cacheRoot, StringComparison.Ordinal))
+                return false;
+
+            var file = new FileInfo(path);
             if (!file.Exists || file.Length != entry.Length)
                 return false;
         }

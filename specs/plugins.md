@@ -1219,6 +1219,7 @@ Cache validation requires the completion sentinel and every expected file at its
 length, including non-core facades. Missing or truncated content triggers staged
 re-extraction; unrelated files cannot substitute for required assemblies. Valid caches,
 including caches from earlier CLI builds with the same ZIP, are reused without rewriting.
+Validation rejects ZIP entry paths outside the cache, including similarly prefixed siblings.
 On local filesystems with OS file locking enabled, repairs exclusively open a persistent
 `<hash>.lock` file beside the replaceable cache and
 revalidate after acquiring it, so delayed callers preserve a concurrent winner across
@@ -1231,7 +1232,7 @@ the shared-temp cache location and trust model remain a separate concern (#1329)
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-52 | Missing non-core reference assemblies and truncated facades recover even when the sentinel and mscorlib survive or an unrelated file preserves the file count | `GetNet462ReferenceAssemblyDirectory_MissingNonCoreAssembly_RestoresExactContent`, `GetNet462ReferenceAssemblyDirectory_TruncatedFacade_RestoresExactContent` | ✅ |
+| AC-52 | Missing non-core reference assemblies and truncated facades recover even when the sentinel and mscorlib survive or an unrelated file preserves the file count; ZIP validation rejects paths outside the cache | `GetNet462ReferenceAssemblyDirectory_MissingNonCoreAssembly_RestoresExactContent`, `GetNet462ReferenceAssemblyDirectory_TruncatedFacade_RestoresExactContent`, `IsPopulated_EntryOutsideCache_RejectsEvenWhenFileExists` | ✅ |
 | AC-53 | A complete cache is reused without replacing files, changing timestamps, or leaving staging directories | `GetNet462ReferenceAssemblyDirectory_ValidCache_PreservesExistingFiles` | ✅ |
 | AC-54 | Concurrent initialization and recovery return complete caches, preserve a winner even when another caller has already observed a cache miss, and clean up staging directories | `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache`, `GetNet462ReferenceAssemblyDirectory_StaleCacheMiss_PreservesConcurrentWinner` | ✅ |
 | AC-55 | A blocked publication returns null through the existing warning/fallback path, cleans staging, and can recover after the obstruction is removed | `GetNet462ReferenceAssemblyDirectory_BlockedPublication_CleansStagingAndCanRetry` | ✅ |

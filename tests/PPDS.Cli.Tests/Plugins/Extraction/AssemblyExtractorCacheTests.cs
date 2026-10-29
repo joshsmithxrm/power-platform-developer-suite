@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
@@ -86,6 +87,34 @@ public sealed class AssemblyExtractorCacheTests : IDisposable
         Assert.Equal("preserve the existing cache", File.ReadAllText(marker));
         Assert.All(timestamps, pair => Assert.Equal(pair.Value, File.GetLastWriteTimeUtc(pair.Key)));
         Assert.Empty(Directory.EnumerateDirectories(_baseDir, ".staging-*"));
+    }
+
+    [Theory]
+    [InlineData("../outside.dll")]
+    [InlineData("../cache-sibling/outside.dll")]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-52")]
+    public void IsPopulated_EntryOutsideCache_RejectsEvenWhenFileExists(string entryName)
+    {
+        var cache = Path.Combine(_baseDir, "cache");
+        Directory.CreateDirectory(cache);
+        File.WriteAllBytes(Path.Combine(cache, AssemblyExtractor.CompletionSentinelFileName), []);
+        var outside = Path.GetFullPath(Path.Combine(cache, entryName));
+        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
+        byte[] content = [1, 2, 3];
+        File.WriteAllBytes(outside, content);
+
+        using var buffer = new MemoryStream();
+        using (var writer = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var entry = writer.CreateEntry(entryName).Open();
+            entry.Write(content);
+        }
+        buffer.Position = 0;
+        using var archive = new ZipArchive(buffer, ZipArchiveMode.Read);
+
+        Assert.False(AssemblyExtractor.IsPopulated(cache, archive));
+        Assert.Equal(content, File.ReadAllBytes(outside));
     }
 
     [Theory]
