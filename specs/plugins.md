@@ -1,7 +1,7 @@
 # Plugin System
 
 **Status:** Draft
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-10-29
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** All
 
@@ -1212,6 +1212,31 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-26 | RPC `plugins/registerStep` accepts `secureConfiguration` parameter and passes it through to `UpsertStepAsync` | ❌ |
 | AC-27 | CLI `ppds plugins register step` accepts `--event-handler-type` flag (pluginType or serviceEndpoint, default: pluginType) to register steps on service endpoints | ❌ |
 
+### Reference Assembly Cache Acceptance Criteria
+
+The embedded net462 ZIP defines the expected cache files and their uncompressed lengths.
+Cache validation requires the completion sentinel and every expected file at its expected
+length, including non-core facades. Missing or truncated content triggers staged
+re-extraction; unrelated files cannot substitute for required assemblies. Valid caches,
+including caches from earlier CLI builds with the same ZIP, are reused without rewriting.
+Validation rejects ZIP entry paths outside the cache, including similarly prefixed siblings.
+On local filesystems with OS file locking enabled, repairs exclusively open a persistent
+`<hash>.lock` file beside the replaceable cache and
+revalidate after acquiring it, so delayed callers preserve a concurrent winner across
+processes and terminal sessions. Lock contention retries for at most 30 seconds; closing
+the handle or exiting releases ownership. Failure retains the existing stderr warning
+and runtime-reference fallback. External mutation during use (including deletion of an
+active lock file) is outside this completeness guarantee.
+This checks completeness, not authenticity against malicious same-length replacements;
+the shared-temp cache location and trust model remain a separate concern (#1329).
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-52 | Missing non-core reference assemblies and truncated facades recover even when the sentinel and mscorlib survive or an unrelated file preserves the file count; ZIP validation rejects paths outside the cache | `GetNet462ReferenceAssemblyDirectory_MissingNonCoreAssembly_RestoresExactContent`, `GetNet462ReferenceAssemblyDirectory_TruncatedFacade_RestoresExactContent`, `IsPopulated_EntryOutsideCache_RejectsEvenWhenFileExists` | ✅ |
+| AC-53 | A complete cache is reused without replacing files, changing timestamps, or leaving staging directories | `GetNet462ReferenceAssemblyDirectory_ValidCache_PreservesExistingFiles` | ✅ |
+| AC-54 | Concurrent initialization and recovery return complete caches, preserve a winner even when another caller has already observed a cache miss, and clean up staging directories | `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache`, `GetNet462ReferenceAssemblyDirectory_StaleCacheMiss_PreservesConcurrentWinner` | ✅ |
+| AC-55 | A blocked publication returns null through the existing warning/fallback path, cleans staging, and can recover after the obstruction is removed | `GetNet462ReferenceAssemblyDirectory_BlockedPublication_CleansStagingAndCanRetry` | ✅ |
+
 ### NuGet Plugin Package Acceptance Criteria
 
 | ID | Criterion | Test | Status |
@@ -1319,6 +1344,7 @@ public async Task Deploy_IdempotentOnSecondRun()
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Reference cache completeness, preservation, concurrent recovery, and failure-path ACs (#1358) |
 | 2026-03-26 | v1 completion: remove IsManaged gatekeeping (#660), secureConfiguration in RPC (#63), service endpoint step support (#65) |
 | 2026-03-23 | Added Extension, MCP, RPC surfaces; new annotation properties; CLI enable/disable; updated ACs |
 | 2026-03-18 | Merged TUI surface content from tui-plugin-registration.md per SL3 |
