@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -41,9 +42,8 @@ public sealed class AssemblyExtractor : IDisposable
 
     /// <summary>
     /// Zero-byte marker written into the cache directory as the very last extraction step.
-    /// Its presence is the cache-validity contract: the cache key is fixed per CLI version,
-    /// so a cache partially deleted by a temp cleaner would otherwise pass an "any DLL"
-    /// check forever and could never self-heal. See #1326.
+    /// Its presence proves extraction finished, but reuse also requires every file from the
+    /// embedded ZIP to be present at its expected length. See #1326 and #1358.
     /// </summary>
     internal const string CompletionSentinelFileName = ".complete";
 
@@ -183,9 +183,11 @@ public sealed class AssemblyExtractor : IDisposable
     /// <summary>
     /// Overload that redirects the cache base directory so tests can exercise cache
     /// corruption and self-healing against an isolated location instead of the real
-    /// per-user cache in the temp directory. See #1326.
+    /// per-user cache in the temp directory. The optional callback lets tests pause after a
+    /// cache miss to reproduce a competing process publishing before recovery begins.
     /// </summary>
-    internal static string? GetNet462ReferenceAssemblyDirectory(string? cacheBaseDirOverride)
+    internal static string? GetNet462ReferenceAssemblyDirectory(
+        string? cacheBaseDirOverride, Action? cacheMissDetected = null)
     {
         try
         {
@@ -220,8 +222,37 @@ public sealed class AssemblyExtractor : IDisposable
             }
 
             var cacheDir = Path.Combine(baseDir, hash);
+            using var zipStream = new MemoryStream(zipBytes, writable: false);
+            using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
 
-            if (IsPopulated(cacheDir))
+            if (IsPopulated(cacheDir, archive))
+                return cacheDir;
+
+            cacheMissDetected?.Invoke();
+            return PopulateReferenceCache(cacheDir, baseDir, archive);
+        }
+        catch (Exception ex)
+        {
+            // Never make things worse — fall back to runtime-directory seeding. But say so
+            // (stderr — stdout is reserved for data): in a single-file install that fallback
+            // has no loose BCL DLLs, so extraction will likely fail downstream with the
+            // confusing "could not find core assembly" error. See #1326.
+            Console.Error.WriteLine(
+                "Warning: failed to extract embedded .NET Framework 4.6.2 reference assemblies; " +
+                $"plugin extraction may fail for single-file installs: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string PopulateReferenceCache(string cacheDir, string baseDir, ZipArchive archive)
+    {
+        // Serialize repairs across processes, then revalidate under the lock. Otherwise a
+        // caller acting on an earlier cache miss can delete a concurrent winner's complete
+        // cache after that winner has already returned it to the metadata resolver.
+        Directory.CreateDirectory(baseDir);
+        using (AcquireReferenceCacheLock(cacheDir))
+        {
+            if (IsPopulated(cacheDir, archive))
                 return cacheDir;
 
             // Self-heal: a cache directory that exists but fails validation is corrupt — e.g. a
@@ -237,17 +268,13 @@ public sealed class AssemblyExtractor : IDisposable
             Directory.CreateDirectory(stagingDir);
             try
             {
-                using (var zipStream = new MemoryStream(zipBytes, writable: false))
-                using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
-                {
-                    archive.ExtractToDirectory(stagingDir);
-                }
+                archive.ExtractToDirectory(stagingDir);
 
                 // Completion sentinel, written only after every entry extracted: validation
                 // treats any cache directory without it as incomplete.
                 File.WriteAllBytes(Path.Combine(stagingDir, CompletionSentinelFileName), []);
 
-                if (IsPopulated(cacheDir))
+                if (IsPopulated(cacheDir, archive))
                     return cacheDir; // Another process won the race while we were extracting.
 
                 Directory.CreateDirectory(Path.GetDirectoryName(cacheDir)!);
@@ -255,7 +282,7 @@ public sealed class AssemblyExtractor : IDisposable
                 {
                     Directory.Move(stagingDir, cacheDir);
                 }
-                catch (IOException) when (IsPopulated(cacheDir))
+                catch (IOException) when (IsPopulated(cacheDir, archive))
                 {
                     // Race: another process created a complete cache between our check and move.
                     return cacheDir;
@@ -270,7 +297,7 @@ public sealed class AssemblyExtractor : IDisposable
                     {
                         Directory.Move(stagingDir, cacheDir);
                     }
-                    catch (IOException) when (IsPopulated(cacheDir))
+                    catch (IOException) when (IsPopulated(cacheDir, archive))
                     {
                         return cacheDir;
                     }
@@ -283,28 +310,50 @@ public sealed class AssemblyExtractor : IDisposable
                 TryDeleteDirectory(stagingDir);
             }
         }
-        catch (Exception ex)
+    }
+
+    private static FileStream AcquireReferenceCacheLock(string cacheDir)
+    {
+        // Keep the lock file beside (not inside) the replaceable cache. Do not delete it on
+        // close: waiters must all lock the same file, including across terminal sessions.
+        // This stays within the existing cache path's permissions/trust boundary (#1329).
+        var timer = Stopwatch.StartNew();
+        while (true)
         {
-            // Never make things worse — fall back to runtime-directory seeding. But say so
-            // (stderr — stdout is reserved for data): in a single-file install that fallback
-            // has no loose BCL DLLs, so extraction will likely fail downstream with the
-            // confusing "could not find core assembly" error. See #1326.
-            Console.Error.WriteLine(
-                "Warning: failed to extract embedded .NET Framework 4.6.2 reference assemblies; " +
-                $"plugin extraction may fail for single-file installs: {ex.Message}");
-            return null;
+            try
+            {
+                return new FileStream(cacheDir + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (timer.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 
     /// <summary>
-    /// A cache directory is valid only when the completion sentinel (written as the last
-    /// extraction step) and the core assembly are both present. Checking mscorlib rather
-    /// than "any DLL" lets a partially deleted cache fail validation and self-heal instead
-    /// of passing forever. See #1326.
+    /// A cache directory is complete only when the sentinel and every file from the embedded
+    /// ZIP are present at the expected length. The ZIP is the source of truth, so unrelated
+    /// files cannot mask a missing facade and existing complete caches need no migration.
+    /// This detects deletion/truncation, not malicious same-length replacements (#1329).
     /// </summary>
-    private static bool IsPopulated(string directory)
-        => File.Exists(Path.Combine(directory, CompletionSentinelFileName))
-           && File.Exists(Path.Combine(directory, "mscorlib.dll"));
+    private static bool IsPopulated(string directory, ZipArchive archive)
+    {
+        if (!File.Exists(Path.Combine(directory, CompletionSentinelFileName)))
+            return false;
+
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.Name.Length == 0)
+                continue; // Directory entries do not contain reference assemblies.
+
+            var file = new FileInfo(Path.Combine(directory, entry.FullName));
+            if (!file.Exists || file.Length != entry.Length)
+                return false;
+        }
+
+        return true;
+    }
 
     private static void TryDeleteDirectory(string directory)
     {
