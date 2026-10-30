@@ -342,7 +342,7 @@ public class PluginRegistrationServiceTests
     }
 
     [Theory]
-    [Trait("AC", "AC-52")]
+    [Trait("AC", "AC-60")]
     [InlineData("netstandard2.0")]
     [InlineData("net8.0")]
     public async Task UpsertPackageAsync_UnsupportedModernFramework_ExplainsRequirementsBeforeConnecting(string framework)

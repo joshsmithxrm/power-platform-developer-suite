@@ -1442,7 +1442,7 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Theory]
-    [Trait("AC", "AC-52")]
+    [Trait("AC", "AC-60")]
     [InlineData("netstandard2.0")]
     [InlineData("net8.0")]
     public void Extract_UnsupportedModernFramework_ExplainsLooseAssemblyRequirements(string framework)
