@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,6 +22,90 @@ namespace PPDS.Cli.Tests.Services.Forms;
 
 public class FormServiceTests
 {
+    [Fact]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-36")]
+    public async Task SetFormXml_TimelineConfiguration_PreservesXml()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        SetupFormFetch(clientMock, BuildFormEntity(TimelineFormFixture.Xml));
+        clientMock.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CreateService(poolMock.Object);
+
+        await service.SetFormXmlAsync(new SetFormXmlRequest("account", "Test Form", TimelineFormFixture.Xml));
+
+        clientMock.Verify(c => c.UpdateAsync(It.Is<Entity>(e =>
+            e.LogicalName == "systemform" && e.Id == TestFormId &&
+            (string)e["formxml"] == TimelineFormFixture.Xml), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-36")]
+    public async Task UpdateTab_TimelineConfiguration_PreservesControl()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        SetupFormFetch(clientMock, BuildFormEntity(TimelineFormFixture.Xml));
+        Entity? written = null;
+        clientMock.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => written = e)
+            .Returns(Task.CompletedTask);
+        var service = CreateService(poolMock.Object);
+
+        await service.UpdateTabAsync(new UpdateTabRequest("account", "Test Form", "My Tab", Visible: false));
+
+        written.Should().NotBeNull();
+        written!.Id.Should().Be(TestFormId);
+        var actual = XDocument.Parse((string)written["formxml"]);
+        var expected = XDocument.Parse(TimelineFormFixture.Xml);
+        expected.Descendants("tab").Single().SetAttributeValue("visible", "0");
+        XNode.DeepEquals(actual, expected).Should().BeTrue("only the requested tab visibility should change");
+        clientMock.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-38")]
+    public async Task SetFormXml_MalformedXml_DoesNotWrite()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        SetupFormFetch(clientMock, BuildFormEntity(TimelineFormFixture.Xml));
+        var service = CreateService(poolMock.Object);
+        var malformed = TimelineFormFixture.Xml.Replace("</parameters>", "</mismatched>");
+
+        var act = () => service.SetFormXmlAsync(new SetFormXmlRequest("account", "Test Form", malformed));
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+        clientMock.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-38")]
+    public async Task SetFormXml_EntityExpansionLimit_DoesNotWrite()
+    {
+        var (poolMock, clientMock) = CreateMocks();
+        SetupFormFetch(clientMock, BuildFormEntity(TimelineFormFixture.Xml));
+        var service = CreateService(poolMock.Object);
+        // Exceeds XDocument.Parse's default entity expansion limit without any I/O.
+        var dtd = new System.Text.StringBuilder("<!DOCTYPE form [<!ENTITY e0 '0123456789'>");
+        for (var i = 1; i <= 7; i++)
+            dtd.Append($"<!ENTITY e{i} '{string.Concat(Enumerable.Repeat($"&e{i - 1};", 10))}'>");
+        dtd.Append("]>");
+        var doc = XDocument.Parse(TimelineFormFixture.Xml);
+        doc.Descendants("UClientActivitiesConfigurationJSON").Single().Value = "ENTITY_PLACEHOLDER";
+        var xml = dtd + doc.ToString().Replace("ENTITY_PLACEHOLDER", "&e7;");
+
+        var act = () => service.SetFormXmlAsync(new SetFormXmlRequest("account", "Test Form", xml));
+
+        var exception = (await act.Should().ThrowAsync<PpdsException>()).Which;
+        exception.ErrorCode.Should().Be(FormErrorCodes.InvalidFormXml);
+        exception.InnerException.Should().BeOfType<System.Xml.XmlException>()
+            .Which.Message.Should().Contain("MaxCharactersFromEntities");
+        clientMock.Verify(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ── Guids used across tests ───────────────────────────────────────────
 
     private static readonly Guid TestFormId = new("11111111-1111-1111-1111-111111111111");
