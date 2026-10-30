@@ -9,6 +9,17 @@ using PPDS.Cli.Plugins.Extraction;
 // through a process boundary without adding a public production cache API.
 var assembly = typeof(AssemblyExtractor).Assembly;
 var command = args.FirstOrDefault() ?? "";
+if (command == "describe")
+{
+    // Query the OS location without creating or inspecting a cache. Environment
+    // overrides do not reliably reproduce GetFolderPath on Windows and macOS.
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+    {
+        localApplicationData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify)
+    }));
+    return;
+}
 if (command == "identity")
 {
     Console.WriteLine($"{RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()} {Environment.UserName}");
@@ -19,7 +30,7 @@ if (command == "seed-legacy")
     SeedLegacy(args.Length == 2 ? args[1] : Environment.UserName);
     return;
 }
-if (command is not ("create" or "reject")) throw new ArgumentException("Expected identity, seed-legacy, create, or reject.");
+if (command is not ("create" or "reject")) throw new ArgumentException("Expected describe, identity, seed-legacy, create, or reject.");
 var originalError = Console.Error;
 using var error = new StringWriter();
 string? cache;

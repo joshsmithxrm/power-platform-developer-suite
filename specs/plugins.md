@@ -116,9 +116,13 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 
 The PR test gate must run the published self-contained, single-file CLI on Windows,
 Linux, and macOS against a deterministic local net462 plug-in fixture. Copy only the
-executable into an isolated directory and give each scenario a fresh temporary/cache
-root so installed frameworks, publish sidecars, or an earlier cache cannot mask missing
-embedded references. Validate extracted registrations, cold/warm cache behavior,
+executable into an isolated directory and give each scenario fresh temporary/config
+storage. On fresh native runners, require the actual protected account cache to be
+absent before extraction; run unit tests afterward so they cannot prepopulate it.
+Compare every cached file byte-for-byte with the archive embedded by that publish,
+so installed frameworks, publish sidecars, or an earlier cache cannot mask missing
+embedded references. Local reuse must be explicitly reported as warm-cache-only
+verification and must not remove existing caches. Validate registrations, cold/warm cache behavior,
 explicit dependency resolution, and structured failure output without Dataverse access.
 
 | ID | Criterion | Test | Status |
