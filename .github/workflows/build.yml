@@ -1,5 +1,8 @@
 name: Build
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -12,12 +15,17 @@ concurrency:
 
 jobs:
   changes:
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists changed files on pull requests.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
       extension: ${{ steps.filter.outputs.extension }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -42,6 +50,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v5
@@ -58,6 +68,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
+        persist-credentials: false
         fetch-depth: 0  # Required for MinVer to read git history
 
     - name: Setup .NET
@@ -129,6 +140,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -185,6 +198,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -217,6 +232,7 @@ jobs:
 
   # Gate job for branch protection
   build-status:
+    permissions: {}
     runs-on: ubuntu-latest
     needs: [changes, build, extension, extension-e2e]
     if: always()
