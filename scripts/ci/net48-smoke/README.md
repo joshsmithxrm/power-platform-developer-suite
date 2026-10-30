@@ -7,9 +7,10 @@ product runtime source. PR #1472 remains the separate read-only preflight lane.
 
 The user approved one bounded package create/update/execute test and cleanup.
 The original opened-event run is complete and failed in its harness readback.
-The current workflow permits only cleanup on the first synchronization from
-the original harness head, on this exact PR and branch, on attempt 1.
-Do not merge, rerun, release, or reuse this lane.
+Cleanup subsequently passed in run 41000961964, with all three recorded IDs
+verified absent. A corrected completion run is prepared locally for coordinator
+review and initiation; see [RUN-PLAN.md](RUN-PLAN.md). The worker must not push
+or start it. This preparation is not a new scope grant. Keep the lane unmerged.
 
 The checked-in packages are the exact previously reviewed SDK-built net48
 fixtures. Both versions preserve package/assembly identity; their marker bodies
@@ -70,6 +71,16 @@ verify those IDs and names are absent. It does not require package content
 readback and has no deployment or account-create path. Resource IDs remain
 in encrypted evidence; only their hashes are committed.
 
-The workflow contains only the cleanup command. Its synchronize event is bound
-to the original head through the webhook before field, defined in the official
+The historical cleanup-only workflow ran once from the original harness head.
+The locally prepared corrected workflow is bound to the successful cleanup head
+through the synchronize webhook before field, defined in the official
 [Octokit webhook schema](https://github.com/octokit/webhooks/blob/main/payload-schemas/api.github.com/pull_request/synchronize.schema.json).
+## Corrected content readback
+
+Omitted package content is recorded as unavailable, without claiming byte
+readback verification. Returned content must match the pinned fixture hash.
+The exact outgoing payload hash, identity/settings checks, and both execution
+markers remain mandatory. Full-smoke cleanup now uses a separate metadata-only
+ownership check; it never requests or depends on package content. Offline
+regressions exercise actual cleanup with a transport that rejects content reads
+and verify that ownership mismatches prevent every delete.

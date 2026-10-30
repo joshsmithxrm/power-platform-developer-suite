@@ -113,7 +113,7 @@ internal static class Program
             boundary.Phase = Phase.ReadOnly;
             Scope.Require(packageId == boundary.PackageId, "CreatedPackageIdMismatch");
             await Discover(service, pool, boundary, journal, ct, waitForAssembly: true);
-            await VerifyPackage(pool, boundary, Scope.V1, ct);
+            await VerifyPackage(pool, boundary, Scope.V1, journal, ct);
             phase = "deploy-v1-preview";
             await Deploy(service, boundary, journal, config1, true, true, ct);
             phase = "deploy-v1";
@@ -131,7 +131,7 @@ internal static class Program
             await Deploy(service, boundary, journal, config2, false, false, ct);
             boundary.Phase = Phase.ReadOnly;
             await Discover(service, pool, boundary, journal, ct);
-            await VerifyPackage(pool, boundary, Scope.V2, ct);
+            await VerifyPackage(pool, boundary, Scope.V2, journal, ct);
             await VerifyStep(pool, boundary, ct);
             journal.Add("identity-stability", new { boundary.PackageId, boundary.AssemblyId, boundary.TypeId,
                 boundary.StepId, packageVersion = "1.0.0", packageAndStepStable = true });
@@ -299,13 +299,37 @@ internal static class Program
             assemblyIds = boundary.AssemblyIds.ToArray(), typeIds = boundary.TypeIds.ToArray(), stepId = boundary.StepId });
     }
 
-    private static async Task VerifyPackage(IDataverseConnectionPool pool, Boundary boundary, string? hash, CancellationToken ct)
+    private static async Task VerifyPackage(IDataverseConnectionPool pool, Boundary boundary, string hash,
+        Evidence journal, CancellationToken ct)
     {
         var rows = await ById(pool, "pluginpackage", boundary.PackageId, ct, "name", "version", "content");
         Scope.Require(rows.Count == 1 && rows[0].GetAttributeValue<string>("name") == Scope.Package
             && rows[0].GetAttributeValue<string>("version") == "1.0.0", "PackageReadbackMismatch");
-        var actual = Scope.Hash(Convert.FromBase64String(rows[0].GetAttributeValue<string>("content")));
-        Scope.Require(hash is null ? actual is Scope.V1 or Scope.V2 : actual == hash, "PackageReadbackHashMismatch");
+        var contentVerified = VerifyOptionalPackageContent(rows[0].GetAttributeValue<string>("content"), hash);
+        journal.Add("package-readback", new { id = boundary.PackageId, name = Scope.Package, version = "1.0.0",
+            uploadedSha256 = hash, contentReadback = contentVerified ? "verified" : "not-returned" });
+    }
+
+    // Dataverse can omit package content on retrieve. The request boundary has
+    // already checked and journaled the exact uploaded bytes. Metadata/ID checks
+    // and both execution markers remain required; verify content when returned.
+    internal static bool VerifyOptionalPackageContent(string? content, string expectedHash)
+    {
+        Scope.Require(expectedHash is Scope.V1 or Scope.V2, "ExpectedPackageHashOutsideScope");
+        if (string.IsNullOrEmpty(content)) return false;
+        var actual = Scope.Hash(Convert.FromBase64String(content));
+        Scope.Require(actual == expectedHash, "PackageReadbackHashMismatch");
+        return true;
+    }
+
+    private static async Task VerifyPackageOwnershipForCleanup(IDataverseConnectionPool pool,
+        Boundary boundary, CancellationToken ct)
+    {
+        // Cleanup must not request, decode, or depend on package content. The
+        // ID was reserved and journaled before create; only that ID can delete.
+        var rows = await ById(pool, "pluginpackage", boundary.PackageId, ct, "name", "version");
+        Scope.Require(rows.Count == 1 && rows[0].GetAttributeValue<string>("name") == Scope.Package
+            && rows[0].GetAttributeValue<string>("version") == "1.0.0", "CleanupPackageOwnershipMismatch");
     }
     private static async Task VerifyStep(IDataverseConnectionPool pool, Boundary boundary, CancellationToken ct)
     {
@@ -343,7 +367,7 @@ internal static class Program
             marker = rows[0].GetAttributeValue<string>("description") });
     }
 
-    private static async Task Cleanup(PluginRegistrationService service, IDataverseConnectionPool pool, Boundary boundary,
+    internal static async Task Cleanup(PluginRegistrationService service, IDataverseConnectionPool pool, Boundary boundary,
         Evidence journal, CancellationToken ct)
     {
         boundary.Phase = Phase.Cleanup;
@@ -370,7 +394,7 @@ internal static class Program
             {
                 if ((await ById(pool, "pluginpackage", boundary.PackageId, ct)).Count != 0)
                 {
-                    await VerifyPackage(pool, boundary, null, ct);
+                    await VerifyPackageOwnershipForCleanup(pool, boundary, ct);
                     await Discover(service, pool, boundary, journal, ct);
                     var result = await service.UnregisterPackageAsync(boundary.PackageId, force: true, cancellationToken: ct);
                     journal.Add("package-unregistered", result);

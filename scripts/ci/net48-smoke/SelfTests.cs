@@ -138,6 +138,63 @@ internal static class SelfTests
         cleanupOnlyBoundary.Attempted.Add(("pluginpackage", recordedId));
         Reject(() => cleanupOnlyBoundary.CheckDelete("pluginpackage", Guid.NewGuid()));
         cleanupOnlyBoundary.CheckDelete("pluginpackage", recordedId); count++;
+        Scope.Require(!Program.VerifyOptionalPackageContent(null, Scope.V1), "AbsentContentShouldRemainUnverified"); count++;
+        Scope.Require(!Program.VerifyOptionalPackageContent("", Scope.V1), "EmptyContentShouldRemainUnverified"); count++;
+        Scope.Require(Program.VerifyOptionalPackageContent(Convert.ToBase64String(bytes), Scope.V1), "ReturnedContentMustMatch"); count++;
+        Reject(() => Program.VerifyOptionalPackageContent(Convert.ToBase64String(bytes), Scope.V2));
+        Reject(() => Program.VerifyOptionalPackageContent(null, "unapproved-hash"));
+        Reject(() => Program.VerifyOptionalPackageContent(Convert.ToBase64String([1, 2, 3]), Scope.V1));
+
+        // Exercise the real full-smoke cleanup path and production unregistration
+        // service. A transport that rejects content retrieval must still clean
+        // up the recorded package/type and verify the assembly's cascade delete.
+        foreach (var wrongOwner in new[] { false, true })
+        {
+            var cleanupBoundary = Fresh();
+            cleanupBoundary.Attempted.Add(("pluginpackage", cleanupBoundary.PackageId));
+            var cleanupTransport = DispatchProxy.Create<IPooledClient, FakeClient>();
+            var cleanupState = (FakeClient)(object)cleanupTransport;
+            var assemblyId = Guid.NewGuid(); var pluginTypeId = Guid.NewGuid();
+            cleanupState.Package = new Entity("pluginpackage", cleanupBoundary.PackageId)
+            {
+                ["name"] = wrongOwner ? "outside-scope" : Scope.Package, ["version"] = "1.0.0",
+                ["content"] = "unreadable-content-must-not-control-cleanup"
+            };
+            cleanupState.Assembly = new Entity("pluginassembly", assemblyId)
+            {
+                ["name"] = Scope.Assembly, ["version"] = "1.0.0.0",
+                ["packageid"] = new EntityReference("pluginpackage", cleanupBoundary.PackageId)
+            };
+            cleanupState.PluginType = new Entity("plugintype", pluginTypeId)
+            {
+                ["typename"] = Scope.PluginType,
+                ["pluginassemblyid"] = new EntityReference("pluginassembly", assemblyId)
+            };
+            cleanupState.RejectPackageContentRead = true;
+            var cleanupPoolTarget = DispatchProxy.Create<IDataverseConnectionPool, FakePool>();
+            ((FakePool)(object)cleanupPoolTarget).Client = cleanupTransport;
+            var cleanupPool = GuardProxy.Wrap(cleanupPoolTarget, cleanupBoundary);
+            var cleanupService = new PPDS.Cli.Plugins.Registration.PluginRegistrationService(cleanupPool, safety,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PPDS.Cli.Plugins.Registration.PluginRegistrationService>.Instance);
+            using var cleanupEvidence = new Evidence(Path.Combine(root, "evidence-public.pem"),
+                Path.Combine(output, wrongOwner ? "wrong-owner" : "content-unavailable"));
+            if (wrongOwner)
+            {
+                Reject(() => Program.Cleanup(cleanupService, cleanupPool, cleanupBoundary, cleanupEvidence, default)
+                    .GetAwaiter().GetResult());
+                Scope.Require(cleanupState.DeletedRequests.Count == 0, "OwnershipMismatchDeletedResources"); count++;
+            }
+            else
+            {
+                Program.Cleanup(cleanupService, cleanupPool, cleanupBoundary, cleanupEvidence, default)
+                    .GetAwaiter().GetResult();
+                Scope.Require(cleanupState.DeletedRequests.SequenceEqual(new[]
+                    { ("plugintype", pluginTypeId), ("pluginpackage", cleanupBoundary.PackageId) }), "UnexpectedCleanupDeletes"); count++;
+                Scope.Require(cleanupState.Package is null && cleanupState.Assembly is null && cleanupState.PluginType is null,
+                    "CleanupResidualResources"); count++;
+            }
+            Scope.Require(cleanupState.PackageContentReads == 0, "CleanupRequestedPackageContent"); count++;
+        }
         Console.WriteLine($"Offline scope/transport/fixture checks: {count} passed.");
         return 0;
     }
@@ -148,11 +205,31 @@ public class FakeClient : DispatchProxy
     public int Calls { get; private set; }
     public Entity? Package { get; set; }
     public Entity? Step { get; set; }
+    public Entity? Assembly { get; set; }
+    public Entity? PluginType { get; set; }
+    public bool RejectPackageContentRead { get; set; }
+    public int PackageContentReads { get; private set; }
+    public List<(string Table, Guid Id)> DeletedRequests { get; } = [];
     private EntityCollection Read(QueryExpression query)
     {
+        if (query.EntityName == "pluginpackage" && (query.ColumnSet.AllColumns || query.ColumnSet.Columns.Contains("content")))
+        {
+            PackageContentReads++;
+            if (RejectPackageContentRead) throw new InvalidOperationException("PackageContentReadUnsupported");
+        }
         var entity = query.EntityName == "pluginpackage" ? Package
-            : query.EntityName == "sdkmessageprocessingstep" ? Step : null;
+            : query.EntityName == "sdkmessageprocessingstep" ? Step
+            : query.EntityName == "pluginassembly" ? Assembly
+            : query.EntityName == "plugintype" ? PluginType : null;
         return entity is null ? new EntityCollection() : new EntityCollection([entity]);
+    }
+    private Task Delete(string table, Guid id)
+    {
+        DeletedRequests.Add((table, id));
+        if (table == "plugintype" && PluginType?.Id == id) PluginType = null;
+        if (table == "sdkmessageprocessingstep" && Step?.Id == id) Step = null;
+        if (table == "pluginpackage" && Package?.Id == id) { Package = null; Assembly = null; }
+        return Task.CompletedTask;
     }
     private static OrganizationResponse Execute(OrganizationRequest request)
     {
@@ -169,7 +246,8 @@ public class FakeClient : DispatchProxy
         return method!.Name switch
         {
             "CreateAsync" => Task.FromResult(((Entity)args![0]!).Id),
-            "DeleteAsync" or "UpdateAsync" => Task.CompletedTask,
+            "DeleteAsync" => Delete((string)args![0]!, (Guid)args[1]!),
+            "UpdateAsync" => Task.CompletedTask,
             "DisposeAsync" => ValueTask.CompletedTask,
             "RetrieveMultipleAsync" => Task.FromResult(Read((QueryExpression)args![0]!)),
             "ExecuteAsync" => Task.FromResult(Execute((OrganizationRequest)args![0]!)),

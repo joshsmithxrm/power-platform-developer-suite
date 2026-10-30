@@ -1,8 +1,8 @@
-name: Approved Net48 Cleanup Continuation
+name: Net48 Readback Correction Smoke
 
-# Cleanup only for the package left by the approved run. The full smoke is not
-# rerun. Only the first synchronization away from its recorded harness head
-# can execute this lane; all later updates and reruns are skipped.
+# Prepared locally for coordinator review and initiation. Pushing the exact
+# reviewed commit performs one bounded test; this file itself grants no approval.
+# Only the first synchronization from the successful cleanup head can run.
 on:
   pull_request:
     types: [synchronize]
@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  approved-cleanup:
-    if: github.event.number == 1474 && github.event.before == '5d63a24d0ae4d3d1356f7c288d9b8b32155776b5' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/net48-approved-smoke' && github.run_attempt == 1
+  corrected-smoke:
+    if: github.event.number == 1474 && github.event.before == '7af9468d1d195d68d2b5c25fdd0c6b91cc7cf01e' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/net48-approved-smoke' && github.run_attempt == 1
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     environment: test-dataverse
     permissions:
       contents: read
@@ -42,28 +42,20 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $sourceTree -ne 'd199398b25b74dee8e9bc473953059f656d0d418') {
             throw 'RuntimeSourceMismatch'
           }
-      - name: Build cleanup harness
+      - name: Build corrected validation harness
         shell: pwsh
         run: dotnet build scripts/ci/net48-smoke/Net48Smoke.csproj -c Release --nologo -v minimal
-      - name: Check scope boundary and recorded-ID matching offline
+      - name: Verify scope, readback, and cleanup regressions offline
         shell: pwsh
         run: dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --self-test scripts/ci/net48-smoke
-      - name: Recheck identity and expected residual presence
+      - name: Recheck target and collisions without writes
         shell: pwsh
         env:
           NET48_DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
           NET48_APP_ID: ${{ vars.PPDS_TEST_APP_ID }}
           NET48_TENANT_ID: ${{ vars.PPDS_TEST_TENANT_ID }}
-        run: |
-          & ./scripts/ci/net48-smoke/Invoke-ReadOnly.ps1 -ReportPath "$env:RUNNER_TEMP/net48-preflight.json"
-          if ($LASTEXITCODE -ne 2) { throw 'ExpectedResidualPreflightRequired' }
-          $report = Get-Content "$env:RUNNER_TEMP/net48-preflight.json" -Raw | ConvertFrom-Json
-          if ($report.status -ne 'collision' -or -not $report.targetAndApplicationVerified -or
-              $report.organizationType -ne 'Developer' -or $report.collisions.Step -or $report.collisions.Account) {
-            throw 'CleanupPreflightMismatch'
-          }
-          exit 0
-      - name: Delete only original recorded resources and verify absence
+        run: ./scripts/ci/net48-smoke/Invoke-ReadOnly.ps1 -ReportPath "$env:RUNNER_TEMP/net48-preflight.json"
+      - name: Execute bounded create-update-execute test with independent cleanup
         shell: pwsh
         env:
           NET48_DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
@@ -71,12 +63,12 @@ jobs:
           NET48_TENANT_ID: ${{ vars.PPDS_TEST_TENANT_ID }}
           TESTED_HEAD: ${{ github.event.pull_request.head.sha }}
           TESTED_SOURCE_TREE: d199398b25b74dee8e9bc473953059f656d0d418
-        run: dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --approved-cleanup scripts/ci/net48-smoke "$env:RUNNER_TEMP/net48-evidence" "$env:RUNNER_TEMP/net48-preflight.json"
-      - name: Retain encrypted cleanup evidence and redacted status
+        run: dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --approved-live scripts/ci/net48-smoke "$env:RUNNER_TEMP/net48-evidence" "$env:RUNNER_TEMP/net48-preflight.json"
+      - name: Retain encrypted evidence and redacted status
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: net48-approved-cleanup
+          name: net48-corrected-smoke
           path: |
             ${{ runner.temp }}/net48-evidence/evidence.enc.json
             ${{ runner.temp }}/net48-evidence/summary.json
