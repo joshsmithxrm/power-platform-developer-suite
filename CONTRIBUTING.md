@@ -94,6 +94,16 @@ The hook runs:
 Drop-in scripts under `scripts/hooks/pre-commit.d/` run before the .NET / TS
 gates. See `docs/CLAUDE-MD-GOVERNANCE.md` for the CLAUDE.md gate that lives there.
 
+### Live integration scheduling
+
+The `Integration Tests` workflow shares the `test-dataverse` environment across
+PR and main runs. Its plugin tests deploy and clean the same fixture, so entire
+runs share a concurrency group while the five shards within each run remain
+parallel. Runs queue without cancelling active cleanup or replacing older pending
+runs (up to GitHub's 100-run queue limit). Workflow edits also trigger this gate.
+Do not overlap a local live-test run against this environment with CI; the Actions
+concurrency group cannot coordinate processes outside GitHub Actions.
+
 ### Single-file plugin extraction
 
 The `Test` workflow runs focused extraction unit tests and the actual published CLI
