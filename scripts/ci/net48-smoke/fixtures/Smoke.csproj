@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Ppds1450Smoke_61e24a05</AssemblyName>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" />
+    <ProjectReference Include="../../../../src/PPDS.Plugins/PPDS.Plugins.csproj" />
+  </ItemGroup>
+</Project>

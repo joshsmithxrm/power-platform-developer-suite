@@ -1,0 +1,26 @@
+{
+  "name": "Ppds1450Smoke_61e24a05",
+  "type": "Nuget",
+  "packagePath": "fixtures/v1/ppds1450_61e24a05.1.0.0.nupkg",
+  "packageContentSha256": "98db0d59c3624e2ff98b453d1b4fe54fcd042808f8bf2361b34129a6dc2dbaab",
+  "allTypeNames": [
+    "Ppds1450Smoke.MarkerPlugin"
+  ],
+  "types": [
+    {
+      "typeName": "Ppds1450Smoke.MarkerPlugin",
+      "steps": [
+        {
+          "name": "MarkerPlugin: Create of account",
+          "message": "Create",
+          "entity": "account",
+          "stage": "PreOperation",
+          "mode": "Synchronous",
+          "executionOrder": 1,
+          "enabled": true,
+          "images": []
+        }
+      ]
+    }
+  ]
+}
