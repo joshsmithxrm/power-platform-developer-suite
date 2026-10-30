@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - Unreleased
+
+### Security
+
+- Refresh the bundled runtime graph with `System.Security.Cryptography.Pkcs` 10.0.13, `System.Security.Cryptography.Xml` 8.0.5, and MessagePack 2.5.307 through StreamJsonRpc 2.26.150.
+
+### Changed
+
+- Consume CLI 1.4.2, Auth 1.1.2, Dataverse 1.3.2, Migration 1.2.2, Query 1.0.2, and Plugins 3.0.1, with Microsoft.Extensions.Hosting 10.0.13. This is runtime and dependency servicing; the MCP tool surface is unchanged.
+
 ## [1.2.1] - 2026-09-12
 
 ### Changed

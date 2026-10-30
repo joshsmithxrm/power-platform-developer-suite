@@ -25,7 +25,7 @@
     <PackageId>PPDS.Plugins</PackageId>
     <Authors>Josh Smith</Authors>
     <Company>Power Platform Developer Suite</Company>
-    <Description>Plugin development attributes for Dataverse. Provides PluginStep and PluginImage attributes for declarative plugin registration configuration that can be extracted and deployed using PPDS.Tools.</Description>
+    <Description>Plugin development attributes for Dataverse. Provides PluginStep and PluginImage attributes for declarative plugin registration configuration that can be extracted and deployed using PPDS CLI.</Description>
     <PackageTags>dataverse;dynamics365;powerplatform;plugins;sdk;crm;xrm</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>Copyright (c) 2025 Josh Smith</Copyright>

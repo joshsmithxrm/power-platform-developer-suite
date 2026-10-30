@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - Unreleased
+
 ### Security
 
 - Update `System.Security.Cryptography.Pkcs` from 10.0.9 to 10.0.13 for [CVE-2026-84008](https://github.com/advisories/GHSA-846f-f764-76mx) and [CVE-2026-70162](https://github.com/advisories/GHSA-2fmv-rv2c-59x7).
 - Update `System.Security.Cryptography.Xml` from 8.0.4 to 8.0.5 for [CVE-2026-96960](https://github.com/advisories/GHSA-7hqp-7c5m-4vq6), [CVE-2026-96959](https://github.com/advisories/GHSA-c399-9853-6jmj), [CVE-2026-96958](https://github.com/advisories/GHSA-r955-8q5j-3h83), and [CVE-2026-96222](https://github.com/advisories/GHSA-vrv5-2jg9-4mmr).
+
+### Changed
+
+- Refresh MSAL and its cache extensions to 4.90.1, the Dataverse SDK to 1.2.27, and Microsoft.Extensions dependencies to 10.0.13. SourceLink build tooling is updated to 10.0.401; the authentication API is unchanged.
 
 ## [1.1.1] - 2026-09-12
 
