@@ -1,7 +1,7 @@
 # Docs Generation
 
 **Status:** Draft
-**Last Updated:** 2026-04-18
+**Last Updated:** 2026-10-30
 **Code:** [scripts/docs-gen/](../scripts/docs-gen/), [src/PPDS.Analyzers/Rules/](../src/PPDS.Analyzers/Rules/), [.github/workflows/docs-smoke.yml](../.github/workflows/docs-smoke.yml), [.github/workflows/docs-release.yml](../.github/workflows/docs-release.yml)
 **Surfaces:** CLI | Libraries | MCP | Extension
 
@@ -242,7 +242,7 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-24 | Generated output does not contain the bare word "SDK" in prose or headings outside of quoted Microsoft references or code fences (enforces Core Requirement 10) | `PPDS.DocsGen.Workflow.Tests/TerminologyTests.NoSdkInProse` | 🔲 |
 | AC-25 | `docs-release.yml` in dry-run mode (workflow_dispatch with `dry_run=true`) produces the expected file tree, a PR body summary, and a baseline rollover diff — all visible as workflow artifacts, without opening any PR | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.DryRunProducesExpectedArtifacts` | 🔲 |
 | AC-26 | `docs-release.yml` rollover logic moves all entries from each library's `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt` (sorted, deduplicated) and clears Unshipped to empty | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.RolloverMovesUnshippedEntries` | 🔲 |
-| AC-27 | `docs-release.yml` aborts when an open rollover PR from a prior tag exists on `main` — exits non-zero with a diagnostic listing the open PR | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.AbortsOnOpenPriorRolloverPr` | 🔲 |
+| AC-27 | `docs-release.yml` checks every page of open PRs and aborts when a prior baseline rollover PR exists, listing the matching PRs. GitHub/API failures or malformed responses also abort; only a successful complete query without matching PRs permits continuation. | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.AbortsOnOpenPriorRolloverPr`; `tests/ci/test_rollover_guard.py::test_blocks_rollover_beyond_first_hundred`, `test_allows_only_after_all_pages_are_checked`, `test_empty_success_is_clean`, `test_api_failures_fail_closed`, `test_late_page_failure_fails_closed`, `test_invalid_api_responses_fail_closed`, `test_malformed_later_page_fails_closed`, `test_non_200_success_status_fails_closed` | ✅ |
 | AC-28 | After Phase 0 completes, running `dotnet build` on each of the four library projects with `WarningsAsErrors` for PPDS014-016/RS0016-0017 produces zero errors | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.AllFourLibrariesBuildClean` | 🔲 |
 | AC-29 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` returns zero RS0016/RS0017 diagnostics against the committed source of each of the four library projects — gated by Phase 0 completion across all four libs (Phase 0 is currently pilot-only: PPDS.Auth has baselines; PPDS.Dataverse / PPDS.Migration / PPDS.Plugins baselines are pending). AC tracked at 🔲 until all four libs reach zero-diagnostic state. | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.RS0016ReturnsZeroDiagnostics` | 🔲 |
 | AC-30 | `docs-smoke.yml` runs as `workflow_call` from a caller repository, accepts the caller's docs path as input, and fails the check with stdout pointing at the offending block when compilation fails | `PPDS.DocsGen.Workflow.Tests/DocsSmokeWorkflowTests.FailsOnBadBlockViaWorkflowCall` | 🔲 |
@@ -321,6 +321,7 @@ foreach (var file in result.Files) File.WriteAllText(Path.Combine(input.OutputRo
 | Release: app-token acquisition failure | GitHub App installation revoked or network error | Retry; rotate the app installation if persistent |
 | Release: cross-repo push failure | Unique branch name collision (extremely rare — run_id suffix) | Re-run; if recurring, check for workflow retries spawning same run_id |
 | Release: open prior rollover PR on main | Previous release's rollover PR not yet merged | Merge or close the open rollover PR, then re-run the release workflow (AC-27) |
+| Release: rollover query cannot complete | API error, later-page failure, or malformed response | Abort with a diagnostic; never report an unverified result as no open rollover PRs (AC-27) |
 | MDX parse failure in generated output | Generator emitted unescaped angle-bracket type reference in prose | Fix the generator — regression of AC-23; the MDX test fixture should reproduce |
 
 ### Recovery Strategies
