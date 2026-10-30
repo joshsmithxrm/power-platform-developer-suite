@@ -33,6 +33,7 @@ jobs:
               - 'src/**'
               - 'tests/PPDS.Cli.Tests/**'
               - 'tests/fixtures/SingleFilePlugin/**'
+              - 'tests/fixtures/ReferenceCacheProbe/**'
               - 'scripts/ci/smoke_single_file_extraction.py'
               - 'Directory.*.props'
               - 'global.json'
@@ -116,13 +117,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - name: Run portable extraction unit tests
-        run: >-
-          dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj -c Release -f net8.0
-          --filter FullyQualifiedName~PPDS.Cli.Tests.Plugins.Extraction
-          -p:VSTestTreatNoTestsAsError=true --logger "console;verbosity=normal"
       - name: Build deterministic local plugin fixture
         run: dotnet build tests/fixtures/SingleFilePlugin/SingleFilePlugin.csproj -c Release
+      - name: Build read-only cache location probe
+        run: dotnet build tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj -c Release
       - name: Publish with shipped single-file settings
         run: >-
           dotnet publish src/PPDS.Cli/PPDS.Cli.csproj -c Release -f net8.0
@@ -132,6 +130,14 @@ jobs:
           python scripts/ci/smoke_single_file_extraction.py
           --binary ./publish/${{ matrix.binary }}
           --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462
+          --cache-probe tests/fixtures/ReferenceCacheProbe/bin/Release/net8.0/ReferenceCacheProbe.dll
+          --reference-archive src/PPDS.Cli/obj/Release/net8.0/${{ matrix.rid }}/Net462ReferenceAssemblies.zip
+      # Run after the smoke so unit tests cannot prepopulate its actual account cache.
+      - name: Run portable extraction unit tests
+        run: >-
+          dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj -c Release -f net8.0
+          --filter FullyQualifiedName~PPDS.Cli.Tests.Plugins.Extraction
+          -p:VSTestTreatNoTestsAsError=true --logger "console;verbosity=normal"
 
   # Gate job for branch protection
   test-status:

@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.6.2] - Unreleased
+
 ### Security
 
+- Bundle DOMPurify 3.4.17 for notebook HTML sanitization and consume the patched cryptography and MessagePack dependencies in CLI 1.4.2.
 - **Extension packaging tooling** — updated the development-only authentication dependencies used by `@vscode/vsce` to address [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5). Extension development and packaging now require Node.js 22+; Extension runtime authentication is unchanged ([#1484](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1484)).
+
+### Changed
+
+- Bundle CLI 1.4.2, including corrected metadata draft verification, plugin package validation, reference-cache recovery/account isolation, and Timeline form validation. Commands available through the bundled CLI retain their existing surfaces.
+- Update vscode-jsonrpc to 9.0.2 and refresh build/test dependencies. The stable channel, VS Code `^1.116.0` requirement, and Node 22 typing alignment are retained.
 
 ## [1.6.1] - 2026-09-12
 
