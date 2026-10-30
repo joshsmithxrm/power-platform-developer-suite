@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - Unreleased
+
+### Security
+
+- Consume PPDS.Dataverse 1.3.2, carrying `System.Security.Cryptography.Pkcs` 10.0.13 and `System.Security.Cryptography.Xml` 8.0.5 through the migration dependency graph.
+
+### Changed
+
+- Refresh Microsoft.Extensions dependencies to 10.0.13, the MSAL cache extension to 4.90.1, and SourceLink build tooling to 10.0.401. Migration formats and public APIs are unchanged.
+
 ## [1.2.1] - 2026-09-12
 
 ### Security
