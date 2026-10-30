@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - Unreleased
+
+### Changed
+
+- Refresh the root README included in the NuGet package and correct the package description's deployment tool name from PPDS.Tools to PPDS CLI.
+- Update SourceLink build tooling from 10.0.201 to 10.0.401. Registration attributes, the net462 library target, and the existing strong-name identity (`0b0809faff135778`) are unchanged.
+
 ## [3.0.0] - 2026-04-18
 
 Promotes the `2.1.0-beta.1` annotation surface to stable, aligned with the broader PPDS v1.0.0 launch. Source-compatible with 2.x — all attribute additions are additive. No framework target change — still `net462` (Dataverse plugin sandbox requirement).
