@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Plugin reference caches are isolated by OS account** — embedded framework references now use protected local application data, validate ownership, permissions and links before reuse or repair, and warn on unsafe storage. Legacy shared-temp caches are neither used nor removed (#1329).
+
 ### Fixed
 - **Plugin extraction repairs incomplete reference caches** — the embedded .NET Framework reference cache now checks every expected file and its size, restoring missing or truncated facades such as `System.Runtime.dll` even when `.complete` and `mscorlib.dll` survive. Complete caches are reused without rewriting (#1358).
 - **Model-driven app editing preserves intended selections and localized navigation** — all component names/IDs are validated before writes, duplicate names require explicit candidate IDs, retained selections are kept, and additions precede removals with partial-failure guidance. Sitemap matching resolves localized labels, prioritizes stable IDs, rejects ambiguous titles and preserves translations (#1448).

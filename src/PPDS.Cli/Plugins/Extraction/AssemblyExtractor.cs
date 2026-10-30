@@ -183,7 +183,7 @@ public sealed class AssemblyExtractor : IDisposable
     /// <summary>
     /// Overload that redirects the cache base directory so tests can exercise cache
     /// corruption and self-healing against an isolated location instead of the real
-    /// per-user cache in the temp directory. The optional callback lets tests pause after a
+    /// per-user application-data cache. The optional callback lets tests pause after a
     /// cache miss to reproduce a competing process publishing before recovery begins.
     /// </summary>
     internal static string? GetNet462ReferenceAssemblyDirectory(
@@ -206,22 +206,13 @@ public sealed class AssemblyExtractor : IDisposable
             // resource (new CLI version) lands in a fresh directory, so there is no stale cache.
             var hash = Convert.ToHexString(SHA256.HashData(zipBytes))[..16].ToLowerInvariant();
 
-            var baseDir = cacheBaseDirOverride;
-            if (baseDir == null)
-            {
-                // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
-                // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
-                // created by the first user and then throw UnauthorizedAccessException for every other
-                // account — which the outer catch swallows, silently disabling the fix for them.
-                // Isolating by user name gives each account its own cache. See #1294.
-                var rawUser = Environment.UserName;
-                var userScope = string.IsNullOrWhiteSpace(rawUser)
-                    ? "default"
-                    : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
-                baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
-            }
-
+            // Never read or migrate the legacy shared-temp cache. Establish the account
+            // boundary before the warm-cache fast path or any repair/cleanup (#1329).
+            var baseDir = cacheBaseDirOverride == null
+                ? ReferenceCacheDirectory.PrepareDefault()
+                : ReferenceCacheDirectory.Prepare(cacheBaseDirOverride);
             var cacheDir = Path.Combine(baseDir, hash);
+            ReferenceCacheDirectory.ValidateCache(cacheDir);
             using var zipStream = new MemoryStream(zipBytes, writable: false);
             using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
 
@@ -252,6 +243,7 @@ public sealed class AssemblyExtractor : IDisposable
         Directory.CreateDirectory(baseDir);
         using (AcquireReferenceCacheLock(cacheDir))
         {
+            ReferenceCacheDirectory.ValidateCache(cacheDir);
             if (IsPopulated(cacheDir, archive))
                 return cacheDir;
 
@@ -265,7 +257,7 @@ public sealed class AssemblyExtractor : IDisposable
             // Extract to a unique staging directory, then atomically move it into place so a
             // concurrent extraction never observes a half-populated cache directory.
             var stagingDir = Path.Combine(baseDir, $".staging-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(stagingDir);
+            ReferenceCacheDirectory.CreatePrivateDirectory(stagingDir);
             try
             {
                 archive.ExtractToDirectory(stagingDir);
@@ -273,6 +265,18 @@ public sealed class AssemblyExtractor : IDisposable
                 // Completion sentinel, written only after every entry extracted: validation
                 // treats any cache directory without it as incomplete.
                 File.WriteAllBytes(Path.Combine(stagingDir, CompletionSentinelFileName), []);
+
+                // A private staging root prevents traversal during extraction. Tighten only
+                // newly extracted objects: a Unix default ACL or umask must not publish
+                // group/other-writable files. Never change pre-existing cache permissions.
+                if (!OperatingSystem.IsWindows())
+                {
+                    foreach (var path in Directory.EnumerateDirectories(stagingDir, "*", SearchOption.AllDirectories))
+                        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    foreach (var path in Directory.EnumerateFiles(stagingDir, "*", SearchOption.AllDirectories))
+                        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                ReferenceCacheDirectory.ValidateCache(stagingDir);
 
                 if (IsPopulated(cacheDir, archive))
                     return cacheDir; // Another process won the race while we were extracting.
@@ -316,13 +320,19 @@ public sealed class AssemblyExtractor : IDisposable
     {
         // Keep the lock file beside (not inside) the replaceable cache. Do not delete it on
         // close: waiters must all lock the same file, including across terminal sessions.
-        // This stays within the existing cache path's permissions/trust boundary (#1329).
+        // Its parent and any existing lock have already passed account-boundary checks.
         var timer = Stopwatch.StartNew();
         while (true)
         {
             try
             {
-                return new FileStream(cacheDir + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var options = new FileStreamOptions
+                {
+                    Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None
+                };
+                if (!OperatingSystem.IsWindows())
+                    options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                return new FileStream(cacheDir + ".lock", options);
             }
             catch (IOException) when (timer.Elapsed < TimeSpan.FromSeconds(30))
             {
@@ -335,7 +345,8 @@ public sealed class AssemblyExtractor : IDisposable
     /// A cache directory is complete only when the sentinel and every file from the embedded
     /// ZIP are present at the expected length. The ZIP is the source of truth, so unrelated
     /// files cannot mask a missing facade and existing complete caches need no migration.
-    /// This detects deletion/truncation, not malicious same-length replacements (#1329).
+    /// This detects deletion/truncation; ReferenceCacheDirectory establishes the separate
+    /// account boundary before this completeness check reads cached contents (#1329).
     /// </summary>
     internal static bool IsPopulated(string directory, ZipArchive archive)
     {
