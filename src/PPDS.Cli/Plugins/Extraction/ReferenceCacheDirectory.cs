@@ -105,8 +105,10 @@ internal static class ReferenceCacheDirectory
         }
         // Cooperating repairs can replace an incomplete cache while we inspect it.
         // Missing entries are handled by completeness validation, not a trust failure.
-        catch (FileNotFoundException) { }
-        catch (DirectoryNotFoundException) { }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return; // No entry remains to validate; completeness decides whether to repair.
+        }
     }
 
     private static FileAttributes? AttributesIfPresent(string path)
