@@ -1294,11 +1294,11 @@ No host identities or account permissions are created or changed by these fixtur
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-61 | Resolve the cache under protected per-user storage and never consume or delete a pre-seeded legacy temp cache | `DefaultPath_UsesLocalApplicationData`, `PrivateCache_IgnoresLegacySeed` | 🔲 |
-| AC-62 | Reject unsafe cache ownership/permissions; another unprivileged account cannot create, replace, delete, or modify content in new storage | `Prepare_UnsafePermissions_RejectsWithoutChangingContent`, `CrossUserCacheBoundary` | 🔲 |
-| AC-63 | Reject cache/lock/file redirection before reading, extraction, or cleanup, preserving link targets | `Prepare_CacheLinks_RejectsWithoutChangingTarget` | 🔲 |
-| AC-64 | Unavailable or unsafe private storage produces an actionable stderr warning, no stdout, and no shared-temp fallback | `GetReferenceDirectory_UnsafeStorage_WarnsAndPreservesContent` | 🔲 |
-| AC-65 | Private storage retains complete-cache reuse, missing-file recovery, and concurrent repair across native shipped platforms | `PrivateCache_RecoveryAndReuse`, `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache` | 🔲 |
+| AC-61 | Resolve the cache under protected per-user storage and never consume or delete a pre-seeded legacy temp cache | `DefaultPath_UsesLocalApplicationData`, `PrivateCache_IgnoresLegacySeed` | ✅ |
+| AC-62 | Reject unsafe cache ownership/permissions; another unprivileged account cannot create, replace, delete, or modify content in new storage | `Prepare_UnsafePermissions_RejectsWithoutChangingContent`, `CrossUserCacheBoundary` | ✅ |
+| AC-63 | Reject cache/lock/file redirection before reading, extraction, or cleanup, preserving link targets | `Prepare_CacheLinks_RejectsWithoutChangingTarget` | ✅ |
+| AC-64 | Unavailable or unsafe private storage produces an actionable stderr warning, no stdout, and no shared-temp fallback | `GetReferenceDirectory_UnsafeStorage_WarnsAndPreservesContent` | ✅ |
+| AC-65 | Private storage retains complete-cache reuse, missing-file recovery, and concurrent repair across native shipped platforms | `PrivateCache_RecoveryAndReuse`, `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache` | ✅ |
 
 ### NuGet Plugin Package Acceptance Criteria
 
