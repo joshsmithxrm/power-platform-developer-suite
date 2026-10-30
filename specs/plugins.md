@@ -1,7 +1,7 @@
 # Plugin System
 
 **Status:** Draft
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-10-29
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** All
 
@@ -111,6 +111,26 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - Assemblies must be strong-named for Dataverse registration
 - `ExecutionOrder` must be 1-999999
 - All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
+
+### Single-file extraction verification
+
+The PR test gate must run the published self-contained, single-file CLI on Windows,
+Linux, and macOS against a deterministic local net462 plug-in fixture. Copy only the
+executable into an isolated directory and give each scenario fresh temporary/config
+storage. On fresh native runners, require the actual protected account cache to be
+absent before extraction; run unit tests afterward so they cannot prepopulate it.
+Compare every cached file byte-for-byte with the archive embedded by that publish,
+so installed frameworks, publish sidecars, or an earlier cache cannot mask missing
+embedded references. Local reuse must be explicitly reported as warm-cache-only
+verification and must not remove existing caches. Validate registrations, cold/warm cache behavior,
+explicit dependency resolution, and structured failure output without Dataverse access.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-56 | Extraction fixture compilation uses portable restored net462 references, with no Windows framework installation paths | `Extract_WithoutRuntimeDirectory_SucceedsViaEmbeddedReferenceAssemblies` | ✅ |
+| AC-57 | The actual single-file executable extracts DLL registrations and images using fresh embedded references and returns identical metadata on cache reuse | `SingleFileExtractionTests.test_dll_extraction_cold_and_warm_cache` | ✅ |
+| AC-58 | The single-file executable extracts a local net462 NuGet plug-in package without bundled framework or Dataverse SDK assemblies | `SingleFileExtractionTests.test_package_extraction` | ✅ |
+| AC-59 | Missing plug-in dependencies fail with structured errors and resolve via `--reference-dir`; malformed packages fail instead of returning empty success | `SingleFileExtractionTests.test_missing_dependency_and_reference_dir`, `SingleFileExtractionTests.test_invalid_package_reports_error` | ✅ |
 
 ### NuGet Plugin Package Registration
 
@@ -1213,6 +1233,96 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-26 | RPC `plugins/registerStep` accepts `secureConfiguration` parameter and passes it through to `UpsertStepAsync` | ❌ |
 | AC-27 | CLI `ppds plugins register step` accepts `--event-handler-type` flag (pluginType or serviceEndpoint, default: pluginType) to register steps on service endpoints | ❌ |
 
+### Reference Assembly Cache Acceptance Criteria
+
+The embedded net462 ZIP defines the expected cache files and their uncompressed lengths.
+Cache validation requires the completion sentinel and every expected file at its expected
+length, including non-core facades. Missing or truncated content triggers staged
+re-extraction; unrelated files cannot substitute for required assemblies. Valid caches,
+including caches from earlier CLI builds with the same ZIP, are reused without rewriting.
+Validation rejects ZIP entry paths outside the cache, including similarly prefixed siblings.
+On local filesystems with OS file locking enabled, repairs exclusively open a persistent
+`<hash>.lock` file beside the replaceable cache and
+revalidate after acquiring it, so delayed callers preserve a concurrent winner across
+processes and terminal sessions. Lock contention retries for at most 30 seconds; closing
+the handle or exiting releases ownership. Failure retains the existing stderr warning
+and runtime-reference fallback. External mutation during use (including deletion of an
+active lock file) is outside this completeness guarantee.
+This checks completeness, not authenticity against malicious same-length replacements.
+The user-account trust boundary below prevents other unprivileged accounts from supplying
+those files; processes running as the same account and administrators remain trusted.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-52 | Missing non-core reference assemblies and truncated facades recover even when the sentinel and mscorlib survive or an unrelated file preserves the file count; ZIP validation rejects paths outside the cache | `GetNet462ReferenceAssemblyDirectory_MissingNonCoreAssembly_RestoresExactContent`, `GetNet462ReferenceAssemblyDirectory_TruncatedFacade_RestoresExactContent`, `IsPopulated_EntryOutsideCache_RejectsEvenWhenFileExists` | ✅ |
+| AC-53 | A complete cache is reused without replacing files, changing timestamps, or leaving staging directories | `GetNet462ReferenceAssemblyDirectory_ValidCache_PreservesExistingFiles` | ✅ |
+| AC-54 | Concurrent initialization and recovery return complete caches, preserve a winner even when another caller has already observed a cache miss, and clean up staging directories | `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache`, `GetNet462ReferenceAssemblyDirectory_StaleCacheMiss_PreservesConcurrentWinner` | ✅ |
+| AC-55 | A blocked publication returns null through the existing warning/fallback path, cleans staging, and can recover after the obstruction is removed | `GetNet462ReferenceAssemblyDirectory_BlockedPublication_CleansStagingAndCanRetry` | ✅ |
+
+### Reference Assembly Cache Trust Boundary
+
+The reference cache lives under the OS `LocalApplicationData` directory at
+`PPDS/cache/net462-ref/<zip-hash>`. Neither the legacy
+`<temp>/ppds-<username>/net462-ref` tree nor its contents are read, migrated, repaired,
+or deleted. Missing/relative local application data paths fail with the existing stderr
+warning and runtime-reference fallback; there is no fallback to a shared cache.
+
+Before a cache is reused or repaired, its storage hierarchy must be protected against
+other unprivileged OS accounts. On Unix, ancestors must belong to the effective user or
+root and must not be group/other writable (root-owned sticky ancestors such as `/tmp`
+are allowed). Cache-owned directories/files must belong to the effective user and must
+not be writable by group/other; new directories are created with mode 0700. Staging stays
+private during extraction; newly extracted Unix directories/files are normalized to
+0700/0600 and validated before publication, including when default ACLs are inherited.
+New Unix lock files use 0600. Pre-existing permissions are never repaired. macOS extended
+ACLs are also checked: deny entries and read/list/search-only allows are accepted;
+mutation-capable allows (including inheritable grants), unknown forms, and ACL inspection
+failures are rejected. This conservative policy also rejects custom write grants to
+otherwise trusted principals rather than implementing UUID/group membership resolution.
+On Windows, cache owners and mutation-capable ACL entries are limited to the current user,
+SYSTEM, and local Administrators; OS ancestors additionally permit TrustedInstaller.
+Private cache directories are created with a protected DACL. Ancestor checks allow creation
+of unrelated siblings, but never removal/replacement of the selected existing directory,
+attribute changes, or security-descriptor changes by an untrusted principal. Effective and
+inherit-only ACEs are distinguished; pre-existing cache children are checked individually.
+AppContainer package/capability allow entries (`S-1-15-2-*`/`S-1-15-3-*`) do not confer
+ordinary account access: Windows requires both account and AppContainer checks to pass.
+They are ignored only when assessing cross-account mutation, never accepted as owners;
+ordinary untrusted user/group mutation grants still reject the path.
+
+System/user-owned ancestor links may resolve only into a separately validated protected
+hierarchy; the original traversal is validated before resolution, and subsequent I/O uses
+the resolved path. Links/reparse points in cache-owned
+directories, cached files, or the lock file are rejected before reading or cleanup.
+Unsafe pre-existing permissions/ownership are rejected, not silently changed. The lock,
+staging directories, warm reuse, and corrupt-cache repair retain AC-52–55 behavior inside
+this boundary. Validate the persistent lock before opening it, then inspect cache trust
+and completeness while holding that lock so readers cannot inspect a tree mid-repair.
+Failures identify the unsafe path on stderr and preserve stdout for data.
+
+This boundary protects against other unprivileged accounts on local filesystems with
+normal OS access control. Same-account attackers, administrators/root, hostile filesystems,
+and deliberate post-validation mutation by those trusted actors are non-goals. Cache
+hashes identify the embedded resource; they are not signatures over cached contents.
+Metadata inspection does not execute reference assemblies. Resolver ordering and modern
+TFM support (#1331) are unchanged.
+
+`reference-cache-trust.yml` runs the focused filesystem tests and the actual default-path
+probe on all five shipped native RIDs. `PrivateCache_IgnoresLegacySeed` uses only a marked,
+disposable temp fixture for poisoned legacy contents. `CrossUserCacheBoundary` runs in a
+disposable Linux container with its existing `nobody`/`www-data` identities; it checks
+pre-seeding/squatting, unauthorized writes/deletes/replacement, unsafe ownership, default
+ACL inheritance, intermediate links, special files, and concurrent process recovery.
+No host identities or account permissions are created or changed by these fixtures.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-61 | Resolve the cache under protected per-user storage and never consume or delete a pre-seeded legacy temp cache | `DefaultPath_UsesLocalApplicationData`, `PrivateCache_IgnoresLegacySeed` | ✅ |
+| AC-62 | Reject unsafe cache ownership/permissions; another unprivileged account cannot create, replace, delete, or modify content in new storage | `Prepare_UnsafePermissions_RejectsWithoutChangingContent`, `CrossUserCacheBoundary` | ✅ |
+| AC-63 | Reject cache/lock/file redirection before reading, extraction, or cleanup, preserving link targets | `Prepare_CacheLinks_RejectsWithoutChangingTarget` | ✅ |
+| AC-64 | Unavailable or unsafe private storage produces an actionable stderr warning, no stdout, and no shared-temp fallback | `GetReferenceDirectory_UnsafeStorage_WarnsAndPreservesContent` | ✅ |
+| AC-65 | Private storage retains complete-cache reuse, missing-file recovery, and concurrent repair across native shipped platforms | `PrivateCache_RecoveryAndReuse`, `PrivateCache_WaitsForRepairLockBeforeTrustInspection`, `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache` | ✅ |
+
 ### NuGet Plugin Package Acceptance Criteria
 
 | ID | Criterion | Test | Status |
@@ -1321,6 +1431,8 @@ public async Task Deploy_IdempotentOnSecondRun()
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Protected per-user reference-cache storage, OS permission/link validation, untouched legacy storage, and native/cross-user trust-boundary AC-61–65 (#1329) |
+| 2026-10-29 | Reference cache completeness, preservation, concurrent recovery, and failure-path ACs (#1358) |
 | 2026-03-26 | v1 completion: remove IsManaged gatekeeping (#660), secureConfiguration in RPC (#63), service endpoint step support (#65) |
 | 2026-03-23 | Added Extension, MCP, RPC surfaces; new annotation properties; CLI enable/disable; updated ACs |
 | 2026-03-18 | Merged TUI surface content from tui-plugin-registration.md per SL3 |

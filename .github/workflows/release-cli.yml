@@ -17,13 +17,13 @@ jobs:
             os: windows-latest
             artifact: ppds-win-x64.exe
           - rid: win-arm64
-            os: windows-latest
+            os: windows-11-arm
             artifact: ppds-win-arm64.exe
           - rid: osx-x64
-            os: macos-latest
+            os: macos-15-intel
             artifact: ppds-osx-x64
           - rid: osx-arm64
-            os: macos-latest
+            os: macos-15
             artifact: ppds-osx-arm64
           - rid: linux-x64
             os: ubuntu-latest
@@ -39,7 +39,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.427
+            10.0.114
 
       - name: Publish self-contained binary
         run: |
@@ -51,6 +53,27 @@ jobs:
             --self-contained \
             -o ./publish
         shell: bash
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Build deterministic local plugin fixture
+        run: dotnet build tests/fixtures/SingleFilePlugin/SingleFilePlugin.csproj -c Release
+
+      - name: Build read-only cache location probe
+        run: dotnet build tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj -c Release
+
+      - name: Verify extraction before uploading release binary
+        shell: bash
+        run: |
+          binary=./publish/ppds
+          if [[ "${{ runner.os }}" == "Windows" ]]; then binary+=.exe; fi
+          python scripts/ci/smoke_single_file_extraction.py \
+            --binary "$binary" \
+            --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462 \
+            --cache-probe tests/fixtures/ReferenceCacheProbe/bin/Release/net8.0/ReferenceCacheProbe.dll \
+            --reference-archive src/PPDS.Cli/obj/Release/net8.0/${{ matrix.rid }}/Net462ReferenceAssemblies.zip
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
