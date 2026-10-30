@@ -112,6 +112,49 @@ public sealed class ReferenceCacheTrustTests : IDisposable
         Assert.Equal(timestamp, File.GetLastWriteTimeUtc(facade));
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    [Trait("AC", "AC-65")]
+    public async Task PrivateCache_WaitsForRepairLockBeforeTrustInspection()
+    {
+        var root = Path.Combine(_root, "cache");
+        var cache = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(root);
+        Assert.NotNull(cache);
+        var facade = Path.Combine(cache, "System.Runtime.dll");
+        var expected = File.ReadAllBytes(facade);
+        var timestamp = File.GetLastWriteTimeUtc(facade);
+        using var writer = new FileStream(cache + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        // Hold a transient, invalid tree state behind the cooperating writer's lock.
+        // Readers must inspect the final tree after the writer finishes, not fail
+        // midway through repair. Existing unsafe-storage tests cover permanent states.
+        var restore = AllowOtherWrite(cache);
+        using var started = new ManualResetEventSlim();
+        var reader = Task.Factory.StartNew(() =>
+        {
+            started.Set();
+            return AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(root);
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        bool completedWhileLocked;
+        try
+        {
+            Assert.True(started.Wait(TimeSpan.FromSeconds(10)), "Reader did not start.");
+            await Task.WhenAny(reader, Task.Delay(TimeSpan.FromSeconds(1)));
+            completedWhileLocked = reader.IsCompleted;
+        }
+        finally
+        {
+            restore();
+            writer.Dispose();
+        }
+
+        var result = await reader.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(completedWhileLocked, "Reader inspected a tree while a repair held the lock.");
+        Assert.Equal(cache, result);
+        Assert.Equal(expected, File.ReadAllBytes(facade));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(facade));
+    }
+
     [Theory]
     [InlineData("base")]
     [InlineData("cache")]
@@ -341,6 +384,10 @@ public sealed class ReferenceCacheTrustTests : IDisposable
             return () =>
             {
                 if (!OperatingSystem.IsWindows()) return;
+                // SetAccessControl persists only modified sections. Mark the saved
+                // DACL as modified so restoration actually removes the test grant.
+                original.SetSecurityDescriptorBinaryForm(
+                    original.GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
                 if (directory) new DirectoryInfo(path).SetAccessControl((DirectorySecurity)original);
                 else new FileInfo(path).SetAccessControl((FileSecurity)original);
             };

@@ -32,8 +32,11 @@ internal static class ReferenceCacheDirectory
     internal static void ValidateCache(string directory)
     {
         ValidateTreeIfPresent(directory);
-        ValidateTreeIfPresent(directory + ".lock");
+        ValidateLock(directory);
     }
+
+    internal static void ValidateLock(string directory)
+        => ValidateTreeIfPresent(directory + ".lock");
 
     private static void RequireAbsolutePath(string path)
     {

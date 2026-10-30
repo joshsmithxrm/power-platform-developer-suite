@@ -212,13 +212,24 @@ public sealed class AssemblyExtractor : IDisposable
                 ? ReferenceCacheDirectory.PrepareDefault()
                 : ReferenceCacheDirectory.Prepare(cacheBaseDirOverride);
             var cacheDir = Path.Combine(baseDir, hash);
-            ReferenceCacheDirectory.ValidateCache(cacheDir);
+            ReferenceCacheDirectory.ValidateLock(cacheDir);
             using var zipStream = new MemoryStream(zipBytes, writable: false);
             using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
 
-            if (IsPopulated(cacheDir, archive))
-                return cacheDir;
+            // Trust inspection must share the repair lock: a cooperating writer may
+            // delete an incomplete tree between an attributes read and its ACL read.
+            // Windows can report that transient deletion as access denied, not missing.
+            // Validate the persistent lock before opening it; validate the cache only
+            // after a writer has finished, without weakening any permission checks.
+            using (AcquireReferenceCacheLock(cacheDir))
+            {
+                ReferenceCacheDirectory.ValidateCache(cacheDir);
+                if (IsPopulated(cacheDir, archive))
+                    return cacheDir;
+            }
 
+            // Keep the stale-miss seam outside the lock. Population rechecks the final
+            // state under the same lock before deleting or replacing anything.
             cacheMissDetected?.Invoke();
             return PopulateReferenceCache(cacheDir, baseDir, archive);
         }

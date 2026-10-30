@@ -1296,7 +1296,9 @@ the resolved path. Links/reparse points in cache-owned
 directories, cached files, or the lock file are rejected before reading or cleanup.
 Unsafe pre-existing permissions/ownership are rejected, not silently changed. The lock,
 staging directories, warm reuse, and corrupt-cache repair retain AC-52–55 behavior inside
-this boundary. Failures identify the unsafe path on stderr and preserve stdout for data.
+this boundary. Validate the persistent lock before opening it, then inspect cache trust
+and completeness while holding that lock so readers cannot inspect a tree mid-repair.
+Failures identify the unsafe path on stderr and preserve stdout for data.
 
 This boundary protects against other unprivileged accounts on local filesystems with
 normal OS access control. Same-account attackers, administrators/root, hostile filesystems,
@@ -1319,7 +1321,7 @@ No host identities or account permissions are created or changed by these fixtur
 | AC-62 | Reject unsafe cache ownership/permissions; another unprivileged account cannot create, replace, delete, or modify content in new storage | `Prepare_UnsafePermissions_RejectsWithoutChangingContent`, `CrossUserCacheBoundary` | ✅ |
 | AC-63 | Reject cache/lock/file redirection before reading, extraction, or cleanup, preserving link targets | `Prepare_CacheLinks_RejectsWithoutChangingTarget` | ✅ |
 | AC-64 | Unavailable or unsafe private storage produces an actionable stderr warning, no stdout, and no shared-temp fallback | `GetReferenceDirectory_UnsafeStorage_WarnsAndPreservesContent` | ✅ |
-| AC-65 | Private storage retains complete-cache reuse, missing-file recovery, and concurrent repair across native shipped platforms | `PrivateCache_RecoveryAndReuse`, `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache` | ✅ |
+| AC-65 | Private storage retains complete-cache reuse, missing-file recovery, and concurrent repair across native shipped platforms | `PrivateCache_RecoveryAndReuse`, `PrivateCache_WaitsForRepairLockBeforeTrustInspection`, `GetNet462ReferenceAssemblyDirectory_ConcurrentCalls_ReturnCompleteCache` | ✅ |
 
 ### NuGet Plugin Package Acceptance Criteria
 
