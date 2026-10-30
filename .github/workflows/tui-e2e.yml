@@ -1,5 +1,8 @@
 name: TUI E2E Tests
 
+permissions:
+  contents: read
+
 # TUI E2E is expensive (Playwright snapshot suite ≈ 6 min on windows-latest). Trigger only
 # when changes could reasonably affect rendered TUI output: the TUI source tree, the e2e
 # test project, or this workflow file itself.
@@ -30,6 +33,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
+        persist-credentials: false
         fetch-depth: 0
 
     - name: Setup .NET

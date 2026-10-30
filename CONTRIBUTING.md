@@ -162,6 +162,8 @@ delete guards). All of it is optional:
 
 ## Pull Request Process
 
+Workflow changes must follow the [Actions token permission policy](docs/CI-PERMISSIONS.md).
+
 1. **Create a PR** targeting `main`
 2. **Fill out the PR template** with:
    - Summary of changes

@@ -1,5 +1,8 @@
 name: Python Tests
 
+permissions:
+  contents: read
+
 # Runs the repository's pure-Python regression suite (`pytest tests/`) on any
 # change that could affect it. These tests guard `.claude/` workflow
 # infrastructure, CI helper scripts (`scripts/ci/`, `scripts/dependabot/`),
@@ -55,6 +58,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v7
