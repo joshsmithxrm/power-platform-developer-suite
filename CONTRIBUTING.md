@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Power Platform Developer Suite! T
 ### Prerequisites
 
 - .NET SDK 8.0+
-- Node.js 20+ (for extension development)
+- Node.js 22+ (for extension development and packaging tooling)
 - PowerShell 7+ (for scripts)
 - Git
 

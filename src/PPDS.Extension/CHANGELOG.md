@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Extension packaging tooling** — updated the development-only authentication dependencies used by `@vscode/vsce` to address [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5). Extension development and packaging now require Node.js 22+; Extension runtime authentication is unchanged ([#1484](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1484)).
+
 ## [1.6.1] - 2026-09-12
 
 ### Fixed
