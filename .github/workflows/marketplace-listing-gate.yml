@@ -1,5 +1,8 @@
 name: Marketplace Listing Gate
 
+permissions:
+  contents: read
+
 # Prong A of the AC-29 release-validation gate. Runs on PRs touching any
 # in-scope listing path and on main pushes so branch protection can require
 # this check. Prong B lives in extension-publish.yml as a preflight job.
@@ -36,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v7
