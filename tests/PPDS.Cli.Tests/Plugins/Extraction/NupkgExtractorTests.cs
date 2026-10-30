@@ -1455,6 +1455,25 @@ public class NupkgExtractorTests : IDisposable
         Assert.Contains("--reference-dir", exception.Message);
     }
 
+    [Theory]
+    [Trait("AC", "AC-60")]
+    [InlineData("netstandard2.0")]
+    [InlineData("net8.0")]
+    public void Extract_UnsupportedModernFramework_ExplainsLooseAssemblyRequirements(string framework)
+    {
+        var nupkgPath = Path.Combine(_scratch, "unsupported-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, framework);
+
+        var error = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, error.ErrorCode);
+        Assert.Contains($"lib/{framework}", error.Message);
+        Assert.Contains("A loose plugin assembly must also target a Dataverse-supported .NET Framework version", error.Message);
+        Assert.Contains("be strong-name-signed", error.Message);
+        Assert.Contains("changing the packaging alone does not make other target frameworks supported", error.Message);
+        Assert.DoesNotContain("Otherwise, deploy", error.Message);
+    }
+
     private static void CreatePluginPackage(
         string nupkgPath,
         string framework,
