@@ -94,6 +94,30 @@ The hook runs:
 Drop-in scripts under `scripts/hooks/pre-commit.d/` run before the .NET / TS
 gates. See `docs/CLAUDE-MD-GOVERNANCE.md` for the CLAUDE.md gate that lives there.
 
+### Single-file plugin extraction
+
+The `Test` workflow runs focused extraction unit tests and the actual published CLI
+on native runners for all shipped RIDs: `win-x64`, `win-arm64`, `linux-x64`,
+`osx-x64`, and `osx-arm64`. Its existing `test-status` gate requires every applicable
+leg to pass. The release workflow repeats the smoke suite before uploading each binary.
+No Dataverse environment or credentials are needed.
+
+To reproduce locally (substitute your native RID and use `ppds.exe` on Windows):
+
+```bash
+dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj -c Release -f net8.0 --filter FullyQualifiedName~PPDS.Cli.Tests.Plugins.Extraction -p:VSTestTreatNoTestsAsError=true
+dotnet build tests/fixtures/SingleFilePlugin/SingleFilePlugin.csproj -c Release
+dotnet publish src/PPDS.Cli/PPDS.Cli.csproj -c Release -f net8.0 -r linux-x64 -p:PublishSingleFile=true --self-contained -o ./publish
+python scripts/ci/smoke_single_file_extraction.py --binary ./publish/ppds --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462
+```
+
+The stdlib-only Python suite copies only the executable and fixture inputs into
+temporary directories (including paths with spaces), isolates each child process's
+reference cache, and checks DLL/package registration JSON, cache reuse, dependency
+failure/recovery, and malformed-package errors. It deliberately omits framework and
+Dataverse SDK DLLs from the inputs. A framework-dependent launcher cannot pass this
+test. Temporary files are removed when the suite exits.
+
 ### Coverage Bar
 
 PRs must achieve at least **80% patch coverage** on new code, enforced by
