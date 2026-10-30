@@ -107,7 +107,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 ### Constraints
 
 - Loose plugin assemblies may target a Dataverse-supported .NET Framework version (4.6.2 through 4.8)
-- NuGet plugin packages must contain a `lib/net462` or `lib/net471` asset group; Dataverse currently rejects packages containing only `lib/net48`
+- NuGet plugin packages must contain a `lib/net462`, `lib/net471`, or `lib/net48` asset group (preferred in that order when several are present)
 - Assemblies must be strong-named for Dataverse registration
 - `ExecutionOrder` must be 1-999999
 - All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
@@ -115,7 +115,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 ### NuGet Plugin Package Registration
 
 - The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
-- A `lib/net462` or `lib/net471` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
+- A `lib/net462`, `lib/net471`, or `lib/net48` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
 - First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
@@ -124,6 +124,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - Before authentication, environment resolution, or any Dataverse call, dry-run and real deploy canonicalize and buffer every configured artifact exactly once. Repeated paths, duplicate root package IDs, a stale configured identity, any missing or no-longer-deployable configured plug-in type, stripped per-type plug-in evidence, unresolved added candidate ancestry, or any additional plausible primary abort the whole configuration. The retained bytes drive inspection and upload, so concurrent path replacement cannot create a validate/upload split or partial application of later assemblies and Custom APIs. Cancellation is checked at each assembly and registration boundary so later assemblies, steps, images, and APIs cannot continue after a cancellation signal.
 - Extraction records a package-content SHA-256 and performs metadata, containment, and extraction against one immutable snapshot. Deploy normally proves every configured type and package-wide ambiguity from package-local metadata; the digest may preserve only unresolved external ancestry from an unchanged `--reference-dir` extraction without persisting machine-specific resolver paths. A digest never waives missing/non-deployable types, contradictory or malformed metadata, or invalid official annotations, and any changed package whose external ancestry cannot be reproven fails closed and must be re-extracted.
 - If Dataverse unexpectedly does not expose the validated primary assembly after a successful package upload, deployment returns structured read-only inspection and retry guidance. Any later unregister cleanup is explicitly destructive and separately confirmation-gated; PPDS does not automatically roll back or unregister the package.
+- Unsupported-framework errors must state that loose plugin assemblies also require a Dataverse-supported .NET Framework target and strong-name signing; changing packaging alone does not make an unsupported target deployable.
 
 ### Validation Rules
 
@@ -1219,8 +1220,8 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-28 | First-time NuGet package registration sends the root `.nuspec` ID and version with package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
 | AC-29 | Re-deploying an existing NuGet package updates content without attempting to change immutable name or version | `UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists` | ✅ |
 | AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
-| AC-31 | A package containing only `lib/net48` fails locally with a structured error naming Dataverse's supported `lib/net462` and `lib/net471` groups | `Extract_Net48OnlyPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
-| AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` asset group | `Extract_Net471Package_SelectsSupportedPluginAssembly` | ✅ |
+| AC-31 | A package with no supported framework group (e.g. only `lib/netstandard2.0`) fails locally with a structured error naming Dataverse's supported `lib/net462`, `lib/net471`, and `lib/net48` groups | `Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
+| AC-32 | Plugin extraction accepts the Dataverse-supported `lib/net471` and `lib/net48` asset groups | `Extract_Net471Package_SelectsSupportedPluginAssembly`, `Extract_Net48Package_SelectsSupportedPluginAssembly` | ✅ |
 | AC-35 | A zero-attribute runtime `IPlugin` package uses the assembly manifest simple name, includes runtime plug-in types in `allTypeNames`, and does not invent registration steps | `Extract_ZeroAttributeRuntimePlugin_UsesManifestNameAndDoesNotInventSteps` | ✅ |
 | AC-36 | Package inspection selects the only plausible primary assembly and rejects multiple plausible primaries with their candidate names | `Extract_RuntimePluginAndDependency_SelectsOnlyPluginAssembly`, `Extract_MultiplePlausiblePluginAssemblies_RejectsWithCandidateNames` | ✅ |
 | AC-37 | Dry-run and real deployment reject a configured/manifest assembly-name mismatch before any package lookup or `UpsertPackageAsync` call | `DeployAssemblyAsync_MismatchedPackageAssembly_FailsBeforeAnyUpload` | ✅ |
@@ -1238,6 +1239,7 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | AC-49 | Extraction validates containment and reads metadata from one immutable package snapshot and records its SHA-256; deploy accepts an unchanged package whose external ancestry was proven with `--reference-dir`, but the digest can waive only unresolved ancestry and never missing/non-deployable types, stripped evidence, invalid annotations, or malformed metadata | `Inspect_BufferedSnapshotDoesNotReopenReplacedPackagePath`, `DeployAssemblyAsync_StrippedPluginEvidence_FailsBeforeServerCalls`, `DeployAssemblyAsync_MixedInvalidOfficialHandler_FailsBeforeServerCallsEvenWithMatchingDigest`, `DeployAssemblyAsync_ConfigExtractedWithReferenceDir_DryRunDoesNotReloadDependencyGraph` | ✅ |
 | AC-50 | Cancellation propagates immediately from local preflight or deployment and cannot be converted into a failed result followed by profile creation, a later assembly/API mutation, or post-step image work | `ExecuteAsync_CancellationDuringPreflight_DoesNotCreateProfileOrContinue`, `ExecuteAsync_CancellationAfterFirstAssembly_DoesNotTouchLaterAssemblyOrApis`, `DeployAssemblyAsync_CancellationDuringUpload_RethrowsAndStopsDeployment`, `DeployAssemblyAsync_CancellationAfterStep_DoesNotInspectOrUpsertImages` | ✅ |
 | AC-51 | Extraction and deploy tie evidence to each configured runtime, step-owner, and Custom API handler TypeDef and verify it remains a public, concrete, closed class, an exact runtime `IPlugin`, and instantiable through a public `()`, `(string)`, or `(string, string)` constructor; removing, renaming, privatizing, abstracting, opening, stripping, or changing one handler to an unsupported constructor fails before profile creation, dry-run lookup, or real upload even when another valid plug-in remains | `Extract_RuntimePluginWithSupportedDataverseConstructor_Succeeds`, `Extract_RuntimePluginWithoutSupportedDataverseConstructor_RejectsPackage`, `DeployAssemblyAsync_RebuiltPackageRemovesConfiguredType_FailsBeforeLookupOrUpload`, `DeployAssemblyAsync_ConfiguredTypeLosesRuntimeDeployability_FailsBeforeServerCalls`, `ExecuteAsync_UnsupportedPluginConstructor_FailsBeforeProfileCreation` | ✅ |
+| AC-60 | Packages targeting only netstandard2.0 or net8.0 fail locally; their diagnostic requires a supported .NET Framework target and strong-name signing for loose assemblies and does not offer repackaging alone as a workaround | `Extract_UnsupportedModernFramework_ExplainsLooseAssemblyRequirements`, `UpsertPackageAsync_UnsupportedModernFramework_ExplainsRequirementsBeforeConnecting` | ✅ |
 
 ### Edge Cases
 

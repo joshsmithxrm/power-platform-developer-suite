@@ -85,7 +85,7 @@ Multiple attributes can be applied to the same class for plugins that handle mul
 ## Target Frameworks
 
 - `PPDS.Plugins` targets `net462` as its compatibility baseline and can be referenced by plug-in projects targeting .NET Framework 4.6.2 through 4.8.
-- Dataverse currently requires NuGet plug-in packages to contain a `lib/net462` or `lib/net471` asset group, so a packaged plug-in project must target one of those frameworks even though loose plug-in assemblies may target .NET Framework 4.8.
+- NuGet plug-in packages must contain a `lib/net462`, `lib/net471`, or `lib/net48` asset group.
 
 ## Report an Issue
 
