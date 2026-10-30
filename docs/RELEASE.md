@@ -71,6 +71,26 @@ CHANGELOG, create tags only after review, push tags individually, monitor every
 publish workflow, and verify the public artifacts before closing the release
 record.
 
+### Documentation for per-product releases
+
+Per-product tags such as `Cli-v*` and `Extension-v*` do not trigger
+`docs-release.yml`, which listens for unified `v*` tags and explicit dispatch.
+For a coordinated patch, record an explicit docs dispatch against the final
+reviewed release ref; do not invent a unified version tag just to trigger docs.
+After the applicable release/docs approval, select a co-located product tag
+whose peeled commit equals the reviewed release SHA and dispatch, for example:
+
+```bash
+gh workflow run docs-release.yml --ref <reviewed-product-release-tag> -f dry_run=true
+```
+
+Review the generated artifacts, then separately authorize the `dry_run=false`
+dispatch that opens the paired docs and API-rollover PRs. Check the existing
+rollover-PR gate and review both outputs, including an expected no-op rollover
+when no unshipped API entries exist. Recapture companion skills against the
+same final CLI/MCP versions. A successful product publish alone does not prove
+that docs or skills were refreshed.
+
 ### Patch release records
 
 `post-merge-release-check.yml` evaluates a merged PR when `release:patch` is

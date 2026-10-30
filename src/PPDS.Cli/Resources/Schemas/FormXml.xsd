@@ -1070,6 +1070,7 @@
 			<xs:element name="UClientActivities" type="xs:string" minOccurs="0" maxOccurs="1" />
 			<xs:element name="UClientOrderBy" type="xs:string" minOccurs="0" maxOccurs="1" />
 			<xs:element name="UClientActivityCardMap" type="xs:string" minOccurs="0" maxOccurs="1" />
+			<xs:element name="UClientActivitiesConfigurationJSON" type="xs:string" minOccurs="0" maxOccurs="1" />
 			<xs:element name="UClientDisplayActivityHeaderUsing" type="xs:string" minOccurs="0" maxOccurs="1" />
 			<xs:element name="UClientSortActivitiesByValue" type="xs:string" minOccurs="0" maxOccurs="1" />
 		</xs:choice>
