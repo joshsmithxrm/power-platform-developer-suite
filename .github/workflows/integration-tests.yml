@@ -1,5 +1,8 @@
 name: Integration Tests
 
+# Jobs opt into only the scopes they use; the status aggregator needs none.
+permissions: {}
+
 on:
   push:
     branches: [main]
@@ -67,6 +70,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
+        persist-credentials: false
         fetch-depth: 0
 
     - name: Setup .NET
@@ -115,6 +119,7 @@ jobs:
   # Preserves the pre-matrix "Integration Tests" status check name so branch protection
   # rules keep working without modification.
   integration-tests-status:
+    permissions: {}
     name: Integration Tests
     runs-on: ubuntu-latest
     needs: integration-tests

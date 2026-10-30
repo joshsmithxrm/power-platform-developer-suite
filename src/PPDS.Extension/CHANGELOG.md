@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 
 - Bundle DOMPurify 3.4.17 for notebook HTML sanitization and consume the patched cryptography and MessagePack dependencies in CLI 1.4.2.
+- **Extension packaging tooling** — updated the development-only authentication dependencies used by `@vscode/vsce` to address [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5). Extension development and packaging now require Node.js 22+; Extension runtime authentication is unchanged ([#1484](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/1484)).
 
 ### Changed
 

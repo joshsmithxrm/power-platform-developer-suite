@@ -1,5 +1,8 @@
 name: docs-smoke
 
+permissions:
+  contents: read
+
 # Reusable workflow invoked by the ppds-docs repo whenever a docs guide PR
 # modifies a C# code sample. Compiles every fenced `csharp` block against the
 # ppds assemblies at the pinned ref and fails the check on the first bad block.
@@ -29,11 +32,13 @@ jobs:
       - name: Checkout ppds
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           ref: ${{ inputs.ppds_ref }}
 
       - name: Checkout docs
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           repository: ${{ inputs.docs_repo }}
           ref: ${{ inputs.docs_ref }}
           path: .docs-repo
