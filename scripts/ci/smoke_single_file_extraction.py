@@ -2,11 +2,13 @@
 """Exercise a published single-file CLI, without Dataverse or installed DLL sidecars."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -15,9 +17,43 @@ import zipfile
 class SingleFileExtractionTests(unittest.TestCase):
     binary_source: Path
     fixture_source: Path
+    cache_probe: Path
+    reference_archive: Path
+    allow_existing_cache: bool
 
     @classmethod
     def setUpClass(cls):
+        # The probe only asks the OS for its actual per-account data directory;
+        # it neither prepares the cache nor supplies references to the copied CLI.
+        description = subprocess.run(
+            ["dotnet", str(cls.cache_probe), "describe"], capture_output=True,
+            text=True, encoding="utf-8", timeout=30, check=True,
+        )
+        if description.stderr.strip():
+            raise AssertionError(description.stderr)
+        local_data = Path(json.loads(description.stdout)["localApplicationData"])
+        if not local_data.is_absolute():
+            raise AssertionError("The OS did not provide an absolute local application data directory")
+        archive_hash = hashlib.sha256(cls.reference_archive.read_bytes()).hexdigest()[:16]
+        with zipfile.ZipFile(cls.reference_archive) as archive:
+            cls.expected_references = {
+                entry.filename: archive.read(entry) for entry in archive.infolist()
+                if not entry.is_dir()
+            }
+        if not {"mscorlib.dll", "System.Runtime.dll"} <= cls.expected_references.keys():
+            raise AssertionError("The published reference archive is incomplete")
+        cls.cache = (local_data / "PPDS" / "cache" / "net462-ref" / archive_hash).resolve()
+        if cls.cache.exists():
+            if not cls.allow_existing_cache:
+                raise AssertionError(
+                    f"Cold-cache verification requires an absent cache: {cls.cache}. "
+                    "Run on a fresh runner, or use --allow-existing-cache for an explicit "
+                    "local warm-cache check. Existing account caches are never removed."
+                )
+            print(f"LOCAL WARM-CACHE CHECK: {cls.cache}; cold creation is not verified.",
+                  file=sys.stderr)
+        else:
+            print(f"Cold-cache verification: {cls.cache}", file=sys.stderr)
         cls.sandbox = tempfile.TemporaryDirectory(prefix="ppds single file ")
         cls.addClassCleanup(cls.sandbox.cleanup)
         cls.root = Path(cls.sandbox.name)
@@ -98,15 +134,20 @@ class SingleFileExtractionTests(unittest.TestCase):
         return assembly
 
     def assert_embedded_cache(self):
-        cores = list(self.temp.glob("ppds-*/net462-ref/*/mscorlib.dll"))
-        self.assertEqual(1, len(cores), "Expected a fresh embedded-reference cache")
-        cache = cores[0].parent
+        cache = self.cache
+        self.assertTrue(cache.is_dir(), f"Expected the private embedded-reference cache: {cache}")
+        actual = {p.relative_to(cache).as_posix() for p in cache.rglob("*") if p.is_file()}
+        self.assertEqual(set(self.expected_references) | {".complete"}, actual)
+        for name, expected in self.expected_references.items():
+            self.assertTrue((cache / name).read_bytes() == expected,
+                            f"Cached bytes differ from published embedded resource: {name}")
         for name in ("mscorlib.dll", "System.Runtime.dll"):
             self.assertGreater((cache / name).stat().st_size, 0)
         self.assertTrue((cache / ".complete").is_file())
-        # Only the embedded-reference cache may supply mscorlib. A framework-dependent
-        # app or managed-DLL bundle extraction must not satisfy this smoke test.
-        self.assertEqual(cores, list(self.case.rglob("mscorlib.dll")))
+        self.assertEqual(0, (cache / ".complete").stat().st_size)
+        # References belong only in protected account storage. Neither a legacy
+        # temp cache nor managed-DLL bundle extraction may satisfy the smoke test.
+        self.assertEqual([], list(self.case.rglob("mscorlib.dll")))
         self.assertFalse(list((self.temp / "bundle").rglob("System.Private.CoreLib.dll")))
         return cache
 
@@ -130,6 +171,7 @@ class SingleFileExtractionTests(unittest.TestCase):
         before = {p.name: p.stat().st_mtime_ns for p in cache.iterdir()}
         warm = self.assert_registration(self.extract(self.dll), "Assembly")
         self.assertEqual(cold, warm)
+        self.assert_embedded_cache()
         self.assertEqual(before, {p.name: p.stat().st_mtime_ns for p in cache.iterdir()})
 
     def test_package_extraction(self):
@@ -159,7 +201,16 @@ if __name__ == "__main__":
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--fixture", required=True, type=Path,
                         help="Built SingleFilePlugin output directory")
+    parser.add_argument("--cache-probe", required=True, type=Path,
+                        help="Built ReferenceCacheProbe.dll (read-only OS location query)")
+    parser.add_argument("--reference-archive", required=True, type=Path,
+                        help="Net462ReferenceAssemblies.zip from this CLI publish's obj directory")
+    parser.add_argument("--allow-existing-cache", action="store_true",
+                        help="Local warm-cache verification only; CI must require a cold cache")
     options = parser.parse_args()
     SingleFileExtractionTests.binary_source = options.binary.resolve(strict=True)
     SingleFileExtractionTests.fixture_source = options.fixture.resolve(strict=True)
+    SingleFileExtractionTests.cache_probe = options.cache_probe.resolve(strict=True)
+    SingleFileExtractionTests.reference_archive = options.reference_archive.resolve(strict=True)
+    SingleFileExtractionTests.allow_existing_cache = options.allow_existing_cache
     unittest.main(argv=[__file__], verbosity=2)

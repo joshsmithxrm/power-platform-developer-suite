@@ -27,6 +27,15 @@ ppds data export --schema schema.xml --output data.zip
 
 ## Command Structure
 
+Plugin extraction caches embedded .NET Framework references under the OS local application
+data directory at `PPDS/cache/net462-ref/<resource-hash>`. Cache storage must be protected
+against writes by other unprivileged OS accounts. Unsafe owners, write permissions, or
+cache links produce a warning on stderr; use protected local user storage to restore
+normal extraction. Custom macOS ACLs granting mutation are conservatively rejected.
+Legacy `<temp>/ppds-<username>/net462-ref` directories are never read, migrated, or deleted
+automatically. This boundary does not protect against processes running as the same
+account or administrators/root.
+
 ```
 ppds                       (default: launches TUI)
 ├── interactive            Launch interactive TUI mode (also: -i, --interactive)
