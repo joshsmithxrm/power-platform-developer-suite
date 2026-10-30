@@ -80,17 +80,9 @@ public sealed class AssemblyExtractorTests : IDisposable
 
         var syntaxTree = CSharpSyntaxTree.ParseText(fullSource);
 
-        // PPDS.Plugins targets net462, which requires mscorlib (not System.Runtime).
-        var mscorlibPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
-            "Microsoft.NET", "Framework64", "v4.0.30319", "mscorlib.dll");
-
-        if (!File.Exists(mscorlibPath))
-        {
-            mscorlibPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
-                "Microsoft.NET", "Framework", "v4.0.30319", "mscorlib.dll");
-        }
+        // Compile from the restored net462 reference package on every OS. Keep this
+        // independent of the extractor's embedded resource/cache being tested.
+        var mscorlibPath = Path.Combine(AppContext.BaseDirectory, "TestAssets", "mscorlib.dll");
 
         var references = new List<MetadataReference>
         {

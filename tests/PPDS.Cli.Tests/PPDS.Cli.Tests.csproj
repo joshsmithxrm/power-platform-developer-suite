@@ -19,6 +19,7 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Moq" />
     <PackageReference Include="xunit" />
@@ -43,6 +44,9 @@
     <Copy
       SourceFiles="$(PkgMicrosoft_CrmSdk_CoreAssemblies)\lib\net462\Microsoft.Xrm.Sdk.dll"
       DestinationFiles="$(OutDir)TestAssets\Microsoft.Xrm.Sdk.net462.dll" />
+    <Copy
+      SourceFiles="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2\mscorlib.dll"
+      DestinationFiles="$(OutDir)TestAssets\mscorlib.dll" />
   </Target>
 
 </Project>
