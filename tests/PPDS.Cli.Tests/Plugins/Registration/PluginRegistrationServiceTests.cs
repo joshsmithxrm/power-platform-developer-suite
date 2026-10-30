@@ -341,6 +341,31 @@ public class PluginRegistrationServiceTests
             Times.Never);
     }
 
+    [Theory]
+    [Trait("AC", "AC-60")]
+    [InlineData("netstandard2.0")]
+    [InlineData("net8.0")]
+    public async Task UpsertPackageAsync_UnsupportedModernFramework_ExplainsRequirementsBeforeConnecting(string framework)
+    {
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", framework);
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, error.ErrorCode);
+        Assert.Contains($"lib/{framework}", error.Message);
+        Assert.Contains("A loose plugin assembly must also target a Dataverse-supported .NET Framework version", error.Message);
+        Assert.Contains("be strong-name-signed", error.Message);
+        Assert.Contains("changing the packaging alone does not make other target frameworks supported", error.Message);
+        Assert.DoesNotContain("Otherwise, deploy", error.Message);
+        _mockPool.Verify(
+            pool => pool.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private void ConfigureCreateResponse(Guid id)
     {
         var response = new CreateResponse();
