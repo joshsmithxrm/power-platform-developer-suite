@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Plugin reference caches are isolated by OS account** — embedded framework references now use protected local application data, validate ownership, permissions and links before reuse or repair, and warn on unsafe storage. Legacy shared-temp caches are neither used nor removed (#1329).
+
 ### Fixed
 - **Unsupported plug-in package guidance now qualifies the loose-assembly alternative** — a loose DLL must still target a supported .NET Framework version and be strong-name-signed; repackaging alone does not make netstandard or modern .NET targets deployable.
+- **Plugin extraction repairs incomplete reference caches** — the embedded .NET Framework reference cache now checks every expected file and its size, restoring missing or truncated facades such as `System.Runtime.dll` even when `.complete` and `mscorlib.dll` survive. Readers inspect trust and completeness under the repair lock, avoiding failures from a concurrent replacement. Complete caches are reused without rewriting (#1358).
 - **Forms writes accept Timeline activity configuration** — the bundled schema now recognizes `UClientActivitiesConfigurationJSON`, allowing direct XML writes and unrelated structured edits to preserve standard Timeline settings while retaining structural and parameter type validation (#1465).
 - **Model-driven app editing preserves intended selections and localized navigation** — all component names/IDs are validated before writes, duplicate names require explicit candidate IDs, retained selections are kept, and additions precede removals with partial-failure guidance. Sitemap matching resolves localized labels, prioritizes stable IDs, rejects ambiguous titles and preserves translations (#1448).
 - **View column and draft verification correctness** — direct columns now synchronize and repair FetchXML projections; related columns use distinct alias-qualified layout names and valid attributes. Every written XML field is verified against intended normalized draft state, including equivalent no-ops. Missing/differing read-backs and unavailable verification produce distinct errors (#1448).

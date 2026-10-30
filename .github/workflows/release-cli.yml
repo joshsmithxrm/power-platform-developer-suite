@@ -61,6 +61,9 @@ jobs:
       - name: Build deterministic local plugin fixture
         run: dotnet build tests/fixtures/SingleFilePlugin/SingleFilePlugin.csproj -c Release
 
+      - name: Build read-only cache location probe
+        run: dotnet build tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj -c Release
+
       - name: Verify extraction before uploading release binary
         shell: bash
         run: |
@@ -68,7 +71,9 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then binary+=.exe; fi
           python scripts/ci/smoke_single_file_extraction.py \
             --binary "$binary" \
-            --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462
+            --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462 \
+            --cache-probe tests/fixtures/ReferenceCacheProbe/bin/Release/net8.0/ReferenceCacheProbe.dll \
+            --reference-archive src/PPDS.Cli/obj/Release/net8.0/${{ matrix.rid }}/Net462ReferenceAssemblies.zip
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
