@@ -112,6 +112,22 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - `ExecutionOrder` must be 1-999999
 - All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
 
+### Single-file extraction verification
+
+The PR test gate must run the published self-contained, single-file CLI on Windows,
+Linux, and macOS against a deterministic local net462 plug-in fixture. Copy only the
+executable into an isolated directory and give each scenario a fresh temporary/cache
+root so installed frameworks, publish sidecars, or an earlier cache cannot mask missing
+embedded references. Validate extracted registrations, cold/warm cache behavior,
+explicit dependency resolution, and structured failure output without Dataverse access.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-56 | Extraction fixture compilation uses portable restored net462 references, with no Windows framework installation paths | `Extract_WithoutRuntimeDirectory_SucceedsViaEmbeddedReferenceAssemblies` | ✅ |
+| AC-57 | The actual single-file executable extracts DLL registrations and images using fresh embedded references and returns identical metadata on cache reuse | `SingleFileExtractionTests.test_dll_extraction_cold_and_warm_cache` | ✅ |
+| AC-58 | The single-file executable extracts a local net462 NuGet plug-in package without bundled framework or Dataverse SDK assemblies | `SingleFileExtractionTests.test_package_extraction` | ✅ |
+| AC-59 | Missing plug-in dependencies fail with structured errors and resolve via `--reference-dir`; malformed packages fail instead of returning empty success | `SingleFileExtractionTests.test_missing_dependency_and_reference_dir`, `SingleFileExtractionTests.test_invalid_package_reports_error` | ✅ |
+
 ### NuGet Plugin Package Registration
 
 - The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
