@@ -24,6 +24,7 @@ UNPRIVILEGED_WORKFLOWS = (
     "marketplace-listing-gate.yml",
     "tui-e2e.yml",
     "workflow-tests.yml",
+    "reference-cache-trust.yml",
 )
 
 # Each entry is a required, bounded exception, not permission to give writes

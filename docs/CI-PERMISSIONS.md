@@ -4,8 +4,9 @@ Every job must resolve to an explicit `permissions` map on the job or its
 workflow. Avoid `read-all`, `write-all`, and implicit repository defaults.
 A job-level map replaces the workflow map; omitted scopes become `none`.
 
-Build, test, docs smoke, Marketplace listing, TUI E2E, and Python regression
-workflows use `contents: read`. Their `dorny/paths-filter` jobs additionally
+Build, test, docs smoke, Marketplace listing, TUI E2E, Python regression, and
+reference-cache trust workflows use `contents: read`. Native extraction and
+cache-trust jobs retain that read-only scope. Their `dorny/paths-filter` jobs additionally
 need `pull-requests: read` to list changed files on PR events. Status-only
 aggregators use `permissions: {}`. These workflows and the integration test
 checkout set `persist-credentials: false`: their later steps do not push Git
