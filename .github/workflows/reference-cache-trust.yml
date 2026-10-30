@@ -1,0 +1,81 @@
+name: Reference Cache Trust
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/PPDS.Cli/Plugins/Extraction/**'
+      - 'tests/PPDS.Cli.Tests/Plugins/Extraction/**'
+      - 'tests/fixtures/ReferenceCacheProbe/**'
+      - 'scripts/ci/test_reference_cache*'
+      - '.github/workflows/reference-cache-trust.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Cache trust (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: windows-latest, rid: win-x64 }
+          - { os: windows-11-arm, rid: win-arm64 }
+          - { os: macos-15-intel, rid: osx-x64 }
+          - { os: macos-15, rid: osx-arm64 }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.427
+            10.0.114
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Native permissions, redirection, recovery and concurrency tests
+        run: dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj -c Release -f net8.0 --filter "FullyQualifiedName~ReferenceCacheTrustTests|FullyQualifiedName~AssemblyExtractorCacheTests" --collect:"XPlat Code Coverage" --results-directory coverage --logger "console;verbosity=normal"
+      - name: Build process probe
+        run: dotnet build tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj -c Release -o artifacts/cache-probe
+      - name: Actual default location ignores poisoned legacy cache
+        run: python scripts/ci/test_reference_cache_trust.py --probe artifacts/cache-probe/ReferenceCacheProbe.dll --rid ${{ matrix.rid }}
+      - name: Disposable cross-user Linux fixture
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          docker run --rm -e PPDS_DISPOSABLE_CACHE_FIXTURE=1 \
+            -e DOTNET_NOLOGO=1 -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            --mount "type=bind,source=$PWD/artifacts/cache-probe,target=/probe,readonly" \
+            --mount "type=bind,source=$PWD/scripts/ci,target=/scripts,readonly" \
+            mcr.microsoft.com/dotnet/sdk:8.0.427-bookworm-slim \
+            bash /scripts/test_reference_cache_cross_user.sh
+      - name: Older supported glibc ABI (UBI 8, unprivileged user)
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          docker run --rm --entrypoint /bin/bash \
+            --mount "type=bind,source=$PWD/artifacts/cache-probe,target=/probe,readonly" \
+            registry.access.redhat.com/ubi8/dotnet-80-runtime:latest -euc '
+              getconf GNU_LIBC_VERSION
+              test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.28"
+              test "$(id -u)" != 0
+              fixture=$(mktemp -d /tmp/ppds-old-glibc.XXXXXX)
+              XDG_DATA_HOME="$fixture/data" dotnet /probe/ReferenceCacheProbe.dll create
+            '
+      - name: Retain native test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cache-trust-${{ matrix.rid }}
+          path: coverage

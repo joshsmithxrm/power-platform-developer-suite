@@ -29,10 +29,10 @@
 
   <ItemGroup Label="Serialization and Security">
     <PackageVersion Include="System.Text.Json" Version="10.0.9" />
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.9" />
-    <!-- Pinned explicitly to patched 8.0.4 to override transitive 8.0.2 pulled by
-         Microsoft.IdentityModel.* and remediate the July 2026 8.x security advisories. -->
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="8.0.4" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <!-- Explicit patched servicing floor for Auth and Dataverse, overriding older
+         transitive versions from the Dataverse SDK's WCF dependencies. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="8.0.5" />
   </ItemGroup>
 
   <ItemGroup Label="CLI and TUI">
@@ -46,7 +46,7 @@
   <ItemGroup Label="RPC and MCP">
     <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.3" />
     <PackageVersion Include="Nerdbank.Streams" Version="2.13.16" />
-    <PackageVersion Include="StreamJsonRpc" Version="2.25.29" />
+    <PackageVersion Include="StreamJsonRpc" Version="2.26.150" />
   </ItemGroup>
 
   <ItemGroup Label="SQL Parsing">

@@ -1,7 +1,7 @@
 # Form Management Commands
 
 **Status:** Draft
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-10-29
 **Code:** [src/PPDS.Cli/Commands/Forms/](../src/PPDS.Cli/Commands/Forms/) | [src/PPDS.Cli/Services/Forms/](../src/PPDS.Cli/Services/Forms/) | [src/PPDS.Cli/Resources/Schemas/](../src/PPDS.Cli/Resources/Schemas/)
 **Surfaces:** CLI
 
@@ -125,8 +125,8 @@ All create/update operations follow this pipeline:
 2. **Mutate** XML in-memory using `FormXmlEditor`
 3. **Validate** mutated XML using `FormXmlValidator`:
    - Schema validation against bundled Dataverse customization XSD
-   - GUID format validation: all `id` and `labelid` attributes must use brace format `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`
-   - GUID uniqueness: no duplicate `id` or `labelid` values within the document
+   - GUID format validation: the XSD types structural IDs as `FormGuidType`, accepting braced or unbraced GUIDs; logical-name IDs remain strings
+   - GUID uniqueness: no duplicate GUID-valued `id` or `labelid` values within the document (normalized for braces and case)
 4. **Update** the `systemform` record through the pooled SDK client: `IPooledClient.UpdateAsync(new Entity("systemform", formId) { ["formxml"] = xml })`. There is no generated early-bound `systemform` entity — use a late-bound `Entity`. (PPDS uses the SDK through `IDataverseConnectionPool`, not raw Web API HTTP; D1/D2.)
 5. **Optionally** add form to solution (`AddSolutionComponentRequest`, component type 60 = `componenttype.SystemForm`). This request is **not** idempotent — re-adding a component already in the solution throws `FaultException<OrganizationServiceFault>` with `ErrorCode == -2147159998` ("Component already exists in the solution"). `FormService` catches that specific fault and treats it as a no-op, mirroring `PluginRegistrationService.AddToSolutionAsync`.
 6. **Optionally** publish entity via the pooled-client extension `IPooledClient.PublishXmlAsync(parameterXml, environmentKey, ct)` with `<importexportxml><entities><entity>{logicalName}</entity></entities></importexportxml>`
@@ -135,11 +135,11 @@ All create/update operations follow this pipeline:
 
 ### Schema Validation
 
+Timeline controls accept `UClientActivitiesConfigurationJSON` as string content alongside the existing `UClient*` parameters. Direct `set-xml` writes and unrelated structured edits must preserve this content. This maintenance fix extends the existing parameter allowlist; it does not open all control parameters to arbitrary elements. Known parameter types, form structure, GUID validation, and XML parser protections remain enforced.
+
 The official Dataverse customization schema (v9.0.0.2090) is bundled as embedded resources in `src/PPDS.Cli/Resources/Schemas/`. Form validation needs four files — `FormXml.xsd` (root; defines `<form>`) plus its `xs:include` chain `RibbonCore.xsd` → `RibbonTypes.xsd` + `RibbonWSS.xsd`. They are loaded via `FormSchemaResources` at validation time (never downloaded at runtime), using `System.Xml.Schema.XmlSchemaSet` with a custom `XmlResolver` that resolves the `xs:include` filenames back to embedded resources. Schema load/compile failure throws `Operation.Internal` — it never silently falls back to GUID-only checks.
 
-The schema's `FormGuidType` permits both braced and unbraced GUIDs (`\{?...\}?`), so it does **not** enforce the brace requirement — the custom GUID check (below) does. GUID uniqueness is always a custom check (XSD cannot enforce document-wide uniqueness).
-
-**GUID format check exemption:** the brace-format check applies to all `id` and `labelid` attributes **except** the `id` on a `<control>` element, which is the column logical name (`xs:string` per the schema), not a GUID. Control `id` values are excluded from both the brace-format and uniqueness checks.
+The schema's `FormGuidType` permits both braced and unbraced GUIDs (`\{?...\}?`). Since #1209, format is enforced only by the XSD. The custom check enforces document-wide uniqueness for GUID-valued `id` and `labelid` attributes, normalizing braces and case. Logical-name IDs on elements such as `<control>`, `<data>`, and `<dependency>` do not participate in that uniqueness check.
 
 Validation failure produces a `PpdsValidationException` with `FormErrorCodes.InvalidFormXml` and an error message that includes the failing element name and the line/position.
 
@@ -394,8 +394,8 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | `--max-rows` | Integer in range 2–250 | `FormErrorCodes.InvalidMaxRows` |
 | `--columns` (tab) | Value must be 1, 2, or 3 | `Validation.InvalidValue` |
 | `--columns` (section) | Value must be 1 or 2 | `Validation.InvalidValue` |
-| `id` / `labelid` format | Must use brace format `{...}` in formxml (except `<control>` `id`, which is the column logical name) | `FormErrorCodes.InvalidFormXml` |
-| GUID uniqueness | No duplicate `id` or `labelid` values in document (excludes `<control>` `id`) | `FormErrorCodes.DuplicateGuid` |
+| `id` / `labelid` format | GUID-typed attributes accept braced or unbraced GUIDs; the XSD defines which IDs are logical-name strings | `FormErrorCodes.InvalidFormXml` |
+| GUID uniqueness | No duplicate GUID-valued `id` or `labelid` values in document after brace/case normalization | `FormErrorCodes.DuplicateGuid` |
 | XSD validation | formxml must conform to bundled Dataverse schema | `FormErrorCodes.InvalidFormXml` |
 
 ---
@@ -406,10 +406,10 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 |----|-----------|------|--------|
 | AC-01 | `ppds forms list --entity X` returns all forms with name, type, ID, and managed status | `FormsListCommandTests.List_ReturnsAllFormsWithCorrectFields` | 🔲 |
 | AC-02 | `ppds forms get --entity X --form "Name"` returns hierarchical structure: tabs → sections → fields and sub-grids | `FormsGetCommandTests.Get_ReturnsFormStructure` | 🔲 |
-| AC-03 | `SetFormXmlAsync` validates XML against bundled Dataverse customization XSD before writing | `FormXmlValidatorTests.Validate_InvalidXml_ThrowsWithInvalidFormXml` | 🔲 |
-| AC-04 | Validation failure from XSD includes the failing element name and line number in the error message | `FormXmlValidatorTests.Validate_InvalidXml_ErrorMessageIncludesElement` | 🔲 |
-| AC-05 | Validation rejects any `id` or `labelid` attribute not in brace-format `{...}` | `FormXmlValidatorTests.Validate_NonBraceGuid_ThrowsWithInvalidFormXml` | 🔲 |
-| AC-06 | Validation rejects formxml with duplicate `id` or `labelid` values | `FormXmlValidatorTests.Validate_DuplicateGuid_ThrowsWithDuplicateGuid` | 🔲 |
+| AC-03 | `SetFormXmlAsync` validates XML against bundled Dataverse customization XSD before writing | `FormXmlValidatorTests.Validate_SchemaViolation_ThrowsWithInvalidFormXml` | ✅ |
+| AC-04 | Validation failure from XSD includes the failing element name and line number in the error message | `FormXmlValidatorTests.Validate_SchemaViolation_ErrorMessageIncludesElementAndLine` | ✅ |
+| AC-05 | Validation rejects malformed GUID-typed IDs and accepts valid unbraced GUIDs | `FormXmlValidatorTests.Validate_MalformedGuidOnGuidTypedId_ThrowsWithInvalidFormXml`, `FormXmlValidatorTests.Validate_UnbracedGuidOnSectionId_DoesNotThrow` | ✅ |
+| AC-06 | Validation rejects formxml with duplicate GUID-valued `id` or `labelid` values | `FormXmlValidatorTests.Validate_DuplicateGuid_ThrowsWithDuplicateGuid` | ✅ |
 | AC-07 | `ppds forms set-xml` reads XML from file, validates, and PATCHes the `systemforms` record | `SetFormXmlCommandTests.SetXml_ValidFile_PatchesRecord` | 🔲 |
 | AC-08 | `ppds forms add-tab` creates a tab with all supported properties and correct defaults (show-label=true, expanded=true, visible=true, available-on-phone=true, columns=1) | `FormServiceTests.AddTab_DefaultProperties_GeneratesCorrectXml` | 🔲 |
 | AC-09 | `ppds forms update-tab` modifies only the provided properties on the existing tab; omitted `bool?` properties are unchanged | `FormServiceTests.UpdateTab_PartialUpdate_ChangesOnlyProvidedProperties` | 🔲 |
@@ -441,6 +441,15 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | AC-33 | `IProgressReporter` receives phase updates during `SetFormXmlAsync` (read → validate → write) | `FormServiceTests.SetFormXml_ReportsPhases` | 🔲 |
 | AC-34 | All CLI status messages are written to stderr; stdout carries only data output (text table or JSON) | `FormsCommandOutputTests.StatusMessages_WrittenToStderr` | 🔲 |
 
+### Timeline compatibility (#1465)
+
+| AC | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-35 | Timeline JSON configuration validates before, between, or after existing Timeline parameters | `FormXmlValidatorTests.Validate_TimelineConfiguration_AmongExistingParameters` | ✅ |
+| AC-36 | Direct XML writes and unrelated tab edits preserve the Timeline configuration | `FormServiceTests.SetFormXml_TimelineConfiguration_PreservesXml`, `FormServiceTests.UpdateTab_TimelineConfiguration_PreservesControl` | ✅ |
+| AC-37 | Timeline compatibility retains known parameter types and structural validation | `FormXmlValidatorTests.Validate_TimelineConfiguration_InvalidContentRejected` | ✅ |
+| AC-38 | Malformed XML and excessive entity expansion fail before any write | `FormServiceTests.SetFormXml_MalformedXml_DoesNotWrite`, `FormServiceTests.SetFormXml_EntityExpansionLimit_DoesNotWrite` | ✅ |
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
@@ -455,7 +464,7 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | max-rows = 1 | `--max-rows 1` | `PpdsException` with `FormErrorCodes.InvalidMaxRows` |
 | max-rows = 251 | `--max-rows 251` | `PpdsException` with `FormErrorCodes.InvalidMaxRows` |
 | Duplicate GUID in set-xml input | `id="{same-guid}"` on two elements | `PpdsException` with `FormErrorCodes.DuplicateGuid` |
-| Non-brace GUID in set-xml input | `id="12345678-..."` (no braces) | `PpdsException` with `FormErrorCodes.InvalidFormXml` |
+| Valid unbraced GUID in set-xml input | Structural `id="8d5e5d54-cae9-42ac-a610-85e840196095"` | Accepted, subject to GUID uniqueness |
 | add-field on already-present field | Field already exists in section | Field is added a second time (Dataverse allows duplicate controls) |
 | remove-field without --section, field in multiple sections | Field appears in 2 sections | Both occurrences are removed |
 | remove-field with --section, field not in that section | Field absent from specified section | No-op — no error, section is left unchanged |
@@ -501,7 +510,7 @@ internal static class FormXmlValidator
 {
     // Throws PpdsValidationException on failure
     internal static void Validate(XDocument formXml);
-    internal static void ValidateGuids(XDocument formXml); // brace format + uniqueness
+    internal static void ValidateGuids(XDocument formXml); // GUID-valued ID uniqueness
 }
 ```
 
@@ -552,7 +561,7 @@ public static class FormErrorCodes
 | `Forms.UnsupportedColumnType` | Column type lacks classid mapping | Use a supported column type |
 | `Forms.ViewNotFound` | `savedqueries` record not found for GUID | Verify view GUID exists |
 | `Forms.InvalidMaxRows` | max-rows not in range 2–250 | Use a value between 2 and 250 |
-| `Forms.InvalidFormXml` | XSD validation failure or non-brace GUID | Fix the XML |
+| `Forms.InvalidFormXml` | Malformed XML or XSD validation failure, including malformed GUID-typed IDs | Fix the XML |
 | `Forms.DuplicateGuid` | Duplicate id/labelid value in document | Make all GUIDs unique |
 | `Solution.NotFound` | Solution unique name not found | Verify solution name |
 
@@ -591,6 +600,12 @@ public static class FormErrorCodes
 - Positive: Deterministic, offline-capable, zero latency
 - Negative: Schema updates require a PPDS release; hypothetical future schema additions are not caught until next release
 
+### Why allowlist the Timeline JSON parameter instead of opening all parameters?
+
+For #1465, add `UClientActivitiesConfigurationJSON` to `UnifiedClientTimelineWallParameters` as `xs:string`. JSON is opaque control configuration; this client validates XML content, not the JSON's internal semantics. The existing repeated choice accepts the parameter in any position among other Timeline parameters.
+
+This preserves typed checks on known parameters and structure elsewhere in the form. A same-namespace `xs:any` alongside the existing choices makes the current schema ambiguous; replacing the choices with a lax wildcard loses local declarations and their type checks. A broader extensibility design needs separate coverage for known parameter types and realistic form fixtures. Unknown future parameter names can still require schema updates under this maintenance policy.
+
 ### Why all modification commands scope to Main form type only?
 
 **Context:** The issue explicitly states "Main forms only for all modification commands." Other form types (Quick Create=7, Quick View=6, Card=11) have different XML structures that overlap poorly with the tab/section/field model.
@@ -619,6 +634,7 @@ public static class FormErrorCodes
 
 | Date | Change |
 |------|--------|
+| 2026-10-29 | Accept Timeline `UClientActivitiesConfigurationJSON` (#1465); add validator and service preservation regressions plus malformed XML/entity-expansion checks. Reconcile GUID validation wording with #1209. |
 | 2026-06-01 | Initial spec |
 | 2026-06-01 | Opus review corrections: SDK late-bound update (not Web API PATCH); `AddSolutionComponentRequest` non-idempotent fault catch; `GetAttributesAsync` (plural); `ClassIdResolver` keys off `AttributeType` string |
 | 2026-06-01 | Embedded real Dataverse schema (FormXml.xsd v9.0.0.2090 + ribbon includes) replacing placeholder; generator emits schema-valid `tabs/columns/sections/rows` hierarchy with `availableforphone` + `labelid` attribute; dropped section `--expanded` (not in schema); subgrid params use `RecordsPerPage`/`EnableQuickFind`; `<control>` `id` exempt from brace-GUID check |

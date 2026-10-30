@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -41,9 +42,8 @@ public sealed class AssemblyExtractor : IDisposable
 
     /// <summary>
     /// Zero-byte marker written into the cache directory as the very last extraction step.
-    /// Its presence is the cache-validity contract: the cache key is fixed per CLI version,
-    /// so a cache partially deleted by a temp cleaner would otherwise pass an "any DLL"
-    /// check forever and could never self-heal. See #1326.
+    /// Its presence proves extraction finished, but reuse also requires every file from the
+    /// embedded ZIP to be present at its expected length. See #1326 and #1358.
     /// </summary>
     internal const string CompletionSentinelFileName = ".complete";
 
@@ -183,9 +183,11 @@ public sealed class AssemblyExtractor : IDisposable
     /// <summary>
     /// Overload that redirects the cache base directory so tests can exercise cache
     /// corruption and self-healing against an isolated location instead of the real
-    /// per-user cache in the temp directory. See #1326.
+    /// per-user application-data cache. The optional callback lets tests pause after a
+    /// cache miss to reproduce a competing process publishing before recovery begins.
     /// </summary>
-    internal static string? GetNet462ReferenceAssemblyDirectory(string? cacheBaseDirOverride)
+    internal static string? GetNet462ReferenceAssemblyDirectory(
+        string? cacheBaseDirOverride, Action? cacheMissDetected = null)
     {
         try
         {
@@ -204,84 +206,32 @@ public sealed class AssemblyExtractor : IDisposable
             // resource (new CLI version) lands in a fresh directory, so there is no stale cache.
             var hash = Convert.ToHexString(SHA256.HashData(zipBytes))[..16].ToLowerInvariant();
 
-            var baseDir = cacheBaseDirOverride;
-            if (baseDir == null)
-            {
-                // Scope the cache to the current user. On multi-user systems Path.GetTempPath() can be
-                // a shared directory (e.g. /tmp on Linux), so a fixed "ppds/net462-ref" path would be
-                // created by the first user and then throw UnauthorizedAccessException for every other
-                // account — which the outer catch swallows, silently disabling the fix for them.
-                // Isolating by user name gives each account its own cache. See #1294.
-                var rawUser = Environment.UserName;
-                var userScope = string.IsNullOrWhiteSpace(rawUser)
-                    ? "default"
-                    : string.Join("_", rawUser.Split(Path.GetInvalidFileNameChars()));
-                baseDir = Path.Combine(Path.GetTempPath(), $"ppds-{userScope}", "net462-ref");
-            }
-
+            // Never read or migrate the legacy shared-temp cache. Establish the account
+            // boundary before the warm-cache fast path or any repair/cleanup (#1329).
+            var baseDir = cacheBaseDirOverride == null
+                ? ReferenceCacheDirectory.PrepareDefault()
+                : ReferenceCacheDirectory.Prepare(cacheBaseDirOverride);
             var cacheDir = Path.Combine(baseDir, hash);
+            ReferenceCacheDirectory.ValidateLock(cacheDir);
+            using var zipStream = new MemoryStream(zipBytes, writable: false);
+            using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
 
-            if (IsPopulated(cacheDir))
-                return cacheDir;
-
-            // Self-heal: a cache directory that exists but fails validation is corrupt — e.g. a
-            // temp cleaner deleted the sentinel or some DLLs but kept the directory. The cache key
-            // is fixed per CLI version, so without deleting it here the corrupt directory would
-            // never recover (and Directory.Move below would throw on the existing destination on
-            // every run). See #1326.
-            TryDeleteDirectory(cacheDir);
-
-            // Extract to a unique staging directory, then atomically move it into place so a
-            // concurrent extraction never observes a half-populated cache directory.
-            var stagingDir = Path.Combine(baseDir, $".staging-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(stagingDir);
-            try
+            // Trust inspection must share the repair lock: a cooperating writer may
+            // delete an incomplete tree between an attributes read and its ACL read.
+            // Windows can report that transient deletion as access denied, not missing.
+            // Validate the persistent lock before opening it; validate the cache only
+            // after a writer has finished, without weakening any permission checks.
+            using (AcquireReferenceCacheLock(cacheDir))
             {
-                using (var zipStream = new MemoryStream(zipBytes, writable: false))
-                using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
-                {
-                    archive.ExtractToDirectory(stagingDir);
-                }
-
-                // Completion sentinel, written only after every entry extracted: validation
-                // treats any cache directory without it as incomplete.
-                File.WriteAllBytes(Path.Combine(stagingDir, CompletionSentinelFileName), []);
-
-                if (IsPopulated(cacheDir))
-                    return cacheDir; // Another process won the race while we were extracting.
-
-                Directory.CreateDirectory(Path.GetDirectoryName(cacheDir)!);
-                try
-                {
-                    Directory.Move(stagingDir, cacheDir);
-                }
-                catch (IOException) when (IsPopulated(cacheDir))
-                {
-                    // Race: another process created a complete cache between our check and move.
+                ReferenceCacheDirectory.ValidateCache(cacheDir);
+                if (IsPopulated(cacheDir, archive))
                     return cacheDir;
-                }
-                catch (IOException)
-                {
-                    // The destination exists but is invalid (e.g. re-created mid-run by a temp
-                    // cleaner or a concurrent loser): delete it and retry the move once. If the
-                    // retry loses to a concurrent winner, its cache is complete — use it.
-                    TryDeleteDirectory(cacheDir);
-                    try
-                    {
-                        Directory.Move(stagingDir, cacheDir);
-                    }
-                    catch (IOException) when (IsPopulated(cacheDir))
-                    {
-                        return cacheDir;
-                    }
-                }
+            }
 
-                return cacheDir;
-            }
-            finally
-            {
-                TryDeleteDirectory(stagingDir);
-            }
+            // Keep the stale-miss seam outside the lock. Population rechecks the final
+            // state under the same lock before deleting or replacing anything.
+            cacheMissDetected?.Invoke();
+            return PopulateReferenceCache(cacheDir, baseDir, archive);
         }
         catch (Exception ex)
         {
@@ -296,15 +246,146 @@ public sealed class AssemblyExtractor : IDisposable
         }
     }
 
+    private static string PopulateReferenceCache(string cacheDir, string baseDir, ZipArchive archive)
+    {
+        // Serialize repairs across processes, then revalidate under the lock. Otherwise a
+        // caller acting on an earlier cache miss can delete a concurrent winner's complete
+        // cache after that winner has already returned it to the metadata resolver.
+        Directory.CreateDirectory(baseDir);
+        using (AcquireReferenceCacheLock(cacheDir))
+        {
+            ReferenceCacheDirectory.ValidateCache(cacheDir);
+            if (IsPopulated(cacheDir, archive))
+                return cacheDir;
+
+            // Self-heal: a cache directory that exists but fails validation is corrupt — e.g. a
+            // temp cleaner deleted the sentinel or some DLLs but kept the directory. The cache key
+            // is fixed per CLI version, so without deleting it here the corrupt directory would
+            // never recover (and Directory.Move below would throw on the existing destination on
+            // every run). See #1326.
+            TryDeleteDirectory(cacheDir);
+
+            // Extract to a unique staging directory, then atomically move it into place so a
+            // concurrent extraction never observes a half-populated cache directory.
+            var stagingDir = Path.Combine(baseDir, $".staging-{Guid.NewGuid():N}");
+            ReferenceCacheDirectory.CreatePrivateDirectory(stagingDir);
+            try
+            {
+                archive.ExtractToDirectory(stagingDir);
+
+                // Completion sentinel, written only after every entry extracted: validation
+                // treats any cache directory without it as incomplete.
+                File.WriteAllBytes(Path.Combine(stagingDir, CompletionSentinelFileName), []);
+
+                // A private staging root prevents traversal during extraction. Tighten only
+                // newly extracted objects: a Unix default ACL or umask must not publish
+                // group/other-writable files. Never change pre-existing cache permissions.
+                if (!OperatingSystem.IsWindows())
+                {
+                    foreach (var path in Directory.EnumerateDirectories(stagingDir, "*", SearchOption.AllDirectories))
+                        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    foreach (var path in Directory.EnumerateFiles(stagingDir, "*", SearchOption.AllDirectories))
+                        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                ReferenceCacheDirectory.ValidateCache(stagingDir);
+
+                if (IsPopulated(cacheDir, archive))
+                    return cacheDir; // Another process won the race while we were extracting.
+
+                Directory.CreateDirectory(Path.GetDirectoryName(cacheDir)!);
+                try
+                {
+                    Directory.Move(stagingDir, cacheDir);
+                }
+                catch (IOException) when (IsPopulated(cacheDir, archive))
+                {
+                    // Race: another process created a complete cache between our check and move.
+                    return cacheDir;
+                }
+                catch (IOException)
+                {
+                    // The destination exists but is invalid (e.g. re-created mid-run by a temp
+                    // cleaner or a concurrent loser): delete it and retry the move once. If the
+                    // retry loses to a concurrent winner, its cache is complete — use it.
+                    TryDeleteDirectory(cacheDir);
+                    try
+                    {
+                        Directory.Move(stagingDir, cacheDir);
+                    }
+                    catch (IOException) when (IsPopulated(cacheDir, archive))
+                    {
+                        return cacheDir;
+                    }
+                }
+
+                return cacheDir;
+            }
+            finally
+            {
+                TryDeleteDirectory(stagingDir);
+            }
+        }
+    }
+
+    private static FileStream AcquireReferenceCacheLock(string cacheDir)
+    {
+        // Keep the lock file beside (not inside) the replaceable cache. Do not delete it on
+        // close: waiters must all lock the same file, including across terminal sessions.
+        // Its parent and any existing lock have already passed account-boundary checks.
+        var timer = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                var options = new FileStreamOptions
+                {
+                    Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None
+                };
+                if (!OperatingSystem.IsWindows())
+                    options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                return new FileStream(cacheDir + ".lock", options);
+            }
+            catch (IOException) when (timer.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                Thread.Sleep(50);
+            }
+        }
+    }
+
     /// <summary>
-    /// A cache directory is valid only when the completion sentinel (written as the last
-    /// extraction step) and the core assembly are both present. Checking mscorlib rather
-    /// than "any DLL" lets a partially deleted cache fail validation and self-heal instead
-    /// of passing forever. See #1326.
+    /// A cache directory is complete only when the sentinel and every file from the embedded
+    /// ZIP are present at the expected length. The ZIP is the source of truth, so unrelated
+    /// files cannot mask a missing facade and existing complete caches need no migration.
+    /// This detects deletion/truncation; ReferenceCacheDirectory establishes the separate
+    /// account boundary before this completeness check reads cached contents (#1329).
     /// </summary>
-    private static bool IsPopulated(string directory)
-        => File.Exists(Path.Combine(directory, CompletionSentinelFileName))
-           && File.Exists(Path.Combine(directory, "mscorlib.dll"));
+    internal static bool IsPopulated(string directory, ZipArchive archive)
+    {
+        if (!File.Exists(Path.Combine(directory, CompletionSentinelFileName)))
+            return false;
+
+        var cacheRoot = Path.GetFullPath(directory);
+        if (!Path.EndsInDirectorySeparator(cacheRoot))
+            cacheRoot += Path.DirectorySeparatorChar;
+
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.Name.Length == 0)
+                continue; // Directory entries do not contain reference assemblies.
+
+            // The ZIP is embedded, but still constrain validation to the cache. Keep the
+            // trailing separator so a sibling with the same name prefix cannot pass.
+            var path = Path.GetFullPath(Path.Combine(cacheRoot, entry.FullName));
+            if (!path.StartsWith(cacheRoot, StringComparison.Ordinal))
+                return false;
+
+            var file = new FileInfo(path);
+            if (!file.Exists || file.Length != entry.Length)
+                return false;
+        }
+
+        return true;
+    }
 
     private static void TryDeleteDirectory(string directory)
     {
