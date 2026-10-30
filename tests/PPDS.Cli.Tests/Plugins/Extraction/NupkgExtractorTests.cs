@@ -133,10 +133,10 @@ public class NupkgExtractorTests : IDisposable
     }
 
     [Fact]
-    public void Extract_Net48OnlyPackage_ThrowsStructuredValidationError()
+    public void Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError()
     {
-        var nupkgPath = Path.Combine(_scratch, "net48-plugin.nupkg");
-        CreatePluginPackage(nupkgPath, "net48");
+        var nupkgPath = Path.Combine(_scratch, "netstandard-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, "netstandard2.0");
 
         var ex = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
 
@@ -145,7 +145,21 @@ public class NupkgExtractorTests : IDisposable
         Assert.Contains("lib/net462", ex.Message);
         Assert.Contains("lib/net471", ex.Message);
         Assert.Contains("lib/net48", ex.Message);
+        Assert.Contains("lib/netstandard2.0", ex.Message);
         Assert.Contains("loose plugin assembly", ex.Message);
+    }
+
+    [Fact]
+    public void Extract_Net48Package_SelectsSupportedPluginAssembly()
+    {
+        var nupkgPath = Path.Combine(_scratch, "net48-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, "net48");
+
+        var config = NupkgExtractor.Extract(nupkgPath);
+
+        Assert.Equal("Nuget", config.Type);
+        var type = Assert.Single(config.Types);
+        Assert.Equal("Net48Plugin", type.TypeName);
     }
 
     [Fact]
@@ -1439,6 +1453,25 @@ public class NupkgExtractorTests : IDisposable
         Assert.Equal(ErrorCodes.Operation.Dependency, exception.ErrorCode);
         Assert.Contains("Contoso.UnresolvedCandidate.dll", exception.Message);
         Assert.Contains("--reference-dir", exception.Message);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-60")]
+    [InlineData("netstandard2.0")]
+    [InlineData("net8.0")]
+    public void Extract_UnsupportedModernFramework_ExplainsLooseAssemblyRequirements(string framework)
+    {
+        var nupkgPath = Path.Combine(_scratch, "unsupported-plugin.nupkg");
+        CreatePluginPackage(nupkgPath, framework);
+
+        var error = Assert.Throws<PpdsException>(() => NupkgExtractor.Extract(nupkgPath));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, error.ErrorCode);
+        Assert.Contains($"lib/{framework}", error.Message);
+        Assert.Contains("A loose plugin assembly must also target a Dataverse-supported .NET Framework version", error.Message);
+        Assert.Contains("be strong-name-signed", error.Message);
+        Assert.Contains("changing the packaging alone does not make other target frameworks supported", error.Message);
+        Assert.DoesNotContain("Otherwise, deploy", error.Message);
     }
 
     private static void CreatePluginPackage(

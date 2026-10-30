@@ -56,7 +56,7 @@ public static class ExtractCommand
             "extract",
             "Extract plugin step/image attributes from an assembly (.dll) or plugin package (.nupkg) to " +
             "JSON configuration. Works against Dataverse-supported .NET Framework plugin assemblies and " +
-            "net462/net471 plugin package assets regardless of how the CLI is packaged (single-file, " +
+            "net462/net471/net48 plugin package assets regardless of how the CLI is packaged (single-file, " +
             "self-contained, or framework-dependent).")
         {
             inputOption,

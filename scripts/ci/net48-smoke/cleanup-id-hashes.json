@@ -1,0 +1,13 @@
+{
+  "originalRun": 40997090146,
+  "originalHead": "5d63a24d0ae4d3d1356f7c288d9b8b32155776b5",
+  "packageIdHash": "e4427de3d5632a27fe5354649befc3a1c6381e3ce6cd5a277ebb870ed843b0f8",
+  "assemblyIdHashes": [
+    "0f5657ecf6161b5e341a15c24d2f8cfa30cd140c8c798937ed0a39f6d046f0fb"
+  ],
+  "typeIdHashes": [
+    "6baccc1841c281339f506fe0dcd03b088455d5e2e2c82693d979a3496931516c"
+  ],
+  "startedAt": "2026-10-29T22:26:26.3321321-05:00",
+  "endedAt": "2026-10-29T22:26:37.5372194-05:00"
+}

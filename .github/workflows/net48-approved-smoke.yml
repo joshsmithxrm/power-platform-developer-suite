@@ -1,0 +1,76 @@
+name: Net48 Readback Correction Smoke
+
+# Prepared locally for coordinator review and initiation. Pushing the exact
+# reviewed commit performs one bounded test; this file itself grants no approval.
+# Only the first synchronization from the successful cleanup head can run.
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: approved-net48-package-smoke
+  cancel-in-progress: false
+
+jobs:
+  corrected-smoke:
+    if: github.event.number == 1474 && github.event.before == '7af9468d1d195d68d2b5c25fdd0c6b91cc7cf01e' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/net48-approved-smoke' && github.run_attempt == 1
+    runs-on: windows-latest
+    timeout-minutes: 40
+    environment: test-dataverse
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.427
+            10.0.114
+      - name: Check pinned runtime source
+        shell: pwsh
+        run: |
+          $sourceTree = git rev-parse HEAD:src
+          if ($LASTEXITCODE -ne 0 -or $sourceTree -ne 'd199398b25b74dee8e9bc473953059f656d0d418') {
+            throw 'RuntimeSourceMismatch'
+          }
+      - name: Build corrected validation harness
+        shell: pwsh
+        run: dotnet build scripts/ci/net48-smoke/Net48Smoke.csproj -c Release --nologo -v minimal
+      - name: Verify scope, readback, and cleanup regressions offline
+        shell: pwsh
+        run: dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --self-test scripts/ci/net48-smoke
+      - name: Recheck target and collisions without writes
+        shell: pwsh
+        env:
+          NET48_DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+          NET48_APP_ID: ${{ vars.PPDS_TEST_APP_ID }}
+          NET48_TENANT_ID: ${{ vars.PPDS_TEST_TENANT_ID }}
+        run: ./scripts/ci/net48-smoke/Invoke-ReadOnly.ps1 -ReportPath "$env:RUNNER_TEMP/net48-preflight.json"
+      - name: Execute bounded create-update-execute test with independent cleanup
+        shell: pwsh
+        env:
+          NET48_DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+          NET48_APP_ID: ${{ vars.PPDS_TEST_APP_ID }}
+          NET48_TENANT_ID: ${{ vars.PPDS_TEST_TENANT_ID }}
+          TESTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          TESTED_SOURCE_TREE: d199398b25b74dee8e9bc473953059f656d0d418
+        run: dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --approved-live scripts/ci/net48-smoke "$env:RUNNER_TEMP/net48-evidence" "$env:RUNNER_TEMP/net48-preflight.json"
+      - name: Retain encrypted evidence and redacted status
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: net48-corrected-smoke
+          path: |
+            ${{ runner.temp }}/net48-evidence/evidence.enc.json
+            ${{ runner.temp }}/net48-evidence/summary.json
+          if-no-files-found: warn
+          retention-days: 7

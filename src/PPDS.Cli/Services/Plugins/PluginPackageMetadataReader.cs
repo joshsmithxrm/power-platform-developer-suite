@@ -10,7 +10,7 @@ namespace PPDS.Cli.Services.Plugins;
 /// </summary>
 internal static class PluginPackageMetadataReader
 {
-    private static readonly string[] DataverseSupportedFrameworks = ["net462", "net471"];
+    private static readonly string[] DataverseSupportedFrameworks = ["net462", "net471", "net48"];
 
     /// <summary>
     /// Reads and validates the package ID, version, and framework asset group required to
@@ -94,11 +94,11 @@ internal static class PluginPackageMetadataReader
                     ErrorCodes.Validation.InvalidValue,
                     "Dataverse cannot register this NuGet plugin package because it does not contain " +
                     "a supported framework asset group. Dataverse currently accepts plugin packages " +
-                    "with lib/net462 or lib/net471. " +
+                    "with lib/net462, lib/net471, or lib/net48. " +
                     $"Found: {found}. To keep using a NuGet plugin package, retarget the plugin project " +
-                    "to net462 or net471. If the project must target net48, deploy its compiled, " +
-                    "strong-name-signed DLL as a loose plugin assembly instead; Dataverse supports " +
-                    "net48 for loose assemblies, not plugin package asset groups.");
+                    "to net462, net471, or net48. A loose plugin assembly must also target a " +
+                    "Dataverse-supported .NET Framework version and be strong-name-signed; " +
+                    "changing the packaging alone does not make other target frameworks supported.");
             }
 
             return new PluginPackageMetadata(id, version, targetFramework);

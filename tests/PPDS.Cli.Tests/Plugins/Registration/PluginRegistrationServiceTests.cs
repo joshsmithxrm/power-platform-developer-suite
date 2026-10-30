@@ -320,7 +320,7 @@ public class PluginRegistrationServiceTests
     public async Task UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall()
     {
         // Arrange
-        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", "net48");
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", "netstandard2.0");
 
         // Act
         var action = () => _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
@@ -332,12 +332,38 @@ public class PluginRegistrationServiceTests
         Assert.Contains("lib/net462", exception.Message);
         Assert.Contains("lib/net471", exception.Message);
         Assert.Contains("lib/net48", exception.Message);
+        Assert.Contains("lib/netstandard2.0", exception.Message);
         Assert.Contains("loose plugin assembly", exception.Message);
         _mockPooledClient.Verify(
             s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _mockPooledClient.Verify(
             s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-60")]
+    [InlineData("netstandard2.0")]
+    [InlineData("net8.0")]
+    public async Task UpsertPackageAsync_UnsupportedModernFramework_ExplainsRequirementsBeforeConnecting(string framework)
+    {
+        var packageBytes = CreatePackageBytes("ppds_TestPackage", "1.0.0", framework);
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes));
+
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, error.ErrorCode);
+        Assert.Contains($"lib/{framework}", error.Message);
+        Assert.Contains("A loose plugin assembly must also target a Dataverse-supported .NET Framework version", error.Message);
+        Assert.Contains("be strong-name-signed", error.Message);
+        Assert.Contains("changing the packaging alone does not make other target frameworks supported", error.Message);
+        Assert.DoesNotContain("Otherwise, deploy", error.Message);
+        _mockPool.Verify(
+            pool => pool.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
