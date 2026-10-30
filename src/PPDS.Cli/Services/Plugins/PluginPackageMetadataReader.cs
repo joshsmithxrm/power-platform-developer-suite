@@ -96,8 +96,9 @@ internal static class PluginPackageMetadataReader
                     "a supported framework asset group. Dataverse currently accepts plugin packages " +
                     "with lib/net462, lib/net471, or lib/net48. " +
                     $"Found: {found}. To keep using a NuGet plugin package, retarget the plugin project " +
-                    "to net462, net471, or net48. Otherwise, deploy its compiled, " +
-                    "strong-name-signed DLL as a loose plugin assembly instead.");
+                    "to net462, net471, or net48. A loose plugin assembly must also target a " +
+                    "Dataverse-supported .NET Framework version and be strong-name-signed; " +
+                    "changing the packaging alone does not make other target frameworks supported.");
             }
 
             return new PluginPackageMetadata(id, version, targetFramework);
