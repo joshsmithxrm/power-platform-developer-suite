@@ -131,6 +131,13 @@ internal static class SelfTests
             evidence.Add("offline-encryption-probe", new { passed = true });
         count++;
 
+        var recordedId = Guid.NewGuid();
+        CleanupOnly.RequireRecordedId(recordedId, Scope.HashValue(recordedId.ToString())); count++;
+        Reject(() => CleanupOnly.RequireRecordedId(Guid.NewGuid(), Scope.HashValue(recordedId.ToString())));
+        var cleanupOnlyBoundary = new Boundary((_, _) => { }) { PackageId = recordedId, Phase = Phase.Cleanup };
+        cleanupOnlyBoundary.Attempted.Add(("pluginpackage", recordedId));
+        Reject(() => cleanupOnlyBoundary.CheckDelete("pluginpackage", Guid.NewGuid()));
+        cleanupOnlyBoundary.CheckDelete("pluginpackage", recordedId); count++;
         Console.WriteLine($"Offline scope/transport/fixture checks: {count} passed.");
         return 0;
     }

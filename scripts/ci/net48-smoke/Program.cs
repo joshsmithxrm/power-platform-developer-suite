@@ -28,12 +28,13 @@ internal static class Program
 {
     internal static readonly JsonSerializerOptions Json = new() { WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
-    private static readonly ShakedownGuard Shakedown = new(new SystemEnvironment(), new SystemFileSystem(),
+    internal static readonly ShakedownGuard Shakedown = new(new SystemEnvironment(), new SystemFileSystem(),
         new SystemClock(), NullLogger<ShakedownGuard>.Instance);
 
     public static async Task<int> Main(string[] args)
     {
         var root = Path.GetFullPath(args.ElementAtOrDefault(1) ?? "scripts/ci/net48-smoke");
+        if (args.Length == 4 && args[0] == "--approved-cleanup") return await CleanupOnly.Run(root, Path.GetFullPath(args[2]), args[3]);
         if (args.FirstOrDefault() == "--self-test") return SelfTests.Run(root);
         if (args.Length != 4 || args[0] != "--approved-live") return 64;
         var output = Path.GetFullPath(args[2]);
@@ -399,7 +400,7 @@ internal static class Program
     private static string RequiredEnvironment(string name) =>
         Environment.GetEnvironmentVariable(name) ?? throw new InvalidOperationException("RequiredRunnerInputMissing");
 
-    private sealed class SourceAdapter(ProfileConnectionSource source) : IConnectionSource
+    internal sealed class SourceAdapter(ProfileConnectionSource source) : IConnectionSource
     {
         public string Name => source.Name;
         public int MaxPoolSize => source.MaxPoolSize;

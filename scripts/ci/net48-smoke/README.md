@@ -6,9 +6,10 @@ its src tree is d199398b25b74dee8e9bc473953059f656d0d418. This harness changes n
 product runtime source. PR #1472 remains the separate read-only preflight lane.
 
 The user approved one bounded package create/update/execute test and cleanup.
-The workflow runs only when this draft PR is opened, only on this exact
-same-repository branch, and only on run attempt 1. It has no dispatch or
-synchronize trigger. Do not merge, rerun, release, or reuse this lane.
+The original opened-event run is complete and failed in its harness readback.
+The current workflow permits only cleanup on the first synchronization from
+the original harness head, on this exact PR and branch, on attempt 1.
+Do not merge, rerun, release, or reuse this lane.
 
 The checked-in packages are the exact previously reviewed SDK-built net48
 fixtures. Both versions preserve package/assembly identity; their marker bodies
@@ -52,3 +53,23 @@ Offline validation:
 
     dotnet build scripts/ci/net48-smoke/Net48Smoke.csproj -c Release
     dotnet scripts/ci/net48-smoke/bin/Release/net8.0/Net48Smoke.dll --self-test scripts/ci/net48-smoke
+## Cleanup continuation after the original run
+
+Run 40997090146 created and materialized the package, assembly, and plugin type.
+The harness then attempted to decode a content attribute Dataverse did not
+return on retrieve. Its cleanup check repeated that readback error. No step
+or account was created, and update/execution were not reached. This is a
+harness failure, not evidence that net48 execution is unsupported.
+
+The cleanup-only entry point uses ID hashes derived from the original encrypted
+journal. It verifies target identity, resource names/version, creation and
+modification times, exact package/assembly/type ID hashes, and no steps or
+accounts before enabling deletes. Only those original IDs enter the guard.
+The production package unregistration service performs cleanup; final reads
+verify those IDs and names are absent. It does not require package content
+readback and has no deployment or account-create path. Resource IDs remain
+in encrypted evidence; only their hashes are committed.
+
+The workflow contains only the cleanup command. Its synchronize event is bound
+to the original head through the webhook before field, defined in the official
+[Octokit webhook schema](https://github.com/octokit/webhooks/blob/main/payload-schemas/api.github.com/pull_request/synchronize.schema.json).

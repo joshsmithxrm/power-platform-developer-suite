@@ -14,7 +14,7 @@ internal enum Phase { ReadOnly, RegisterV1, DeployV1, AccountV1, DeployV2, Accou
 internal sealed class Boundary(Action<string, object> record)
 {
     public Phase Phase { get; set; }
-    public Guid PackageId { get; } = Guid.NewGuid();
+    public Guid PackageId { get; init; } = Guid.NewGuid();
     public Guid StepId { get; } = Guid.NewGuid();
     public Guid FirstAccountId { get; } = Guid.NewGuid();
     public Guid SecondAccountId { get; } = Guid.NewGuid();
