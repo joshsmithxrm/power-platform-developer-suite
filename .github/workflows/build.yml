@@ -219,9 +219,23 @@ jobs:
         env:
           VSCODE_E2E_VERSION: ${{ matrix.vscode-version }}
 
+      - name: Run native notebook host tests
+        id: notebook-host
+        if: success() || steps.e2e.outcome == 'failure'
+        timeout-minutes: 8
+        working-directory: src/PPDS.Extension
+        shell: bash
+        run: |
+          mkdir -p test-results
+          set -o pipefail
+          xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:notebook-host 2>&1 | tee test-results/notebook-host.log
+        env:
+          VSCODE_E2E_VERSION: ${{ matrix.vscode-version }}
+          PPDS_NOTEBOOK_HOST_ARTIFACTS: test-results/notebook-host
+
       - name: Upload E2E diagnostics
         uses: actions/upload-artifact@v7
-        if: always() && steps.e2e.outcome == 'failure'
+        if: always() && (steps.e2e.outcome == 'failure' || steps.notebook-host.outcome == 'failure')
         with:
           name: extension-e2e-${{ matrix.vscode-version }}
           path: |
