@@ -56,6 +56,9 @@ jobs:
           ls artifacts/bin/ppds-mcp-server.dll
 
       - name: Generate reference markdown
+        env:
+          # cli-reflect loads the net10.0 CLI into its own process.
+          DOTNET_ROLL_FORWARD: LatestMajor
         run: |
           mkdir -p artifacts/docs
           dotnet run --project scripts/docs-gen/cli-reflect -c Release -- \
