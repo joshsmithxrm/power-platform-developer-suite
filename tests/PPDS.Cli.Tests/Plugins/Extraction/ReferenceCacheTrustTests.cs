@@ -123,29 +123,30 @@ public sealed class ReferenceCacheTrustTests : IDisposable
         var facade = Path.Combine(cache, "System.Runtime.dll");
         var expected = File.ReadAllBytes(facade);
         var timestamp = File.GetLastWriteTimeUtc(facade);
-        using var writer = new FileStream(cache + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-
         // Hold a transient, invalid tree state behind the cooperating writer's lock.
         // Readers must inspect the final tree after the writer finishes, not fail
         // midway through repair. Existing unsafe-storage tests cover permanent states.
-        var restore = AllowOtherWrite(cache);
         using var started = new ManualResetEventSlim();
-        var reader = Task.Factory.StartNew(() =>
-        {
-            started.Set();
-            return AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(root);
-        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task<string?> reader;
         bool completedWhileLocked;
-        try
+        using (var writer = new FileStream(cache + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            Assert.True(started.Wait(TimeSpan.FromSeconds(10)), "Reader did not start.");
-            await Task.WhenAny(reader, Task.Delay(TimeSpan.FromSeconds(1)));
-            completedWhileLocked = reader.IsCompleted;
-        }
-        finally
-        {
-            restore();
-            writer.Dispose();
+            var restore = AllowOtherWrite(cache);
+            reader = Task.Factory.StartNew(() =>
+            {
+                started.Set();
+                return AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(root);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            try
+            {
+                Assert.True(started.Wait(TimeSpan.FromSeconds(10)), "Reader did not start.");
+                await Task.WhenAny(reader, Task.Delay(TimeSpan.FromSeconds(1)));
+                completedWhileLocked = reader.IsCompleted;
+            }
+            finally
+            {
+                restore();
+            }
         }
 
         var result = await reader.WaitAsync(TimeSpan.FromSeconds(10));
