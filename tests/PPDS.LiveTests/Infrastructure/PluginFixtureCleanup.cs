@@ -158,12 +158,18 @@ internal sealed class PluginFixtureCleanup(
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"{operation} failed with exit {result.ExitCode}: {result.StdErr}");
         var document = JsonDocument.Parse(result.StdOut);
-        if (!document.RootElement.TryGetProperty("success", out var success) || success.ValueKind != JsonValueKind.True)
+        try
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("success", out var success) || success.ValueKind != JsonValueKind.True)
+                throw new InvalidOperationException($"{operation} did not report structured success: {result.StdErr}");
+            return document;
+        }
+        catch
         {
             document.Dispose();
-            throw new InvalidOperationException($"{operation} did not report structured success: {result.StdErr}");
+            throw;
         }
-        return document;
     }
 
     private sealed record Inventory(int Assemblies, int Types, int Steps);

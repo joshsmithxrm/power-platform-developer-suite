@@ -134,6 +134,40 @@ public sealed class PluginFixtureCleanupTests
         Assert.Equal("list", harness.Calls[0][1]);
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"unexpected\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("false")]
+    public async Task Cleanup_RejectsNonObjectInventoryBeforeMutation(string json)
+    {
+        using var harness = new Harness(Ok(json));
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Fixture.CleanupAsync());
+        Assert.Contains("plugins list did not report structured success", thrown.Message);
+        Assert.Single(harness.Calls);
+        Assert.Equal("list", harness.Calls[0][1]);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"unexpected\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("false")]
+    public async Task Run_PreservesPrimaryFailureWhenCleanupInventoryIsNotObject(string json)
+    {
+        using var harness = new Harness(Ok(EmptyInventory), Ok(json));
+        var original = new InvalidOperationException("original diff failure");
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Fixture.RunAsync(() => Task.FromException(original)));
+        Assert.Same(original, thrown);
+        Assert.Equal(2, harness.Calls.Count);
+        Assert.All(harness.Calls, args => Assert.Equal("list", args[1]));
+        Assert.Contains(harness.Messages, message => message.Contains("plugins list did not report structured success", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Cleanup_EmptyAssemblyNeedsNoMutation()
     {
