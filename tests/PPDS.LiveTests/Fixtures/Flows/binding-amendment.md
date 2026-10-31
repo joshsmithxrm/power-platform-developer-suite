@@ -37,6 +37,8 @@ The connection-reference row is created with the [documented `CreateRequest["Sol
 
 The main test is bounded to 10 minutes, each CLI subprocess to two minutes and cleanup to five minutes. The primary fault is saved before cleanup and rethrown afterward; SDK rejection and unknown transport outcomes are recorded separately. Successful cleanup alone does not pass the live gate.
 
+An interrupted dispatched CLI or unverifiable response triggers a bounded 30-second process-stop attempt, followed by saving the primary failure and exit evidence. Its remote outcome remains unknown even if the process exits. All Dataverse cleanup writes are suppressed, including flow disable/delete, reference deletion, solution deletion and publisher deletion. Retain exact confirmed IDs and obtain a separately reviewed recovery procedure; do not assume termination rolled back an in-flight request. This also applies conservatively to dry-run interruptions.
+
 ## Approved execution only
 
 The coordinator supplies the reviewed candidate hash and artifact root after approval. The candidate DLL is the root integration checkout's `src/PPDS.Cli/bin/Release/net8.0/ppds.dll`; the harness is compiled separately in Debug and must not rebuild that pinned Release output.

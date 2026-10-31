@@ -34,6 +34,8 @@ The manifest records the primary exception independently from cleanup. A typed D
 
 The test is `Category=DestructiveE2E` and skips without explicit confirmation. The main run is bounded to 20 minutes, each child process to two minutes, and cleanup to five minutes. It does not publish a package, merge code, invoke a trigger or change any existing business flow.
 
+If a dispatched CLI command is interrupted or its response cannot be verified, the harness attempts to stop it and waits up to 30 seconds using a fresh token. It then saves the original failure and process-exit evidence. Every such command has an **unknown remote outcome**, even when process exit is confirmed: termination cannot roll back an in-flight Dataverse request. Both flow harnesses suppress **all** Dataverse cleanup writes in this case and retain their exact fixture IDs for manual recovery. A dry-run interruption uses the same conservative policy. The ledger is saved after the bounded stop attempt; exit confirmation is not a successful validation result.
+
 ## Approved-run command
 
 Only after approval of the inventory above, supply the explicit reviewed candidate assembly and local artifact root:

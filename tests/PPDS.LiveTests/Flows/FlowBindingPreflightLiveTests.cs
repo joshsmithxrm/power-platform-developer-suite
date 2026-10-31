@@ -61,6 +61,7 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
         var cleanupFailures = new List<string>();
         var owned = new Dictionary<string, Guid>();
         var failure = new FixtureFailureEvidence();
+        var processInterruption = new FixtureProcessInterruption();
         var verifiedNames = new HashSet<Guid>();
         var deleted = new List<object>();
         Guid Id(string key) => owned.GetValueOrDefault(key);
@@ -68,6 +69,7 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
         {
             manifest["confirmedIds"] = owned; manifest["unknownSubmissions"] = unknown;
             manifest["rejectedSubmissions"] = rejected; manifest["primaryFailure"] = failure.Primary;
+            manifest["cliProcessInterruption"] = processInterruption.Evidence;
             manifest["cleanupFailures"] = cleanupFailures; manifest["verifiedDeletions"] = deleted;
             await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
         }
@@ -202,18 +204,21 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
             if (dryRun) start.ArgumentList.Add("--dry-run");
             if (hash is not null) { start.ArgumentList.Add("--expected-plan-hash"); start.ArgumentList.Add(hash); }
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start pinned candidate");
-            var stdout = process.StandardOutput.ReadToEndAsync(ct); var stderr = process.StandardError.ReadToEndAsync(ct);
-            using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct); bounded.CancelAfter(TimeSpan.FromMinutes(2));
-            try { await process.WaitForExitAsync(bounded.Token); }
-            catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-            var outText = await stdout; var errText = await stderr;
-            var label = dryRun ? "01-plan" : "02-execute";
-            await File.WriteAllTextAsync(Path.Combine(directory, label + ".json"), outText, ct);
-            await File.WriteAllTextAsync(Path.Combine(directory, label + ".stderr.txt"), errText, ct);
-            process.ExitCode.Should().NotBe(0); errText.Should().NotBeNullOrWhiteSpace();
-            var json = JsonDocument.Parse(outText).RootElement.Clone();
-            VerifyBlockedResult(json, dryRun, Id("control"), Id("blocker"));
-            return json.GetProperty("data");
+            return await processInterruption.ObserveAsync(process, async () =>
+            {
+                using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct); bounded.CancelAfter(TimeSpan.FromMinutes(2));
+                var stdout = process.StandardOutput.ReadToEndAsync(bounded.Token);
+                var stderr = process.StandardError.ReadToEndAsync(bounded.Token);
+                await process.WaitForExitAsync(bounded.Token);
+                var outText = await stdout; var errText = await stderr;
+                var label = dryRun ? "01-plan" : "02-execute";
+                await File.WriteAllTextAsync(Path.Combine(directory, label + ".json"), outText, ct);
+                await File.WriteAllTextAsync(Path.Combine(directory, label + ".stderr.txt"), errText, ct);
+                process.ExitCode.Should().NotBe(0); errText.Should().NotBeNullOrWhiteSpace();
+                var json = JsonDocument.Parse(outText).RootElement.Clone();
+                VerifyBlockedResult(json, dryRun, Id("control"), Id("blocker"));
+                return json.GetProperty("data");
+            });
         }
         async Task DeleteAsync(string key, string table, string idAttribute)
         {
@@ -277,36 +282,43 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
         catch (Exception exception)
         {
             failure.CapturePrimary(exception); manifest["state"] = "failed";
+            if (processInterruption.RequiresManualReview)
+                unknown.Add("Dispatched CLI outcome is unknown; process exit does not prove remote rollback. All fixture cleanup writes are suppressed.");
             output.WriteLine("Primary fixture failure: " + JsonSerializer.Serialize(failure.Primary));
             try { await SaveAsync(); } catch (Exception save) { cleanupFailures.Add("Pre-cleanup ledger: " + save.Message); }
         }
         finally
         {
-            using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
             try
             {
-                foreach (var key in new[] { "blocker", "control" }.Where(key => Id(key) != Guid.Empty))
+                await processInterruption.RunCleanupIfSafeAsync(async () =>
                 {
-                    var row = await ReadFlowAsync(key); await VerifyInventoryAsync(complete: false);
-                    if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
+                    using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
+                    foreach (var key in new[] { "blocker", "control" }.Where(key => Id(key) != Guid.Empty))
                     {
-                        await guard.EnsureConfirmedAsync("disable isolated fixture during cleanup", Target, ct);
-                        await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", row.Id), State = new(0), Status = new(1) });
+                        var row = await ReadFlowAsync(key); await VerifyInventoryAsync(complete: false);
+                        if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
+                        {
+                            await guard.EnsureConfirmedAsync("disable isolated fixture during cleanup", Target, ct);
+                            await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", row.Id), State = new(0), Status = new(1) });
+                        }
+                        await DeleteAsync(key, "workflow", "workflowid");
                     }
-                    await DeleteAsync(key, "workflow", "workflowid");
-                }
-                if (unknown.Count == 0 && cleanupFailures.Count == 0)
-                {
-                    if (Id("reference") != Guid.Empty)
-                    { await VerifyReferenceAsync(); await VerifyInventoryAsync(complete: false); await DeleteAsync("reference", "connectionreference", "connectionreferenceid"); }
-                    if (Id("solution") != Guid.Empty)
-                    { await VerifyInventoryAsync(complete: true); await VerifyPublisherAsync(Id("solution")); await DeleteAsync("solution", "solution", "solutionid"); }
-                    if (Id("publisher") != Guid.Empty)
-                    { await VerifyPublisherAsync(); await DeleteAsync("publisher", "publisher", "publisherid"); }
-                }
+                    if (unknown.Count == 0 && cleanupFailures.Count == 0)
+                    {
+                        if (Id("reference") != Guid.Empty)
+                        { await VerifyReferenceAsync(); await VerifyInventoryAsync(complete: false); await DeleteAsync("reference", "connectionreference", "connectionreferenceid"); }
+                        if (Id("solution") != Guid.Empty)
+                        { await VerifyInventoryAsync(complete: true); await VerifyPublisherAsync(Id("solution")); await DeleteAsync("solution", "solution", "solutionid"); }
+                        if (Id("publisher") != Guid.Empty)
+                        { await VerifyPublisherAsync(); await DeleteAsync("publisher", "publisher", "publisherid"); }
+                    }
+                });
             }
             catch (Exception exception) { cleanupFailures.Add(exception.GetType().Name + ": " + exception.Message); }
-            manifest["cleanup"] = owned.Count == 0 && unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained confirmed IDs and ownership evidence";
+            manifest["cleanup"] = processInterruption.RequiresManualReview
+                ? "manual-review-required; interrupted CLI outcome unknown; all Dataverse cleanup writes suppressed"
+                : owned.Count == 0 && unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained confirmed IDs and ownership evidence";
             try { await SaveAsync(); } catch (Exception save) { cleanupFailures.Add("Final ledger: " + save.Message); }
             output.WriteLine("Fixture cleanup: " + manifest["cleanup"] + "; " + JsonSerializer.Serialize(cleanupFailures));
         }

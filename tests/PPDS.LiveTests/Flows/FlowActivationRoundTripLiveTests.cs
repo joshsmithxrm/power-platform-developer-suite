@@ -54,6 +54,7 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         var unknown = new List<string>();
         var rejected = new List<object>();
         var failure = new FixtureFailureEvidence();
+        var processInterruption = new FixtureProcessInterruption();
         var cleanupFailures = new List<string>();
         var owned = new Dictionary<Guid, OwnedFlow>();
         var knownSourceNames = new HashSet<string>(StringComparer.Ordinal);
@@ -72,6 +73,7 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         {
             manifest["confirmedFlows"] = owned.Values.ToArray(); manifest["unknownSubmissions"] = unknown.ToArray();
             manifest["rejectedSubmissions"] = rejected.ToArray(); manifest["primaryFailure"] = failure.Primary;
+            manifest["cliProcessInterruption"] = processInterruption.Evidence;
             await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
         }
         async Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request)
@@ -186,18 +188,21 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
             if (dryRun) start.ArgumentList.Add("--dry-run");
             if (hash is not null) { start.ArgumentList.Add("--expected-plan-hash"); start.ArgumentList.Add(hash); }
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start candidate CLI");
-            var stdout = process.StandardOutput.ReadToEndAsync(ct); var stderr = process.StandardError.ReadToEndAsync(ct);
-            using var commandTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct); commandTimeout.CancelAfter(TimeSpan.FromMinutes(2));
-            try { await process.WaitForExitAsync(commandTimeout.Token); }
-            catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-            var outText = await stdout; var errText = await stderr;
-            var label = (++sequence).ToString("D2") + "-" + verb + (dryRun ? "-plan" : "-execute");
-            await File.WriteAllTextAsync(Path.Combine(directory, label + ".json"), outText, ct);
-            await File.WriteAllTextAsync(Path.Combine(directory, label + ".stderr.txt"), errText, ct);
-            var result = JsonDocument.Parse(outText).RootElement.Clone();
-            result.GetProperty("data").GetProperty("environmentUrl").GetString().Should().Be(url);
-            errText.Should().NotBeNullOrWhiteSpace("long-running phases belong on stderr");
-            return (process.ExitCode, result);
+            return await processInterruption.ObserveAsync(process, async () =>
+            {
+                using var commandTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct); commandTimeout.CancelAfter(TimeSpan.FromMinutes(2));
+                var stdout = process.StandardOutput.ReadToEndAsync(commandTimeout.Token);
+                var stderr = process.StandardError.ReadToEndAsync(commandTimeout.Token);
+                await process.WaitForExitAsync(commandTimeout.Token);
+                var outText = await stdout; var errText = await stderr;
+                var label = (++sequence).ToString("D2") + "-" + verb + (dryRun ? "-plan" : "-execute");
+                await File.WriteAllTextAsync(Path.Combine(directory, label + ".json"), outText, ct);
+                await File.WriteAllTextAsync(Path.Combine(directory, label + ".stderr.txt"), errText, ct);
+                var result = JsonDocument.Parse(outText).RootElement.Clone();
+                result.GetProperty("data").GetProperty("environmentUrl").GetString().Should().Be(url);
+                errText.Should().NotBeNullOrWhiteSpace("long-running phases belong on stderr");
+                return (process.ExitCode, result);
+            });
         }
         void VerifySelection(JsonElement result, IReadOnlyCollection<OwnedFlow> expected)
         {
@@ -331,6 +336,8 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         catch (Exception exception)
         {
             failure.CapturePrimary(exception);
+            if (processInterruption.RequiresManualReview)
+                unknown.Add("Dispatched CLI outcome is unknown; process exit does not prove remote rollback. All fixture cleanup writes are suppressed.");
             manifest["state"] = "failed";
             output.WriteLine("Primary fixture failure: " + JsonSerializer.Serialize(failure.Primary));
             // Persist the original fault before potentially slow cleanup, while retaining it if
@@ -342,32 +349,40 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         {
             try
             {
-                using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
-                async Task CleanAsync(string name, Func<Task> action)
+                var cleanupAllowed = await processInterruption.RunCleanupIfSafeAsync(async () =>
                 {
-                    try { await action(); output.WriteLine("Cleaned: " + name); }
-                    catch (Exception ex) { cleanupFailures.Add(name + ": " + ex.Message); }
-                }
-                foreach (var item in owned.Values.Where(f => !f.Managed).ToArray()) await CleanAsync(item.Name, () => DeleteOwnedFlowAsync(item));
-                foreach (var item in owned.Values.Where(f => f.Managed).ToArray()) await CleanAsync("disable " + item.Name, async () =>
-                {
-                    var row = await ReadFlowAsync(item); await VerifyMembershipAsync(item);
-                    if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
-                        await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", item.Id), State = new(0), Status = new(1) });
-                });
-                if (unknown.Count == 0 && cleanupFailures.Count == 0)
-                {
-                    if (sourceId != Guid.Empty) await CleanAsync(sourceName, async () => { await VerifySolutionAsync(sourceId, sourceName); await DeleteAsync("solution", sourceId); });
-                    if (outsideId != Guid.Empty) await CleanAsync(outsideName, async () => { await VerifySolutionAsync(outsideId, outsideName); await DeleteAsync("solution", outsideId); });
-                }
-                if (publisherId != Guid.Empty && unknown.Count == 0 && cleanupFailures.Count == 0)
-                    await CleanAsync(publisherName, async () =>
+                    using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
+                    async Task CleanAsync(string name, Func<Task> action)
                     {
-                        var rows = await QueryAsync(publishers); var row = rows.Entities.Should().ContainSingle().Subject;
-                        row.Id.Should().Be(publisherId); await DeleteAsync("publisher", publisherId);
+                        try { await action(); output.WriteLine("Cleaned: " + name); }
+                        catch (Exception ex) { cleanupFailures.Add(name + ": " + ex.Message); }
+                    }
+                    foreach (var item in owned.Values.Where(f => !f.Managed).ToArray()) await CleanAsync(item.Name, () => DeleteOwnedFlowAsync(item));
+                    foreach (var item in owned.Values.Where(f => f.Managed).ToArray()) await CleanAsync("disable " + item.Name, async () =>
+                    {
+                        var row = await ReadFlowAsync(item); await VerifyMembershipAsync(item);
+                        if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
+                            await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", item.Id), State = new(0), Status = new(1) });
                     });
-                manifest["cleanupFailures"] = cleanupFailures;
-                manifest["cleanup"] = unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained solution/publisher ownership evidence";
+                    if (unknown.Count == 0 && cleanupFailures.Count == 0)
+                    {
+                        if (sourceId != Guid.Empty) await CleanAsync(sourceName, async () => { await VerifySolutionAsync(sourceId, sourceName); await DeleteAsync("solution", sourceId); });
+                        if (outsideId != Guid.Empty) await CleanAsync(outsideName, async () => { await VerifySolutionAsync(outsideId, outsideName); await DeleteAsync("solution", outsideId); });
+                    }
+                    if (publisherId != Guid.Empty && unknown.Count == 0 && cleanupFailures.Count == 0)
+                        await CleanAsync(publisherName, async () =>
+                        {
+                            var rows = await QueryAsync(publishers); var row = rows.Entities.Should().ContainSingle().Subject;
+                            row.Id.Should().Be(publisherId); await DeleteAsync("publisher", publisherId);
+                        });
+                    manifest["cleanupFailures"] = cleanupFailures;
+                    manifest["cleanup"] = unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained solution/publisher ownership evidence";
+                });
+                if (!cleanupAllowed)
+                {
+                    manifest["cleanupFailures"] = cleanupFailures;
+                    manifest["cleanup"] = "manual-review-required; interrupted CLI outcome unknown; all Dataverse cleanup writes suppressed";
+                }
             }
             catch (Exception exception)
             {
