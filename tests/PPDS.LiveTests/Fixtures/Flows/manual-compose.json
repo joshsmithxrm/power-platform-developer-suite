@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "connectionReferences": {},
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$connections": { "defaultValue": {}, "type": "Object" },
+        "$authentication": { "defaultValue": {}, "type": "SecureObject" }
+      },
+      "triggers": {
+        "manual": { "type": "Request", "kind": "Button", "inputs": { "schema": { "type": "object", "properties": {}, "required": [] } } }
+      },
+      "actions": {
+        "Fixture_marker": { "type": "Compose", "inputs": "PPDS isolated activation fixture", "runAfter": {} }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}
