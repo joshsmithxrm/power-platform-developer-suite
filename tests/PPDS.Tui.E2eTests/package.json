@@ -13,5 +13,10 @@
     "@microsoft/tui-test": "^0.0.1-rc.5",
     "@playwright/test": "^1.40.0",
     "@xterm/xterm": "^5.5.0"
+  },
+  "overrides": {
+    "@microsoft/tui-test": {
+      "glob": "^14.0.2"
+    }
   }
 }
