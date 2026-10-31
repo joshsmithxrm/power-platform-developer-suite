@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.2] - Unreleased
+## [1.4.2] - 2026-10-30
 
 ### Security
 - **Plugin reference caches are isolated by OS account** — embedded framework references now use protected local application data and validate ownership, permissions and links before reuse or repair. Unsafe storage, including mutation-capable macOS ACLs, is rejected with a path-specific warning; use the [cache troubleshooting guidance](README.md#command-structure) to restore safe storage. Legacy shared-temp caches are neither used nor removed. This boundary does not protect against same-account or administrator mutation or hostile filesystems (#1329).
