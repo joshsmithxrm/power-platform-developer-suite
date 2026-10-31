@@ -1,6 +1,6 @@
 # Flows
 
-**Status:** Implementing activation; read commands implemented
+**Status:** Activation implemented; live fixture validation pending
 **Last Updated:** 2026-10-31
 **Code:** src/PPDS.Cli/Services/Flows/ | src/PPDS.Cli/Commands/Flows/
 **Surfaces:** CLI (read and activation); other surfaces retain existing read behavior
@@ -45,7 +45,7 @@ Return target, selection, requested state, plan hash, dry-run, counts, eligible 
 | AC-06 | Zero writes for any known preflight blocker; runtime failure/cancellation stops remaining writes and preserves outcomes. | `Execute_RuntimeFailurePreservesEarlierSuccessAndStopsRemainingWrites`; `Execute_PreconditionChangeStopsBeforeSubmission`; `Execute_CancellationAfterSubmissionIsUnknownAndDoesNotWriteNextFlow` | Automated passing |
 | AC-07 | Bounded verification and honest ambiguous outcomes; no blind mutation retries or rollback. | `Execute_VerificationDeadlineCancelsBlockedReadAndReportsUnknown`; `Execute_LateReadCannotWinDeadlineOrCancellation`; `Execute_AcceptedWriteFollowedByReadFaultIsUnknownNotRejected`; `Execute_ServerRejectionIsFailedAndPreservesFaultReason` | Automated passing |
 | AC-08 | CLI structured output, exit codes, progress, cancellation and rerun contracts. | `StateCommandTests.InvocationRoutesTargetAndOptionsAndKeepsProgressOffStdout`, `ProviderFailureProducesStructuredErrorAndNonzeroExit`, `PartialResultRetainsDataAndNonzeroExit`; service cancellation/rerun tests; credentialed CLI subprocess pending | Automated passing; subprocess live pending |
-| AC-09 | Harmless managed/unmanaged live single/batch fixtures with isolation and cleanup evidence. | Requires authorized sandbox fixtures | Pending |
+| AC-09 | Harmless managed/unmanaged live single/batch fixtures with isolation and cleanup evidence. | `FlowActivationRoundTripLiveTests.CandidateCli_ManagedAndUnmanagedActivation_IsVerifiedIsolatedAndIdempotent`; opt-in inventory and cleanup in `tests/PPDS.LiveTests/Fixtures/Flows/README.md` | Harness compiled; live pending |
 
 ## Platform references
 
