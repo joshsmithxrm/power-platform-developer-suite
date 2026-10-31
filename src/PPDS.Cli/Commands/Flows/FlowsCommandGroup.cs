@@ -35,6 +35,8 @@ public static class FlowsCommandGroup
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());
         command.Subcommands.Add(UrlCommand.Create());
+        command.Subcommands.Add(StateCommand.Create(enable: true));
+        command.Subcommands.Add(StateCommand.Create(enable: false));
 
         return command;
     }

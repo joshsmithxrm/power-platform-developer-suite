@@ -69,6 +69,15 @@ public sealed record FlowInfo
     /// <summary>Gets the flow category.</summary>
     public required FlowCategory Category { get; init; }
 
+    /// <summary>Workflow type (1=definition, 2=activation, 3=template), when known.</summary>
+    public int? DefinitionType { get; init; }
+
+    /// <summary>Whether connection dependencies could be parsed without guessing.</summary>
+    public bool ConnectionReferencesVerified { get; init; }
+
+    /// <summary>Safe diagnostic for an unreadable dependency declaration.</summary>
+    public string? ConnectionReferenceParseError { get; init; }
+
     /// <summary>Gets whether the flow is managed.</summary>
     public bool IsManaged { get; init; }
 

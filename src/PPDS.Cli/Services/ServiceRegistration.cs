@@ -325,6 +325,7 @@ public static class ServiceRegistration
         services.AddTransient<IImportJobService, ImportJobService>();
         services.AddTransient<IUserService, UserService>();
         services.AddTransient<IFlowService, FlowService>();
+        services.AddTransient<IFlowActivationService, FlowActivationService>();
         services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
         services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
         services.AddTransient<IComponentNameResolver, ComponentNameResolver>();
