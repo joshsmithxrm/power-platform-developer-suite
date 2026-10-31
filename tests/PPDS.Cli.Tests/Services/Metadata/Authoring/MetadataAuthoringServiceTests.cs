@@ -474,9 +474,7 @@ public class MetadataAuthoringServiceTests
         await _service.UpdateColumnAsync(request);
 
         capturedRequest.Should().NotBeNull();
-        var dtAttr = capturedRequest!.Attribute as DateTimeAttributeMetadata;
-        dtAttr.Should().NotBeNull();
-        Assert.NotNull(dtAttr);
+        var dtAttr = Assert.IsType<DateTimeAttributeMetadata>(capturedRequest!.Attribute);
         dtAttr.Format.Should().Be(DateTimeFormat.DateOnly);
     }
 
@@ -677,10 +675,8 @@ public class MetadataAuthoringServiceTests
         await _service.UpdateRelationshipAsync(request);
 
         capturedRequest.Should().NotBeNull();
-        var updatedRel = capturedRequest!.Relationship as OneToManyRelationshipMetadata;
-        updatedRel.Should().NotBeNull("because UpdateRelationship should send a OneToManyRelationshipMetadata");
-        Assert.NotNull(updatedRel);
-        updatedRel.CascadeConfiguration.Should().NotBeNull();
+        var updatedRel = Assert.IsType<OneToManyRelationshipMetadata>(capturedRequest!.Relationship);
+        Assert.NotNull(updatedRel.CascadeConfiguration);
         updatedRel.CascadeConfiguration.Delete.Should().Be(CascadeType.Restrict);
         updatedRel.CascadeConfiguration.Assign.Should().Be(CascadeType.Cascade);
     }
