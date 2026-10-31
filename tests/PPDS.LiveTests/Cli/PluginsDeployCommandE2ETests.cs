@@ -1,6 +1,7 @@
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -13,40 +14,8 @@ namespace PPDS.LiveTests.Cli;
 /// Tier 1 tests use --dry-run and are safe for all environments.
 /// Tier 2 tests (marked with DestructiveE2E trait) actually deploy plugins.
 /// </remarks>
-public class PluginsDeployCommandE2ETests : CliE2ETestBase
+public class PluginsDeployCommandE2ETests(ITestOutputHelper output) : CliE2ETestBase
 {
-    /// <summary>
-    /// Empty-types config for pre-test state reset. Lists the fixture assembly with no types
-    /// and no allTypeNames so <c>plugins clean</c> treats every existing type and step as an
-    /// orphan and removes it. Ensures destructive tests start from a clean baseline even when
-    /// a prior run crashed before its <c>finally</c> cleanup (issue surfaced on PR #826 CI).
-    /// </summary>
-    private const string EmptyRegistrationsConfigJson = """
-        {
-            "version": "1.0",
-            "assemblies": [
-                {
-                    "name": "PPDS.LiveTests.Fixtures",
-                    "type": "Assembly",
-                    "path": "PPDS.LiveTests.Fixtures.dll",
-                    "types": []
-                }
-            ]
-        }
-        """;
-
-    /// <summary>
-    /// Runs <c>plugins clean</c> with an empty-types config to wipe any pre-existing
-    /// registrations from prior (possibly interrupted) test runs. Tolerates a non-zero
-    /// exit code — the follow-up deploy assertion is the real signal.
-    /// </summary>
-    private async Task EnsureCleanFixtureStateAsync()
-    {
-        var emptyConfigPath = GenerateTempFilePath(".json");
-        await File.WriteAllTextAsync(emptyConfigPath, EmptyRegistrationsConfigJson);
-        await RunCliAsync("plugins", "clean", "--config", emptyConfigPath);
-    }
-
     #region Tier 1: Safe tests (--dry-run)
 
     [CliE2EWithCredentials]
@@ -165,10 +134,9 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        // Reset env state in case a prior run crashed before its cleanup.
-        await EnsureCleanFixtureStateAsync();
-
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Actually deploy the plugin
             var deployResult = await RunCliAsync(
@@ -185,19 +153,12 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
             listResult.ExitCode.Should().Be(0, $"List failed: {listResult.StdErr}");
             listResult.StdOut.Should().Contain("PPDS.LiveTests.Fixtures");
-        }
-        finally
-        {
-            // Clean up: remove the deployed plugin
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", TestRegistrationsPath);
-        }
+        });
     }
 
     [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
-    public async Task Deploy_ActualDeploy_ThenClean_RemovesPlugin()
+    public async Task Deploy_ActualDeploy_ThenClean_RemovesRegistrations()
     {
         var profileName = GenerateTestProfileName();
         await RunCliAsync(
@@ -210,10 +171,9 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        // Reset env state in case a prior run crashed before its cleanup.
-        await EnsureCleanFixtureStateAsync();
-
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Deploy the plugin
             var deployResult = await RunCliAsync(
@@ -222,30 +182,9 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
             deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
 
-            // Clean up using the clean command
-            var cleanResult = await RunCliAsync(
-                "plugins", "clean",
-                "--config", TestRegistrationsPath);
-
-            cleanResult.ExitCode.Should().Be(0, $"Clean failed: {cleanResult.StdErr}");
-
-            // Verify the plugin was removed
-            var listResult = await RunCliAsync(
-                "plugins", "list",
-                "--assembly", "PPDS.LiveTests.Fixtures",
-                "--output-format", "json");
-
-            listResult.ExitCode.Should().Be(0);
-            // After clean, the assembly should not be in the list
-            // (or list should be empty for that filter)
-        }
-        finally
-        {
-            // Ensure cleanup even if assertions fail
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", TestRegistrationsPath);
-        }
+            // Verify zero types/steps through the real clean/list commands; retain the assembly.
+            await fixture.CleanupAsync();
+        });
     }
 
     #endregion

@@ -986,11 +986,24 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 | AC-66 | A later deployment failure preserves earlier per-step errors in structured output; secondary-only message-filter diagnostics do not name an empty primary entity | `PluginReleaseRegressionTests.Deploy_DoubleFault_PreservesStepAndCleanupErrorsInJson`, `MissingFilter_DescribesOnlySpecifiedEntities` | ✅ |
 | AC-67 | Diff passes cancellation through every asynchronous registration lookup and stops enumerating configured/existing steps and images after cancellation | `PluginReleaseRegressionTests.Diff_PreCancelled_DoesNotLookUpAssembly`, `Diff_CancellationDuringStepLookup_StopsOtherTypes`, `Diff_PassesTokenToMessageFilterAndImageLookups` | ✅ |
 | AC-68 | The deploy/diff propagation wait has a configurable 90-second default deadline and retains elapsed time, attempts, and last command output on timeout; caller cancellation is distinct | `PropagationWaitTests.Poll_DeadlineRetainsLastResultAndAttempts`, `Poll_DeadlineCancelsInFlightCommand`, `Poll_CommandTimeoutRetainsDiagnostics`, `Poll_CallerCancellationRemainsCancellation`, `TimeoutConfiguration_IsBounded`, `TimeoutConfiguration_RejectsInvalidValues` | ✅ |
+| AC-69 | Destructive CLI fixture tests clean only the declared `PPDS.LiveTests.Fixtures` registrations using an empty types/allTypeNames config, reject unexpected inventory before mutation, require successful cleanup and structured zero-registration readback, retain the assembly, and preserve the primary failure when cleanup also fails | `PluginFixtureCleanupTests.Cleanup_UsesOnlyEmptyFixtureConfigAndPinnedTarget`, `Cleanup_RejectsForeignInventoryBeforeMutation`, `Cleanup_RejectsFailureAndResidualRegistrations`, `Run_PreservesPrimaryFailureAndReportsCleanupFailure`, `Run_PreservesPrimaryEvenWhenCleanupReportingFails` | ✅ |
 
 The live `Diff_AfterDeploy_ShowsNoDrift` assertion uses this tested wait helper and
 prints last exit/stdout/stderr with elapsed time and attempt count. Its timeout is
 configured by `PPDS_TEST_PROPAGATION_TIMEOUT_SECONDS` (1–900, default 90).
 Offline helper validation is not a claim that a credentialed deploy/diff roundtrip ran.
+
+The five destructive deploy/diff/clean CLI tests share fixture teardown. It removes
+only the two declared fixture types, their matching steps and images after checking
+the complete hidden-inclusive inventory. Cleanup uses a separate empty config,
+requires zero exit plus successful JSON, and verifies zero remaining types/steps in
+a fresh structured list. The assembly record is deliberately retained, including
+when it predated the test; these tests never unregister an assembly or expand
+dependencies. Cleanup uses a three-minute cancellation deadline, does not retry an
+uncertain mutation, and reports cleanup failure without replacing the original test
+failure. The existing CLI runner waits for a killed process to exit, so this deadline
+is not a guarantee of a three-minute wall-clock completion time.
+The fixture must not be modified concurrently by another run or user.
 
 ### Edge Cases
 

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -9,7 +10,7 @@ namespace PPDS.LiveTests.Cli;
 /// Compares plugin configuration against actual Dataverse environment state.
 /// Tests only run on .NET 8.0 since CLI is spawned with --framework net8.0.
 /// </summary>
-public class PluginsDiffCommandE2ETests : CliE2ETestBase
+public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBase
 {
     #region Tier 1: Safe tests
 
@@ -102,7 +103,9 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Deploy the plugin first
             var deployResult = await RunCliAsync(
@@ -125,14 +128,7 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
                 $"stdout: {poll.Last?.StdOut ?? "(none)"}; stderr/drift: {poll.Last?.StdErr ?? "(none)"}");
             var diffResult = poll.Last!;
             diffResult.StdErr.Should().Contain("No drift");
-        }
-        finally
-        {
-            // Clean up: remove the deployed plugin
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", TestRegistrationsPath);
-        }
+        });
     }
 
     #endregion
