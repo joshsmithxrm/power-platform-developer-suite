@@ -65,3 +65,9 @@ Attempt 2 created and round-tripped the harmless flows successfully, including a
 The confirmed outside flow was deleted and the two managed flows were left Off. Source/outside solutions and publisher were retained for recovery because the create outcome was recorded as unknown. Recovery must verify the manifest's exact IDs, package hash/component inventory, complete publisher ownership and absence of the blocker; it must never adopt rows by name. Preserve all attempt 2 evidence. Only after verified cleanup and fresh absence checks may the coordinator perform a controlled diagnostic run of the same approved inventory in a new `attempt3` artifact directory. Adding an unbound connection-reference resource would change the approved inventory and requires a separate reviewed amendment.
 
 Offline regression coverage: `FixtureFailureEvidenceTests.DataverseFault_RecordsAuthoritativeRejectionWithoutArbitraryErrorDetails`, `TransportTimeoutAndCancellation_KeepSubmissionUnknown`, `CleanupFailure_DoesNotReplacePrimaryExceptionOrItsOriginalStack`, and `UnknownSubmissionWithoutPrimaryFailure_StillFailsValidation`. These tests do not authenticate or call Dataverse.
+
+## Attempt 3 diagnosis
+
+After verified attempt 2 recovery, the coordinator ran a controlled attempt 3 with the same approved inventory and fresh collision checks. All 20 candidate CLI artifacts again passed. Blocker creation returned explicit Dataverse fault `0x80095005`: the named connection reference did not exist. The corrected harness preserved this fault and completed cleanup with empty failures/unknown lists. This establishes the provisioning constraint; the missing-binding live gate remains incomplete.
+
+A [separate proposed binding amendment](binding-amendment.md) uses one new unbound connection-reference metadata row and two harmless manual flows. It requires separate approval before execution and does not repeat the successful managed/unmanaged roundtrip.
