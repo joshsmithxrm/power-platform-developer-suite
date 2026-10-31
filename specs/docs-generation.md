@@ -246,6 +246,8 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-28 | After Phase 0 completes, running `dotnet build` on each of the four library projects with `WarningsAsErrors` for PPDS014-016/RS0016-0017 produces zero errors | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.AllFourLibrariesBuildClean` | 🔲 |
 | AC-29 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` returns zero RS0016/RS0017 diagnostics against the committed source of each of the four library projects — gated by Phase 0 completion across all four libs (Phase 0 is currently pilot-only: PPDS.Auth has baselines; PPDS.Dataverse / PPDS.Migration / PPDS.Plugins baselines are pending). AC tracked at 🔲 until all four libs reach zero-diagnostic state. | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.RS0016ReturnsZeroDiagnostics` | 🔲 |
 | AC-30 | `docs-smoke.yml` runs as `workflow_call` from a caller repository, accepts the caller's docs path as input, and fails the check with stdout pointing at the offending block when compilation fails | `PPDS.DocsGen.Workflow.Tests/DocsSmokeWorkflowTests.FailsOnBadBlockViaWorkflowCall` | 🔲 |
+| AC-31 | The CLI reflector exits nonzero without writing output when the input cannot load, a command factory fails, or no command pages are generated; valid inputs still emit reference pages successfully. | `PPDS.DocsGen.Cli.Tests/CliReflectProcessTests` | ✅ |
+| AC-32 | Release reference generation selects a runtime compatible with the workflow's net10.0 input assemblies, even when .NET 8 is also installed. | `tests/ci/test_docs_release_workflow.py::test_reflectors_use_runtime_compatible_with_net10_input` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 

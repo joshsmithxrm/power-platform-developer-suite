@@ -79,3 +79,10 @@ def test_dry_run_dispatch_preserved(workflow: dict) -> None:
     dispatch = on_config.get("workflow_dispatch") or {}
     inputs = dispatch.get("inputs", {})
     assert "dry_run" in inputs, "dry_run input must be preserved"
+
+
+def test_reflectors_use_runtime_compatible_with_net10_input(workflow: dict) -> None:
+    """The CLI reflector executes command factories from the net10 build."""
+    steps = workflow["jobs"]["release"]["steps"]
+    generate = next(step for step in steps if step.get("name") == "Generate reference markdown")
+    assert generate.get("env", {}).get("DOTNET_ROLL_FORWARD") == "LatestMajor"

@@ -6,6 +6,9 @@ public static class AuthCommandGroup
 {
     public static Command Create()
     {
+        if (Environment.GetEnvironmentVariable("PPDS_DOCS_FIXTURE_FAIL_FACTORY") == "1")
+            throw new InvalidOperationException("Expected fixture factory failure.");
+
         var root = new Command("auth", "Authentication commands.");
         root.Subcommands.Add(CreateLogin());
         root.Subcommands.Add(CreateLogout());

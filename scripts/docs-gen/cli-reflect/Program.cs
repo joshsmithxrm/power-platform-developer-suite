@@ -23,6 +23,16 @@ try
         new GenerationInput(assemblyPath, outputRoot),
         CancellationToken.None);
 
+    if (result.Files.Count == 0 || result.Diagnostics.Any(d =>
+        d.StartsWith("load:", StringComparison.Ordinal) ||
+        d.StartsWith("factory ", StringComparison.Ordinal)))
+    {
+        foreach (var diagnostic in result.Diagnostics)
+            Console.Error.WriteLine($"cli-reflect: {diagnostic}");
+        throw new InvalidOperationException(
+            "CLI reference generation did not load the complete command surface.");
+    }
+
     Directory.CreateDirectory(outputRoot);
     foreach (var file in result.Files)
     {
