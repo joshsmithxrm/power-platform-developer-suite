@@ -73,7 +73,8 @@ builder.Services.RegisterDataverseServices();
 // EnvironmentConfigStore, ISecureCredentialStore), so we don't call it separately here.
 builder.Services.AddCliApplicationServices();
 
-var host = builder.Build();
+using var host = builder.Build();
+await host.Services.GetRequiredService<McpToolContext>().InitializeAsync();
 await host.RunAsync();
 return 0;
 

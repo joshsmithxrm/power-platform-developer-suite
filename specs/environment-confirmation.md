@@ -15,9 +15,11 @@ Coverage in this increment: every FormService writer and the flow activation ser
 
 | ID | Criterion | Test | Status |
 |---|---|---|---|
-| AC-01 | Protected/unknown/development/override/read-only/mismatched targets follow policy and denied operations do not write. | EnvironmentConfirmationServiceTests | Pending |
-| AC-02 | Acknowledgement is isolated by session, identity, target and policy; concurrent calls cannot cross-authorize. | EnvironmentConfirmationServiceTests | Pending |
-| AC-03 | MCP captures startup identity/target; allowed switching changes actual new request targets while overlapping calls retain theirs. | McpToolContextTests | Pending |
-| AC-04 | All selected service entry points fail closed without context and preserve operation-level guards. | FormServiceConfirmationTests; FlowActivationServiceTests | Pending |
-| AC-05 | CLI/MCP return structured errors and allowed-env alone never confirms writing. | FormsCommandTests; FormsToolsTests | Pending |
-| AC-06 | Cancellation, progress and resource ownership propagate through service and adapter boundaries. | FormAuthoringTests; McpToolContextTests | Pending |
+| AC-01 | Protected/unknown/development/override/read-only/mismatched targets follow policy and denied operations do not write. | EnvironmentConfirmationServiceTests.PolicyMatrix, Mismatch_IsRejectedEvenForDevelopment, ReadOnly_CannotBeAcknowledgedAndDoesNotReadPolicy, MissingContext_FailsClosed | ✅ |
+| AC-02 | Acknowledgement is isolated by session, identity, target and policy; concurrent calls cannot cross-authorize. | EnvironmentConfirmationServiceTests.Acknowledgement_DoesNotCrossIdentitySessionOrTarget, PolicyChange_InvalidatesPriorAcknowledgement, ConcurrentAcknowledgements_DoNotAuthorizeAnotherTarget | ✅ |
+| AC-03 | MCP captures startup identity/target; allowed switching changes actual new request targets while overlapping calls retain theirs. | McpSessionSnapshotTests.StartupSnapshot_DoesNotFollowActiveProfileOrReturnedObjectChanges, InFlightPoolRequest_UsesCapturedTargetWhileLaterRequestUsesSwitch_WithoutGlobalMutation, AuthWho_AndProviderUseSameOverrideAndSwitchedTarget_WithTruthfulMetadata | ✅ |
+| AC-04 | All selected service entry points fail closed without context and preserve operation-level guards. | FormConfirmationCoverageTests.EveryExistingWriter_FailsClosedWithoutContext_BeforeClientAcquisition; FormAuthoringTests.ReadOnly_DryRunPlansWithoutAcknowledgementOrAnyWrites_ActualNoOpRejected; flow integration mapping owned by flow spec | Forms ✅; combined flow validation pending integration |
+| AC-05 | CLI/MCP return structured errors and allowed-env alone never confirms writing. | FormsCommandGroupTests.EveryMutation_ExposesExactEnvironmentAcknowledgement_SeparateFromPublication; FormsProtocolTests.ClientReceivesStructuredGuardError_AndInvalidInputNeverCallsService; EnvironmentConfirmationServiceTests.PolicyMatrix | ✅ |
+| AC-06 | Cancellation, progress and resource ownership propagate through service and adapter boundaries. | FormAuthoringTests.CancelledBeforePlanning_PropagatesCancellation_AndDoesNotAcquireClient; FormsProtocolTests.ClientListsBoundedTools_AndCallsReadDraftPublishJourneyWithProgress; McpSessionSnapshotTests.AuthWho_AndProviderUseSameOverrideAndSwitchedTarget_WithTruthfulMetadata | ✅ |
+
+Local validation uses SDK fakes and real in-process MCP JSON-RPC transports. It does not assert live Dataverse behavior. The opt-in live form fixture roundtrip remains pending, documented in `tests/PPDS.LiveTests/Fixtures/Forms/README.md`.

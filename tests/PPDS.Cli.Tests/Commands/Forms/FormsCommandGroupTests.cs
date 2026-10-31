@@ -29,6 +29,20 @@ public class FormsCommandGroupTests
         _command.Description.Should().NotBeNullOrEmpty();
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void EveryMutation_ExposesExactEnvironmentAcknowledgement_SeparateFromPublication()
+    {
+        string[] writers = ["set-xml", "add-tab", "update-tab", "remove-tab", "add-section", "update-section", "remove-section",
+            "add-field", "remove-field", "reorder-fields", "add-subgrid", "remove-subgrid"];
+        foreach (var name in writers)
+        {
+            var command = _command.Subcommands.Single(c => c.Name == name);
+            command.Options.Should().Contain(o => o.Name == "--confirm-env", name + " must expose target acknowledgement");
+            command.Options.Single(o => o.Name == "--publish").Description.Should().Contain("table");
+        }
+    }
+
     /// <summary>AC-28: All expected subcommands are present.</summary>
     [Fact]
     [Trait("Category", "Unit")]

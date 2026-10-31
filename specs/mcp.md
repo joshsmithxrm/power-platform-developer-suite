@@ -1,7 +1,7 @@
 # MCP Server
 
 **Status:** Implemented
-**Last Updated:** 2026-01-23
+**Last Updated:** 2026-10-31
 **Code:** [src/PPDS.Mcp/](../src/PPDS.Mcp/)
 **Surfaces:** MCP
 
@@ -9,7 +9,13 @@
 
 ## Overview
 
-The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabilities to AI assistants like Claude Code. It provides 13 tools for authentication, environment management, schema discovery, query execution, and plugin debugging—enabling natural language interaction with Dataverse through the standardized MCP protocol over stdio transport.
+The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabilities to AI assistants. Tools cover authentication, environment management, schema discovery, queries, plugin debugging and bounded form authoring through the MCP protocol over stdio. The tool attributes are the authoritative inventory.
+
+### Captured session targets and form authoring
+
+The host initializes `McpToolContext` before accepting requests, capturing the explicitly selected profile or current default. External profile edits cannot redirect the running session. Every operation captures identity and current environment together. An allowlisted `ppds_env_select` updates only future session operations and retains resolved environment metadata; it does not update the user's saved active profile or dispose pools used by overlapping calls. `ppds_auth_who` reports the same captured current target, including an explicit startup environment override.
+
+`ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field`, and `ppds_forms_publish` delegate to `IFormService`. Add-field requires stable form/section IDs and the fingerprint from a fresh unpublished read. It supports a write-free preview and saves/verifies a draft without publishing. Publication requires `confirmPublishEntity` equal to the table logical name and publishes all pending changes for that table; verification covers the selected form. `confirmEnvironment` acknowledges the exact protected target, separately from publication scope and environment switching. See [form AC-39–47](feat-forms-commands.md#safe-mcp-authoring-surface) and [environment confirmation](environment-confirmation.md) for the acceptance/test mapping. Live managed validation remains pending until the opt-in fixture harness passes.
 
 ### Goals
 
@@ -355,11 +361,11 @@ Response:
 
 **Context:** Tools need connection pools, but creating pools is expensive (authentication, MSAL token acquisition).
 
-**Decision:** Cache pools by sorted profile names + normalized environment URL.
+**Decision:** Captured-session pools are keyed by a hash of the captured profile snapshot plus canonical environment URL. They never reload a mutable profile name. The legacy multi-profile API retains its sorted-name cache key for existing callers.
 
 **Implementation:** The pool manager ([`McpConnectionPoolManager.cs:31`](../src/PPDS.Mcp/Infrastructure/McpConnectionPoolManager.cs#L31)) uses `ConcurrentDictionary<string, Lazy<Task<CachedPoolEntry>>>`.
 
-**Cache key format:** `"{sorted_profiles}|{normalized_url}"` ([`McpConnectionPoolManager.cs:207-212`](../src/PPDS.Mcp/Infrastructure/McpConnectionPoolManager.cs#L207-L212))
+**Cache key formats:** captured session `"{profile_snapshot_hash}|{canonical_url}"`; legacy API `"{sorted_profiles}|{canonical_url}"`.
 
 **Alternatives considered:**
 - Per-request pools: Rejected—too slow (authentication overhead per request)
@@ -455,7 +461,7 @@ public sealed class NewOperationResult
 
 ### Acceptance Criteria
 
-- [ ] Tool auto-discovery finds all 13 tools at startup
+- [ ] Tool auto-discovery finds all attributed tools at startup
 - [ ] Pool reuse: Second query reuses cached pool (no re-authentication)
 - [ ] Pool isolation: Different profiles get different pools
 - [ ] Invalidation: `InvalidateProfile()` removes correct pools

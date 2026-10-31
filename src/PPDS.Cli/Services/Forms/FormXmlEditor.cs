@@ -333,24 +333,52 @@ internal static class FormXmlEditor
            ?? throw new PpdsException(FormErrorCodes.InvalidFormXml, "Form XML has no root element.");
 
     private static XElement RequireTab(XDocument formXml, string tabLabelOrId)
-        => formXml.Descendants("tab").FirstOrDefault(t => ElementMatches(t, tabLabelOrId))
-           ?? throw new PpdsException(FormErrorCodes.TabNotFound, $"Tab '{tabLabelOrId}' not found in form XML.");
+        => RequireElement(formXml, "tab", tabLabelOrId, FormErrorCodes.TabNotFound);
 
-    private static XElement RequireSection(XDocument formXml, string sectionLabelOrId)
-        => formXml.Descendants("section").FirstOrDefault(s => ElementMatches(s, sectionLabelOrId))
-           ?? throw new PpdsException(FormErrorCodes.SectionNotFound, $"Section '{sectionLabelOrId}' not found in form XML.");
+    internal static XElement RequireSection(XDocument formXml, string sectionLabelOrId)
+        => RequireElement(formXml, "section", sectionLabelOrId, FormErrorCodes.SectionNotFound);
 
-    // Exported so FormService can use the same matching logic for FindTab/FindSection.
-    // Tries label match first, then name attribute match — no GUID detection.
-    // Tabs and sections have both label (inside <labels>) and name attribute.
-    // Pre-existing Dataverse-generated forms have GUID-valued name attributes,
-    // so callers can still identify elements by their GUID name string.
-    internal static bool ElementMatches(XElement element, string labelOrName)
-        => LabelMatches(element, labelOrName) || NameAttributeMatches(element, labelOrName);
+    internal static XElement RequireSectionById(XDocument formXml, Guid sectionId)
+        => UniqueElement(formXml.Descendants("section").Where(e => IdMatches(e, sectionId)).ToList(), "section", sectionId.ToString())
+            ?? throw new PpdsException(FormErrorCodes.SectionNotFound, $"Section ID '{sectionId}' not found in form XML.");
+
+    private static XElement RequireElement(XDocument formXml, string kind, string selector, string notFoundCode)
+    {
+        return FindElement(formXml, kind, selector)
+            ?? throw new PpdsException(notFoundCode, $"{kind} '{selector}' not found in form XML.");
+    }
+
+    internal static XElement? FindElement(XDocument formXml, string kind, string selector)
+    {
+        if (Guid.TryParse(selector.Trim('{', '}'), out var id))
+        {
+            var ids = formXml.Descendants(kind).Where(e => IdMatches(e, id)).ToList();
+            if (ids.Count > 0) return UniqueElement(ids, kind, selector);
+        }
+        return UniqueElement(formXml.Descendants(kind).Where(e => LabelMatches(e, selector) || NameAttributeMatches(e, selector)).ToList(), kind, selector);
+    }
+
+    private static XElement? UniqueElement(IReadOnlyList<XElement> matches, string kind, string selector)
+        => matches.Count switch
+        {
+            1 => matches[0],
+            0 => null,
+            _ => throw new PpdsException("Forms.AmbiguousElement", $"More than one {kind} matches '{selector}'. Use its ID.")
+        };
+
+    private static bool IdMatches(XElement element, Guid id)
+        => Guid.TryParse(((string?)element.Attribute("id"))?.Trim('{', '}'), out var actualId) && id == actualId;
+
+    // Single-element compatibility predicate; FindElement applies ID precedence across the document.
+    internal static bool ElementMatches(XElement element, string selector)
+        => (Guid.TryParse(selector.Trim('{', '}'), out var id) && IdMatches(element, id))
+            || LabelMatches(element, selector) || NameAttributeMatches(element, selector);
 
     private static bool NameAttributeMatches(XElement element, string name)
     {
         var nameAttr = (string?)element.Attribute("name") ?? string.Empty;
+        if (Guid.TryParse(name.Trim('{', '}'), out var selectorId) && Guid.TryParse(nameAttr.Trim('{', '}'), out var nameId))
+            return selectorId == nameId;
         return string.Equals(nameAttr, name, StringComparison.OrdinalIgnoreCase);
     }
 

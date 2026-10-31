@@ -1,4 +1,5 @@
 using PPDS.Auth.Credentials;
+using PPDS.Auth.Profiles;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Mcp.Infrastructure;
@@ -21,6 +22,12 @@ public interface IMcpConnectionPoolManager : IAsyncDisposable
         IReadOnlyList<string> profileNames,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Gets a pool using an already captured profile, without reloading external defaults.</summary>
+    Task<IDataverseConnectionPool> GetOrCreateCapturedPoolAsync(
+        AuthProfile profile,
+        string environmentUrl,
         CancellationToken cancellationToken = default);
 
     /// <summary>

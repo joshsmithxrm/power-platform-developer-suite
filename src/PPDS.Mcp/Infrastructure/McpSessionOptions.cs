@@ -8,7 +8,7 @@ public sealed class McpSessionOptions
 {
     /// <summary>
     /// Lock the session to a specific profile name.
-    /// If null, uses the active profile at first tool invocation.
+    /// If null, captures the active profile at server startup.
     /// </summary>
     public string? Profile { get; set; }
 
@@ -19,7 +19,7 @@ public sealed class McpSessionOptions
     public string? Environment { get; set; }
 
     /// <summary>
-    /// When true, all DML operations (INSERT, UPDATE, DELETE) are rejected.
+    /// When true, DML and guarded form mutations are rejected. Other domains retain their existing guards.
     /// </summary>
     public bool ReadOnly { get; set; }
 
@@ -37,9 +37,9 @@ public sealed class McpSessionOptions
         if (AllowedEnvironments.Count == 0)
             return false; // No allowlist = no switching
 
-        var normalized = url.TrimEnd('/').ToLowerInvariant();
+        var normalized = PPDS.Cli.Services.Environment.EnvironmentConfirmationService.NormalizeUrl(url);
         return AllowedEnvironments.Any(e =>
-            e.TrimEnd('/').Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            PPDS.Cli.Services.Environment.EnvironmentConfirmationService.NormalizeUrl(e).Equals(normalized, StringComparison.Ordinal));
     }
 
     /// <summary>

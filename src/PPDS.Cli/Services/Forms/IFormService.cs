@@ -19,6 +19,10 @@ public interface IFormService
 
     Task<FormDetail?> GetAsync(string entityLogicalName, string formName, bool unpublished = false, CancellationToken ct = default);
 
+    Task<FormAuthoringResult> AddFieldDraftAsync(AddFieldDraftRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+
+    Task<FormAuthoringResult> PublishFormEntityAsync(PublishFormEntityRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+
     // ── Set XML ───────────────────────────────────────────────────────────
 
     Task SetFormXmlAsync(SetFormXmlRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
@@ -76,7 +80,9 @@ public sealed record FormDetail(
     bool IsManaged,
     string? Description,
     IReadOnlyList<TabDetail> Tabs,
-    string? FormXml = null);
+    string? FormXml = null,
+    string? DraftHash = null,
+    string State = "published");
 
 public sealed record TabDetail(
     Guid Id,

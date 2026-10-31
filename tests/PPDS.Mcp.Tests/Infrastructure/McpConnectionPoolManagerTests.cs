@@ -11,6 +11,21 @@ namespace PPDS.Mcp.Tests.Infrastructure;
 /// </summary>
 public sealed class McpConnectionPoolManagerTests
 {
+    [Fact]
+    public async Task CapturedProfile_DoesNotReloadName_AndSeparatesPrincipalChanges()
+    {
+        await using var manager = new McpConnectionPoolManager(loadProfilesAsync: _ => throw new InvalidOperationException("profile reload is forbidden"))
+        { CapturedPoolFactory = (_, _) => Moq.Mock.Of<PPDS.Dataverse.Pooling.IDataverseConnectionPool>() };
+        var profile = new AuthProfile { Index = 1, Name = "same-name", Username = "first@invalid.test" };
+        var first = await manager.GetOrCreateCapturedPoolAsync(profile, "https://fixture.example.test");
+        (await manager.GetOrCreateCapturedPoolAsync(profile, "https://fixture.example.test/")).Should().BeSameAs(first);
+        profile.Username = "second@invalid.test";
+        var second = await manager.GetOrCreateCapturedPoolAsync(profile, "https://fixture.example.test");
+        second.Should().NotBeSameAs(first);
+        manager.InvalidateProfile("same-name");
+        (await manager.GetOrCreateCapturedPoolAsync(profile, "https://fixture.example.test")).Should().NotBeSameAs(second);
+    }
+
     #region GenerateCacheKey Tests
 
     [Fact]

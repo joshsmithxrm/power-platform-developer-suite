@@ -11,6 +11,43 @@ namespace PPDS.Cli.Tests.Services.Forms;
 
 public class FormXmlEditorTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void LegacyGuidNameRemainsSelectable_WhenStableIdDiffersOrIsMissing(bool hasId)
+    {
+        var selector = Guid.NewGuid();
+        var section = new XElement("section", new XAttribute("name", "{" + selector + "}"));
+        if (hasId) section.SetAttributeValue("id", Guid.NewGuid());
+        var doc = new XDocument(new XElement("form", section));
+        FormXmlEditor.RequireSection(doc, selector.ToString()).Should().BeSameAs(section);
+        var strict = () => FormXmlEditor.RequireSectionById(doc, selector);
+        strict.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be(FormErrorCodes.SectionNotFound);
+    }
+
+    [Fact]
+    public void StableIdWinsOverLegacyGuidName_AndDuplicateIdsFailClosed()
+    {
+        var id = Guid.NewGuid();
+        var nameMatch = new XElement("section", new XAttribute("name", id));
+        var idMatch = new XElement("section", new XAttribute("name", "different"), new XAttribute("id", id));
+        var doc = new XDocument(new XElement("form", nameMatch, idMatch));
+        FormXmlEditor.RequireSection(doc, id.ToString()).Should().BeSameAs(idMatch);
+        FormXmlEditor.RequireSectionById(doc, id).Should().BeSameAs(idMatch);
+        doc.Root!.Add(new XElement(idMatch));
+        var act = () => FormXmlEditor.RequireSection(doc, id.ToString());
+        act.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be("Forms.AmbiguousElement");
+    }
+
+    [Fact]
+    public void DuplicateLegacyNamesOrLabels_FailClosed()
+    {
+        var doc = new XDocument(new XElement("form", new XElement("section", new XAttribute("name", "duplicate")),
+            new XElement("section", new XAttribute("name", "duplicate"))));
+        var act = () => FormXmlEditor.RequireSection(doc, "duplicate");
+        act.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be("Forms.AmbiguousElement");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string NewBraceGuid() => $"{{{Guid.NewGuid():D}}}";
