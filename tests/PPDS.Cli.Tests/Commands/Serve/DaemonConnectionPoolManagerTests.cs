@@ -57,6 +57,62 @@ public class DaemonConnectionPoolManagerTests
         manager.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task OriginalConstructor_PreservesNoInteractivePolicy()
+    {
+        await using var manager = new DaemonConnectionPoolManager(null, null, null);
+        using var source = manager.CreateConnectionSource(CreateProfileWithEnvId(), "https://org.crm.dynamics.com",
+            null, new Mock<ISecureCredentialStore>().Object);
+
+        // Construction-only contract: inspect the callback without acquiring a token or opening a browser.
+        var field = typeof(PPDS.Auth.Pooling.ProfileConnectionSource).GetField("_beforeInteractiveAuth",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        field.GetValue(source).Should().BeNull();
+        typeof(DaemonConnectionPoolManager).GetConstructor([
+            typeof(Microsoft.Extensions.Logging.ILoggerFactory),
+            typeof(Func<CancellationToken, Task<ProfileCollection>>), typeof(TimeSpan?)
+        ]).Should().NotBeNull("the existing public constructor must remain binary compatible");
+    }
+
+    [Fact]
+    public async Task ExplicitInteractivePolicy_IsForwardedToConnectionSource()
+    {
+        Action<DeviceCodeInfo> challenge = _ => throw new InvalidOperationException("Must not start a login");
+        Action<DeviceCodeInfo>? received = null;
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult> policy = callback =>
+        {
+            received = callback;
+            return PreAuthDialogResult.Cancel;
+        };
+        await using var manager = new DaemonConnectionPoolManager(null, null, null, policy);
+        using var source = manager.CreateConnectionSource(CreateProfileWithEnvId(), "https://org.crm.dynamics.com",
+            challenge, new Mock<ISecureCredentialStore>().Object);
+        var field = typeof(PPDS.Auth.Pooling.ProfileConnectionSource).GetField("_beforeInteractiveAuth",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var forwarded = (Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>)field.GetValue(source)!;
+
+        forwarded.Should().BeSameAs(policy);
+        forwarded(challenge).Should().Be(PreAuthDialogResult.Cancel);
+        received.Should().BeSameAs(challenge);
+    }
+
+    [Fact]
+    public async Task ServiceProvider_StillResolvesDefaultConstructorWithoutInteractivePolicy()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCliApplicationServices();
+        services.AddSingleton<DaemonConnectionPoolManager>();
+        await using var provider = services.BuildServiceProvider();
+
+        var manager = provider.GetRequiredService<DaemonConnectionPoolManager>();
+        using var source = manager.CreateConnectionSource(CreateProfileWithEnvId(), "https://org.crm.dynamics.com",
+            null, new Mock<ISecureCredentialStore>().Object);
+        var field = typeof(PPDS.Auth.Pooling.ProfileConnectionSource).GetField("_beforeInteractiveAuth",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        field.GetValue(source).Should().BeNull();
+    }
+
     #endregion
 
     #region InvalidateProfile Tests

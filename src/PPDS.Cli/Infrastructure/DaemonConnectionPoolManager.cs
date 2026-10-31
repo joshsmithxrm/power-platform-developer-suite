@@ -42,6 +42,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     private readonly ILoggerFactory _loggerFactory;
     private readonly Func<CancellationToken, Task<ProfileCollection>> _loadProfilesAsync;
     private readonly TimeSpan _poolCreationTimeout;
+    private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private int _disposed;
 
     /// <summary>
@@ -54,10 +55,27 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         ILoggerFactory? loggerFactory = null,
         Func<CancellationToken, Task<ProfileCollection>>? loadProfilesAsync = null,
         TimeSpan? poolCreationTimeout = null)
+        : this(loggerFactory, loadProfilesAsync, poolCreationTimeout, null)
+    {
+    }
+
+    /// <summary>Creates a manager with an optional policy for interactive authentication.</summary>
+    /// <remarks>The original three-argument constructor preserves existing source and binary behavior.</remarks>
+    /// <param name="loggerFactory">Optional logger factory.</param>
+    /// <param name="loadProfilesAsync">Optional profile loader; defaults to the profile store.</param>
+    /// <param name="poolCreationTimeout">Optional timeout for creating a cached pool.</param>
+    /// <param name="beforeInteractiveAuth">Policy for InteractiveBrowser fallback after silent authentication fails;
+    /// other providers, including DeviceCode, do not use it. Null preserves the provider default.</param>
+    public DaemonConnectionPoolManager(
+        ILoggerFactory? loggerFactory,
+        Func<CancellationToken, Task<ProfileCollection>>? loadProfilesAsync,
+        TimeSpan? poolCreationTimeout,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
     {
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _loadProfilesAsync = loadProfilesAsync ?? DefaultLoadProfilesAsync;
         _poolCreationTimeout = poolCreationTimeout ?? DefaultPoolCreationTimeout;
+        _beforeInteractiveAuth = beforeInteractiveAuth;
     }
 
     /// <summary>
@@ -326,13 +344,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             {
                 firstProfile ??= profile;
 
-                var source = new ProfileConnectionSource(
-                    profile,
-                    environmentUrl,
-                    maxPoolSize: MaxPoolSizePerProfile,
-                    deviceCodeCallback: deviceCodeCallback,
-                    environmentDisplayName: null,
-                    credentialStore: credentialStore);
+                var source = CreateConnectionSource(profile, environmentUrl, deviceCodeCallback, credentialStore);
 
                 var adapter = new ProfileConnectionSourceAdapter(source);
                 sources.Add(adapter);
@@ -371,6 +383,12 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             throw;
         }
     }
+
+    internal ProfileConnectionSource CreateConnectionSource(AuthProfile profile, string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback, ISecureCredentialStore credentialStore)
+        => new(profile, environmentUrl, maxPoolSize: MaxPoolSizePerProfile,
+            deviceCodeCallback: deviceCodeCallback, beforeInteractiveAuth: _beforeInteractiveAuth,
+            environmentDisplayName: null, credentialStore: credentialStore);
 
     /// <summary>
     /// Creates a service provider from connection sources.

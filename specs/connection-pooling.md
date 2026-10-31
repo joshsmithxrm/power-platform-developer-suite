@@ -1,8 +1,8 @@
 # Connection Pooling
 
 **Status:** Implemented
-**Last Updated:** 2026-01-23
-**Code:** [src/PPDS.Dataverse/Pooling/](../src/PPDS.Dataverse/Pooling/), [src/PPDS.Dataverse/Resilience/](../src/PPDS.Dataverse/Resilience/)
+**Last Updated:** 2026-10-31
+**Code:** [src/PPDS.Dataverse/Pooling/](../src/PPDS.Dataverse/Pooling/), [src/PPDS.Dataverse/Resilience/](../src/PPDS.Dataverse/Resilience/), [DaemonConnectionPoolManager](../src/PPDS.Cli/Infrastructure/DaemonConnectionPoolManager.cs)
 **Surfaces:** All
 
 ---
@@ -455,6 +455,12 @@ public class MyConnectionSource : IConnectionSource
 
 ### Acceptance Criteria
 
+| ID | Contract | Evidence |
+|---|---|---|
+| AC-DAEMON-AUTH-01 | The original three-argument daemon pool constructor retains its binary signature, optional defaults and normal DI behavior. It supplies no interactive-auth policy. An explicitly supplied four-argument callback is forwarded unchanged to `ProfileConnectionSource`; it controls InteractiveBrowser fallback after silent authentication fails, not other providers such as DeviceCode. | `DaemonConnectionPoolManagerTests.OriginalConstructor_PreservesNoInteractivePolicy`, `ExplicitInteractivePolicy_IsForwardedToConnectionSource`, `ServiceProvider_StillResolvesDefaultConstructorWithoutInteractivePolicy` (construction-only tests; no claim of live authentication). |
+
+The optional callback lets a validation host reject an interactive login without changing the daemon's default authentication behavior. It does not suppress silent token acquisition or replace environment/profile identity checks.
+
 - [ ] Pool reuses connections instead of creating new ones
 - [ ] Throttled connections are tracked and avoided
 - [ ] Multiple sources distribute load correctly
@@ -519,6 +525,7 @@ public async Task ThrottleAwareStrategy_SkipsThrottledConnection()
 
 | Date | Change |
 |------|--------|
+| 2026-10-31 | AC-DAEMON-AUTH-01: optional browser-auth policy forwarding with preserved constructor/DI compatibility |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap

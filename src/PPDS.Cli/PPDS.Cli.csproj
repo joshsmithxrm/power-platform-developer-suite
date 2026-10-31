@@ -52,6 +52,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Cli.Tests" />
     <InternalsVisibleTo Include="PPDS.Cli.DaemonTests" />
+    <InternalsVisibleTo Include="PPDS.NotebookLiveHost" />
   </ItemGroup>
 
   <ItemGroup>
