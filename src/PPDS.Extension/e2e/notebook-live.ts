@@ -111,7 +111,7 @@ export async function run(): Promise<void> {
         return notebook;
     }
     const execute = (notebook: vscode.NotebookDocument, cells = notebook.getCells()): Promise<void> =>
-        Promise.resolve(native.executeHandler!(cells, notebook, native));
+        Promise.resolve(native.executeHandler(cells, notebook, native));
     const cached = (cell: vscode.NotebookCell): QueryResultResponse => {
         const result = controller.getCellResults(cell.document.uri.toString());
         assert.ok(result, 'Native execution must cache a real result.');
