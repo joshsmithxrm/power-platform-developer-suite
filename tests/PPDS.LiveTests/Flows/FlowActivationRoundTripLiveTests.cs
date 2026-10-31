@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
@@ -44,9 +45,11 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         var sourceName = "PPDSFlowsSource_" + run;
         var outsideName = "PPDSFlowsOutside_" + run;
         var names = new[] { $"PPDS flow {run} A", $"PPDS flow {run} B", $"PPDS flow {run} outside", $"PPDS flow {run} blocker" };
+        var uniqueNames = new[] { "a", "b", "outside", "blocker" }.Select(suffix => $"{prefix}_{run}_{suffix}").ToArray();
         var manifest = new Dictionary<string, object?> { ["runId"] = run, ["environmentUrl"] = url, ["candidateAssembly"] = assembly,
             ["candidateAssemblySha256"] = candidateHash,
-            ["publisher"] = publisherName, ["sourceSolution"] = sourceName, ["outsideSolution"] = outsideName, ["flowNames"] = names, ["state"] = "planned" };
+            ["publisher"] = publisherName, ["sourceSolution"] = sourceName, ["outsideSolution"] = outsideName,
+            ["flowNames"] = names, ["flowUniqueNames"] = uniqueNames, ["state"] = "planned" };
         var unknown = new List<string>();
         var cleanupFailures = new List<string>();
         var owned = new Dictionary<Guid, OwnedFlow>();
@@ -135,21 +138,26 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         VerifyHarmless(template, null);
         async Task<OwnedFlow> CreateFlowAsync(string name, bool inSource, bool blocker = false)
         {
+            var uniqueName = uniqueNames[Array.IndexOf(names, name)];
             var data = JsonNode.Parse(template)!;
             if (blocker) data["properties"]!["connectionReferences"]!["fixture_missing"] = new JsonObject
             { ["connection"] = new JsonObject { ["connectionReferenceLogicalName"] = prefix + "_missing" },
                 ["api"] = new JsonObject { ["name"] = "shared_commondataserviceforapps" }, ["runtimeSource"] = "embedded" };
             var json = data.ToJsonString(); VerifyHarmless(json, blocker ? prefix + "_missing" : null);
-            var id = await CreateAsync(new("workflow") { ["name"] = name, ["category"] = new OptionSetValue(5),
+            var id = await CreateAsync(new("workflow") { ["name"] = name, ["uniquename"] = uniqueName, ["category"] = new OptionSetValue(5),
                 ["type"] = new OptionSetValue(1), ["primaryentity"] = "none", ["clientdata"] = json });
             var item = new OwnedFlow(id, name, "", inSource, false, blocker, false);
             owned[id] = item; await SaveAsync(); // a returned ID is recorded before subsequent reads/association
             var row = await ReadFlowAsync(item);
-            item = item with { UniqueName = row.GetAttributeValue<string>("uniquename") };
-            item.UniqueName.Should().NotBeNullOrWhiteSpace(); owned[id] = item; await SaveAsync();
+            // UniqueName is optional: Create does not promise to generate it. Keep the confirmed
+            // ID with an empty cleanup selector until the explicitly assigned name is verified.
+            row.GetAttributeValue<string>("uniquename").Should().Be(uniqueName);
+            item = item with { UniqueName = uniqueName }; owned[id] = item; await SaveAsync();
             await ExecuteAsync(new AddSolutionComponentRequest { ComponentType = 29, ComponentId = id,
                 SolutionUniqueName = inSource ? sourceName : outsideName, AddRequiredComponents = false });
             item = item with { Associated = true }; owned[id] = item; await SaveAsync();
+            await ReadFlowAsync(item); // association must preserve the assigned stable unique name
+            await VerifyMembershipAsync(item);
             if (inSource) knownSourceNames.Add(item.UniqueName);
             return item;
         }
@@ -216,9 +224,15 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         var publishers = new QueryExpression("publisher") { ColumnSet = new("publisherid"), TopCount = 1 };
         publishers.Criteria.AddCondition("uniquename", ConditionOperator.Equal, publisherName);
         (await QueryAsync(publishers)).Entities.Should().BeEmpty();
-        var collisions = new QueryExpression("workflow") { ColumnSet = new("workflowid"), TopCount = 1 };
+        var collisions = new QueryExpression("workflow") { ColumnSet = new("workflowid"), TopCount = 1,
+            Criteria = new FilterExpression(LogicalOperator.Or) };
         collisions.Criteria.AddCondition("name", ConditionOperator.In, names.Cast<object>().ToArray());
+        collisions.Criteria.AddCondition("uniquename", ConditionOperator.In, uniqueNames.Cast<object>().ToArray());
         (await QueryAsync(collisions)).Entities.Should().BeEmpty();
+        var uniqueNameMetadata = (RetrieveAttributeResponse)await ExecuteAsync(new RetrieveAttributeRequest
+            { EntityLogicalName = "workflow", LogicalName = "uniquename", RetrieveAsIfPublished = true });
+        uniqueNameMetadata.AttributeMetadata.IsValidForCreate.Should().BeTrue(
+            "this target must support assigning the fixture's stable unique name during Create; fail before provisioning otherwise");
         var existingReference = new QueryExpression("connectionreference") { ColumnSet = new("connectionreferenceid"), TopCount = 1 };
         existingReference.Criteria.AddCondition("connectionreferencelogicalname", ConditionOperator.Equal, prefix + "_missing");
         (await QueryAsync(existingReference)).Entities.Should().BeEmpty("the blocker must never refer to an existing connection");

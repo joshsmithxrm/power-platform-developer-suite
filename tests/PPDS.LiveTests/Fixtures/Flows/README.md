@@ -1,6 +1,6 @@
 # Opt-in flow activation release fixture
 
-Status: not executed. Required live evidence for flow activation AC-08 remains pending. The harness drives the reviewed candidate CLI as an actual subprocess and validates its JSON stdout and progress stderr. Authentication uses an explicit existing profile; no active-profile selection changes are made.
+Status: the first attempt stopped during setup and cleaned up; the revised harness has not yet executed. Required live evidence for flow activation AC-08 remains pending. The harness drives the reviewed candidate CLI as an actual subprocess and validates its JSON stdout and progress stderr. Authentication uses an explicit existing profile; no active-profile selection changes are made.
 
 `manual-compose.json` is derived from the workflow/clientdata contract documented in [Manage cloud flows with code](https://learn.microsoft.com/en-us/power-automate/manage-flows-with-code). Every fixture has exactly one manual Button trigger and one built-in Compose action. The trigger is never invoked. There are no HTTP actions, schedules, Dataverse triggers or connector actions. Enabling these fixtures does not initiate a run. Disabling is not a promise to cancel prior runs; none are deliberately started.
 
@@ -16,6 +16,7 @@ Target `https://orgcabef92d.crm.dynamics.com`, explicit profile `PPDS`, run ID `
 | Source definitions | `PPDS flow 6d83a2e4 A`, `PPDS flow 6d83a2e4 B` |
 | Outside definition | `PPDS flow 6d83a2e4 outside` |
 | Preflight blocker | `PPDS flow 6d83a2e4 blocker`, created in the outside solution after successful managed/unmanaged checks |
+| Assigned workflow unique names | `pfl6d83_6d83a2e4_a`, `pfl6d83_6d83a2e4_b`, `pfl6d83_6d83a2e4_outside`, `pfl6d83_6d83a2e4_blocker` |
 | Declared missing reference | `pfl6d83_missing`; no connection/reference resource or connector operation is created |
 | Artifacts | `<artifact-root>/flows-6d83a2e4/manifest.json`, `managed-fixture.zip`, numbered CLI JSON/stderr records |
 
@@ -23,7 +24,7 @@ The blocker adds one unused connection-reference mapping to the same harmless de
 
 ## Sequence
 
-1. Confirm exact target through the shared environment guard, then reject collisions before creating the publisher, two solutions and three harmless definitions. Store each returned ID and actual unique name.
+1. Confirm exact target through the shared environment guard, reject collisions on both display names and assigned workflow unique names, and check target metadata permits creating `workflow.uniquename` before provisioning. Create the publisher, two solutions and three harmless definitions with deterministic run-owned unique names. Store each returned ID immediately; verify its assigned unique name before recording that selector, then verify it again after solution association.
 2. Unmanaged source: CLI dry run, single enable using the expected plan hash, idempotent rerun by unique name, disable; then solution batch enable/disable. Before every execution, require the plan's IDs to exactly equal the confirmed fixture IDs, reject unexpected excluded entries, and recheck harmless definitions/membership. Verify result IDs, source states and that the outside definition stays unchanged. Parse stdout as one JSON document and require progress on stderr.
 3. Require the complete source solution component inventory to contain exactly the two owned workflows, export it as managed, then verify the package's root component IDs. Verify exact workflow IDs/names and source membership before deleting the two source definitions and original source solution. Import the exact recorded package. `PublishWorkflows=false` applies to classic workflows and does not guarantee cloud flows import disabled: every imported fixture is checked Off before candidate execution; unexpected state fails and cleanup handles confirmed harmless IDs. Record package hash/import job and validate successful imported solution ownership/version before adopting its ID. Resolve imported members by recorded unique names, validate the harmless definitions and repeat the same checks.
 4. Create the draft blocker in the outside solution. Dry-run and execution must both fail preflight with zero state changes for either outside definition. Do not execute or activate the blocker directly.
@@ -46,3 +47,11 @@ dotnet test tests/PPDS.LiveTests/PPDS.LiveTests.csproj -f net10.0 --filter Fully
 ```
 
 Successful fixture creation is not a release pass. Require the CLI checks, state readback and cleanup evidence to succeed. A skipped test is not a pass. No credentials appear in subprocess arguments or the artifact manifest.
+
+## Unique-name provenance and retry evidence
+
+The first approved attempt on `6d83a2e4` stopped during fixture setup: Dataverse returned a null `workflow.uniquename` after Create. No candidate CLI activation command ran; the confirmed flow, both solutions and publisher were cleaned up with no unresolved submissions. Microsoft documents [`UniqueName` as optional and writable](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/workflow#uniquename); the minimal cloud-flow create example does not assign it. Automatic generation is therefore not a fixture contract.
+
+The revised harness assigns the deterministic names listed above in Create, checks `IsValidForCreate` in target metadata before any provisioning, and verifies readback both before and after `AddSolutionComponent`. A failed assignment cannot prevent cleanup of a confirmed own ID: its stored unique-name selector remains empty until the exact assigned value is verified. Display names, IDs returned by Dataverse, manual Button/Compose definitions, target and cleanup scope are otherwise unchanged.
+
+Preserve the first attempt's artifacts. After confirmed cleanup and repeated collision checks, retry the same approved run ID with `PPDS_FLOWS_LIVE_ARTIFACTS` pointing to a new `attempt2` subdirectory beneath the approved artifact root. The harness still refuses to overwrite its run directory; it does not infer permission from an old manifest.
