@@ -333,6 +333,10 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
             failure.CapturePrimary(exception);
             manifest["state"] = "failed";
             output.WriteLine("Primary fixture failure: " + JsonSerializer.Serialize(failure.Primary));
+            // Persist the original fault before potentially slow cleanup, while retaining it if
+            // the evidence directory is temporarily unavailable. The final save retries the ledger.
+            try { await SaveAsync(); }
+            catch (Exception saveException) { cleanupFailures.Add("Pre-cleanup manifest save failed: " + saveException.Message); }
         }
         finally
         {
