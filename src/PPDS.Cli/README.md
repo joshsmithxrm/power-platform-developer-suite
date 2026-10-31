@@ -679,6 +679,31 @@ Manage cloud flows.
 | `ppds flows list` | List cloud flows (supports `--solution`, `--state`) |
 | `ppds flows get <name>` | Get flow details by unique name |
 | `ppds flows url <name>` | Get Power Automate maker URL for a flow |
+| `ppds flows enable --id <guid>` | Activate one solution-aware cloud-flow definition after preflight and verify its state |
+| `ppds flows disable --all --solution <unique-name>` | Disable eligible definitions in one solution and report every outcome |
+
+Exactly one of `--id`, `--name` (unique/schema name), or `--all` is required.
+Batch operations require `--solution` and default to a maximum of 100 eligible
+flows. `--max-flows` adjusts that explicit limit; an exceeded limit fails before
+writing and never truncates the selection.
+
+```bash
+ppds connection-references analyze --solution MySolution
+ppds flows enable --all --solution MySolution --dry-run --output-format Json
+# After reviewing the plan and resolving any missing bindings:
+ppds flows enable --all --solution MySolution --confirm-env https://org.crm.dynamics.com --expected-plan-hash <reviewed-hash>
+```
+
+Dry run reports a plan fingerprint and makes no writes. Execution resolves a fresh
+plan; `--expected-plan-hash` rejects changed preconditions before writing. Bound
+connection references do not prove credentials, permissions, licensing, DLP or
+runtime connector health. This command does not bind connections or invoke flows.
+
+Already matching states return `unchanged`. `--timeout` bounds state verification
+per changed flow (default 60 seconds). A failed, cancelled or uncertain change
+stops the remaining batch and returns a nonzero exit with complete per-flow
+results. Inspect an `unknown` outcome before retrying. Disabling does not cancel
+existing runs, and completed changes are not automatically rolled back.
 
 ### `ppds connections`
 
