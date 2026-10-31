@@ -1,6 +1,6 @@
 # Isolated form fixtures (#1240)
 
-Status: **live execution pending explicit approval**. Local tests use SDK fakes and are not evidence of Dataverse managed behavior.
+Status: **live roundtrip passed on 2026-10-31**. Josh approved the exact target and inventory below. Run `4f9c2a71` passed in 8 minutes 23 seconds against candidate `c0394de1a` (product source `6932dcd52`), including unmanaged/managed MCP edits, explicit publication, locked-form rejection and cleanup. The manifest records no cleanup failures or unknown submissions. Local SDK-fake tests alone are not evidence of Dataverse managed behavior.
 
 `timeline-form.xml` is reconstructed from the Timeline fragment in issue #1465, matching `TimelineFormFixture.Xml` in the unit suite. It is not a customer export. It includes modern root attributes, an unbraced section ID, a conventional field and Timeline JSON. The live harness substitutes its own primary column name. Managed provenance comes from exporting the newly created source solution with `Managed=true`, deleting its own unmanaged source components, and importing that exact package. The export and resource ledger are retained locally.
 
@@ -33,7 +33,7 @@ The test is `Category=DestructiveE2E` and also skips without `PPDS_FORMS_LIVE_CO
 
 ## Approved-run command
 
-Run only after explicit approval of the inventory above:
+Run only after explicit approval of the inventory above. The recorded run is complete; use a fresh artifact root and repeat collision checks for any separately authorized rerun:
 
 ```powershell
 $env:PPDS_FORMS_LIVE_URL = 'https://orgcabef92d.crm.dynamics.com'
