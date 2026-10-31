@@ -78,7 +78,7 @@ public static class CreateCommand
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
+    internal static async Task<int> ExecuteAsync(
         string file,
         string name,
         string? displayName,
@@ -88,7 +88,8 @@ public static class CreateCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -108,13 +109,15 @@ public static class CreateCommand
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {
@@ -134,7 +137,10 @@ public static class CreateCommand
             }
 
             var request = new CreateWebResourceRequest(name, displayName, typeCode, content, solution);
-            var id = await webResourceService.CreateAsync(request, cancellationToken);
+            var created = await webResourceService.CreateAsync(request, cancellationToken);
+            var id = created.Id;
+            foreach (var warning in created.Warnings)
+                Console.Error.WriteLine($"Warning [{warning.Code}]: {warning.Message}");
 
             if (publish)
             {
@@ -151,7 +157,8 @@ public static class CreateCommand
                     Type = typeCode,
                     TypeName = typeName,
                     Solution = solution,
-                    Published = publish
+                    Published = publish,
+                    Warnings = created.Warnings
                 });
             }
             else
@@ -237,6 +244,9 @@ public static class CreateCommand
 
         [JsonPropertyName("published")]
         public bool Published { get; set; }
+
+        [JsonPropertyName("warnings")]
+        public IReadOnlyList<WebResourceWarning> Warnings { get; set; } = [];
     }
 
     #endregion

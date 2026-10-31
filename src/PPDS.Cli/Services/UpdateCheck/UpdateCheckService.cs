@@ -39,6 +39,11 @@ public sealed class UpdateCheckService : IUpdateCheckService
     private readonly string _statusPath;
     private readonly string _lockPath;
 
+    // Test seams preserve production scheduling while allowing deterministic
+    // cache-age and completion assertions instead of wall-clock sleeps.
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+    internal Task BackgroundRefreshTask { get; private set; } = Task.CompletedTask;
+
     /// <summary>
     /// Initializes the service for production use with default HTTP and cache path.
     /// </summary>
@@ -139,7 +144,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
             PreReleaseUpdateAvailable = preReleaseUpdateAvailable,
             UpdateCommand = command,
             PreReleaseUpdateCommand = preReleaseUpdateCommand,
-            CheckedAt = DateTimeOffset.UtcNow
+            CheckedAt = Clock.GetUtcNow()
         };
 
         await WriteCacheAsync(result, cancellationToken).ConfigureAwait(false);
@@ -162,7 +167,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
                 return null;
 
             // Honour TTL
-            if (DateTimeOffset.UtcNow - result.CheckedAt > CacheTtl)
+            if (Clock.GetUtcNow() - result.CheckedAt > CacheTtl)
                 return null;
 
             return result;
@@ -185,7 +190,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
                 return; // Cache is fresh — no refresh needed
 
             // Fire-and-forget: no await, no CancellationToken (R2)
-            _ = Task.Run(async () =>
+            BackgroundRefreshTask = Task.Run(async () =>
             {
                 try
                 {

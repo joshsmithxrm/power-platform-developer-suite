@@ -8,7 +8,8 @@ Build, test, docs smoke, Marketplace listing, TUI E2E, Python regression, and
 reference-cache trust workflows use `contents: read`. Native extraction and
 cache-trust jobs retain that read-only scope. Their `dorny/paths-filter` jobs additionally
 need `pull-requests: read` to list changed files on PR events. Status-only
-aggregators use `permissions: {}`. These workflows and the integration test
+aggregators use `permissions: {}`. The Test aggregate uses `contents: read`
+to check out its tested status evaluator; it has no write grant. These workflows and the integration test
 checkout set `persist-credentials: false`: their later steps do not push Git
 changes. Public-history fetches do not require persisted checkout credentials.
 

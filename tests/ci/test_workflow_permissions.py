@@ -102,7 +102,10 @@ def test_unprivileged_workflows_use_minimum_permissions(workflow_name: str) -> N
             str(step.get("uses", "")).startswith("dorny/paths-filter@")
             for step in job.get("steps", [])
         )
-        if job_name.endswith("-status"):
+        if job_name.endswith("-status") and not any(
+            str(step.get("uses", "")).startswith("actions/checkout@")
+            for step in job.get("steps", [])
+        ):
             expected = {}
         elif uses_paths_filter:
             expected = {"contents": "read", "pull-requests": "read"}

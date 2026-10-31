@@ -979,6 +979,19 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 - **Cascade constraint**: Add `--force` to unregister children first
 - **Drift detected**: Run `ppds plugins deploy --clean` to sync
 
+### Deployment diagnostics and cancellation
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-66 | A later deployment failure preserves earlier per-step errors in structured output; secondary-only message-filter diagnostics do not name an empty primary entity | `PluginReleaseRegressionTests.Deploy_DoubleFault_PreservesStepAndCleanupErrorsInJson`, `MissingFilter_DescribesOnlySpecifiedEntities` | ✅ |
+| AC-67 | Diff passes cancellation through every asynchronous registration lookup and stops enumerating configured/existing steps and images after cancellation | `PluginReleaseRegressionTests.Diff_PreCancelled_DoesNotLookUpAssembly`, `Diff_CancellationDuringStepLookup_StopsOtherTypes`, `Diff_PassesTokenToMessageFilterAndImageLookups` | ✅ |
+| AC-68 | The deploy/diff propagation wait has a configurable 90-second default deadline and retains elapsed time, attempts, and last command output on timeout; caller cancellation is distinct | `PropagationWaitTests.Poll_DeadlineRetainsLastResultAndAttempts`, `Poll_DeadlineCancelsInFlightCommand`, `Poll_CommandTimeoutRetainsDiagnostics`, `Poll_CallerCancellationRemainsCancellation`, `TimeoutConfiguration_IsBounded`, `TimeoutConfiguration_RejectsInvalidValues` | ✅ |
+
+The live `Diff_AfterDeploy_ShowsNoDrift` assertion uses this tested wait helper and
+prints last exit/stdout/stderr with elapsed time and attempt count. Its timeout is
+configured by `PPDS_TEST_PROPAGATION_TIMEOUT_SECONDS` (1–900, default 90).
+Offline helper validation is not a claim that a credentialed deploy/diff roundtrip ran.
+
 ### Edge Cases
 
 | Scenario | Expected Behavior |

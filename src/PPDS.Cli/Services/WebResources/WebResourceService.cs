@@ -198,7 +198,7 @@ public class WebResourceService : IWebResourceService
     }
 
     /// <inheritdoc />
-    public async Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
+    public async Task<CreateWebResourceResult> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Content);
@@ -214,6 +214,7 @@ public class WebResourceService : IWebResourceService
                 $"Use 'ppds webresources update {request.Name} <file>' to replace its content.");
         }
 
+        var warnings = await GetCreationWarningsAsync(request, cancellationToken);
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
         var entity = new Entity(WebResource.EntityLogicalName)
@@ -235,7 +236,67 @@ public class WebResourceService : IWebResourceService
         var response = (CreateResponse)await client.ExecuteAsync(createRequest, cancellationToken);
 
         _logger.LogInformation("Created web resource: {Name} ({Id})", request.Name, response.id);
-        return response.id;
+        return new CreateWebResourceResult(response.id, warnings);
+    }
+
+    private async Task<IReadOnlyList<WebResourceWarning>> GetCreationWarningsAsync(
+        CreateWebResourceRequest request, CancellationToken cancellationToken)
+    {
+        string? expectedPrefix = null;
+        if (!string.IsNullOrWhiteSpace(request.SolutionUniqueName))
+        {
+            var query = new QueryExpression(Solution.EntityLogicalName)
+            {
+                ColumnSet = new ColumnSet(Solution.Fields.SolutionId),
+                TopCount = 2
+            };
+            query.Criteria.AddCondition(Solution.Fields.UniqueName, ConditionOperator.Equal, request.SolutionUniqueName);
+            var publisher = query.AddLink(Publisher.EntityLogicalName, Solution.Fields.PublisherId,
+                Publisher.Fields.PublisherId, JoinOperator.LeftOuter);
+            publisher.EntityAlias = "publisher";
+            publisher.Columns = new ColumnSet(Publisher.Fields.CustomizationPrefix);
+            EntityCollection results;
+            try
+            {
+                await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+                results = await client.RetrieveMultipleAsync(query, cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                throw new PpdsException(ErrorCodes.External.ServiceUnavailable,
+                    $"Could not resolve publisher for solution '{request.SolutionUniqueName}': {ex.Message}", ex);
+            }
+            if (results.Entities.Count == 0)
+                throw new PpdsException(ErrorCodes.Operation.NotFound,
+                    $"Solution '{request.SolutionUniqueName}' was not found.");
+            if (results.Entities.Count != 1)
+                throw new PpdsException(ErrorCodes.Operation.Duplicate,
+                    $"Solution '{request.SolutionUniqueName}' is ambiguous.");
+            expectedPrefix = results.Entities[0]
+                .GetAttributeValue<AliasedValue>($"publisher.{Publisher.Fields.CustomizationPrefix}")?.Value as string;
+            if (string.IsNullOrWhiteSpace(expectedPrefix))
+                throw new PpdsException(ErrorCodes.Operation.NotFound,
+                    $"Publisher customization prefix for solution '{request.SolutionUniqueName}' was not found.");
+        }
+
+        var rootName = request.Name.Split('/')[0];
+        var separator = rootName.IndexOf('_');
+        var prefix = separator > 0 ? rootName[..separator] : null;
+        var warnings = new List<WebResourceWarning>();
+        if (prefix is null || !prefix.All(char.IsLetterOrDigit))
+        {
+            warnings.Add(new("WebResource.MissingPublisherPrefix",
+                $"Web resource '{request.Name}' has no publisher prefix. Use '<prefix>_<name>' " +
+                "or '<prefix>_/path/name' to keep solution ownership clear."));
+        }
+        if (expectedPrefix is not null && !string.Equals(prefix, expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add(new("WebResource.PublisherPrefixMismatch",
+                $"Web resource '{request.Name}' does not use publisher prefix '{expectedPrefix}_' " +
+                $"from solution '{request.SolutionUniqueName}'. The name will not be changed."));
+        }
+        return warnings;
     }
 
     /// <inheritdoc />

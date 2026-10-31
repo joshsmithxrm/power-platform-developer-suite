@@ -107,7 +107,8 @@ public static class DiffCommand
 
             foreach (var assemblyConfig in config.Assemblies)
             {
-                var drift = await ComputeDriftAsync(registrationService, assemblyConfig);
+                cancellationToken.ThrowIfCancellationRequested();
+                var drift = await ComputeDriftAsync(registrationService, assemblyConfig, cancellationToken);
                 allDrifts.Add(drift);
 
                 if (drift.HasDrift)
@@ -206,15 +207,17 @@ public static class DiffCommand
     /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
     internal static async Task<AssemblyDrift> ComputeDriftAsync(
         IPluginRegistrationService service,
-        PluginAssemblyConfig config)
+        PluginAssemblyConfig config,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var drift = new AssemblyDrift
         {
             AssemblyName = config.Name
         };
 
         // Check if assembly exists
-        var assembly = await service.GetAssemblyByNameAsync(config.Name);
+        var assembly = await service.GetAssemblyByNameAsync(config.Name, cancellationToken);
         if (assembly == null)
         {
             drift.AssemblyMissing = true;
@@ -222,7 +225,8 @@ public static class DiffCommand
         }
 
         // Get all types for this assembly
-        var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id);
+        cancellationToken.ThrowIfCancellationRequested();
+        var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id, cancellationToken);
 
         // Configured (type, step) pairs. Config-side duplicate resolved names are already blocked by
         // PluginRegistrationConfig.Validate() (per-type name uniqueness); the matcher's zip semantics
@@ -230,8 +234,12 @@ public static class DiffCommand
         var configured = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
         foreach (var typeConfig in config.Types)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (var stepConfig in typeConfig.Steps)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 configured.Add((typeConfig, stepConfig));
+            }
         }
 
         // Existing (type, step) pairs. The owning type name comes from the enclosing loop so identity
@@ -239,9 +247,13 @@ public static class DiffCommand
         var existing = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
         foreach (var existingType in existingTypes)
         {
-            var steps = await service.ListStepsForTypeAsync(existingType.Id);
+            cancellationToken.ThrowIfCancellationRequested();
+            var steps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
             foreach (var step in steps)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 existing.Add((existingType, step));
+            }
         }
 
         var matches = PluginStepMatcher.Match(
@@ -252,6 +264,7 @@ public static class DiffCommand
 
         foreach (var match in matches)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (match.IsMissing)
             {
                 var typeConfig = match.TypeConfig!;
@@ -273,9 +286,10 @@ public static class DiffCommand
                 if (PluginStepIdentity.IsEntitySpecified(stepConfig.Entity) ||
                     PluginStepIdentity.IsEntitySpecified(stepConfig.SecondaryEntity))
                 {
-                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
+                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (messageId != null &&
-                        await service.GetSdkMessageFilterIdAsync(messageId.Value, stepConfig.Entity, stepConfig.SecondaryEntity) == null)
+                        await service.GetSdkMessageFilterIdAsync(messageId.Value, stepConfig.Entity, stepConfig.SecondaryEntity, cancellationToken) == null)
                     {
                         drift.Warnings.Add(
                             $"Missing step '{missingName}' cannot be created by deploy: " +
@@ -333,13 +347,14 @@ public static class DiffCommand
                 }
 
                 // Compare images
-                var existingImages = await service.ListImagesForStepAsync(stepInfo.Id);
+                var existingImages = await service.ListImagesForStepAsync(stepInfo.Id, cancellationToken);
                 var existingImageMap = existingImages.ToDictionary(i => i.Name, i => i);
                 var configImageMap = stepConfig.Images.ToDictionary(i => i.Name, i => i);
 
                 // Missing images
                 foreach (var imageConfig in stepConfig.Images)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!existingImageMap.ContainsKey(imageConfig.Name))
                     {
                         drift.MissingImages.Add(new ImageDrift
@@ -353,6 +368,7 @@ public static class DiffCommand
                 // Orphaned images
                 foreach (var imageInfo in existingImages)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!configImageMap.ContainsKey(imageInfo.Name))
                     {
                         drift.OrphanedImages.Add(new ImageDrift
@@ -366,6 +382,7 @@ public static class DiffCommand
                 // Modified images
                 foreach (var imageConfig in stepConfig.Images)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!existingImageMap.TryGetValue(imageConfig.Name, out var imageInfo))
                         continue;
 
@@ -392,6 +409,7 @@ public static class DiffCommand
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return drift;
     }
 

@@ -374,42 +374,86 @@ public class UpdateCheckServiceTests : IDisposable
     [Fact]
     public async Task RefreshCacheInBackgroundIfStale_RefreshesWhenCacheExpired()
     {
+        var clock = new TestClock();
         var oldResult = new UpdateCheckResult
         {
             CurrentVersion = "1.0.0",
             LatestStableVersion = "1.0.0",
-            CheckedAt = DateTimeOffset.UtcNow.AddHours(-25)
+            CheckedAt = clock.GetUtcNow().AddHours(-25)
         };
         Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
         var jsonOpts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         File.WriteAllText(_cacheFile, JsonSerializer.Serialize(oldResult, jsonOpts));
 
         var handler = BuildHandler(MakeVersionsJson("1.0.0", "2.0.0"));
-        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile) { Clock = clock };
 
         svc.RefreshCacheInBackgroundIfStale("1.0.0");
-        await Task.Delay(1000);
+        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         var cached = svc.GetCachedResult();
         Assert.NotNull(cached);
         Assert.True(cached.StableUpdateAvailable);
+        Assert.Equal(clock.GetUtcNow(), cached.CheckedAt);
     }
 
     [Fact]
     public async Task RefreshCacheInBackgroundIfStale_SkipsWhenCacheFresh()
     {
+        var clock = new TestClock();
         var handler = BuildHandler(MakeVersionsJson("1.0.0", "2.0.0"));
-        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile) { Clock = clock };
         await svc.CheckAsync("1.0.0");
 
-        var throwingHandler = BuildThrowingHandler();
-        var svc2 = new UpdateCheckService(handler: throwingHandler, cachePath: _cacheFile);
+        var forbidden = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        var svc2 = new UpdateCheckService(handler: forbidden.Object, cachePath: _cacheFile) { Clock = clock };
+        var initialTask = svc2.BackgroundRefreshTask;
 
         svc2.RefreshCacheInBackgroundIfStale("1.0.0");
-        await Task.Delay(500);
+        Assert.Same(initialTask, svc2.BackgroundRefreshTask);
+        await svc2.BackgroundRefreshTask;
+        forbidden.VerifyNoOtherCalls();
 
         var cached = svc2.GetCachedResult();
         Assert.NotNull(cached);
+    }
+
+    [Fact]
+    public async Task RefreshCacheInBackgroundIfStale_CompletionIncludesCacheWrite()
+    {
+        var response = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected().Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns(() => { started.TrySetResult(); return response.Task; });
+        var svc = new UpdateCheckService(handler.Object, _cacheFile) { Clock = new TestClock() };
+
+        svc.RefreshCacheInBackgroundIfStale("1.0.0");
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(svc.BackgroundRefreshTask.IsCompleted);
+        Assert.False(File.Exists(_cacheFile));
+        response.SetResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(MakeVersionsJson("2.0.0"), Encoding.UTF8, "application/json")
+        });
+        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("2.0.0", svc.GetCachedResult()!.LatestStableVersion);
+    }
+
+    [Fact]
+    public async Task RefreshCacheInBackgroundIfStale_FailureCompletesWithoutCache()
+    {
+        var svc = new UpdateCheckService(BuildThrowingHandler(), _cacheFile) { Clock = new TestClock() };
+        svc.RefreshCacheInBackgroundIfStale("1.0.0");
+        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(svc.GetCachedResult());
+        Assert.False(File.Exists(_cacheFile));
+    }
+
+    private sealed class TestClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 10, 31, 0, 0, 0, TimeSpan.Zero);
     }
 
     // ─── Pre-release track logic tests (Task 7) ───────────────────────────────
