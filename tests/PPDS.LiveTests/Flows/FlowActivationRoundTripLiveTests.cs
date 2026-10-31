@@ -14,6 +14,7 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Pooling;
+using PPDS.LiveTests.Infrastructure;
 using PPDS.Mcp.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
@@ -51,6 +52,8 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
             ["publisher"] = publisherName, ["sourceSolution"] = sourceName, ["outsideSolution"] = outsideName,
             ["flowNames"] = names, ["flowUniqueNames"] = uniqueNames, ["state"] = "planned" };
         var unknown = new List<string>();
+        var rejected = new List<object>();
+        var failure = new FixtureFailureEvidence();
         var cleanupFailures = new List<string>();
         var owned = new Dictionary<Guid, OwnedFlow>();
         var knownSourceNames = new HashSet<string>(StringComparer.Ordinal);
@@ -68,6 +71,7 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         async Task SaveAsync()
         {
             manifest["confirmedFlows"] = owned.Values.ToArray(); manifest["unknownSubmissions"] = unknown.ToArray();
+            manifest["rejectedSubmissions"] = rejected.ToArray(); manifest["primaryFailure"] = failure.Primary;
             await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
         }
         async Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request)
@@ -84,7 +88,17 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
         {
             await using var client = await pool.GetClientAsync(cancellationToken: ct);
             try { return await client.CreateAsync(entity, ct); }
-            catch { unknown.Add($"Unconfirmed create {entity.LogicalName}: {entity.GetAttributeValue<string>("name") ?? entity.GetAttributeValue<string>("uniquename")}"); throw; }
+            catch (Exception exception)
+            {
+                var resource = entity.GetAttributeValue<string>("name") ?? entity.GetAttributeValue<string>("uniquename");
+                var detail = FixtureFailureEvidence.Describe(exception);
+                if (detail.SubmissionOutcome == "server-rejected")
+                    rejected.Add(new { operation = "Create", table = entity.LogicalName, resource, failure = detail });
+                else unknown.Add($"Unconfirmed create {entity.LogicalName}: {resource}");
+                // Do not write the ledger here: an I/O failure must not replace the server fault.
+                // The outer catch records it before cleanup and the final save persists both.
+                throw;
+            }
         }
         async Task DeleteAsync(string table, Guid id)
         {
@@ -314,37 +328,55 @@ public sealed class FlowActivationRoundTripLiveTests(ITestOutputHelper output)
             await VerifyStateAsync(outside, 0); await VerifyStateAsync(blocker, 0);
             manifest["state"] = "verified"; await SaveAsync();
         }
+        catch (Exception exception)
+        {
+            failure.CapturePrimary(exception);
+            manifest["state"] = "failed";
+            output.WriteLine("Primary fixture failure: " + JsonSerializer.Serialize(failure.Primary));
+        }
         finally
         {
-            using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
-            async Task CleanAsync(string name, Func<Task> action)
+            try
             {
-                try { await action(); output.WriteLine("Cleaned: " + name); }
-                catch (Exception ex) { cleanupFailures.Add(name + ": " + ex.Message); }
-            }
-            foreach (var item in owned.Values.Where(f => !f.Managed).ToArray()) await CleanAsync(item.Name, () => DeleteOwnedFlowAsync(item));
-            foreach (var item in owned.Values.Where(f => f.Managed).ToArray()) await CleanAsync("disable " + item.Name, async () =>
-            {
-                var row = await ReadFlowAsync(item); await VerifyMembershipAsync(item);
-                if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
-                    await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", item.Id), State = new(0), Status = new(1) });
-            });
-            if (unknown.Count == 0 && cleanupFailures.Count == 0)
-            {
-                if (sourceId != Guid.Empty) await CleanAsync(sourceName, async () => { await VerifySolutionAsync(sourceId, sourceName); await DeleteAsync("solution", sourceId); });
-                if (outsideId != Guid.Empty) await CleanAsync(outsideName, async () => { await VerifySolutionAsync(outsideId, outsideName); await DeleteAsync("solution", outsideId); });
-            }
-            if (publisherId != Guid.Empty && unknown.Count == 0 && cleanupFailures.Count == 0)
-                await CleanAsync(publisherName, async () =>
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromMinutes(5)); ct = cleanup.Token;
+                async Task CleanAsync(string name, Func<Task> action)
                 {
-                    var rows = await QueryAsync(publishers); var row = rows.Entities.Should().ContainSingle().Subject;
-                    row.Id.Should().Be(publisherId); await DeleteAsync("publisher", publisherId);
+                    try { await action(); output.WriteLine("Cleaned: " + name); }
+                    catch (Exception ex) { cleanupFailures.Add(name + ": " + ex.Message); }
+                }
+                foreach (var item in owned.Values.Where(f => !f.Managed).ToArray()) await CleanAsync(item.Name, () => DeleteOwnedFlowAsync(item));
+                foreach (var item in owned.Values.Where(f => f.Managed).ToArray()) await CleanAsync("disable " + item.Name, async () =>
+                {
+                    var row = await ReadFlowAsync(item); await VerifyMembershipAsync(item);
+                    if (row.GetAttributeValue<OptionSetValue>("statecode").Value != 0)
+                        await ExecuteAsync(new SetStateRequest { EntityMoniker = new("workflow", item.Id), State = new(0), Status = new(1) });
                 });
-            manifest["cleanupFailures"] = cleanupFailures;
-            manifest["cleanup"] = unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained solution/publisher ownership evidence";
-            await SaveAsync();
-            cleanupFailures.Should().BeEmpty(); unknown.Should().BeEmpty("unconfirmed submissions require manual recovery");
+                if (unknown.Count == 0 && cleanupFailures.Count == 0)
+                {
+                    if (sourceId != Guid.Empty) await CleanAsync(sourceName, async () => { await VerifySolutionAsync(sourceId, sourceName); await DeleteAsync("solution", sourceId); });
+                    if (outsideId != Guid.Empty) await CleanAsync(outsideName, async () => { await VerifySolutionAsync(outsideId, outsideName); await DeleteAsync("solution", outsideId); });
+                }
+                if (publisherId != Guid.Empty && unknown.Count == 0 && cleanupFailures.Count == 0)
+                    await CleanAsync(publisherName, async () =>
+                    {
+                        var rows = await QueryAsync(publishers); var row = rows.Entities.Should().ContainSingle().Subject;
+                        row.Id.Should().Be(publisherId); await DeleteAsync("publisher", publisherId);
+                    });
+                manifest["cleanupFailures"] = cleanupFailures;
+                manifest["cleanup"] = unknown.Count == 0 && cleanupFailures.Count == 0 ? "completed" : "manual-review-required; retained solution/publisher ownership evidence";
+            }
+            catch (Exception exception)
+            {
+                cleanupFailures.Add("Cleanup interrupted: " + exception.Message);
+                manifest["cleanupFailures"] = cleanupFailures;
+                manifest["cleanup"] = "manual-review-required; cleanup interrupted";
+            }
+            try { await SaveAsync(); }
+            catch (Exception exception) { cleanupFailures.Add("Manifest save failed: " + exception.Message); }
+            output.WriteLine("Fixture cleanup: " + manifest["cleanup"] + "; failures=" + JsonSerializer.Serialize(cleanupFailures) +
+                "; unknown=" + JsonSerializer.Serialize(unknown));
         }
+        failure.ThrowIfFailed(cleanupFailures, unknown);
     }
 
     private sealed record OwnedFlow(Guid Id, string Name, string UniqueName, bool InSource, bool Managed, bool Blocker, bool Associated);

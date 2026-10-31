@@ -1,6 +1,6 @@
 # Opt-in flow activation release fixture
 
-Status: the first attempt stopped during setup and cleaned up; the revised harness has not yet executed. Required live evidence for flow activation AC-08 remains pending. The harness drives the reviewed candidate CLI as an actual subprocess and validates its JSON stdout and progress stderr. Authentication uses an explicit existing profile; no active-profile selection changes are made.
+Status: attempt 2 passed managed and unmanaged single-flow, idempotent and batch activation checks (20 CLI JSON artifacts), then failed while creating the blocker fixture. The missing-binding live gate remains pending. The harness drives the reviewed candidate CLI as an actual subprocess and validates its JSON stdout and progress stderr. Authentication uses an explicit existing profile; no active-profile selection changes are made.
 
 `manual-compose.json` is derived from the workflow/clientdata contract documented in [Manage cloud flows with code](https://learn.microsoft.com/en-us/power-automate/manage-flows-with-code). Every fixture has exactly one manual Button trigger and one built-in Compose action. The trigger is never invoked. There are no HTTP actions, schedules, Dataverse triggers or connector actions. Enabling these fixtures does not initiate a run. Disabling is not a promise to cancel prior runs; none are deliberately started.
 
@@ -21,6 +21,8 @@ Target `https://orgcabef92d.crm.dynamics.com`, explicit profile `PPDS`, run ID `
 | Artifacts | `<artifact-root>/flows-6d83a2e4/manifest.json`, `managed-fixture.zip`, numbered CLI JSON/stderr records |
 
 The blocker adds one unused connection-reference mapping to the same harmless definition; no action uses it. If Dataverse rejects this draft fixture, the harness records/fails that platform constraint. It never introduces a business connector action to force acceptance.
+
+The manifest records the primary exception independently from cleanup. A typed Dataverse `OrganizationServiceFault` returned by Create records an explicit rejection, including code, message and activity ID in `rejectedSubmissions`; timeouts, cancellation and transport errors remain `unknownSubmissions` and retain solution/publisher recovery evidence. Arbitrary SDK error details and credentials are not serialized. Cleanup diagnostics cannot replace the original exception or its stack. A rejection still fails validation; it is not treated as evidence that the blocker gate passed.
 
 ## Sequence
 
@@ -55,3 +57,11 @@ The first approved attempt on `6d83a2e4` stopped during fixture setup: Dataverse
 The revised harness assigns the deterministic names listed above in Create, checks `IsValidForCreate` in target metadata before any provisioning, and verifies readback both before and after `AddSolutionComponent`. A failed assignment cannot prevent cleanup of a confirmed own ID: its stored unique-name selector remains empty until the exact assigned value is verified. Display names, IDs returned by Dataverse, manual Button/Compose definitions, target and cleanup scope are otherwise unchanged.
 
 Preserve the first attempt's artifacts. After confirmed cleanup and repeated collision checks, retry the same approved run ID with `PPDS_FLOWS_LIVE_ARTIFACTS` pointing to a new `attempt2` subdirectory beneath the approved artifact root. The harness still refuses to overwrite its run directory; it does not infer permission from an old manifest.
+
+## Attempt 2 failure evidence
+
+Attempt 2 created and round-tripped the harmless flows successfully, including all 20 candidate CLI plan/execution calls. Blocker creation then threw before any blocker CLI invocation. The original harness incorrectly replaced that exception with its final unresolved-submission assertion, so the precise server reason is unavailable from the attempt 2 log. An absent-reference platform restriction is a hypothesis, not an established diagnosis.
+
+The confirmed outside flow was deleted and the two managed flows were left Off. Source/outside solutions and publisher were retained for recovery because the create outcome was recorded as unknown. Recovery must verify the manifest's exact IDs, package hash/component inventory, complete publisher ownership and absence of the blocker; it must never adopt rows by name. Preserve all attempt 2 evidence. Only after verified cleanup and fresh absence checks may the coordinator perform a controlled diagnostic run of the same approved inventory in a new `attempt3` artifact directory. Adding an unbound connection-reference resource would change the approved inventory and requires a separate reviewed amendment.
+
+Offline regression coverage: `FixtureFailureEvidenceTests.DataverseFault_RecordsAuthoritativeRejectionWithoutArbitraryErrorDetails`, `TransportTimeoutAndCancellation_KeepSubmissionUnknown`, `CleanupFailure_DoesNotReplacePrimaryExceptionOrItsOriginalStack`, and `UnknownSubmissionWithoutPrimaryFailure_StillFailsValidation`. These tests do not authenticate or call Dataverse.
