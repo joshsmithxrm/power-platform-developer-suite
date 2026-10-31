@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 /** JSON format for .ppdsnb notebook files. */
 interface NotebookFileData {
-    metadata: NotebookMetadata;
+    metadata?: NotebookMetadata;
     cells: NotebookCellFileData[];
 }
 
@@ -84,20 +84,20 @@ export class DataverseNotebookSerializer implements vscode.NotebookSerializer {
         }
 
         const notebookData = new vscode.NotebookData(cells);
-        notebookData.metadata = {
-            environmentId: data.metadata.environmentId,
-            environmentName: data.metadata.environmentName,
-            environmentUrl: data.metadata.environmentUrl,
-        };
+        notebookData.metadata = this.safeMetadata(data.metadata);
         return notebookData;
     }
 
     private extractMetadata(data: vscode.NotebookData): NotebookMetadata {
-        const metadata = data.metadata as NotebookMetadata | undefined;
+        return this.safeMetadata(data.metadata);
+    }
+
+    private safeMetadata(metadata: unknown): NotebookMetadata {
+        const values = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {};
         return {
-            environmentId: metadata?.environmentId,
-            environmentName: metadata?.environmentName,
-            environmentUrl: metadata?.environmentUrl,
+            environmentId: typeof values.environmentId === 'string' ? values.environmentId : undefined,
+            environmentName: typeof values.environmentName === 'string' ? values.environmentName : undefined,
+            environmentUrl: typeof values.environmentUrl === 'string' ? values.environmentUrl : undefined,
         };
     }
 

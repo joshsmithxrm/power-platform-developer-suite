@@ -537,6 +537,13 @@
           "group": "3_export"
         }
       ],
+      "notebook/toolbar": [
+        {
+          "command": "ppds.selectNotebookEnvironment",
+          "when": "notebookType == ppdsnb",
+          "group": "navigation"
+        }
+      ],
       "notebook/cell/title": [
         {
           "command": "ppds.toggleNotebookCellLanguage",
@@ -633,6 +640,7 @@
     "test:watch": "vitest",
     "pretest:e2e": "npm run compile",
     "test:e2e": "playwright test",
+    "test:notebook-host": "node tools/run-notebook-host-tests.mjs",
     "vsce:package": "vsce package --pre-release",
     "local:install": "node tools/install-local.mjs",
     "local:uninstall": "code --uninstall-extension JoshSmithXRM.power-platform-developer-suite",

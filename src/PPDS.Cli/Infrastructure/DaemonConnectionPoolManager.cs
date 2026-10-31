@@ -100,14 +100,37 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         return entry.ServiceProvider;
     }
 
+    /// <inheritdoc/>
+    public async Task<IServiceProvider> GetOrCreateCapturedServiceProviderAsync(
+        AuthProfile profileSnapshot,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profileSnapshot);
+        var snapshot = profileSnapshot.Clone();
+        // Aliases preserve normal invalidation; the identity prevents cache reuse by
+        // a different principal that acquires the same name/index.
+        var cacheIdentities = new[]
+        {
+            snapshot.Name ?? snapshot.DisplayIdentifier,
+            snapshot.Index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "identity:" + RpcProfileIdentity.Create(snapshot)
+        };
+        var entry = await GetOrCreateEntryAsync(cacheIdentities, environmentUrl,
+            deviceCodeCallback, cancellationToken, new[] { snapshot }).ConfigureAwait(false);
+        return entry.ServiceProvider;
+    }
+
     /// <summary>
-    /// Core implementation that gets or creates a cached pool entry, shared by both public methods.
+    /// Core implementation that gets or creates a cached pool entry, shared by the public methods.
     /// </summary>
     private async Task<CachedPoolEntry> GetOrCreateEntryAsync(
         IReadOnlyList<string> profileNames,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<AuthProfile>? profileSnapshots = null)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
@@ -127,7 +150,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         // Note: CancellationToken.None is passed to CreatePoolEntryAsync because the Lazy<Task<>>
         // caches the result - we don't want the first caller's token to affect subsequent callers.
         var lazyEntry = _pools.GetOrAdd(cacheKey, _ => new Lazy<Task<CachedPoolEntry>>(
-            () => CreatePoolEntryAsync(profileNames, environmentUrl, deviceCodeCallback, CancellationToken.None),
+            () => CreatePoolEntryAsync(profileNames, environmentUrl, deviceCodeCallback, CancellationToken.None, profileSnapshots),
             LazyThreadSafetyMode.ExecutionAndPublication));
 
         // Add timeout wrapper to prevent indefinite blocking (e.g., device code flow)
@@ -283,9 +306,12 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         IReadOnlyList<string> profileNames,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<AuthProfile>? profileSnapshots = null)
     {
-        var collection = await _loadProfilesAsync(cancellationToken).ConfigureAwait(false);
+        var collection = profileSnapshots is null
+            ? await _loadProfilesAsync(cancellationToken).ConfigureAwait(false)
+            : null;
         var credentialStore = new NativeCredentialStore();
 
         // Create connection sources for each profile
@@ -293,10 +319,11 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         try
         {
             AuthProfile? firstProfile = null;
-            foreach (var profileName in profileNames)
+            var resolvedProfiles = profileSnapshots ?? profileNames.Select(profileName =>
+                collection!.GetByNameOrIndex(profileName)?.Clone()
+                    ?? throw new InvalidOperationException($"Profile '{profileName}' not found.")).ToArray();
+            foreach (var profile in resolvedProfiles)
             {
-                var profile = collection.GetByNameOrIndex(profileName)
-                    ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
                 firstProfile ??= profile;
 
                 var source = new ProfileConnectionSource(

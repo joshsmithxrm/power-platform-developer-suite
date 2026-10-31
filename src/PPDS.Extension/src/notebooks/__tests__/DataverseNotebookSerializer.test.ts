@@ -70,6 +70,25 @@ describe('DataverseNotebookSerializer', () => {
         serializer = new DataverseNotebookSerializer();
     });
 
+    it.each([undefined, null, {}, { environmentName: 'Old notebook' }, { environmentUrl: 123 }])('preserves cells with missing or partial metadata %j', async metadata => {
+        const data = await serializer.deserializeNotebook(encode(JSON.stringify({
+            metadata, cells: [{ kind: 'sql', source: 'SELECT name FROM account' }],
+        })), token);
+        expect(data.cells[0].value).toBe('SELECT name FROM account');
+        expect(data.metadata?.environmentUrl).toBeUndefined();
+    });
+
+    it('never serializes credentials acknowledgement or a claimed environment type', async () => {
+        const data = await serializer.deserializeNotebook(encode(JSON.stringify({
+            metadata: { environmentUrl: 'https://org.crm.dynamics.com', token: 'secret', acknowledged: true, environmentType: 'Development' },
+            cells: [{ kind: 'sql', source: 'SELECT name FROM account' }],
+        })), token);
+        data.metadata = { ...data.metadata, password: 'secret', acknowledgement: true };
+        const text = decode(await serializer.serializeNotebook(data, token));
+        expect(JSON.parse(text).metadata).toEqual({ environmentUrl: 'https://org.crm.dynamics.com' });
+        expect(text).not.toContain('secret');
+    });
+
     it('round-trips SQL cells with metadata', async () => {
         const input = JSON.stringify({
             metadata: {

@@ -30,6 +30,8 @@ export interface EnvironmentSummary {
 }
 
 export interface AuthWhoResponse {
+    /** Opaque daemon identity selector; absent on older daemons. */
+    profileIdentity?: string;
     index: number;
     name: string | null;
     authMethod: string;

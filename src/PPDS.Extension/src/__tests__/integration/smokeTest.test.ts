@@ -68,6 +68,7 @@ vi.mock('vscode', () => {
             openNotebookDocument: vi.fn(() => Promise.resolve({ notebookType: 'ppdsnb', metadata: {} })),
             openTextDocument: vi.fn(() => Promise.resolve({})),
             onDidOpenNotebookDocument: vi.fn(() => disposable),
+            onDidChangeNotebookDocument: vi.fn(() => disposable),
             onDidCloseNotebookDocument: vi.fn(() => disposable),
             onDidCloseTextDocument: vi.fn(() => disposable),
             onDidChangeTextDocument: vi.fn(() => disposable),

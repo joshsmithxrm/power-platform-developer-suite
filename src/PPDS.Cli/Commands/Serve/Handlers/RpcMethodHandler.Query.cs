@@ -110,7 +110,7 @@ public partial class RpcMethodHandler
                     SortOrder = c.SortOrder
                 }).ToList()
             };
-        }, cancellationToken);
+        }, cancellationToken, profileIdentity: request.ProfileIdentity);
     }
 
     /// <summary>
@@ -174,8 +174,10 @@ public partial class RpcMethodHandler
             query = InjectTopAttribute(query, request.Top.Value);
         }
 
-        var response = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, ct) =>
+        string? executedEnvironmentUrl = null;
+        var response = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, _, env, ct) =>
         {
+            executedEnvironmentUrl = env.Url;
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
                 query,
@@ -187,10 +189,10 @@ public partial class RpcMethodHandler
             var mapped = MapToResponse(result, query);
             mapped.QueryMode = "dataverse";
             return mapped;
-        }, cancellationToken);
+        }, cancellationToken, profileIdentity: request.ProfileIdentity);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(request.FetchXml, response);
+        FireAndForgetHistorySave(request.FetchXml, response, executedEnvironmentUrl);
 
         return response;
     }
@@ -213,8 +215,10 @@ public partial class RpcMethodHandler
         }
 
         // Execute (or transpile-only) via SqlQueryService from the environment's service provider
+        string? executedEnvironmentUrl = null;
         var response = await WithProfileAndEnvironmentAsync(request.ProfileName, request.EnvironmentUrl, async (sp, profile, env, ct) =>
         {
+            executedEnvironmentUrl = env.Url;
             var service = sp.GetRequiredService<ISqlQueryService>();
 
             // ShowFetchXml mode: transpile only, no execution needed
@@ -273,11 +277,11 @@ public partial class RpcMethodHandler
                         // Task.Run avoids blocking the RPC handler's async context thread,
                         // which would be a thread-pool starvation risk under concurrent requests.
                         var remoteProfileName = profile.Name ?? profile.DisplayIdentifier;
-                        var remoteProvider = Task.Run(() => _poolManager.GetOrCreateServiceProviderAsync(
-                            new[] { remoteProfileName },
-                            config.Url,
-                            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, remoteProfileName),
-                            cancellationToken: ct)).GetAwaiter().GetResult();
+                        var remoteProvider = Task.Run(() => request.ProfileIdentity is not null
+                            ? _poolManager.GetOrCreateCapturedServiceProviderAsync(profile, config.Url,
+                                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, remoteProfileName), cancellationToken: ct)
+                            : _poolManager.GetOrCreateServiceProviderAsync(new[] { remoteProfileName }, config.Url,
+                                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, remoteProfileName), cancellationToken: ct)).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
                         return remoteProvider.GetRequiredService<IQueryExecutor>();
                     };
@@ -393,10 +397,10 @@ public partial class RpcMethodHandler
             {
                 throw MapPpdsToRpcException(ex);
             }
-        }, cancellationToken);
+        }, cancellationToken, profileIdentity: request.ProfileIdentity);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(request.Sql, response);
+        FireAndForgetHistorySave(request.Sql, response, executedEnvironmentUrl);
 
         return response;
     }
@@ -636,7 +640,7 @@ public partial class RpcMethodHandler
                     throw new RpcException(ErrorCodes.Query.ParseError, parseEx.UserMessage);
                 }
             }
-        }, cancellationToken);
+        }, cancellationToken, profileIdentity: request.ProfileIdentity);
     }
 
     #endregion
@@ -864,6 +868,7 @@ public class QueryExplainResponse
 /// </summary>
 public class QuerySqlRequest
 {
+    [JsonPropertyName("profileIdentity")] public string? ProfileIdentity { get; set; }
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
     [JsonPropertyName("top")] public int? Top { get; set; }
     [JsonPropertyName("page")] public int? Page { get; set; }
@@ -894,6 +899,7 @@ public sealed class DmlSafetyRpcOptions
 /// </summary>
 public class QueryFetchRequest
 {
+    [JsonPropertyName("profileIdentity")] public string? ProfileIdentity { get; set; }
     [JsonPropertyName("fetchXml")] public string FetchXml { get; set; } = "";
     [JsonPropertyName("top")] public int? Top { get; set; }
     [JsonPropertyName("page")] public int? Page { get; set; }
@@ -908,6 +914,7 @@ public class QueryFetchRequest
 /// </summary>
 public class QueryCompleteRequest
 {
+    [JsonPropertyName("profileIdentity")] public string? ProfileIdentity { get; set; }
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
     [JsonPropertyName("cursorOffset")] public int CursorOffset { get; set; }
     [JsonPropertyName("language")] public string? Language { get; set; }
@@ -965,6 +972,7 @@ public class QueryExportRequest
 /// </summary>
 public class QueryExplainRequest
 {
+    [JsonPropertyName("profileIdentity")] public string? ProfileIdentity { get; set; }
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
     [JsonPropertyName("profileName")] public string? ProfileName { get; set; }

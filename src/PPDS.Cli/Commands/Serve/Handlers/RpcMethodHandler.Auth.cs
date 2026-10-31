@@ -115,7 +115,7 @@ public partial class RpcMethodHandler
         var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
-        var profile = collection.ActiveProfile;
+        var profile = collection.ActiveProfile?.Clone();
         if (profile == null)
         {
             throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
@@ -138,6 +138,7 @@ public partial class RpcMethodHandler
 
         return new AuthWhoResponse
         {
+            ProfileIdentity = RpcProfileIdentity.Create(profile),
             Index = profile.Index,
             Name = profile.Name,
             AuthMethod = profile.AuthMethod.ToString(),
@@ -303,6 +304,9 @@ public class EnvironmentSummary
 /// </summary>
 public class AuthWhoResponse
 {
+    [JsonPropertyName("profileIdentity")]
+    public string ProfileIdentity { get; set; } = "";
+
     [JsonPropertyName("index")]
     public int Index { get; set; }
 

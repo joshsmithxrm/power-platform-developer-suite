@@ -23,7 +23,7 @@ Per-panel environment scoping gives each VS Code panel (Data Explorer, Solutions
 
 ### Non-Goals
 
-- Changing the notebook environment model (notebooks already have per-file environment metadata — correct as-is)
+- Per-cell notebook environment overrides (notebook-level binding and execution isolation are covered below)
 - Rewriting the webview UI framework (we enhance the existing `WebviewPanelBase` + inline HTML pattern)
 - TUI per-tab profile switching (tracked separately in #927)
 - Panel state persistence across VS Code restart (panel profile+environment bindings are ephemeral)
@@ -31,6 +31,22 @@ Per-panel environment scoping gives each VS Code panel (Data Explorer, Solutions
 ---
 
 ## Architecture
+
+### Notebook execution isolation
+
+Each notebook binds its own environment in its existing file metadata, or uses
+the authenticated session's default when unbound. Its picker never selects the
+global environment. A run captures an immutable profile identity and resolved
+environment before executing cells; focus, binding, and default changes affect
+subsequent runs only. Different notebooks execute concurrently. Runs within one
+notebook queue, and interruption/close cancels only that notebook's active and
+queued work. Late results cannot replace a newer execution's output.
+
+Production and unknown targets require an in-memory acknowledgement per notebook,
+profile identity, target, and classification. Metadata cannot grant approval, and
+this acknowledgement never enables DML confirmation. Query execution and safety
+remain in the existing Application Services. Notebook behavior and acceptance
+criteria are specified in [data-explorer.md](./data-explorer.md).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐

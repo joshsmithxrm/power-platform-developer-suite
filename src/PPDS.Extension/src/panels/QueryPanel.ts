@@ -4,7 +4,7 @@ import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 import type { DaemonClient } from '../daemonClient.js';
 import type { DiagnosticItem, QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
-import { handleAuthError } from '../utils/errorUtils.js';
+import { handleAuthError, isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
 
@@ -13,6 +13,11 @@ import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getEnvironmentPickerHtml, showContextPicker } from './environmentPicker.js';
 import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
+
+interface CapturedQueryProfile {
+    profileName: string;
+    profileIdentity: string;
+}
 
 export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryPanelHostToWebview> {
     private static instances: QueryPanel[] = [];
@@ -30,16 +35,22 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         return QueryPanel.instances.length;
     }
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string, envUrl?: string, envDisplayName?: string): QueryPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string, envUrl?: string, envDisplayName?: string, profile?: CapturedQueryProfile): QueryPanel {
         if (QueryPanel.instances.length >= QueryPanel.MAX_PANELS) {
             const oldest = QueryPanel.instances[0];
             oldest.panel?.reveal();
+            const normalized = (url: string | undefined): string | undefined => url?.replace(/\/+$/, '').toLowerCase();
+            if ((envUrl && normalized(oldest.environmentUrl) !== normalized(envUrl))
+                || (profile && oldest.profileIdentity !== profile.profileIdentity)) {
+                void vscode.window.showWarningMessage('Close a Data Explorer panel before opening this notebook query. The existing panel uses a different environment or profile.');
+                return oldest;
+            }
             if (initialSql) {
                 oldest.postMessage({ command: 'loadQuery', sql: initialSql });
             }
             return oldest;
         }
-        const panel = new QueryPanel(extensionUri, daemon, initialSql, envUrl, envDisplayName);
+        const panel = new QueryPanel(extensionUri, daemon, initialSql, envUrl, envDisplayName, profile);
         return panel;
     }
 
@@ -52,6 +63,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private lastLanguage = 'sql';
     protected readonly panelLabel = 'Data Explorer';
     private readonly initialSql: string | undefined;
+    private profileIdentity: string | undefined;
+
+    private get queryTarget(): { environmentUrl?: string; profileName?: string; profileIdentity?: string } {
+        return { environmentUrl: this.environmentUrl, profileName: this.profileName, profileIdentity: this.profileIdentity };
+    }
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -59,8 +75,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         initialSql?: string,
         initialEnvUrl?: string,
         initialEnvDisplayName?: string,
+        initialProfile?: CapturedQueryProfile,
     ) {
         super();
+        this.profileName = initialProfile?.profileName;
+        this.profileIdentity = initialProfile?.profileIdentity;
 
         // Pre-set environment if provided (from tree context menu)
         if (initialEnvUrl) {
@@ -147,8 +166,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         sql: message.sql,
                         cursorOffset: message.cursorOffset,
                         language: message.language,
-                        environmentUrl: this.environmentUrl,
-                        profileName: this.profileName,
+                        ...this.queryTarget,
                     });
                     this.postMessage({ command: 'completionResult', requestId, items: result.items });
                 } catch (err) {
@@ -192,8 +210,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         // SQL → FetchXML: use daemon's explain endpoint (fetchXml field has clean XML)
                         const result = await this.daemon.queryExplain({
                             sql,
-                            environmentUrl: this.environmentUrl ?? undefined,
-                            profileName: this.profileName,
+                            ...this.queryTarget,
                         });
                         converted = result.fetchXml ?? result.plan;
                     } else {
@@ -231,6 +248,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 const env = await showContextPicker(this.daemon, this.profileName, this.environmentUrl);
                 if (env) {
                     this.profileName = env.profileName;
+                    this.profileIdentity = undefined;
                     this.environmentUrl = env.url;
                     this.environmentDisplayName = env.displayName;
                     this.environmentType = env.type;
@@ -278,12 +296,14 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private async initEnvironment(): Promise<void> {
         // Always fetch profile name for the title
         try {
-            const list = await this.daemon.authList();
-            const active = list.profiles.find(p => p.isActive);
-            this.profileName = active?.name ?? (active ? `Profile ${active.index}` : list.activeProfile ?? undefined);
-            if (!this.environmentUrl && active?.environment) {
-                this.environmentUrl = active.environment.url;
-                this.environmentDisplayName = active.environment.displayName;
+            if (!this.profileIdentity) {
+                const list = await this.daemon.authList();
+                const active = list.profiles.find(p => p.isActive);
+                this.profileName = active?.name ?? (active ? `Profile ${active.index}` : list.activeProfile ?? undefined);
+                if (!this.environmentUrl && active?.environment) {
+                    this.environmentUrl = active.environment.url;
+                    this.environmentDisplayName = active.environment.displayName;
+                }
             }
             this.environmentType = null;
         } catch (err) {
@@ -321,9 +341,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             let result: QueryResultResponse;
             if (language === 'xml') {
-                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl, profileName: this.profileName }, token);
+                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, ...this.queryTarget }, token);
             } else {
-                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl, profileName: this.profileName, dmlSafety: { isConfirmed } }, token);
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, ...this.queryTarget, dmlSafety: { isConfirmed } }, token);
             }
             this.lastSql = sql;
             this.lastUseTds = tds;
@@ -369,6 +389,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             const msg = error instanceof Error ? error.message : String(error);
 
+            if (this.profileIdentity && isAuthError(error)) {
+                this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${this.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.` });
+                return;
+            }
+
             if (await handleAuthError(this.daemon, error, isRetry, () =>
                 this.executeQuery(sql, true, useTds, language, isConfirmed)
             )) {
@@ -385,7 +410,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async showFetchXml(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl, profileName: this.profileName });
+            const result = await this.daemon.queryExplain({ sql, ...this.queryTarget });
             if (result.plan) {
                 const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
                 if (ExplainDocumentProvider.instance) {
@@ -403,7 +428,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async explainQuery(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl, profileName: this.profileName });
+            const result = await this.daemon.queryExplain({ sql, ...this.queryTarget });
             const language = result.format === 'fetchxml' ? 'xml' : 'plaintext';
             const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
             if (ExplainDocumentProvider.instance) {
@@ -430,8 +455,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     fetchXml: this.lastSql,
                     page,
                     pagingCookie,
-                    environmentUrl: this.environmentUrl,
-                    profileName: this.profileName,
+                    ...this.queryTarget,
                 });
             } else {
                 result = await this.daemon.querySql({
@@ -439,8 +463,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     page,
                     pagingCookie,
                     useTds: this.lastUseTds,
-                    environmentUrl: this.environmentUrl,
-                    profileName: this.profileName,
+                    ...this.queryTarget,
                 });
             }
 

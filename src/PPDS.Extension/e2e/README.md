@@ -16,3 +16,20 @@ Playwright assertion retries remain disabled. In CI only, the harness retries on
 ## Blocking CI gate
 
 The monitored ramp was promoted to a blocking gate after four consecutive clean declared-minimum/stable matrix runs, including pull-request and `main` runs, completed without consuming the startup retry. A failure in either lane now fails `build-status`. Traces and screenshots are still uploaded on failure so a blocking failure retains its diagnostics.
+
+## Native notebook host tests
+
+Run `npm run test:notebook-host` for the current stable VS Code host. Set
+`VSCODE_E2E_VERSION=minimum` to test the minimum declared in `engines.vscode`.
+The runner downloads the selected host and uses temporary workspace, user-data,
+extension, and PPDS config directories. AI features are disabled in the temporary
+settings, and the child host receives empty temporary home and app-data directories
+to prevent machine-global plugin discovery. A test-only extension loads the production serializer and controller
+with an in-memory daemon, so these tests require no Dataverse credentials and
+make no live Dataverse requests.
+
+Coverage includes concurrent native SQL/FetchXML executions, captured bindings
+and authentication identity, output attribution and record links, scoped
+interruption and queues, and legacy file loading plus saved-binding reload. Unit tests
+cover picker cancellation and Production/Unknown acknowledgement dialogs.
+Passing host tests does not substitute for an authorized live sandbox check.

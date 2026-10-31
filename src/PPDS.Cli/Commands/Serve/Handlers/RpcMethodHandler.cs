@@ -289,7 +289,8 @@ public partial class RpcMethodHandler : IDisposable
         string? environmentUrl,
         Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
         CancellationToken cancellationToken,
-        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "",
+        string? profileIdentity = null)
     {
         return SafeExecuteAsync(callerName, async () =>
         {
@@ -299,7 +300,11 @@ public partial class RpcMethodHandler : IDisposable
             var collection = await store.LoadAsync(cancellationToken);
 
             AuthProfile profile;
-            if (!string.IsNullOrWhiteSpace(profileName))
+            if (profileIdentity is not null)
+            {
+                profile = RpcProfileIdentity.ResolveSnapshot(collection, profileIdentity);
+            }
+            else if (!string.IsNullOrWhiteSpace(profileName))
             {
                 profile = collection.GetByNameOrIndex(profileName)
                     ?? throw new RpcException(ErrorCodes.Auth.ProfileNotFound, $"Profile '{profileName}' not found");
@@ -331,11 +336,12 @@ public partial class RpcMethodHandler : IDisposable
                 : new PPDS.Auth.Profiles.EnvironmentInfo { Url = resolvedUrl, DisplayName = resolvedUrl };
 
             var resolvedProfileName = profile.Name ?? profile.DisplayIdentifier;
-            var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
-                new[] { resolvedProfileName },
-                resolvedUrl,
-                deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc, resolvedProfileName),
-                cancellationToken: cancellationToken);
+            var callback = DaemonDeviceCodeHandler.CreateCallback(_rpc, resolvedProfileName);
+            var serviceProvider = profileIdentity is not null
+                ? await _poolManager.GetOrCreateCapturedServiceProviderAsync(
+                    profile, resolvedUrl, deviceCodeCallback: callback, cancellationToken: cancellationToken)
+                : await _poolManager.GetOrCreateServiceProviderAsync(
+                    new[] { resolvedProfileName }, resolvedUrl, deviceCodeCallback: callback, cancellationToken: cancellationToken);
 
             return await action(serviceProvider, profile, resolvedEnvironment, cancellationToken);
         });
@@ -353,13 +359,15 @@ public partial class RpcMethodHandler : IDisposable
         string? environmentUrl,
         Func<IServiceProvider, CancellationToken, Task<T>> action,
         CancellationToken cancellationToken,
-        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "")
+        [System.Runtime.CompilerServices.CallerMemberName] string callerName = "",
+        string? profileIdentity = null)
         => WithProfileAndEnvironmentAsync<T>(
             profileName,
             environmentUrl,
             (sp, _, _, ct) => action(sp, ct),
             cancellationToken,
-            callerName);
+            callerName,
+            profileIdentity);
 
     /// <summary>
     /// Maps a PpdsException (or subclass) to an RpcException with structured error data.

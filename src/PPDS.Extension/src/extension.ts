@@ -493,10 +493,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // ── Notebook Commands ─────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.newNotebook', createNewNotebook),
-        vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(client)),
+        vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(client, notebookController)),
         vscode.commands.registerCommand('ppds.openCellInDataExplorer', () => {
-            openCellInDataExplorer((sql: string) => {
-                QueryPanel.show(context.extensionUri, client, sql);
+            return openCellInDataExplorer(notebookController, (sql, target) => {
+                QueryPanel.show(context.extensionUri, client, sql, target.environmentUrl, target.environmentName, target);
             });
         }),
         vscode.commands.registerCommand('ppds.exportCellResultsCsv', () => exportCellResults(notebookController, 'csv')),
@@ -504,7 +504,13 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // ── IntelliSense Completion Provider ──────────────────────────────
-    const completionProvider = new DataverseCompletionProvider(client);
+    const completionProvider = new DataverseCompletionProvider(client, async document => {
+        if (document.uri.scheme !== 'vscode-notebook-cell') return undefined;
+        const notebook = vscode.workspace.notebookDocuments.find(candidate =>
+            candidate.notebookType === 'ppdsnb' && candidate.getCells().some(cell => cell.document.uri.toString() === document.uri.toString()));
+        if (!notebook) throw new Error('Notebook is no longer open.');
+        return notebookController.getNotebookQueryContext(notebook);
+    });
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
         vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<', '"'),
