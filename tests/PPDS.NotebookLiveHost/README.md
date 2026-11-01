@@ -1,6 +1,11 @@
 # Opt-in two-environment notebook demonstration
 
-Status: prepared, not executed. This addresses the approved notebook AC-08/G5 sandbox gate. The deterministic minimum/stable notebook suite remains separate evidence.
+Status: the authorized two-organization demonstration passed on 2026-11-01
+using product commit `1cba826c6ad6233e41b0d4d5197d0c7c618cd4c7` on VS Code
+1.116.0 and 1.144.0. Six fixed organization reads ran per host. This closes the
+notebook AC-08/G5 demonstration gate for that candidate; future invocations
+still require their own explicit two-target plan. The deterministic host suite
+and shipped-serve integration remain separate evidence.
 
 The coordinator must approve a plan naming **two distinct sandbox organization URLs** and exact existing named profiles. Two profiles on the same URL do not satisfy this gate. The live assertions also require different returned organization IDs, so aliases of one organization cannot pass.
 
