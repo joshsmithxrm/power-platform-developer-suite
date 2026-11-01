@@ -42,7 +42,8 @@ public sealed class FlowActivationReaderTests
         pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
         var service = new FlowService(pool.Object, NullLogger<FlowService>.Instance);
         var result = await service.ListAsync("test_solution", includeClassic: true);
-        Assert.Equal(new[] { (1, (string?)null), (2, (string?)"next-page") }, pages);
+        (int, string?)[] expectedPages = [(1, null), (2, "next-page")];
+        Assert.Equal(expectedPages, pages);
         Assert.Equal(2, result.TotalCount);
         Assert.Equal(1, result.Items.Single(f => f.Id == first.Id).DefinitionType);
         Assert.True(result.Items.Single(f => f.Id == first.Id).ConnectionReferencesVerified);

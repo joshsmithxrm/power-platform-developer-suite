@@ -230,7 +230,7 @@ public sealed class FormAuthoringTests
         public Exception? WriteFailure, AssociationFailure;
         public Func<Task>? BeforeWrite;
         public UpdateRequest? UpdateRequest;
-        public List<QueryExpression> Queries = [];
+        public readonly List<QueryExpression> Queries = [];
         public Harness()
         {
             Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(Client.Object);

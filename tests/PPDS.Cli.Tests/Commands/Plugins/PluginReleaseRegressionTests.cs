@@ -45,7 +45,7 @@ public class PluginReleaseRegressionTests
             mock.Setup(s => s.GetSdkMessageIdAsync("Create", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
             mock.Setup(s => s.GetSdkMessageFilterIdAsync(It.IsAny<Guid>(), "acount", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid?)null);
+                .Returns(Task.FromResult<Guid?>(null));
             mock.Setup(s => s.DeleteStepAsync(orphanId, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("cleanup rejected"));
             var config = new PluginAssemblyConfig
@@ -120,7 +120,7 @@ public class PluginReleaseRegressionTests
             .ReturnsAsync([new() { Id = stepId, Name = "existing", Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous" }]);
         mock.Setup(s => s.ListImagesForStepAsync(stepId, cts.Token)).ReturnsAsync([]);
         mock.Setup(s => s.GetSdkMessageIdAsync("Create", cts.Token)).ReturnsAsync(messageId);
-        mock.Setup(s => s.GetSdkMessageFilterIdAsync(messageId, "account", null, cts.Token)).ReturnsAsync((Guid?)null);
+        mock.Setup(s => s.GetSdkMessageFilterIdAsync(messageId, "account", null, cts.Token)).Returns(Task.FromResult<Guid?>(null));
         var config = new PluginAssemblyConfig
         {
             Name = "Example", Types = [new() { TypeName = "Handler", Steps = [
