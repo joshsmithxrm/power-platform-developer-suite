@@ -630,6 +630,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async querySql(params: {
         sql: string;
+        profileIdentity?: string;
         environmentUrl?: string;
         profileName?: string;
         top?: number;
@@ -656,6 +657,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryFetch(params: {
         fetchXml: string;
+        profileIdentity?: string;
         environmentUrl?: string;
         profileName?: string;
         top?: number;
@@ -680,7 +682,7 @@ export class DaemonClient implements vscode.Disposable {
      * Uses quiet (non-logging) transport to avoid flooding the output channel
      * on every keystroke.
      */
-    async queryComplete(params: { sql: string; cursorOffset: number; language?: string; environmentUrl?: string; profileName?: string }): Promise<QueryCompleteResponse> {
+    async queryComplete(params: { sql: string; cursorOffset: number; language?: string; environmentUrl?: string; profileName?: string; profileIdentity?: string }): Promise<QueryCompleteResponse> {
         return this.sendRequestQuiet(RPC_QUERY_COMPLETE, params);
     }
 
@@ -742,7 +744,7 @@ export class DaemonClient implements vscode.Disposable {
      * Since Dataverse SQL is transpiled to FetchXML, the transpiled FetchXML
      * serves as the execution plan.
      */
-    async queryExplain(params: { sql: string; environmentUrl?: string; profileName?: string }): Promise<QueryExplainResponse> {
+    async queryExplain(params: { sql: string; environmentUrl?: string; profileName?: string; profileIdentity?: string }): Promise<QueryExplainResponse> {
         await this.ensureConnected();
         this.log.debug('Calling query/explain...');
         const result = await this.connection!.sendRequest(RPC_QUERY_EXPLAIN, params);

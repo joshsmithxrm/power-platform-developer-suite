@@ -61,7 +61,7 @@ public static class AddSectionCommand
 
         var publishOption = new Option<bool>("--publish")
         {
-            Description = "Publish customizations after adding the section",
+            Description = "Publish all pending customizations for this table after writing",
             DefaultValueFactory = _ => false
         };
 
@@ -83,7 +83,8 @@ public static class AddSectionCommand
             publishOption,
             solutionOption,
             FormsCommandGroup.ProfileOption,
-            FormsCommandGroup.EnvironmentOption
+            FormsCommandGroup.EnvironmentOption,
+            FormsCommandGroup.ConfirmEnvironmentOption
         };
 
         GlobalOptions.AddToCommand(command);
@@ -102,10 +103,11 @@ public static class AddSectionCommand
             var solution = parseResult.GetValue(solutionOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
+            var confirmEnvironment = parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAsync(entity, form, tab, label, showLabel, columns, visible,
-                availableOnPhone, publish, solution, profile, environment, globalOptions, cancellationToken);
+                availableOnPhone, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -124,6 +126,7 @@ public static class AddSectionCommand
         string? solution,
         string? profile,
         string? environment,
+        string? confirmEnvironment,
         GlobalOptionValues globalOptions,
         CancellationToken ct)
     {
@@ -139,6 +142,7 @@ public static class AddSectionCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 ct);
 
+            await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, ct);
             var formService = serviceProvider.GetRequiredService<IFormService>();
 
             if (!globalOptions.IsJsonMode)

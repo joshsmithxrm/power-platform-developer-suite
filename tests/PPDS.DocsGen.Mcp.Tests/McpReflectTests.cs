@@ -107,6 +107,17 @@ public class McpReflectTests
             "sibling [System.ComponentModel.Description] must be surfaced as the tool description");
     }
 
+    [Fact]
+    public async Task ExcludesServerInjectedParameters()
+    {
+        var generated = await GenerateAsync();
+        var schema = generated["tools/fixture_alpha_echo.md"];
+        schema.Should().Contain("| message | `String` | yes |");
+        schema.Should().Contain("| repeat | `Int32` | no |");
+        schema.Should().NotContain("| progress |");
+        schema.Should().NotContain("| cancellationToken |");
+    }
+
     private static string Normalize(string s) =>
         s.Replace("\r\n", "\n", StringComparison.Ordinal);
 }

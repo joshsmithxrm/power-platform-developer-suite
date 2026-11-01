@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded form authoring** — `ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field` and `ppds_forms_publish` support inspection, adding an existing column to an existing Main-form section, verified draft saves and explicit table-scoped publication. Stable IDs and a fresh draft fingerprint prevent accidental selection and stale edits; results retain completed and uncertain phases (#1215, partial).
+
+### Changed
+
+- MCP captures the startup authentication profile and target. Allowed environment switches affect subsequent calls in that session without changing global defaults or redirecting in-flight work.
+- Form writes require explicit acknowledgement of a protected target using `confirmEnvironment`; `--allowed-env` permits switching but does not authorize a write. `--read-only` rejects form mutations. Publication separately requires `confirmPublishEntity` because it includes all pending customizations for that table (#1015, partial).
+
 ## [1.2.2] - 2026-10-30
 
 ### Security

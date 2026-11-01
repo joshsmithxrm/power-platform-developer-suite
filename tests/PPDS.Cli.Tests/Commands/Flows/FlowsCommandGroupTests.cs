@@ -49,9 +49,9 @@ public class FlowsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasThreeSubcommands()
+    public void Create_HasFiveSubcommands()
     {
-        Assert.Equal(3, _command.Subcommands.Count);
+        Assert.Equal(5, _command.Subcommands.Count);
     }
 
     #endregion

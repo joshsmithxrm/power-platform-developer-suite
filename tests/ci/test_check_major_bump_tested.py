@@ -104,7 +104,7 @@ class TestRequiredEvidenceSelection:
         evidence, error = cmbt.required_evidence_for(classification)
         assert error == ""
         assert evidence == cmbt.RequiredEvidence(
-            "Python Tests", "workflow-tests", "executable workflow-policy tests",
+            "Test", "Python tests / workflow-tests", "executable workflow-policy tests",
         )
 
     def test_unknown_ecosystem_has_no_fallback_to_unrelated_tests(self):
@@ -427,7 +427,7 @@ class TestMain:
         checks = [
             check("Test", "test", "SKIPPED"),
             check("Build", "extension", "SKIPPED"),
-            check("Python Tests", "workflow-tests", "SUCCESS"),
+            check("Test", "Python tests / workflow-tests", "SUCCESS"),
         ]
         with patch.object(
             cmbt, "fetch_pr_payload", return_value=major_pr("github-actions"),

@@ -21,6 +21,10 @@ Nine connected panels, one notebook experience, and a shared authentication mode
 
 Write queries in `.ppdsnb` notebooks with one cell per question. Toggle a cell between SQL and FetchXML with a single command; syntax highlighting, keyword completion, and column suggestions follow the switch. Results render inline with virtual scrolling so million-row selects stay responsive. Export any cell to CSV or JSON, or pop the query into the standalone Data Explorer for ad-hoc refinement. Query history persists per workspace and every execution records the environment it ran against.
 
+Use **Select Notebook Environment** in the notebook toolbar or status bar to bind each notebook independently. **Use session default** removes the saved binding. A run captures its environment and authentication profile when it starts; changing focus, the default, or the notebook binding affects subsequent runs. Results, errors, record links, and export dialogs identify the target that produced them. Interrupting a notebook cancels its active request and clears its queued runs without cancelling other notebooks.
+
+The first run on Production or an Unknown environment asks for an acknowledgement scoped to that notebook, target, and profile for the current session. This acknowledgement does not approve data changes. Only the environment ID, name, and URL are saved in notebook metadata. Old notebooks remain readable; notebooks without a saved URL use the current session default. Notebook execution requires the daemon bundled with this release; restart an older daemon if prompted.
+
 ### Metadata Browser
 
 ![Metadata Browser](media/metadata-browser.png)

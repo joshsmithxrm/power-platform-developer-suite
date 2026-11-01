@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind notebook runs independently to their selected environment and captured authentication identity, including concurrent SQL/FetchXML runs, cancellation, queued runs, completion, and conversion. Renaming or reordering profiles cannot redirect captured queries.
+- Attribute notebook outputs, errors, record links, exports, and query history to their executed environment. Preserve valid legacy notebooks with missing or partial environment metadata.
+
+### Added
+
+- Notebook environment toolbar action and **Use session default** option, with in-memory acknowledgement before runs on Production or Unknown targets. This acknowledgement does not authorize DML.
+
 ## [1.6.2] - 2026-10-30
 
 ### Security

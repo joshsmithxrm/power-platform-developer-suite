@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\PPDS.Dataverse\PPDS.Dataverse.csproj" />
     <ProjectReference Include="..\..\src\PPDS.Auth\PPDS.Auth.csproj" />
+    <ProjectReference Include="..\..\src\PPDS.Mcp\PPDS.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

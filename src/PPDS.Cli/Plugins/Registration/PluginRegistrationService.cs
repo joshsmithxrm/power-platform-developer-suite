@@ -962,9 +962,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// </summary>
     public static string DescribeMissingMessageFilter(string message, string primaryEntity, string? secondaryEntity = null)
     {
-        var combination = PluginStepIdentity.IsEntitySpecified(secondaryEntity)
-            ? $"entity '{primaryEntity}' with secondary entity '{secondaryEntity}'"
-            : $"entity '{primaryEntity}'";
+        var hasPrimary = PluginStepIdentity.IsEntitySpecified(primaryEntity);
+        var hasSecondary = PluginStepIdentity.IsEntitySpecified(secondaryEntity);
+        var combination = (hasPrimary, hasSecondary) switch
+        {
+            (true, true) => $"entity '{primaryEntity}' with secondary entity '{secondaryEntity}'",
+            (false, true) => $"secondary entity '{secondaryEntity}'",
+            (true, false) => $"entity '{primaryEntity}'",
+            _ => "the global message"
+        };
         return $"No SDK message filter exists for message '{message}' on {combination}. " +
                "Check the entity logical name; if the step is meant to be global, set entity to 'none'.";
     }

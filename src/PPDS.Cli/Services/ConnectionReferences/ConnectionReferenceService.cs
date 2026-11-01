@@ -59,6 +59,7 @@ public class ConnectionReferenceService : IConnectionReferenceService
                 ConnectionReference.Fields.ConnectionId,
                 ConnectionReference.Fields.ConnectorId,
                 ConnectionReference.Fields.IsManaged,
+                ConnectionReference.Fields.StateCode,
                 ConnectionReference.Fields.CreatedOn,
                 ConnectionReference.Fields.ModifiedOn),
             Orders = { new OrderExpression(ConnectionReference.Fields.ConnectionReferenceLogicalName, OrderType.Ascending) }
@@ -333,6 +334,8 @@ public class ConnectionReferenceService : IConnectionReferenceService
             ConnectionId = entity.GetAttributeValue<string>(ConnectionReference.Fields.ConnectionId),
             ConnectorId = entity.GetAttributeValue<string>(ConnectionReference.Fields.ConnectorId),
             IsManaged = entity.GetAttributeValue<bool>(ConnectionReference.Fields.IsManaged),
+            IsActive = entity.GetAttributeValue<OptionSetValue>(ConnectionReference.Fields.StateCode) is { } state
+                ? state.Value == 0 : null,
             CreatedOn = entity.GetAttributeValue<DateTime?>(ConnectionReference.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(ConnectionReference.Fields.ModifiedOn)
         };

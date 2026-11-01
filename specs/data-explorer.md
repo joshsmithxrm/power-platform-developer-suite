@@ -1,8 +1,8 @@
 # Data Explorer
 
 **Status:** Draft
-**Last Updated:** 2026-04-25
-**Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/)
+**Last Updated:** 2026-10-31
+**Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts), [src/PPDS.Extension/src/notebooks/](../src/PPDS.Extension/src/notebooks/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/)
 **Surfaces:** Extension, TUI, MCP
 
 ---
@@ -464,6 +464,70 @@ The status bar already has `statusText`, `rowCountEl`, and `executionTimeEl` spa
 ---
 
 ## Acceptance Criteria
+
+### Notebook environment isolation
+
+Notebook bindings persist only environment ID, name, and URL. Missing or partial
+metadata remains compatible with existing files. The picker binds the originating
+notebook, even if focus changes while it is open, and offers “Use session default.”
+The session default is resolved when an unbound notebook begins a run; another
+notebook's binding is never used as a fallback.
+
+Each run captures profile identity and environment name, URL, and type. Queries,
+result links, completion, and SQL-to-FetchXML conversion use the relevant captured
+context. Output headers include the executed target and timestamp, including
+errors and cancellation after resolution. Cached results retain that context.
+Binding changes during a run apply to the next run and are visible in status.
+
+Runs in one notebook queue; distinct notebooks run concurrently. Interrupting or
+closing a notebook cancels its active run and pending queue only. A cancelled old
+request cannot overwrite a newer result or remove its execution state. All timers,
+token subscriptions, and notebook state are disposed with their owners.
+
+Production/Unknown execution requires explicit in-memory acknowledgement scoped
+to notebook, target, authenticated identity, and classification. Target/profile
+changes, close/reopen, and classification changes require reevaluation. This
+acknowledgement never sets DML confirmation and is never serialized. Per-cell
+environment overrides and a new notebook DML approval UI are out of scope.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-NB-01 | Concurrent bound notebooks issue SQL/FetchXML against their respective targets. | `DataverseNotebookController.test.ts`: `executes SQL and FetchXML concurrently against their notebook targets` | ✅ |
+| AC-NB-02 | Focus, binding, or default changes do not redirect an active run or its output/links. | `DataverseNotebookController.test.ts`: `captures one target and profile for the entire run despite focus binding and default changes` | ✅ |
+| AC-NB-03 | Unbound notebooks capture the session default; missing defaults prompt before execution. | `DataverseNotebookController.test.ts`: `uses the session default for an unbound notebook without inheriting another binding`, `prompts once for a missing default and runs every cell on the selected binding`, `does not inherit another run default while its missing-default picker is open` | ✅ |
+| AC-NB-04 | Cancellation, close, queues, and late completions are notebook/run scoped. | `DataverseNotebookController.test.ts`: `queues runs within a notebook and clears queued work on interrupt`, `does not let a closed notebook late response overwrite a reopened notebook result`, `individual-cell cancellation allows later cells without cancelling another notebook`, `disposal cancels active requests and clears queued runs` | ✅ |
+| AC-NB-05 | Production/Unknown cancellation sends no query; acknowledgements cannot enable DML. | `DataverseNotebookController.test.ts`: `requires acknowledgement for %s and cancellation sends no query`, `scopes acknowledgement to notebook target profile and type without approving DML` | ✅ |
+| AC-NB-06 | Legacy/partial metadata loads, binding roundtrips, and no credentials/acknowledgements persist. | `DataverseNotebookSerializer.test.ts`: `preserves cells with missing or partial metadata %j`, `preserves environment metadata through round-trip`, `never serializes credentials acknowledgement or a claimed environment type` | ✅ |
+| AC-NB-07 | Picker only changes notebook metadata; safely rendered output identifies its actual target. | `DataverseNotebookController.test.ts`: `binds the originating notebook when focus changes while its picker is open`, `renders target labels as plain text and does not interpolate them into HTML`, `labels error and empty outputs with the resolved target and execution time` | ✅ |
+| AC-NB-08 | Minimum and stable VS Code hosts execute the isolated two-notebook journey. | `e2e/notebook-host.ts`: `runScenarios`; `e2e/notebook-live.ts`: `run` through `PPDS.NotebookLiveHost`, with two authorized Dataverse organizations on VS Code 1.116.0 and 1.144.0 (2026-11-01) | ✅ |
+| AC-NB-09 | Query RPC binds the captured opaque profile identity, survives rename/reorder, rejects removed/changed/ambiguous identities, and creates pools from a cloned profile snapshot. Callers omitting identity retain existing name/index behavior. | `RpcProfileIdentityTests`: `ResolveSnapshot_UsesIdentityAfterRenameAndIndexReuse`, `ResolveSnapshot_RejectsRemovedOrChangedIdentity`, `ResolveSnapshot_RejectsAmbiguousIdentity`, `CapturedProvider_DoesNotReloadMutableProfileName_AndSeparatesIdentities`, `QueryFetch_OmittedIdentityRetainsNameResolution`, `QueryMethods_RejectMissingCapturedIdentityBeforePoolAccess` | ✅ |
+| AC-NB-10 | Opening a notebook cell in Data Explorer transfers its executed target/profile (or current captured context before execution), including completion, conversion, and subsequent query pages. A full panel limit never loads the query into a different target/profile. | `notebookQueryTransfer.test.ts`: `preserves executed context when the notebook has since changed binding`, `retains the transferred profile across initialization, completion, conversion, SQL/FetchXML and paging`, `refuses mismatched %s reuse at the panel cap` | ✅ |
+| AC-NB-11 | The blocking minimum/stable VS Code CI matrix runs the native notebook suite under xvfb with bounded execution and failure diagnostics; tests use isolated application directories without changing the process HOME. | `test_extension_e2e_workflow.py`: `test_native_notebook_suite_is_a_bounded_blocking_matrix_step`, `test_native_notebook_runner_isolates_application_state_without_overriding_home`, `test_failed_e2e_run_always_uploads_diagnostics` | ✅ |
+
+The daemon returns an opaque `profileIdentity` in `auth/who`, derived from
+non-secret authentication identity and profile creation fields, excluding mutable
+name/index. Notebook SQL, FetchXML, completion, and explain requests send it.
+Identity lookup must match exactly one profile; failure never falls back to a
+name/index. Pool creation uses the captured profile snapshot directly. Older
+clients can omit the field; notebooks require a daemon that supplies it.
+
+Native host coverage uses the production controller and serializer with deterministic
+in-memory RPC responses and isolated home, application-data, VS Code, and PPDS
+directories. It verifies execution, cancellation, output/link attribution, and
+saved-binding reload. Unit tests cover dialog choices and close/late-result races.
+The authorized two-organization live demonstration passed on 2026-11-01 using
+product commit `1cba826c6ad6233e41b0d4d5197d0c7c618cd4c7`, on both VS Code
+1.116.0 and 1.144.0. Each host made six fixed one-row organization reads through
+the production RPC/query pipeline and verified distinct organization IDs,
+captured-target output links, notebook-scoped cancellation and queue clearing,
+the unbound session default, and persisted binding isolation. Original profile
+and environment metadata hashes were unchanged, and temporary local resources
+were removed. Both targets used the same existing profile; credential-identity
+switching remains covered by deterministic tests. The live helper uses an
+isolated metadata/DI bootstrap, not the shipped `serve` entrypoint. Cancellation
+delays real response delivery at the client and does not measure server-side
+cancellation timing. See `tests/PPDS.NotebookLiveHost/README.md` for the harness
+contract.
 
 ### Monaco Editor Integration
 

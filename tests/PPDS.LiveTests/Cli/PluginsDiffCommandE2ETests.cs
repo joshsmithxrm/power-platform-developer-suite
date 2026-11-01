@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -10,7 +10,7 @@ namespace PPDS.LiveTests.Cli;
 /// Compares plugin configuration against actual Dataverse environment state.
 /// Tests only run on .NET 8.0 since CLI is spawned with --framework net8.0.
 /// </summary>
-public class PluginsDiffCommandE2ETests : CliE2ETestBase
+public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBase
 {
     #region Tier 1: Safe tests
 
@@ -103,7 +103,9 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Deploy the plugin first
             var deployResult = await RunCliAsync(
@@ -113,34 +115,20 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
             deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
 
             // Deploy is async server-side; poll until diff shows no drift or timeout
-            var maxWait = TimeSpan.FromSeconds(30);
-            var pollInterval = TimeSpan.FromSeconds(2);
-            using var cts = new CancellationTokenSource(maxWait);
-            var sw = Stopwatch.StartNew();
-            CliResult diffResult;
-
-            do
-            {
-                diffResult = await RunCliAsync(
-                    "plugins", "diff",
-                    "--config", TestRegistrationsPath);
-
-                if (diffResult.ExitCode == 0)
-                    break;
-
-                await Task.Delay(pollInterval, cts.Token);
-            } while (sw.Elapsed < maxWait);
-
-            diffResult.ExitCode.Should().Be(0, $"Diff should show no drift within {maxWait.TotalSeconds}s after deploy: {diffResult.StdErr}");
+            var maxWait = PropagationWait.TimeoutFromEnvironment(
+                Environment.GetEnvironmentVariable("PPDS_TEST_PROPAGATION_TIMEOUT_SECONDS"));
+            var poll = await PropagationWait.UntilAsync(
+                token => RunCliWithCancellationAsync(token, "plugins", "diff", "--config", TestRegistrationsPath),
+                result => result.ExitCode == 0,
+                maxWait, TimeSpan.FromSeconds(2));
+            poll.Succeeded.Should().BeTrue(
+                $"Diff should show no drift within {maxWait.TotalSeconds}s after deploy. " +
+                $"Elapsed: {poll.Elapsed.TotalSeconds:F1}s; attempts: {poll.Attempts}; " +
+                $"last exit: {poll.Last?.ExitCode.ToString() ?? "(none)"}; error: {poll.LastError ?? "(none)"}; " +
+                $"stdout: {poll.Last?.StdOut ?? "(none)"}; stderr/drift: {poll.Last?.StdErr ?? "(none)"}");
+            var diffResult = poll.Last!;
             diffResult.StdErr.Should().Contain("No drift");
-        }
-        finally
-        {
-            // Clean up: remove the deployed plugin
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", TestRegistrationsPath);
-        }
+        });
     }
 
     #endregion

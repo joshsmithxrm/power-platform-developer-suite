@@ -10,6 +10,7 @@ using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Cli.Services.Flows.Utilities;
+using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Services.Flows;
 
@@ -45,8 +46,6 @@ public class FlowService : IFlowService
         bool includeClassic = false,
         CancellationToken cancellationToken = default)
     {
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-
         var query = new QueryExpression(Workflow.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
@@ -56,12 +55,14 @@ public class FlowService : IFlowService
                 Workflow.Fields.Description,
                 Workflow.Fields.StateCode,
                 Workflow.Fields.Category,
+                Workflow.Fields.Type,
                 Workflow.Fields.IsManaged,
                 Workflow.Fields.ClientData,
                 Workflow.Fields.CreatedOn,
                 Workflow.Fields.ModifiedOn,
                 Workflow.Fields.OwnerId),
-            Orders = { new OrderExpression(Workflow.Fields.Name, OrderType.Ascending) }
+            Orders = { new OrderExpression(Workflow.Fields.WorkflowId, OrderType.Ascending) },
+            PageInfo = new PagingInfo { Count = 5000, PageNumber = 1 }
         };
 
         var filtersApplied = new List<string>();
@@ -90,6 +91,7 @@ public class FlowService : IFlowService
                 Workflow.Fields.WorkflowId,
                 SolutionComponent.Fields.ObjectId);
             solutionLink.EntityAlias = "sc";
+            solutionLink.LinkCriteria.AddCondition(SolutionComponent.Fields.ComponentType, ConditionOperator.Equal, 29);
 
             var solutionLink2 = solutionLink.AddLink(
                 Solution.EntityLogicalName,
@@ -101,9 +103,21 @@ public class FlowService : IFlowService
         }
 
         _logger.LogDebug("Querying cloud flows");
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-
-        var flows = results.Entities.Select(MapToFlowInfo).ToList();
+        var byId = new Dictionary<Guid, FlowInfo>();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EntityCollection results;
+            await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+                results = await client.RetrieveMultipleAsync(query, cancellationToken);
+            foreach (var entity in results.Entities)
+                byId[entity.Id] = MapToFlowInfo(entity);
+            if (!results.MoreRecords) break;
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = results.PagingCookie;
+        }
+        var flows = byId.Values.OrderBy(f => f.DisplayName ?? f.UniqueName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Id).ToList();
         _logger.LogDebug("Found {Count} cloud flows", flows.Count);
 
         return new ListResult<FlowInfo>
@@ -124,7 +138,7 @@ public class FlowService : IFlowService
         var query = new QueryExpression(Workflow.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(true),
-            TopCount = 1
+            TopCount = 2
         };
 
         // Filter by unique name
@@ -142,6 +156,10 @@ public class FlowService : IFlowService
         {
             return null;
         }
+
+        if (results.Entities.Count > 1)
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                $"Flow name '{uniqueName}' is ambiguous. Select an ID: {string.Join(", ", results.Entities.Select(e => e.Id))}.");
 
         return MapToFlowInfo(results.Entities[0]);
     }
@@ -178,10 +196,11 @@ public class FlowService : IFlowService
 
     private static FlowInfo MapToFlowInfo(Entity entity)
     {
-        var stateValue = entity.GetAttributeValue<OptionSetValue>(Workflow.Fields.StateCode)?.Value ?? 0;
-        var categoryValue = entity.GetAttributeValue<OptionSetValue>(Workflow.Fields.Category)?.Value ?? ModernFlowCategory;
+        var stateValue = entity.GetAttributeValue<OptionSetValue>(Workflow.Fields.StateCode)?.Value ?? -1;
+        var categoryValue = entity.GetAttributeValue<OptionSetValue>(Workflow.Fields.Category)?.Value ?? -1;
         var clientData = entity.GetAttributeValue<string>(Workflow.Fields.ClientData);
         var ownerRef = entity.GetAttributeValue<EntityReference>(Workflow.Fields.OwnerId);
+        var dependencies = FlowClientDataParser.ParseForActivation(clientData);
 
         return new FlowInfo
         {
@@ -191,8 +210,12 @@ public class FlowService : IFlowService
             Description = entity.GetAttributeValue<string>(Workflow.Fields.Description),
             State = (FlowState)stateValue,
             Category = (FlowCategory)categoryValue,
+            DefinitionType = entity.GetAttributeValue<OptionSetValue>(Workflow.Fields.Type)?.Value,
+            ConnectionReferencesVerified = dependencies.Verified,
+            ConnectionReferenceParseError = dependencies.Error,
             IsManaged = entity.GetAttributeValue<bool>(Workflow.Fields.IsManaged),
-            ConnectionReferenceLogicalNames = FlowClientDataParser.ExtractConnectionReferenceLogicalNames(clientData),
+            ConnectionReferenceLogicalNames = dependencies.Verified ? dependencies.Names
+                : FlowClientDataParser.ExtractConnectionReferenceLogicalNames(clientData),
             CreatedOn = entity.GetAttributeValue<DateTime?>(Workflow.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(Workflow.Fields.ModifiedOn),
             OwnerId = ownerRef?.Id,

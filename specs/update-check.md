@@ -573,6 +573,12 @@ public void FormatNotification_BothUpdatesAvailable_ReturnsTwoLines()
 
 ---
 
+### Background refresh reliability
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-53 | Background refresh tests observe completion and control cache time deterministically for stale, fresh, in-flight and failed requests; fixed delays are not proof of completion | `UpdateCheckServiceTests.RefreshCacheInBackgroundIfStale_RefreshesWhenCacheExpired`, `RefreshCacheInBackgroundIfStale_SkipsWhenCacheFresh`, `RefreshCacheInBackgroundIfStale_CompletionIncludesCacheWrite`, `RefreshCacheInBackgroundIfStale_FailureCompletesWithoutCache` | ✅ |
+
 ## Changelog
 
 | Date | Change |

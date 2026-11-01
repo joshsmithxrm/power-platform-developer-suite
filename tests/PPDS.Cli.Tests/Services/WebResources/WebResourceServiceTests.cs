@@ -390,9 +390,12 @@ public class WebResourceServiceTests
     {
         // Arrange — no existing resource with the same name
         var newId = Guid.NewGuid();
+        var solutionRow = new Entity(Solution.EntityLogicalName, Guid.NewGuid());
+        solutionRow["publisher.customizationprefix"] = new AliasedValue("publisher", "customizationprefix", "hsl");
         _client
             .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync((QueryBase query, CancellationToken _) => ((QueryExpression)query).EntityName == Solution.EntityLogicalName
+                ? new EntityCollection([solutionRow]) : new EntityCollection());
 
         OrganizationRequest? captured = null;
         var response = new CreateResponse();
@@ -410,7 +413,8 @@ public class WebResourceServiceTests
             "hsl_vet_icon.svg", "Vet Icon", 11, content, "PawsClawsLabs"));
 
         // Assert
-        id.Should().Be(newId);
+        id.Id.Should().Be(newId);
+        id.Warnings.Should().BeEmpty();
         captured.Should().BeOfType<CreateRequest>();
 
         var createRequest = (CreateRequest)captured!;

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -13,25 +14,8 @@ namespace PPDS.LiveTests.Cli;
 /// Tier 1 tests use --dry-run and are safe for all environments.
 /// Tier 2 tests (marked with DestructiveE2E trait) actually clean plugins.
 /// </remarks>
-public class PluginsCleanCommandE2ETests : CliE2ETestBase
+public class PluginsCleanCommandE2ETests(ITestOutputHelper output) : CliE2ETestBase
 {
-    /// <summary>
-    /// Empty config for cleanup - declares assembly with no types to make all steps orphans.
-    /// </summary>
-    private const string EmptyConfigJson = """
-        {
-            "version": "1.0",
-            "assemblies": [
-                {
-                    "name": "PPDS.LiveTests.Fixtures",
-                    "type": "Assembly",
-                    "path": "PPDS.LiveTests.Fixtures.dll",
-                    "types": []
-                }
-            ]
-        }
-        """;
-
     #region Tier 1: Safe tests (--dry-run)
 
     [CliE2EWithCredentials]
@@ -123,11 +107,9 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        // Create empty config for cleanup
-        var emptyConfigPath = GenerateTempFilePath(".json");
-        await File.WriteAllTextAsync(emptyConfigPath, EmptyConfigJson);
-
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Deploy the plugin first
             var deployResult = await RunCliAsync(
@@ -136,29 +118,9 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
 
             deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
 
-            // Clean with empty config - should find orphans
-            var cleanResult = await RunCliAsync(
-                "plugins", "clean",
-                "--config", emptyConfigPath);
-
-            cleanResult.ExitCode.Should().Be(0, $"Clean failed: {cleanResult.StdErr}");
-
-            // Verify cleanup was successful
-            var listResult = await RunCliAsync(
-                "plugins", "list",
-                "--assembly", "PPDS.LiveTests.Fixtures",
-                "--output-format", "json");
-
-            listResult.ExitCode.Should().Be(0);
-            // After clean, the assembly should have no steps
-        }
-        finally
-        {
-            // Ensure cleanup even if assertions fail
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", emptyConfigPath);
-        }
+            // The empty config makes the fixture registrations orphaned; read back their absence.
+            await fixture.CleanupAsync();
+        });
     }
 
     [CliE2EWithCredentials]
@@ -176,11 +138,9 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        // Create empty config for cleanup
-        var emptyConfigPath = GenerateTempFilePath(".json");
-        await File.WriteAllTextAsync(emptyConfigPath, EmptyConfigJson);
-
-        try
+        var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
+            profileName, Configuration.DataverseUrl!, output.WriteLine);
+        await fixture.RunAsync(async () =>
         {
             // Deploy the plugin
             var deployResult = await RunCliAsync(
@@ -196,14 +156,7 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
 
             cleanResult.ExitCode.Should().Be(0, $"Clean failed: {cleanResult.StdErr}");
             cleanResult.StdErr.Should().Contain("No orphaned");
-        }
-        finally
-        {
-            // Clean up: remove the deployed plugin using empty config
-            await RunCliAsync(
-                "plugins", "clean",
-                "--config", emptyConfigPath);
-        }
+        });
     }
 
     #endregion

@@ -66,8 +66,8 @@ REQUIRED_EVIDENCE_BY_ECOSYSTEM = {
     "nuget": RequiredEvidence("Test", "test", ".NET unit tests"),
     "npm": RequiredEvidence("Build", "extension", "Extension build and tests"),
     "github-actions": RequiredEvidence(
-        "Python Tests",
-        "workflow-tests",
+        "Test",
+        "Python tests / workflow-tests",
         "executable workflow-policy tests",
     ),
 }

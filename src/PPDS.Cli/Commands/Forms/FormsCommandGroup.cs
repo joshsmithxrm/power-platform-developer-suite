@@ -1,4 +1,6 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Environment;
 
 namespace PPDS.Cli.Commands.Forms;
 
@@ -18,6 +20,16 @@ public static class FormsCommandGroup
     {
         Description = "Override the environment URL. Takes precedence over profile's bound environment."
     };
+
+    /// <summary>Exact target acknowledgement, distinct from operation-level confirmation.</summary>
+    public static readonly Option<string?> ConfirmEnvironmentOption = new("--confirm-env")
+    {
+        Description = "Acknowledge writing to this exact resolved environment URL"
+    };
+
+    internal static Task ConfirmEnvironmentAsync(IServiceProvider provider, string? confirmedEnvironment, CancellationToken ct)
+        => provider.GetRequiredService<IEnvironmentConfirmationService>()
+            .EnsureConfirmedAsync("modify form", confirmedEnvironment, ct);
 
     /// <summary>
     /// Creates the 'forms' command group with all subcommands registered.

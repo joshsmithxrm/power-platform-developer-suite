@@ -337,6 +337,8 @@ public static class DeployCommand
         };
 
         var solution = solutionOverride ?? assemblyConfig.Solution;
+        // Keep earlier per-step diagnostics even if a later operation also fails.
+        var stepErrors = new List<string>();
 
         try
         {
@@ -514,11 +516,6 @@ public static class DeployCommand
                 if (match.Config is not null)
                     envForConfigStep[match.Config] = match.Env;
             }
-
-            // Per-step configuration errors (e.g., an entity with no SDK message filter). These fail
-            // the assembly result — and thus the command exit code — without aborting the remaining
-            // steps, mirroring how a thrown exception fails the whole assembly.
-            var stepErrors = new List<string>();
 
             // Deploy each type
             foreach (var typeConfig in assemblyConfig.Types)
@@ -728,7 +725,7 @@ public static class DeployCommand
         catch (Exception ex)
         {
             result.Success = false;
-            result.Error = ex.Message;
+            result.Error = string.Join("; ", stepErrors.Append(ex.Message));
             if (ex is PpdsException ppdsException)
             {
                 result.ErrorCode = ppdsException.ErrorCode;

@@ -29,11 +29,14 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
     private static readonly TimeSpan DefaultPoolCreationTimeout = TimeSpan.FromMinutes(5);
 
     private readonly ConcurrentDictionary<string, Lazy<Task<CachedPoolEntry>>> _pools = new();
+    private readonly ConcurrentDictionary<string, string> _capturedProfileKeys = new();
     private readonly ConcurrentBag<Task> _disposalTasks = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly Func<CancellationToken, Task<ProfileCollection>> _loadProfilesAsync;
     private readonly TimeSpan _poolCreationTimeout;
     private int _disposed;
+    // Allows cache/identity tests to avoid authentication or background connection warmup.
+    internal Func<AuthProfile, string, IDataverseConnectionPool>? CapturedPoolFactory { get; init; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="McpConnectionPoolManager"/> class.
@@ -132,6 +135,35 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
     }
 
     /// <inheritdoc/>
+    public async Task<IDataverseConnectionPool> GetOrCreateCapturedPoolAsync(
+        AuthProfile profile, string environmentUrl, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        ArgumentNullException.ThrowIfNull(profile);
+        environmentUrl = PPDS.Cli.Services.Environment.EnvironmentConfirmationService.NormalizeUrl(environmentUrl);
+        var snapshot = System.Text.Json.JsonSerializer.Deserialize<AuthProfile>(
+            System.Text.Json.JsonSerializer.Serialize(profile))!;
+        var identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(snapshot))));
+        var names = new[] { snapshot.Name ?? $"[{snapshot.Index}]" };
+        var key = GenerateCacheKey(new[] { identity }, environmentUrl);
+        _capturedProfileKeys[key] = names[0];
+        var lazyEntry = _pools.GetOrAdd(key, _ => new Lazy<Task<CachedPoolEntry>>(
+            () => CreatePoolEntryAsync(names, environmentUrl, null, CancellationToken.None, snapshot),
+            LazyThreadSafetyMode.ExecutionAndPublication));
+        try
+        {
+            var entry = await lazyEntry.Value.WaitAsync(_poolCreationTimeout, cancellationToken).ConfigureAwait(false);
+            return entry.Pool;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _pools.TryRemove(new KeyValuePair<string, Lazy<Task<CachedPoolEntry>>>(key, lazyEntry));
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
     public void InvalidateProfile(string profileName)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -143,7 +175,8 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
 
         // Snapshot keys to avoid enumeration during concurrent modification.
         var keysToRemove = _pools.Keys
-            .Where(key => KeyContainsProfile(key, profileName))
+            .Where(key => KeyContainsProfile(key, profileName) ||
+                (_capturedProfileKeys.TryGetValue(key, out var name) && name.Equals(profileName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         foreach (var key in keysToRemove)
@@ -192,6 +225,7 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
         // Dispose all active pools.
         var entries = _pools.Values.ToList();
         _pools.Clear();
+        _capturedProfileKeys.Clear();
 
         foreach (var lazyEntry in entries)
         {
@@ -229,7 +263,7 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
     /// </summary>
     private static string NormalizeUrl(string url)
     {
-        return url.TrimEnd('/').ToLowerInvariant();
+        return PPDS.Cli.Services.Environment.EnvironmentConfirmationService.NormalizeUrl(url);
     }
 
     /// <summary>
@@ -255,10 +289,22 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
         IReadOnlyList<string> profileNames,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        AuthProfile? capturedProfile = null)
     {
-        var collection = await _loadProfilesAsync(cancellationToken).ConfigureAwait(false);
+        var collection = capturedProfile is null ? await _loadProfilesAsync(cancellationToken).ConfigureAwait(false) : null;
         var credentialStore = new NativeCredentialStore();
+
+        if (capturedProfile is not null && CapturedPoolFactory is not null)
+        {
+            var services = new ServiceCollection();
+            services.AddSingleton<ISecureCredentialStore>(_ => credentialStore);
+            services.AddSingleton<IDataverseConnectionPool>(_ => CapturedPoolFactory(capturedProfile, environmentUrl));
+            var provider = services.BuildServiceProvider();
+            return new CachedPoolEntry { ServiceProvider = provider, Pool = provider.GetRequiredService<IDataverseConnectionPool>(),
+                CredentialStore = provider.GetRequiredService<ISecureCredentialStore>(), ProfileNames = profileNames.ToHashSet(StringComparer.OrdinalIgnoreCase),
+                EnvironmentUrl = environmentUrl };
+        }
 
         // Create connection sources for each profile.
         var sources = new List<IConnectionSource>();
@@ -266,7 +312,7 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
         {
             foreach (var profileName in profileNames)
             {
-                var profile = collection.GetByName(profileName)
+                var profile = capturedProfile ?? collection!.GetByName(profileName)
                     ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
 
                 var source = new ProfileConnectionSource(

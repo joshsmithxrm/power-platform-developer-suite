@@ -1,4 +1,5 @@
 using PPDS.Auth.Credentials;
+using PPDS.Auth.Profiles;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Infrastructure;
@@ -35,6 +36,16 @@ public interface IDaemonConnectionPoolManager : IAsyncDisposable
     /// <returns>A cached service provider. Caller must NOT dispose it.</returns>
     Task<IServiceProvider> GetOrCreateServiceProviderAsync(
         IReadOnlyList<string> profileNames,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a provider bound to an already-resolved profile snapshot. The manager
+    /// must clone it before awaiting and must not re-resolve its mutable name/index.
+    /// </summary>
+    Task<IServiceProvider> GetOrCreateCapturedServiceProviderAsync(
+        AuthProfile profileSnapshot,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         CancellationToken cancellationToken = default);

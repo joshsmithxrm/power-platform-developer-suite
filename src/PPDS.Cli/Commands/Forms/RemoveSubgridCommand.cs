@@ -34,7 +34,7 @@ public static class RemoveSubgridCommand
 
         var publishOption = new Option<bool>("--publish")
         {
-            Description = "Publish customizations after writing",
+            Description = "Publish all pending customizations for this table after writing",
             DefaultValueFactory = _ => false
         };
 
@@ -51,7 +51,8 @@ public static class RemoveSubgridCommand
             publishOption,
             solutionOption,
             FormsCommandGroup.ProfileOption,
-            FormsCommandGroup.EnvironmentOption
+            FormsCommandGroup.EnvironmentOption,
+            FormsCommandGroup.ConfirmEnvironmentOption
         };
 
         GlobalOptions.AddToCommand(command);
@@ -65,9 +66,10 @@ public static class RemoveSubgridCommand
             var solution = parseResult.GetValue(solutionOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
+            var confirmEnvironment = parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, label, publish, solution, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, label, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -81,6 +83,7 @@ public static class RemoveSubgridCommand
         string? solution,
         string? profile,
         string? environment,
+        string? confirmEnvironment,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -96,6 +99,7 @@ public static class RemoveSubgridCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
+            await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, cancellationToken);
             var formService = serviceProvider.GetRequiredService<IFormService>();
 
             if (!globalOptions.IsJsonMode)

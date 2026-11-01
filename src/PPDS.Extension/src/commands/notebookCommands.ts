@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import type { DataverseNotebookController } from '../notebooks/DataverseNotebookController.js';
+import type { DataverseNotebookController, NotebookExecutionContext } from '../notebooks/DataverseNotebookController.js';
 import type { DaemonClient } from '../daemonClient.js';
 import { FetchXmlToSqlTranspiler } from '../utils/fetchXmlToSql.js';
 
@@ -36,7 +36,7 @@ export async function createNewNotebook(): Promise<void> {
  * SQL -> FetchXML: calls query/sql with showFetchXml=true to transpile.
  * FetchXML -> SQL: switches language only (no server-side transpiler for this direction yet).
  */
-export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
+export async function toggleCellLanguage(daemon: DaemonClient, controller: DataverseNotebookController): Promise<void> {
     const editor = vscode.window.activeNotebookEditor;
     if (editor?.notebook.notebookType !== 'ppdsnb') return;
 
@@ -65,7 +65,8 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
 
         if (currentLanguage !== 'fetchxml' && !content.startsWith('<')) {
             // SQL → FetchXML: use daemon transpiler
-            const result = await daemon.queryExplain({ sql: content });
+            const target = await controller.getNotebookQueryContext(editor.notebook);
+            const result = await daemon.queryExplain({ sql: content, environmentUrl: target.environmentUrl, profileName: target.profileName, profileIdentity: target.profileIdentity });
             const fetchXml = result.fetchXml ?? result.plan;
             if (fetchXml) {
                 edit.replace(cell.document.uri, fullRange, fetchXml);
@@ -102,7 +103,7 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
 /**
  * Opens a query from a notebook cell in the Data Explorer webview panel.
  */
-export function openCellInDataExplorer(openQueryPanel: (sql: string) => void): void {
+export async function openCellInDataExplorer(controller: DataverseNotebookController, openQueryPanel: (sql: string, target: NotebookExecutionContext) => void): Promise<void> {
     const editor = vscode.window.activeNotebookEditor;
     if (editor?.notebook.notebookType !== 'ppdsnb') return;
 
@@ -113,7 +114,14 @@ export function openCellInDataExplorer(openQueryPanel: (sql: string) => void): v
     const cell = editor.notebook.cellAt(firstSelection.start);
     if (cell.kind !== vscode.NotebookCellKind.Code) return;
 
-    openQueryPanel(cell.document.getText());
+    const sql = cell.document.getText();
+    try {
+        const target = controller.getCellExecutionContext(cell.document.uri.toString())?.context
+            ?? await controller.getNotebookQueryContext(editor.notebook);
+        openQueryPanel(sql, target);
+    } catch (error) {
+        void vscode.window.showWarningMessage(`Could not resolve this notebook's target: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 /**
@@ -137,6 +145,7 @@ export async function exportCellResults(
 
     const cellUri = cell.document.uri.toString();
     const results = controller.getCellResults(cellUri);
+    const executed = controller.getCellExecutionContext(cellUri);
     if (!results) { vscode.window.showWarningMessage('No results to export. Execute the cell first.'); return; }
     if (results.records.length === 0) { vscode.window.showWarningMessage('Query returned no results.'); return; }
 
@@ -180,11 +189,12 @@ export async function exportCellResults(
     const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(filename),
         filters: { [filterName]: [format] },
+        title: executed ? `Export results from ${executed.context.environmentName} · ${executed.context.environmentUrl} · ${executed.executedAt}` : 'Export query results',
     });
 
     if (uri) {
         await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
-        vscode.window.showInformationMessage(`Exported ${results.records.length} rows to ${uri.fsPath}`);
+        vscode.window.showInformationMessage(`Exported ${results.records.length} rows${executed ? ` from ${executed.context.environmentUrl}` : ''} to ${uri.fsPath}`);
     }
 }
 

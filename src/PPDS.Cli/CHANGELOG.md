@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded cloud-flow activation** — `flows enable` and `flows disable` accept one ID/unique name or all eligible definitions in a named solution. Write-free plans report dependency blockers, exclusions and a plan hash. Execution verifies each change and preserves partial or uncertain outcomes without retrying ambiguous submissions (#1214).
+- **Explicit target acknowledgement for form and flow writes** — protected targets require `--confirm-env <resolved-url>` through a shared service guard; read-only sessions reject writes. Existing form mutation commands use the same guard (#1015, partial).
+
+### Fixed
+
+- Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics describe the actual filter requirement (#1360).
+- Plugin diff drift collection propagates cancellation through every collection stage (#1317).
+- Web-resource creation returns missing or mismatched publisher-prefix warnings without changing the requested name. Missing-resource guidance uses the correct `<file>` placeholder (#1236).
+- Query RPCs can bind to an opaque captured profile identity, and query history retains the executed environment during concurrent profile/environment changes (#1218).
+- Live propagation checks use bounded, configurable deadlines and retain timeout diagnostics; background update-check tests use deterministic completion and clocks (#1314, #1361).
+
+### Validation
+
+- Relevant Python workflow regressions feed the required, always-reporting `test-status` gate (#1357).
+- Isolated managed-form fixtures and explicit opt-in validation document their provisioning and cleanup boundaries (#1240).
+
 ## [1.4.2] - 2026-10-30
 
 ### Security

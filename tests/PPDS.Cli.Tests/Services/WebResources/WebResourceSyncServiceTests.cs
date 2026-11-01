@@ -573,11 +573,11 @@ internal sealed class FakeWebResourceService : IWebResourceService
         return Task.FromResult(info);
     }
 
-    public Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
+    public Task<CreateWebResourceResult> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         AddText(request.Name, System.Text.Encoding.UTF8.GetString(request.Content), request.WebResourceType);
-        return Task.FromResult(IdOf(request.Name));
+        return Task.FromResult(new CreateWebResourceResult(IdOf(request.Name), []));
     }
 
     public Task UpdateContentAsync(Guid id, byte[] content, CancellationToken cancellationToken = default) =>

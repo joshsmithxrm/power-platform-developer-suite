@@ -248,6 +248,7 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-30 | `docs-smoke.yml` runs as `workflow_call` from a caller repository, accepts the caller's docs path as input, and fails the check with stdout pointing at the offending block when compilation fails | `PPDS.DocsGen.Workflow.Tests/DocsSmokeWorkflowTests.FailsOnBadBlockViaWorkflowCall` | 🔲 |
 | AC-31 | The CLI reflector exits nonzero without writing output when the input cannot load, a command factory fails, or no command pages are generated; valid inputs still emit reference pages successfully. | `PPDS.DocsGen.Cli.Tests/CliReflectProcessTests` | ✅ |
 | AC-32 | Release reference generation selects a runtime compatible with the workflow's net10.0 input assemblies, even when .NET 8 is also installed. | `tests/ci/test_docs_release_workflow.py::test_reflectors_use_runtime_compatible_with_net10_input` | ✅ |
+| AC-33 | MCP input reference omits server-injected `CancellationToken` and `IProgress<ProgressNotificationValue>` parameters while retaining real user inputs and deterministic golden output. | `PPDS.DocsGen.Mcp.Tests/McpReflectTests.ExcludesServerInjectedParameters`; `EmitsExpectedMarkdownForFixtureToolSet` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 

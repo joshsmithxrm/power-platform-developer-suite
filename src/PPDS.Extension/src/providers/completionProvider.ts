@@ -11,7 +11,10 @@ import type { DaemonClient } from '../daemonClient.js';
  * completion engine (SqlCompletionEngine or FetchXmlCompletionEngine).
  */
 export class DataverseCompletionProvider implements vscode.CompletionItemProvider {
-    constructor(private readonly daemon: DaemonClient) {}
+    constructor(
+        private readonly daemon: DaemonClient,
+        private readonly resolveTarget?: (document: vscode.TextDocument) => Promise<{ environmentUrl: string; profileName: string; profileIdentity: string } | undefined>,
+    ) {}
 
     async provideCompletionItems(
         document: vscode.TextDocument,
@@ -25,10 +28,13 @@ export class DataverseCompletionProvider implements vscode.CompletionItemProvide
         const offset = document.offsetAt(position);
 
         try {
+            const target = await this.resolveTarget?.(document);
+            if (token.isCancellationRequested) return null;
             const result = await this.daemon.queryComplete({
                 sql: text,
                 cursorOffset: offset,
                 language: document.languageId,
+                ...target,
             });
 
             if (token.isCancellationRequested) return null;

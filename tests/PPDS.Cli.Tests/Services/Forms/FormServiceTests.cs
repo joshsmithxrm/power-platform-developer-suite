@@ -13,6 +13,7 @@ using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Services.Forms;
+using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
@@ -185,10 +186,14 @@ public class FormServiceTests
     private static FormService CreateService(IDataverseConnectionPool pool, IMetadataQueryService? metadata = null)
     {
         var metaMock = new Mock<IMetadataQueryService>();
+        var confirmation = new Mock<IEnvironmentConfirmationService>();
+        confirmation.Setup(c => c.EnsureConfirmedAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         return new FormService(
             pool,
             metadata ?? metaMock.Object,
-            new NullLogger<FormService>());
+            new NullLogger<FormService>(),
+            confirmation.Object);
     }
 
     // ── GetAsync read-default: published unless --unpublished (parity with views/web-resource) ──

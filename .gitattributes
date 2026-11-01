@@ -1,6 +1,9 @@
 # Auto-detect text files and normalize to LF in the repository
 * text=auto
 
+# Byte-for-byte generated documentation fixtures must retain the generator's LF output.
+tests/PPDS.DocsGen.Extension.Tests/fixtures/ext-reflect/expected/*.md text eol=lf
+
 # Linux-targeted files - MUST be LF (executed in containers)
 *.sh text eol=lf
 Dockerfile* text eol=lf

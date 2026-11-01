@@ -11,6 +11,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
+using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
@@ -20,11 +21,13 @@ namespace PPDS.Cli.Services.Forms;
 /// <summary>
 /// IDataverseConnectionPool-backed implementation of <see cref="IFormService"/>.
 /// </summary>
-public sealed class FormService : IFormService
+public sealed partial class FormService : IFormService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly IMetadataQueryService _metadataService;
     private readonly ILogger<FormService> _logger;
+    private readonly IEnvironmentConfirmationService _confirmation;
+    private readonly FormMutationCoordinator? _mutations;
 
     private const int MainFormType = 2;
     private const int SystemFormComponentType = 60;
@@ -32,11 +35,15 @@ public sealed class FormService : IFormService
     public FormService(
         IDataverseConnectionPool pool,
         IMetadataQueryService metadataService,
-        ILogger<FormService> logger)
+        ILogger<FormService> logger,
+        IEnvironmentConfirmationService? confirmation = null,
+        FormMutationCoordinator? mutations = null)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confirmation = confirmation ?? MissingEnvironmentConfirmationService.Instance;
+        _mutations = mutations;
     }
 
     // ── Read ──────────────────────────────────────────────────────────────
@@ -51,12 +58,22 @@ public sealed class FormService : IFormService
                 Criteria = new FilterExpression(LogicalOperator.And)
             };
             query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, entityLogicalName);
-            query.Criteria.AddCondition("type", ConditionOperator.NotNull);
 
-            await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-            var result = await client.RetrieveMultipleAsync(query, ct);
+            query.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1 };
+            var records = new List<Entity>();
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                EntityCollection page;
+                await using (var client = await _pool.GetClientAsync(cancellationToken: ct))
+                    page = await client.RetrieveMultipleAsync(query, ct);
+                records.AddRange(page.Entities);
+                if (!page.MoreRecords) break;
+                query.PageInfo.PageNumber++;
+                query.PageInfo.PagingCookie = page.PagingCookie;
+            }
 
-            var items = result.Entities
+            var items = records
                 .Select(e => new FormInfo(
                     e.GetAttributeValue<Guid>("formid"),
                     e.GetAttributeValue<string>("name") ?? string.Empty,
@@ -72,6 +89,7 @@ public sealed class FormService : IFormService
                 TotalCount = items.Count
             };
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -100,8 +118,11 @@ public sealed class FormService : IFormService
                 isManaged,
                 description,
                 tabs,
-                formXmlStr);
+                formXmlStr,
+                unpublished ? ComputeDraftHash(formXmlStr) : null,
+                unpublished ? "unpublished" : "published");
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -114,6 +135,7 @@ public sealed class FormService : IFormService
 
     public async Task SetFormXmlAsync(SetFormXmlRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -137,6 +159,7 @@ public sealed class FormService : IFormService
 
             await ApplySideEffectsAsync(formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -149,6 +172,7 @@ public sealed class FormService : IFormService
 
     public async Task<TabResult> AddTabAsync(AddTabRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -166,6 +190,7 @@ public sealed class FormService : IFormService
 
             return new TabResult(Guid.TryParse(newTabId.Trim('{', '}'), out var g) ? g : Guid.Empty, request.Label);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -176,6 +201,7 @@ public sealed class FormService : IFormService
 
     public async Task UpdateTabAsync(UpdateTabRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -188,6 +214,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Updating tab '{request.TabLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -198,6 +225,7 @@ public sealed class FormService : IFormService
 
     public async Task RemoveTabAsync(RemoveTabRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -210,6 +238,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Removing tab '{request.TabLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -227,10 +256,11 @@ public sealed class FormService : IFormService
 
             var doc = XDocument.Parse(formXmlStr!);
             var tabs = doc.Descendants("tab").ToList();
+            var selected = FormXmlEditor.FindElement(doc, "tab", request.TabLabel);
 
             for (var i = 0; i < tabs.Count; i++)
             {
-                if (!FormXmlEditor.ElementMatches(tabs[i], request.TabLabel))
+                if (tabs[i] != selected)
                     continue;
 
                 var idStr = (string?)tabs[i].Attribute("id") ?? string.Empty;
@@ -241,6 +271,7 @@ public sealed class FormService : IFormService
 
             return null;
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -253,6 +284,7 @@ public sealed class FormService : IFormService
 
     public async Task<SectionResult> AddSectionAsync(AddSectionRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -271,6 +303,7 @@ public sealed class FormService : IFormService
 
             return new SectionResult(sectionId, request.Label, request.TabLabel);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -281,6 +314,7 @@ public sealed class FormService : IFormService
 
     public async Task UpdateSectionAsync(UpdateSectionRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -293,6 +327,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Updating section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -303,6 +338,7 @@ public sealed class FormService : IFormService
 
     public async Task RemoveSectionAsync(RemoveSectionRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -315,6 +351,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Removing section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -331,6 +368,7 @@ public sealed class FormService : IFormService
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct);
 
             var doc = XDocument.Parse(formXmlStr!);
+            var selected = FormXmlEditor.FindElement(doc, "section", request.SectionLabel);
 
             foreach (var tab in doc.Descendants("tab"))
             {
@@ -341,7 +379,7 @@ public sealed class FormService : IFormService
 
                 foreach (var section in tab.Descendants("section"))
                 {
-                    if (!FormXmlEditor.ElementMatches(section, request.SectionLabel))
+                    if (section != selected)
                         continue;
 
                     var sectionLabelAttr = section.Element("labels")?.Element("label")?.Attribute("description");
@@ -354,6 +392,7 @@ public sealed class FormService : IFormService
 
             return null;
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -366,6 +405,7 @@ public sealed class FormService : IFormService
 
     public async Task AddFieldAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         if (request.FieldLogicalNames.Length == 0)
             throw new PpdsValidationException("FieldLogicalNames", "At least one field is required.");
 
@@ -393,6 +433,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Adding {request.FieldLogicalNames.Length} field(s) to section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -403,6 +444,7 @@ public sealed class FormService : IFormService
 
     public async Task RemoveFieldAsync(RemoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             reporter?.ReportPhase("Retrieving", $"Fetching form '{request.FormName}'");
@@ -415,6 +457,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Removing field '{request.FieldLogicalName}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -425,6 +468,7 @@ public sealed class FormService : IFormService
 
     public async Task ReorderFieldsAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         if (request.FieldLogicalNames.Length == 0)
             throw new PpdsValidationException("FieldLogicalNames", "At least one field is required for reorder-fields.");
 
@@ -445,6 +489,7 @@ public sealed class FormService : IFormService
             reporter?.ReportPhase("Writing", $"Reordering fields in section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -457,6 +502,7 @@ public sealed class FormService : IFormService
 
     public async Task AddSubgridAsync(AddSubgridRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         if (request.MaxRows < 2 || request.MaxRows > 250)
             throw new PpdsException(FormErrorCodes.InvalidMaxRows,
                 $"--max-rows must be between 2 and 250 (got {request.MaxRows}).");
@@ -488,6 +534,7 @@ public sealed class FormService : IFormService
 
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -498,6 +545,7 @@ public sealed class FormService : IFormService
 
     public async Task RemoveSubgridAsync(RemoveSubgridRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         try
         {
             var (entityLogicalName, formXmlStr, formId, _, _, _, _) =
@@ -508,6 +556,7 @@ public sealed class FormService : IFormService
 
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
@@ -521,10 +570,27 @@ public sealed class FormService : IFormService
     private async Task<(string entityLogicalName, string? formXml, Guid formId, string resolvedName, int formType, bool isManaged, string? description)>
         FetchFormRecordAsync(string entityLogicalName, string formName, bool requireMainForm, CancellationToken ct, bool requireCustomizable = false, bool unpublished = true)
     {
+        var form = await FetchFormEntityAsync(entityLogicalName, formName, requireMainForm, ct, requireCustomizable, unpublished).ConfigureAwait(false);
+        var formType = form.GetAttributeValue<OptionSetValue>("type")?.Value ?? 0;
+        return (
+            entityLogicalName,
+            form.GetAttributeValue<string>("formxml"),
+            form.GetAttributeValue<Guid>("formid"),
+            form.GetAttributeValue<string>("name") ?? formName,
+            formType,
+            form.GetAttributeValue<bool>("ismanaged"),
+            form.GetAttributeValue<string>("description")
+        );
+    }
+
+    private async Task<Entity> FetchFormEntityAsync(
+        string entityLogicalName, string formName, bool requireMainForm, CancellationToken ct,
+        bool requireCustomizable = false, bool unpublished = true)
+    {
         var query = new QueryExpression("systemform")
         {
-            ColumnSet = new ColumnSet("formid", "name", "type", "formxml", "ismanaged", "iscustomizable", "description"),
-            TopCount = 1
+            ColumnSet = new ColumnSet("formid", "name", "type", "formxml", "ismanaged", "iscustomizable", "description", "versionnumber"),
+            TopCount = 2
         };
         query.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, entityLogicalName);
         if (Guid.TryParse(formName.Trim('{', '}'), out var formGuid))
@@ -553,6 +619,9 @@ public sealed class FormService : IFormService
             throw new PpdsException(FormErrorCodes.FormNotFound,
                 $"Form '{formName}' not found for entity '{entityLogicalName}'.");
 
+        if (result.Entities.Count > 1)
+            throw new PpdsException("Forms.AmbiguousForm", $"More than one form matches '{formName}'. Use its form ID.");
+
         var form = result.Entities[0];
         var formType = form.GetAttributeValue<OptionSetValue>("type")?.Value ?? 0;
 
@@ -566,17 +635,9 @@ public sealed class FormService : IFormService
         if (requireCustomizable && form.GetAttributeValue<BooleanManagedProperty>("iscustomizable") is not { Value: true })
             throw new PpdsException(FormErrorCodes.FormNotCustomizable,
                 $"Form '{formName}' on entity '{entityLogicalName}' is not customizable and cannot be modified by PPDS. " +
-                "To make it customizable, add it to an unmanaged solution layer in this environment, then retry.");
+                "Ask the solution owner to allow customization in the source solution's managed properties and deploy that change before retrying.");
 
-        return (
-            entityLogicalName,
-            form.GetAttributeValue<string>("formxml"),
-            form.GetAttributeValue<Guid>("formid"),
-            form.GetAttributeValue<string>("name") ?? formName,
-            formType,
-            form.GetAttributeValue<bool>("ismanaged"),
-            form.GetAttributeValue<string>("description")
-        );
+        return form;
     }
 
     private async Task WriteFormXmlAsync(

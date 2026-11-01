@@ -37,10 +37,7 @@ public sealed class EnvSelectTool : McpToolBase
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
-            var collection = await Context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
-
-            var profile = collection.ActiveProfile
-                ?? throw new InvalidOperationException("No active profile configured. Run 'ppds auth create' first.");
+            var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
             // Use multi-layer resolution.
             using var credentialStore = new NativeCredentialStore();
@@ -55,33 +52,7 @@ public sealed class EnvSelectTool : McpToolBase
 
             var resolved = result.Environment!;
 
-            // Determine the currently-active environment URL.
-            var currentUrl = Context.EnvironmentUrlOverride
-                ?? profile.Environment?.Url;
-
-            // No-op: if the resolved URL matches the already-active environment, skip
-            // the allowlist check and the save — switching to self is always allowed
-            // (Constitution SS2 only blocks *switching*, not confirming the current env).
-            var isSameEnvironment = currentUrl != null &&
-                currentUrl.TrimEnd('/').Equals(
-                    resolved.Url.TrimEnd('/'),
-                    StringComparison.OrdinalIgnoreCase);
-
-            if (!isSameEnvironment)
-            {
-                // Validate environment switch against session allowlist
-                Context.ValidateEnvironmentSwitch(resolved.Url);
-
-                // Invalidate cached pool for the old environment.
-                if (profile.Environment != null)
-                {
-                    Context.InvalidateEnvironment(profile.Environment.Url);
-                }
-
-                // Update profile with new environment.
-                profile.Environment = resolved;
-                await Context.SaveProfileCollectionAsync(collection, cancellationToken).ConfigureAwait(false);
-            }
+            await Context.SwitchEnvironmentAsync(resolved, cancellationToken).ConfigureAwait(false);
 
             return new EnvSelectResult
             {

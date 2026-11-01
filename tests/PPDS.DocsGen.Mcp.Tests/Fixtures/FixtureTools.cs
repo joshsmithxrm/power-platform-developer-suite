@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using PPDS.Mcp;
 
@@ -20,8 +21,10 @@ public sealed class AlphaEchoTool
     public string ExecuteAsync(
         [Description("The message to echo.")] string message,
         int repeat = 1,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        _ = progress;
         _ = cancellationToken;
         return string.Concat(Enumerable.Repeat(message, repeat));
     }

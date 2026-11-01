@@ -41,11 +41,11 @@ public interface IWebResourceService
     /// </summary>
     /// <param name="request">The creation request (name, type, content, optional solution binding).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The ID of the created web resource.</returns>
+    /// <returns>The created ID and non-blocking publisher-prefix warnings.</returns>
     /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
     /// Thrown with <c>WebResource.AlreadyExists</c> when a resource with the same name exists.
     /// </exception>
-    Task<Guid> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default);
+    Task<CreateWebResourceResult> CreateAsync(CreateWebResourceRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the content of a web resource, optionally unpublished.
@@ -189,3 +189,9 @@ public sealed record CreateWebResourceRequest(
     int WebResourceType,
     byte[] Content,
     string? SolutionUniqueName);
+
+/// <summary>Created resource and non-blocking naming diagnostics for every surface.</summary>
+public sealed record CreateWebResourceResult(Guid Id, IReadOnlyList<WebResourceWarning> Warnings);
+
+/// <summary>A structured, non-blocking web-resource diagnostic.</summary>
+public sealed record WebResourceWarning(string Code, string Message);

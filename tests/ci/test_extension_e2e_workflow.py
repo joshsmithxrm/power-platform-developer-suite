@@ -55,10 +55,42 @@ def test_failed_e2e_run_always_uploads_diagnostics():
     job = workflow["jobs"]["extension-e2e"]
     diagnostics = _step(job, "Upload E2E diagnostics")
 
-    assert diagnostics["if"] == "always() && steps.e2e.outcome == 'failure'"
+    assert diagnostics["if"] == "always() && (steps.e2e.outcome == 'failure' || steps.notebook-host.outcome == 'failure')"
     assert diagnostics["with"]["if-no-files-found"] == "warn"
     assert "playwright-report/" in diagnostics["with"]["path"]
     assert "test-results/" in diagnostics["with"]["path"]
+
+
+def test_native_notebook_suite_is_a_bounded_blocking_matrix_step():
+    job = _load_workflow()["jobs"]["extension-e2e"]
+    native = _step(job, "Run native notebook host tests")
+
+    assert "continue-on-error" not in native
+    assert native["if"] == "success() || steps.e2e.outcome == 'failure'"
+    assert native["env"]["VSCODE_E2E_VERSION"] == "${{ matrix.vscode-version }}"
+    assert 0 < native["timeout-minutes"] < job["timeout-minutes"] <= 25
+    assert "xvfb-run" in native["run"]
+    assert "npm run test:notebook-host" in native["run"]
+    assert "set -o pipefail" in native["run"]
+    assert "tee test-results/notebook-host.log" in native["run"]
+    assert native["env"]["PPDS_NOTEBOOK_HOST_ARTIFACTS"] == "test-results/notebook-host"
+
+
+def test_native_notebook_runner_isolates_application_state_without_overriding_home():
+    runner = (REPO_ROOT / "src" / "PPDS.Extension" / "tools" / "run-notebook-host-tests.mjs").read_text(encoding="utf-8")
+
+    assert "XDG_CONFIG_HOME:" in runner
+    assert "XDG_CACHE_HOME:" in runner
+    assert "XDG_DATA_HOME:" in runner
+    assert "'chat.plugins.enabled': false" in runner
+    assert "'chat.customizations.migration.enabled': false" in runner
+    assert "--user-data-dir=" in runner
+    assert "--extensions-dir=" in runner
+    assert "--disable-extension=GitHub.copilot-chat" in runner
+    assert "\n        HOME:" not in runner
+    assert "process.env.HOME =" not in runner
+    assert "path.join(artifacts, 'host-run.json')" in runner
+    assert "path.join(artifacts, 'vscode-logs')" in runner
 
 
 def test_documentation_records_completed_promotion():

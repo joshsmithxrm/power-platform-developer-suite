@@ -486,6 +486,18 @@ Upload modified web resources from a local folder back to Dataverse with conflic
 
 ---
 
+### Publisher-prefix diagnostics
+
+Creation validates the root name prefix before any slash. Missing prefixes and a mismatch
+against a supplied solution publisher produce warnings without renaming or rejecting the
+resource. Application Services return the warnings; CLI prints them to stderr and retains
+them in structured output. A missing solution/publisher remains a resolution error.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-WR-62 | Missing or mismatched publisher prefixes produce visible structured warnings; matching prefixes do not warn and names are not rewritten | `WebResourcePrefixTests.Create_PrefixWarningsPreserveSubmittedName`, `Create_MissingSolutionOrPublisher_FailsBeforeWrite`, `CreateDiagnosticsTests.Create_WarningsAppearOnStderrAndInJsonWithoutChangingName` | ✅ |
+| AC-WR-63 | Update's not-found guidance uses the supported create command and a literal `<file>` placeholder | `CreateDiagnosticsTests.Update_NotFoundHint_UsesLiteralFilePlaceholder` | ✅ |
+
 ## Changelog
 
 | Date | Change |

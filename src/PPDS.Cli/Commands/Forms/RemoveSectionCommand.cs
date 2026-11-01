@@ -35,7 +35,7 @@ public static class RemoveSectionCommand
 
         var publishOption = new Option<bool>("--publish")
         {
-            Description = "Publish customizations after removing the section",
+            Description = "Publish all pending customizations for this table after writing",
             DefaultValueFactory = _ => false
         };
 
@@ -52,7 +52,8 @@ public static class RemoveSectionCommand
             publishOption,
             solutionOption,
             FormsCommandGroup.ProfileOption,
-            FormsCommandGroup.EnvironmentOption
+            FormsCommandGroup.EnvironmentOption,
+            FormsCommandGroup.ConfirmEnvironmentOption
         };
 
         GlobalOptions.AddToCommand(command);
@@ -66,10 +67,11 @@ public static class RemoveSectionCommand
             var solution = parseResult.GetValue(solutionOption);
             var profile = parseResult.GetValue(FormsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
+            var confirmEnvironment = parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAsync(entity, form, section, publish, solution, profile, environment,
-                globalOptions, cancellationToken);
+                confirmEnvironment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -83,6 +85,7 @@ public static class RemoveSectionCommand
         string? solution,
         string? profile,
         string? environment,
+        string? confirmEnvironment,
         GlobalOptionValues globalOptions,
         CancellationToken ct)
     {
@@ -98,6 +101,7 @@ public static class RemoveSectionCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 ct);
 
+            await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, ct);
             var formService = serviceProvider.GetRequiredService<IFormService>();
 
             if (!globalOptions.IsJsonMode)

@@ -13,6 +13,9 @@ namespace PPDS.Cli.Commands.WebResources;
 /// </summary>
 public static class UpdateCommand
 {
+    internal static string DescribeMissingResource(string name)
+        => $"Web resource '{name}' not found. Use 'ppds webresources create <file> --name {name}' to create it.";
+
     public static Command Create()
     {
         var nameArgument = new Argument<string>("name")
@@ -109,7 +112,7 @@ public static class UpdateCommand
             {
                 var error = new StructuredError(
                     ErrorCodes.WebResource.NotFound,
-                    $"Web resource '{name}' not found. Use 'ppds webresources create {file} --name {name}' to create it.",
+                    DescribeMissingResource(name),
                     null,
                     name);
                 writer.WriteError(error);

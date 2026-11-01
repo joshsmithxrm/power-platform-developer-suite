@@ -593,11 +593,13 @@ public class ViewServiceTests
         ex.Which.Message.Should().Contain("0x80040203").And.Contain("FetchXml is invalid");
     }
 
-    [Fact]
-    public async Task SetFetchXml_WriteSilentlyDropped_ThrowsUpdateNotPersisted()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetFetchXml_WriteSilentlyDropped_ThrowsUpdateNotPersisted(bool isManaged)
     {
         // Update "succeeds" but the read-back still shows the original value → silent no-op (#1194).
-        var svc = BuildViewWriteService(isManaged: false, updateThrows: null, fetchAfterWrite: OriginalFetch);
+        var svc = BuildViewWriteService(isManaged: isManaged, updateThrows: null, fetchAfterWrite: OriginalFetch);
 
         var ex = await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
             .Should().ThrowAsync<PpdsException>();
@@ -605,11 +607,13 @@ public class ViewServiceTests
         ex.Which.ErrorCode.Should().Be(ErrorCodes.View.UpdateNotPersisted);
     }
 
-    [Fact]
-    public async Task SetFetchXml_WritePersists_Succeeds()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetFetchXml_WritePersists_Succeeds(bool isManaged)
     {
         // Update succeeds and the read-back reflects the new value → no throw.
-        var svc = BuildViewWriteService(isManaged: false, updateThrows: null, fetchAfterWrite: NewFetch);
+        var svc = BuildViewWriteService(isManaged: isManaged, updateThrows: null, fetchAfterWrite: NewFetch);
 
         await FluentActions.Awaiting(() => svc.SetFetchXmlAsync("contact", ViewName, NewFetch))
             .Should().NotThrowAsync();

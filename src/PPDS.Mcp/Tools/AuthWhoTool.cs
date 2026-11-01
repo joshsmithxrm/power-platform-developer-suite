@@ -41,7 +41,7 @@ public sealed class AuthWhoTool : McpToolBase
                     using var provider = CredentialProviderFactory.Create(profile);
                     tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // Ignore errors - token info will be null
                 }

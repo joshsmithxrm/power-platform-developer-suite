@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -6,6 +7,9 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Services;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.Forms;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
@@ -22,7 +26,7 @@ namespace PPDS.Mcp.Infrastructure;
 /// - Getting or creating connection pools
 /// - Creating service providers with full DI for service access
 /// </remarks>
-public sealed class McpToolContext
+public sealed class McpToolContext : IDisposable
 {
     private readonly IMcpConnectionPoolManager _poolManager;
     private readonly ProfileStore _profileStore;
@@ -30,6 +34,15 @@ public sealed class McpToolContext
     private readonly ILoggerFactory _loggerFactory;
     private readonly McpSessionOptions _sessionOptions;
     private AuthProfile? _lockedProfile;
+    private string? _currentEnvironmentUrl;
+    private EnvironmentInfo? _currentEnvironment;
+    private string? _startupError;
+    private bool _initialized;
+    private readonly string _sessionId = Guid.NewGuid().ToString("N");
+    private readonly EnvironmentAcknowledgementStore _acknowledgements = new();
+    private readonly FormMutationCoordinator _formMutations = new();
+    // A protocol-test seam: production always creates the real provider from captured connection sources.
+    internal Func<ResolvedConnectionInfo, IEnvironmentConfirmationContext, EnvironmentAcknowledgementStore, FormMutationCoordinator, ServiceProvider>? ServiceProviderFactory { get; init; }
     private readonly SemaphoreSlim _lockGate = new(1, 1);
 
     /// <summary>
@@ -50,15 +63,17 @@ public sealed class McpToolContext
         _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
-        _sessionOptions = sessionOptions ?? throw new ArgumentNullException(nameof(sessionOptions));
+        ArgumentNullException.ThrowIfNull(sessionOptions);
+        _sessionOptions = new McpSessionOptions { Profile = sessionOptions.Profile, Environment = sessionOptions.Environment,
+            ReadOnly = sessionOptions.ReadOnly, AllowedEnvironments = [.. sessionOptions.AllowedEnvironments] };
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
     }
 
-    /// <summary>Whether DML operations are disabled for this session.</summary>
+    /// <summary>Whether DML and guarded form mutations are disabled for this session.</summary>
     public bool IsReadOnly => _sessionOptions.ReadOnly;
 
     /// <summary>The overridden environment URL, if specified via --environment.</summary>
-    public string? EnvironmentUrlOverride => _sessionOptions.Environment;
+    public string? EnvironmentUrlOverride => _currentEnvironmentUrl ?? _sessionOptions.Environment;
 
     /// <summary>
     /// Validates whether switching to the given environment URL is allowed.
@@ -83,39 +98,97 @@ public sealed class McpToolContext
     /// <exception cref="InvalidOperationException">Thrown if no profile is active.</exception>
     public async Task<AuthProfile> GetActiveProfileAsync(CancellationToken cancellationToken = default)
     {
-        // Session locking: resolve the profile once, then reuse for the session
-        if (_lockedProfile != null)
-            return _lockedProfile;
-
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
         await _lockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_lockedProfile != null)
-                return _lockedProfile;
+            if (_lockedProfile is null)
+                throw new InvalidOperationException(_startupError ?? "No active profile configured at session startup.");
+            return CaptureProfile();
+        }
+        finally { _lockGate.Release(); }
+    }
 
+    /// <summary>Captures defaults before the MCP host accepts requests. Missing auth remains a useful tool error.</summary>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await _lockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_initialized) return;
             var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-
-            AuthProfile? profile;
-            if (_sessionOptions.Profile != null)
-            {
-                profile = collection.GetByNameOrIndex(_sessionOptions.Profile)
-                    ?? throw new InvalidOperationException(
-                        $"Profile '{_sessionOptions.Profile}' not found. Available profiles: {string.Join(", ", collection.All.Select(p => p.Name ?? $"Profile {p.Index}"))}");
-            }
+            var profile = _sessionOptions.Profile is not null
+                ? collection.GetByNameOrIndex(_sessionOptions.Profile)
+                : collection.ActiveProfile;
+            if (profile is null)
+                _startupError = "No active profile configured at session startup. Run 'ppds auth create', then restart this MCP server.";
             else
             {
-                profile = collection.ActiveProfile
-                    ?? throw new InvalidOperationException(
-                        "No active profile configured. Run 'ppds auth create' to create a profile.");
+                _lockedProfile = CloneProfile(profile);
+                var url = _sessionOptions.Environment ?? profile.Environment?.Url;
+                _currentEnvironmentUrl = url is null ? null : EnvironmentConfirmationService.NormalizeUrl(url);
+                _currentEnvironment = _currentEnvironmentUrl is null ? null :
+                    profile.Environment is not null && EnvironmentConfirmationService.NormalizeUrl(profile.Environment.Url) == _currentEnvironmentUrl
+                        ? CloneEnvironment(profile.Environment)
+                        : new EnvironmentInfo { Url = _currentEnvironmentUrl, DisplayName = _currentEnvironmentUrl };
+                if (_currentEnvironment is not null) _currentEnvironment.Url = _currentEnvironmentUrl!;
             }
+            _initialized = true;
+        }
+        finally { _lockGate.Release(); }
+    }
 
-            _lockedProfile = profile;
-            return profile;
-        }
-        finally
+    private static AuthProfile CloneProfile(AuthProfile profile)
+        => JsonSerializer.Deserialize<AuthProfile>(JsonSerializer.Serialize(profile))!;
+
+    private static EnvironmentInfo? CloneEnvironment(EnvironmentInfo? environment)
+        => environment is null ? null : JsonSerializer.Deserialize<EnvironmentInfo>(JsonSerializer.Serialize(environment))!;
+
+    // Called only while holding the target gate: identity and current environment stay one snapshot.
+    private AuthProfile CaptureProfile()
+    {
+        var profile = CloneProfile(_lockedProfile!);
+        profile.Environment = CloneEnvironment(_currentEnvironment);
+        return profile;
+    }
+
+    /// <summary>Changes only this session's future operations; captured operations keep their own target.</summary>
+    public async Task SwitchEnvironmentAsync(EnvironmentInfo environment, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        var target = EnvironmentConfirmationService.NormalizeUrl(environment.Url);
+        await _lockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _lockGate.Release();
+            if (_lockedProfile is null) throw new InvalidOperationException(_startupError);
+            if (!string.Equals(target, _currentEnvironmentUrl, StringComparison.Ordinal))
+                ValidateEnvironmentSwitch(target);
+            _currentEnvironmentUrl = target;
+            _currentEnvironment = CloneEnvironment(environment);
+            _currentEnvironment!.Url = target;
         }
+        finally { _lockGate.Release(); }
+        // Retain old pools until server shutdown: in-flight calls still own their target.
+    }
+
+    private async Task<(AuthProfile Profile, string Url)> CaptureTargetAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _lockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_lockedProfile is null) throw new InvalidOperationException(_startupError);
+            var url = _currentEnvironmentUrl ?? throw new InvalidOperationException(
+                "No environment selected at session startup. Select an allowed environment or restart with --environment.");
+            return (CaptureProfile(), url);
+        }
+        finally { _lockGate.Release(); }
+    }
+
+    public void Dispose()
+    {
+        _lockGate.Dispose();
+        _formMutations.Dispose();
     }
 
     /// <summary>
@@ -139,17 +212,8 @@ public sealed class McpToolContext
     /// </exception>
     public async Task<IDataverseConnectionPool> GetPoolAsync(CancellationToken cancellationToken = default)
     {
-        var profile = await GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
-
-        var environmentUrl = _sessionOptions.Environment ?? profile.Environment?.Url
-            ?? throw new InvalidOperationException(
-                "No environment selected. Run 'ppds env select <url>' to select an environment.");
-
-        var profileName = profile.Name ?? profile.DisplayIdentifier;
-        return await _poolManager.GetOrCreatePoolAsync(
-            new[] { profileName },
-            environmentUrl,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+        var (profile, environmentUrl) = await CaptureTargetAsync(cancellationToken).ConfigureAwait(false);
+        return await _poolManager.GetOrCreateCapturedPoolAsync(profile, environmentUrl, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -167,15 +231,15 @@ public sealed class McpToolContext
     /// </remarks>
     public async Task<ServiceProvider> CreateServiceProviderAsync(CancellationToken cancellationToken = default)
     {
-        var profile = await GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
+        var (profile, environmentUrl) = await CaptureTargetAsync(cancellationToken).ConfigureAwait(false);
+        var environmentDisplayName = profile.Environment?.Url.TrimEnd('/') == environmentUrl
+            ? profile.Environment.DisplayName : environmentUrl;
 
-        var environmentUrl = _sessionOptions.Environment ?? profile.Environment?.Url
-            ?? throw new InvalidOperationException(
-                "No environment selected. Run 'ppds env select <url>' to select an environment.");
-
-        var environmentDisplayName = _sessionOptions.Environment != null
-            ? _sessionOptions.Environment
-            : profile.Environment?.DisplayName;
+        if (ServiceProviderFactory is not null)
+            return ServiceProviderFactory(
+                new ResolvedConnectionInfo { Profile = profile, EnvironmentUrl = environmentUrl, EnvironmentDisplayName = environmentDisplayName },
+                EnvironmentConfirmationContext.FromProfile(profile, environmentUrl, _sessionId, IsReadOnly),
+                _acknowledgements, _formMutations);
 
         var sources = new List<IConnectionSource>();
 
@@ -192,7 +256,7 @@ public sealed class McpToolContext
             var adapter = new ProfileConnectionSourceAdapter(source);
             sources.Add(adapter);
 
-            return CreateProviderFromSources(sources.ToArray(), _credentialStore);
+            return CreateProviderFromSources(sources.ToArray(), _credentialStore, profile, environmentUrl, environmentDisplayName);
         }
         catch
         {
@@ -229,9 +293,18 @@ public sealed class McpToolContext
     /// </summary>
     private ServiceProvider CreateProviderFromSources(
         IConnectionSource[] sources,
-        ISecureCredentialStore credentialStore)
+        ISecureCredentialStore credentialStore,
+        AuthProfile profile,
+        string environmentUrl,
+        string? environmentDisplayName)
     {
         var services = new ServiceCollection();
+        services.AddSingleton(new ResolvedConnectionInfo { Profile = profile, EnvironmentUrl = environmentUrl,
+            EnvironmentDisplayName = environmentDisplayName });
+        services.AddSingleton<IEnvironmentConfirmationContext>(EnvironmentConfirmationContext.FromProfile(
+            profile, environmentUrl, _sessionId, IsReadOnly));
+        services.AddSingleton(_acknowledgements);
+        services.AddSingleton(_formMutations);
 
         // Configure minimal logging.
         services.AddLogging(builder =>

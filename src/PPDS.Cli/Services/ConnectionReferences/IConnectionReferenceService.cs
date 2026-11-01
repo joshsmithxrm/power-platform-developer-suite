@@ -120,6 +120,9 @@ public sealed record ConnectionReferenceInfo
     /// <summary>Gets whether a connection is bound (ConnectionId is set).</summary>
     public bool IsBound => !string.IsNullOrEmpty(ConnectionId);
 
+    /// <summary>Whether the Dataverse reference is active; null means state was not returned.</summary>
+    public bool? IsActive { get; init; }
+
     /// <summary>Gets the created date.</summary>
     public DateTime? CreatedOn { get; init; }
 

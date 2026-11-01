@@ -189,8 +189,11 @@ public sealed class McpReferenceGenerator : IReferenceGenerator
         var result = new List<ParamInfo>(parameters.Count);
         foreach (var p in parameters)
         {
-            // Skip CancellationToken — MCP does not expose it on the input schema.
-            if (p.ParameterType.FullName == "System.Threading.CancellationToken")
+            // MCP supplies these parameters; callers never include them in tool input.
+            var type = p.ParameterType;
+            if (type.FullName == "System.Threading.CancellationToken" ||
+                (type.IsGenericType && type.GetGenericTypeDefinition().FullName == "System.IProgress`1" &&
+                 type.GetGenericArguments()[0].FullName == "ModelContextProtocol.ProgressNotificationValue"))
                 continue;
 
             var description = ExtractParameterDescription(p);

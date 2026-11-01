@@ -35,6 +35,12 @@ ppds-mcp-server
 
 Any MCP-compatible client can connect by spawning the process and exchanging JSON-RPC messages over stdio.
 
+The server captures the profile and environment at startup. Use `--profile <name>`
+and `--environment <url>` to select them explicitly. Global profile changes do
+not redirect an existing server. Switching is disabled unless a destination is
+listed with `--allowed-env <url>`; permitted switches affect future calls in this
+session only. Calls already running retain their captured target.
+
 ## Available Tools
 
 ### Authentication & Environment
@@ -43,7 +49,7 @@ Any MCP-compatible client can connect by spawning the process and exchanging JSO
 |------|-------------|
 | `ppds_auth_who` | Get the current authentication profile context including identity, connected environment, and token status. |
 | `ppds_env_list` | List available Dataverse environments accessible with the current profile. Supports filtering by name, URL, or ID. |
-| `ppds_env_select` | Select a Dataverse environment by URL, display name, or unique name. All subsequent tools use the selected environment. |
+| `ppds_env_select` | Select an allowed environment for subsequent calls in this session without changing global defaults. |
 
 ### Querying
 
@@ -59,6 +65,29 @@ Any MCP-compatible client can connect by spawning the process and exchanging JSO
 | `ppds_data_analyze` | Analyze entity data: record count, primary attributes, and sample records. |
 | `ppds_data_schema` | Get the schema (fields/attributes) for a Dataverse entity including types, constraints, and option set values. |
 | `ppds_metadata_entity` | Get detailed entity metadata including attributes, relationships, keys, and ownership type. |
+
+### Forms
+
+| Tool | Description |
+|------|-------------|
+| `ppds_forms_list` | List a table's forms with stable IDs, types and managed status. |
+| `ppds_forms_get` | Inspect published or unpublished form XML/layout; `unpublished=true` returns the draft fingerprint. |
+| `ppds_forms_add_field` | Add one existing column to one existing Main-form section by IDs. Preview with `dryRun=true`; execution saves and verifies an unpublished draft. |
+| `ppds_forms_publish` | Publish pending customizations for the selected table and verify the selected form. |
+
+Read the unpublished form first, then supply its `draftHash` as
+`expectedDraftHash`. A stale fingerprint fails before writing. Where Dataverse
+supports row-version concurrency it is enforced; otherwise the result reports
+`preflight-only` protection, so avoid simultaneous editors. Managed forms can
+accept an unmanaged-layer edit only when their managed properties allow it.
+
+Protected form writes require `confirmEnvironment` equal to the exact resolved
+URL. Acknowledgements remain in memory for that session, identity, target and
+policy. `--allowed-env` is independent of write acknowledgement, and `--read-only`
+rejects mutations. Draft saves never publish. Publication additionally requires
+`confirmPublishEntity` equal to the table logical name because it publishes other
+pending customizations for that table too. Inspect phase results after a partial
+failure; an error does not prove that an earlier write was undone.
 
 ### Plugin Analysis
 

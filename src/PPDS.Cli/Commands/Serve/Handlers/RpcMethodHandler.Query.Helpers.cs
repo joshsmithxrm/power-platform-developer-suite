@@ -62,7 +62,7 @@ public partial class RpcMethodHandler
     /// ignored, and all other exceptions are logged at Debug level to aid diagnostics
     /// without surfacing failures to the caller.
     /// </summary>
-    private void FireAndForgetHistorySave(string queryText, QueryResultResponse response)
+    private void FireAndForgetHistorySave(string queryText, QueryResultResponse response, string? environmentUrl)
     {
         var daemonToken = _daemonCts.Token;
         _ = Task.Run(async () =>
@@ -72,19 +72,13 @@ public partial class RpcMethodHandler
                 daemonToken.ThrowIfCancellationRequested();
 
                 var historyService = _authServices.GetService<IQueryHistoryService>();
-                if (historyService != null)
+                if (historyService != null && environmentUrl != null)
                 {
-                    var store = _authServices.GetRequiredService<ProfileStore>();
-                    var collection = await store.LoadAsync(daemonToken);
-                    var envUrl = collection.ActiveProfile?.Environment?.Url;
-                    if (envUrl != null)
-                    {
-                        await historyService.AddQueryAsync(
-                            envUrl, queryText,
-                            rowCount: response.Count,
-                            executionTimeMs: response.ExecutionTimeMs,
-                            cancellationToken: daemonToken);
-                    }
+                    await historyService.AddQueryAsync(
+                        environmentUrl, queryText,
+                        rowCount: response.Count,
+                        executionTimeMs: response.ExecutionTimeMs,
+                        cancellationToken: daemonToken);
                 }
             }
             catch (OperationCanceledException)

@@ -117,10 +117,21 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     /// <param name="envVars">Additional environment variables to set.</param>
     /// <param name="args">Command arguments (e.g., "auth", "list").</param>
     /// <returns>The CLI execution result.</returns>
-    protected async Task<CliResult> RunCliWithEnvAsync(
+    protected Task<CliResult> RunCliWithEnvAsync(
         IDictionary<string, string>? envVars,
         params string[] args)
+        => RunCliCoreAsync(envVars, CancellationToken.None, args);
+
+    /// <summary>Runs a command bounded by both the normal command timeout and the caller's deadline.</summary>
+    protected Task<CliResult> RunCliWithCancellationAsync(CancellationToken cancellationToken, params string[] args)
+        => RunCliCoreAsync(null, cancellationToken, args);
+
+    private async Task<CliResult> RunCliCoreAsync(
+        IDictionary<string, string>? envVars,
+        CancellationToken cancellationToken,
+        string[] args)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -185,14 +196,21 @@ public abstract class CliE2ETestBase : IAsyncLifetime
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        using var cts = new CancellationTokenSource(CommandTimeout);
+        using var commandTimeout = new CancellationTokenSource(CommandTimeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(commandTimeout.Token, cancellationToken);
         try
         {
             await process.WaitForExitAsync(cts.Token);
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) when (process.HasExited) { }
+            await process.WaitForExitAsync(CancellationToken.None);
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException(
                 $"CLI command timed out after {CommandTimeout.TotalSeconds}s: ppds {string.Join(" ", args)}");
         }

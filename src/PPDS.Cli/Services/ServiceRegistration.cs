@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.DependencyInjection;
@@ -57,6 +58,19 @@ public static class ServiceRegistration
     {
         // Auth services (ProfileStore, EnvironmentConfigStore, NativeCredentialStore)
         services.AddAuthServices();
+
+        // One acknowledgement store per caller session. MCP injects its own store/context
+        // into child providers so acknowledgements survive per-tool DI scopes.
+        services.TryAddSingleton<EnvironmentAcknowledgementStore>();
+        services.TryAddSingleton<FormMutationCoordinator>();
+        services.TryAddSingleton<IEnvironmentConfirmationContext>(sp =>
+        {
+            var connection = sp.GetService<ResolvedConnectionInfo>();
+            return connection is null
+                ? new EnvironmentConfirmationContext("", "", "")
+                : EnvironmentConfirmationContext.FromProfile(connection.Profile, connection.EnvironmentUrl);
+        });
+        services.TryAddSingleton<IEnvironmentConfirmationService, EnvironmentConfirmationService>();
 
         // Profile management services
         services.AddTransient<IProfileService, ProfileService>();
@@ -319,12 +333,15 @@ public static class ServiceRegistration
         services.AddTransient<IFormService>(sp => new FormService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<IMetadataQueryService>(),
-            sp.GetRequiredService<ILogger<FormService>>()));
+            sp.GetRequiredService<ILogger<FormService>>(),
+            sp.GetRequiredService<IEnvironmentConfirmationService>(),
+            sp.GetRequiredService<FormMutationCoordinator>()));
 
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();
         services.AddTransient<IUserService, UserService>();
         services.AddTransient<IFlowService, FlowService>();
+        services.AddTransient<IFlowActivationService, FlowActivationService>();
         services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
         services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
         services.AddTransient<IComponentNameResolver, ComponentNameResolver>();

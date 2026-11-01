@@ -22,6 +22,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       extraction: ${{ steps.filter.outputs.extraction }}
+      python: ${{ steps.filter.outputs.python }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -48,6 +49,36 @@ jobs:
               - 'NuGet.config'
               - '.github/workflows/test.yml'
               - '.github/workflows/release-cli.yml'
+            python:
+              - 'src/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - '.claude/**'
+              - 'specs/**'
+              - 'docs/**'
+              - 'CLAUDE.md'
+              - 'CONTRIBUTING.md'
+              - 'README.md'
+              - 'package*.json'
+              - 'Directory.*.props'
+              - 'global.json'
+              - 'NuGet.config'
+              - 'nuget.config'
+              - '.github/**'
+              - 'pyproject.toml'
+              - 'pytest.ini'
+              - 'setup.cfg'
+              - 'tox.ini'
+              - '**/conftest.py'
+              - '**/requirements*.txt'
+              - 'uv.lock'
+              - 'poetry.lock'
+
+  python-tests:
+    name: Python tests
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    uses: ./.github/workflows/workflow-tests.yml
 
   test:
     needs: changes
@@ -151,25 +182,16 @@ jobs:
 
   # Gate job for branch protection
   test-status:
-    permissions: {}
+    permissions:
+      contents: read # Read the tested aggregate evaluator; no write grant.
     runs-on: ubuntu-latest
-    needs: [changes, test, single-file-extraction]
+    needs: [changes, test, single-file-extraction, python-tests]
     if: always()
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Check test status
-        run: |
-          if [[ "${{ needs.changes.result }}" != "success" ]]; then
-            echo "Changes detection failed: ${{ needs.changes.result }}"
-            exit 1
-          fi
-          if [[ "${{ needs.changes.outputs.extraction }}" == "true" && "${{ needs.single-file-extraction.result }}" != "success" ]]; then
-            echo "Single-file extraction failed: ${{ needs.single-file-extraction.result }}"
-            exit 1
-          fi
-          if [[ "${{ needs.test.result }}" == "success" || "${{ needs.test.result }}" == "skipped" ]]; then
-            echo "Tests passed"
-            exit 0
-          else
-            echo "Tests failed: ${{ needs.test.result }}"
-            exit 1
-          fi
+        env:
+          TEST_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/check_test_status.py
