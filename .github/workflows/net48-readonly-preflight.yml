@@ -1,0 +1,49 @@
+name: Net48 Read-only Preflight
+
+# Temporary validation lane, isolated from the unapproved mutation smoke.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/net48-readonly-preflight.yml'
+      - 'scripts/ci/net48-preflight/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: net48-readonly-preflight-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/net48-readonly-preflight'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    environment: test-dataverse
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify read-only boundary without network access
+        shell: pwsh
+        run: ./scripts/ci/net48-preflight/Test-ReadOnly.ps1
+      - name: Read target identity and bounded collisions
+        shell: pwsh
+        env:
+          NET48_DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+          NET48_APP_ID: ${{ vars.PPDS_TEST_APP_ID }}
+          NET48_TENANT_ID: ${{ vars.PPDS_TEST_TENANT_ID }}
+        run: ./scripts/ci/net48-preflight/Invoke-ReadOnly.ps1 -ReportPath "$env:RUNNER_TEMP/net48-readonly-preflight.json"
+      - name: Retain redacted result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: net48-readonly-preflight
+          path: ${{ runner.temp }}/net48-readonly-preflight.json
+          if-no-files-found: warn
+          retention-days: 7
