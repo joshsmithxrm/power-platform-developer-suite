@@ -1,14 +1,22 @@
-# Proposed missing-binding live validation amendment
+# Missing-binding live validation fixture
 
-Status: **not approved or executed**. This adds one connection-reference metadata row to the previously approved fixture resource types. The coordinator must obtain separate approval of this exact inventory before setting the opt-in variables. It does not repeat the already-passed managed/unmanaged activation roundtrip.
+Status: **approved and passed on 2026-11-01, fresh attempt 2; cleanup verified**. The approved inventory added one unbound connection-reference metadata row to the earlier fixture resource types. This separate test did not repeat the already-passed managed/unmanaged activation roundtrip. Future execution still requires approval of the exact target and inventory before setting opt-in variables.
 
 ## Evidence and purpose
 
-The original run `6d83a2e4`, attempt 3, passed all 20 managed/unmanaged CLI plan/execution checks and then received explicit Dataverse rejection `0x80095005`: the declared `pfl6d83_missing` reference did not exist. Cleanup completed with no unknown submissions or errors. The activation product was never called for that rejected blocker. Flow acceptance criterion AC-09 therefore remains incomplete.
+The original run `6d83a2e4`, attempt 3, passed all 20 managed/unmanaged CLI plan/execution checks and then received explicit Dataverse rejection `0x80095005`: the declared `pfl6d83_missing` reference did not exist. Cleanup completed with no unknown submissions or errors. The activation product was never called for that rejected blocker. That original failed run did not establish the missing-binding portion of flow acceptance criterion AC-09; the separate passing fixture below now supplies that evidence.
 
-This independent fixture tests **an existing but unbound reference**. Microsoft documents `connectionid` as optional and `connectorid` as application-required in the [connectionreference table contract](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/connectionreference). Creating the row without a connection ID should represent an unbound dependency; target acceptance remains to be demonstrated. If creation is rejected, preserve the exact fault and stop without changing the definition or expanding resources.
+This independent fixture tests **an existing but unbound reference**. Microsoft documents `connectionid` as optional and `connectorid` as application-required in the [connectionreference table contract](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/connectionreference). The approved target accepted the row without a connection ID and the candidate reported the dependency as `unbound`. If creation is rejected, preserve the exact fault and stop without changing the definition or expanding resources.
 
-## Exact proposed inventory
+## Recorded validation
+
+The fresh `6d83b1f0` attempt 2 passed `FlowBindingPreflightLiveTests.CandidateCli_UnboundReference_BlocksWholeBatchWithoutStateWrites`: 1/1 tests, 34.2999 seconds. Product source was `1cba826c6ad6233e41b0d4d5197d0c7c618cd4c7`. The executed immutable copy of the Release CLI DLL had SHA-256 `2990982BD7F56DC66A27F4BAFCDFC565EDD845C68B82785F4835BE45EA89CFDA`.
+
+Plan and execution selected exactly the two confirmed flow IDs, returned `Flow.PreflightBlocked`, and identified the reference as `unbound`. The control was `would-change` in preview and `not-attempted` in execution; the blocker remained `blocked`. Both flows stayed Off and their version numbers were unchanged. The manifest reached `state: verified` and `cleanup: completed`; all five returned resource IDs were recorded as `verified-deleted`, `confirmedIds` was empty, and primary failure, CLI interruption, unknown/rejected submissions and cleanup failures were absent.
+
+Retained evidence: `live-validation-1cba826c6-attempt2/flow-binding-6d83b1f0/manifest.json`, `01-plan.json`, `02-execute.json`, paired stderr files, and `flow-binding-live-1cba826c6-attempt2.log`. The first binding attempt at this same product pin passed the behavioral assertions but failed automatic cleanup with a Dataverse transaction error. Its failed result and recovery evidence are preserved separately; this fresh passing attempt does not change that history or the earlier absent-reference provisioning failure.
+
+## Exact approved inventory
 
 Target: `https://orgcabef92d.crm.dynamics.com`, existing profile `PPDS`, fixed run ID `6d83b1f0`.
 
@@ -52,4 +60,4 @@ $env:PPDS_FLOW_BINDING_LIVE_ARTIFACTS = '<approved absolute artifact root>'
 dotnet test tests/PPDS.LiveTests/PPDS.LiveTests.csproj -f net10.0 --no-build --filter FullyQualifiedName~FlowBindingPreflightLiveTests --logger 'console;verbosity=normal'
 ```
 
-Acceptance mapping: `FlowBindingPreflightLiveTests.CandidateCli_UnboundReference_BlocksWholeBatchWithoutStateWrites` supplies the outstanding live flow AC-09 evidence only when it actually passes and cleanup is verified. Until then, its status remains pending.
+Acceptance mapping: `FlowBindingPreflightLiveTests.CandidateCli_UnboundReference_BlocksWholeBatchWithoutStateWrites` supplies the missing-binding portion of live flow AC-09 when it actually passes and cleanup is verified. The recorded fresh attempt 2 meets that requirement. The earlier managed/unmanaged core phases and cleanup are separate evidence; overall release QA remains a separate gate.
