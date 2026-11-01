@@ -215,7 +215,7 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
                 await File.WriteAllTextAsync(Path.Combine(directory, label + ".json"), outText, ct);
                 await File.WriteAllTextAsync(Path.Combine(directory, label + ".stderr.txt"), errText, ct);
                 process.ExitCode.Should().NotBe(0); errText.Should().NotBeNullOrWhiteSpace();
-                var json = JsonDocument.Parse(outText).RootElement.Clone();
+                var json = FlowBindingFixtureResponse.Parse(outText);
                 VerifyBlockedResult(json, dryRun, Id("control"), Id("blocker"));
                 return json.GetProperty("data");
             });
@@ -359,7 +359,7 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
         references[0].GetProperty("logicalName").GetString().Should().Be(Reference);
         references[0].GetProperty("status").GetString().Should().Be("unbound");
         references[0].GetProperty("connectorId").GetString().Should().Be(Connector);
-        if (references[0].TryGetProperty("connectionId", out var connection)) connection.ValueKind.Should().Be(JsonValueKind.Null);
+        FlowBindingFixtureResponse.RequireUnboundConnectionId(references[0]);
         flows.Should().OnlyContain(f => f.GetProperty("phase").GetString() == "preflight");
     }
 }
