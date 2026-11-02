@@ -9,12 +9,19 @@ reference-cache trust workflows use `contents: read`. Native extraction and
 cache-trust jobs retain that read-only scope. Their `dorny/paths-filter` jobs additionally
 need `pull-requests: read` to list changed files on PR events. Status-only
 aggregators use `permissions: {}`. The Test aggregate uses `contents: read`
-to check out its tested status evaluator; it has no write grant. These workflows and the integration test
-checkout set `persist-credentials: false`: their later steps do not push Git
+to check out its tested status evaluator; it has no write grant. These workflows'
+checkouts set `persist-credentials: false`: their later steps do not push Git
 changes. Public-history fetches do not require persisted checkout credentials.
 
 The reusable docs-smoke caller must grant `contents: read`; a called workflow
 cannot elevate its caller's permissions.
+
+Integration is held: its only trigger is input-free manual dispatch, and its
+single refusal job has `permissions: {}`. It checks out nothing, declares no
+environment or credentials, and exits unsuccessfully with no live tests run.
+There is no Integration OIDC exception or skipped-as-passed aggregate. This
+workflow hold does not revoke credentials, historical runs or other refs, and
+does not change Build/Test protection or certify live acceptance.
 
 ## Intentional elevated scopes
 
@@ -27,7 +34,6 @@ an update to the test allowlist and this table.
 | `codeql.yml` / `analyze` | `security-events: write` | Upload CodeQL results; retain its existing read scopes. |
 | `dependabot-label.yml` / `label-major-updates` | `issues: write`, `pull-requests: write` | Apply labels to Dependabot PRs using trusted base automation. |
 | `docs-release.yml` / `release` | `contents: write`, `pull-requests: write` | Push the primary repository's baseline rollover branch and create its PR. |
-| `integration-tests.yml` / `integration-tests` | `id-token: write` | Existing federated authentication; repository contents remain read-only. |
 | `milestone-release-check.yml` / `check-milestone-completion` | `issues: write` | Maintain release-tracking issues. |
 | `post-merge-release-check.yml` / `patch-release-detection`, `extension-corelease-detection` | `issues: write` | Maintain release-tracking issues. |
 | `release-cadence-check.yml` / `cadence-check` | `issues: write` | Maintain release-tracking issues. |
