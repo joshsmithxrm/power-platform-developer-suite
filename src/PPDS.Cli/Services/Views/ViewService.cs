@@ -12,6 +12,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Infrastructure.Safety;
+using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Models;
@@ -28,17 +29,30 @@ public class ViewService : IViewService
     private readonly ICachedMetadataProvider _cachedMetadata;
     private readonly IShakedownGuard _guard;
     private readonly ILogger<ViewService> _logger;
+    private readonly IEnvironmentConfirmationService _confirmation;
 
     public ViewService(
         IDataverseConnectionPool pool,
         ICachedMetadataProvider cachedMetadata,
         IShakedownGuard guard,
         ILogger<ViewService> logger)
+        : this(pool, cachedMetadata, guard, logger, MissingEnvironmentConfirmationService.Instance)
+    {
+    }
+
+    /// <summary>Creates a view service with session-owned target acknowledgement for writes.</summary>
+    public ViewService(
+        IDataverseConnectionPool pool,
+        ICachedMetadataProvider cachedMetadata,
+        IShakedownGuard guard,
+        ILogger<ViewService> logger,
+        IEnvironmentConfirmationService confirmation)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _cachedMetadata = cachedMetadata ?? throw new ArgumentNullException(nameof(cachedMetadata));
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confirmation = confirmation ?? throw new ArgumentNullException(nameof(confirmation));
     }
 
     // ─── Read path ─────────────────────────────────────────────────────────────
@@ -184,6 +198,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.add-column");
+        await _confirmation.EnsureConfirmedAsync("views.add-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -249,6 +265,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.remove-column");
+        await _confirmation.EnsureConfirmedAsync("views.remove-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -280,6 +298,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.update-column");
+        await _confirmation.EnsureConfirmedAsync("views.update-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -311,6 +331,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.reorder-columns");
+        await _confirmation.EnsureConfirmedAsync("views.reorder-columns", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -344,6 +366,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-sort");
+        await _confirmation.EnsureConfirmedAsync("views.set-sort", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -372,6 +396,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.clear-sort");
+        await _confirmation.EnsureConfirmedAsync("views.clear-sort", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -403,6 +429,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-filter");
+        await _confirmation.EnsureConfirmedAsync("views.set-filter", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var filterElement = XElement.Parse(filterXmlFragment);
         if (filterElement.Name.LocalName != "filter")
@@ -436,6 +464,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.clear-filter");
+        await _confirmation.EnsureConfirmedAsync("views.clear-filter", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -465,6 +495,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-fetchxml");
+        await _confirmation.EnsureConfirmedAsync("views.set-fetchxml", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var fetchDoc = XDocument.Parse(fetchXml);
         if (fetchDoc.Root?.Name.LocalName != "fetch")

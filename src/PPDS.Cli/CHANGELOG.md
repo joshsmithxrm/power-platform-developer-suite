@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- All nine existing `views` writers now enforce the shared target-confirmation policy. Scripts targeting protected environments must pass `--confirm-env <resolved-url>`; read-only sessions reject writes, including no-op edits. `views list` and `views get` remain acknowledgement-free. The original four-argument `ViewService` constructor remains available for readers, but direct writers must supply a resolved confirmation service (#1015, partial).
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
