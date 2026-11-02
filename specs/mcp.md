@@ -1,7 +1,7 @@
 # MCP Server
 
 **Status:** Implemented
-**Last Updated:** 2026-10-31
+**Last Updated:** 2026-11-01
 **Code:** [src/PPDS.Mcp/](../src/PPDS.Mcp/)
 **Surfaces:** MCP
 
@@ -14,6 +14,14 @@ The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabil
 ### Captured session targets and form authoring
 
 The host initializes `McpToolContext` before accepting requests, capturing the explicitly selected profile or current default. External profile edits cannot redirect the running session. Every operation captures identity and current environment together. An allowlisted `ppds_env_select` updates only future session operations and retains resolved environment metadata; it does not update the user's saved active profile or dispose pools used by overlapping calls. `ppds_auth_who` reports the same captured current target, including an explicit startup environment override.
+
+Environment selection checks explicit URLs against the captured current target and session allowlist **before** creating an authenticated direct resolver. Malformed or disallowed URLs never fall through to discovery. Name/ID selection uses discovery metadata only, then checks the resolved URL; it does not connect directly to a selected organization while resolving a name. The final session switch rechecks policy after asynchronous resolution. This is a target-selection boundary, not a general network-egress sandbox.
+
+| AC | Requirement | Test | Status |
+|---|---|---|---|
+| MCP-AC-01 | Reject disallowed/malformed explicit URLs before any direct resolver or discovery call, including schemeless Dataverse hosts. | `McpEnvironmentSelectionTests.RejectedUrl_DoesNotResolveOrSwitch` | ✅ |
+| MCP-AC-02 | Permit current/allowlisted URLs with captured profile identity, preserving cancellation and rechecking the final target. | `McpEnvironmentSelectionTests.AllowedUrl_UsesCapturedProfileAndNormalizedTarget`, `Cancellation_DoesNotSwitch`, `ResolvedDifferentTarget_IsRejected` | ✅ |
+| MCP-AC-03 | Resolve names through discovery only, refuse ambiguous exact/partial names, and reject disallowed resolved targets without connecting to them. | `McpEnvironmentSelectionTests.NameSelection_UsesDiscoveryOnly`, `AmbiguousName_DoesNotSwitch`, `DiscoveryCancellation_DoesNotSwitch`, `UnsupportedNameAuthentication_DoesNotResolve` | ✅ |
 
 `ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field`, and `ppds_forms_publish` delegate to `IFormService`. Add-field requires stable form/section IDs and the fingerprint from a fresh unpublished read. It supports a write-free preview and saves/verifies a draft without publishing. Publication requires `confirmPublishEntity` equal to the table logical name and publishes all pending changes for that table; verification covers the selected form. `confirmEnvironment` acknowledges the exact protected target, separately from publication scope and environment switching. See [form AC-39–47](feat-forms-commands.md#safe-mcp-authoring-surface) and [environment confirmation](environment-confirmation.md) for the acceptance/test mapping. Live managed validation remains pending until the opt-in fixture harness passes.
 
