@@ -7,14 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-01
+
 ### Added
 
-- **Bounded form authoring** — `ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field` and `ppds_forms_publish` support inspection, adding an existing column to an existing Main-form section, verified draft saves and explicit table-scoped publication. Stable IDs and a fresh draft fingerprint prevent accidental selection and stale edits; results retain completed and uncertain phases (#1215, partial).
+- **Bounded Main-form authoring** - `ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field` and `ppds_forms_publish` add inspection, an existing column in an existing section, verified draft saves and explicit table-scoped publication. Stable IDs and a fresh unpublished draft fingerprint support write-free preview and stale-draft preflight; results retain completed and uncertain phases. The catalog grows from 41 to 45 tools (#1215, partial).
 
 ### Changed
 
-- MCP captures the startup authentication profile and target. Allowed environment switches affect subsequent calls in that session without changing global defaults or redirecting in-flight work.
-- Form writes require explicit acknowledgement of a protected target using `confirmEnvironment`; `--allowed-env` permits switching but does not authorize a write. `--read-only` rejects form mutations. Publication separately requires `confirmPublishEntity` because it includes all pending customizations for that table (#1015, partial).
+- Captured startup authentication/target defaults. Allowed switches affect future calls in that session without changing global defaults; creating or replacing startup authentication requires a server restart.
+- Form writes require `confirmEnvironment` when effective protection requires acknowledgement. `--allowed-env` permits switching but does not authorize writes; `--read-only` rejects covered form mutations. Publication separately requires `confirmPublishEntity`, publishes all pending customizations for that table and verifies only the selected form (#1015, partial).
+- Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501).
+- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 with explicit protected-write/session migration and custom-embedder signature incompatibilities. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
+
+### Fixed
+
+- Auth inspection reports the actual session target after `--environment` overrides and allowed environment switches, matching subsequent operations.
+- Captured profile/target snapshots and pool identity prevent external default changes or reused profile names from redirecting in-flight operations.
+
+### Limitations
+
+- Draft fingerprints are preflight checks, not atomic concurrency protection; avoid concurrent editors and inspect applied/unknown phases before retrying. General FormXML/layout authoring is outside this increment, and an unmanaged solution does not bypass locked managed properties.
 
 ## [1.2.2] - 2026-10-30
 
@@ -75,7 +88,9 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **Structured MCP error responses** — All tool exceptions now surface `errorCode`, `userMessage`, and `context`, giving MCP clients machine-readable failure details ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Configurable log level** — `--log-level` flag and `PPDS_MCP_LOG_LEVEL` environment variable let operators adjust server verbosity without rebuilding ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.3.0...HEAD
+[1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.2...Mcp-v1.3.0
+[1.2.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.1...Mcp-v1.2.2
 [1.2.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.2.0...Mcp-v1.2.1
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.1.0...Mcp-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Mcp-v1.0.1...Mcp-v1.1.0

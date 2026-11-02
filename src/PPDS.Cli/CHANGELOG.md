@@ -7,23 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-01
+
 ### Added
 
-- **Bounded cloud-flow activation** — `flows enable` and `flows disable` accept one ID/unique name or all eligible definitions in a named solution. Write-free plans report dependency blockers, exclusions and a plan hash. Execution verifies each change and preserves partial or uncertain outcomes without retrying ambiguous submissions (#1214).
-- **Explicit target acknowledgement for form and flow writes** — protected targets require `--confirm-env <resolved-url>` through a shared service guard; read-only sessions reject writes. Existing form mutation commands use the same guard (#1015, partial).
+- **Bounded cloud-flow activation** - `flows enable` and `flows disable` accept one ID/unique name or all eligible definitions in a named solution. Write-free plans report blockers, exclusions and a plan hash; execution verifies per-flow outcomes and retains partial or uncertain results without blindly retrying submissions. `--max-flows` defaults to 100; `--timeout` defaults to 60 seconds per flow (#1214).
+- **Shared target acknowledgement** - existing form mutations and new flow writes use a resolved-context service guard. Protected targets require `--confirm-env <resolved-url>`; read-only sessions reject the covered writes (#1015, partial).
+
+### Changed
+
+- Refreshed System.CommandLine 2.0.9 to 2.0.14, Nerdbank.Streams 2.13.16 to 2.14.411 and direct Microsoft.Extensions dependencies to 10.0.14; consumed the coordinated Auth/Dataverse/Migration/Query/Plugins releases and their JWT/build-tool servicing (#1499, #1500, #1501, #1502).
+- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 despite stricter protected-write behavior and incompatible CLI/MCP implementation signatures. Update scripts with required acknowledgements and custom embedders with the documented signature changes. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
 
-- Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics describe the actual filter requirement (#1360).
-- Plugin diff drift collection propagates cancellation through every collection stage (#1317).
-- Web-resource creation returns missing or mismatched publisher-prefix warnings without changing the requested name. Missing-resource guidance uses the correct `<file>` placeholder (#1236).
-- Query RPCs can bind to an opaque captured profile identity, and query history retains the executed environment during concurrent profile/environment changes (#1218).
-- Live propagation checks use bounded, configurable deadlines and retain timeout diagnostics; background update-check tests use deterministic completion and clocks (#1314, #1361).
+- Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics identify the actual secondary-entity requirement (#1360).
+- Plugin diff propagates cancellation through every drift-collection and comparison stage (#1317).
+- Web-resource creation reports missing or mismatched publisher-prefix warnings in structured results and stderr without renaming the resource. Missing-resource update guidance uses the literal `<file>` placeholder (#1236).
+- Query RPCs and history retain the captured authentication identity and executed environment during concurrent profile/environment changes (#1218).
+- Form tab/section selectors prioritize stable IDs and reject ambiguity while retaining unique legacy GUID-valued name selectors. Form listings page all results, inspection includes draft hash/state, and operation cancellation propagates accurately.
 
 ### Validation
 
-- Relevant Python workflow regressions feed the required, always-reporting `test-status` gate (#1357).
-- Isolated managed-form fixtures and explicit opt-in validation document their provisioning and cleanup boundaries (#1240).
+- Bounded/configurable live propagation polling and verified fixture-owned cleanup retain useful failure evidence; background update-check regressions use controlled time and explicit completion instead of sleeps (#1314, #1361). These are validation improvements, not new runtime timeout settings.
+- Relevant Python workflow regressions feed the required, always-reporting `test-status` gate (#1357). Managed-form fixtures, live roundtrips and cleanup provenance complement retained managed-view coverage (#1240).
 
 ## [1.4.2] - 2026-10-30
 
@@ -186,7 +193,9 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`ppds flows get|url` accept GUID or unique name** — The `name` argument resolves by workflow ID (GUID) when provided, falling back to unique-name lookup ([#868](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/868)).
 - **Extension panel UX** — Unified panel navigation and filtering, 300 ms filter debouncing, and race-condition prevention across 8 VS Code panels ([#633](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/633)).
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.5.0...HEAD
+[1.5.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.2...Cli-v1.5.0
+[1.4.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.1...Cli-v1.4.2
 [1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.4.0...Cli-v1.4.1
 [1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.3.0...Cli-v1.4.0
 [1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.2.0...Cli-v1.3.0
