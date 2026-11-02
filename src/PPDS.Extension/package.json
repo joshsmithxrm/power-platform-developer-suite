@@ -674,7 +674,7 @@
     "@types/vscode": "^1.116.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.1.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
     "eslint-plugin-import-x": "^4.17.1",
     "knip": "^6.35.1",
