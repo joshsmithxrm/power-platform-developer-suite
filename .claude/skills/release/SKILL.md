@@ -342,9 +342,9 @@ Watch the runs:
 gh run list --limit 20 --json status,conclusion,createdAt,displayTitle,workflowName
 ```
 
-Expected sequence (typical timing):
-1. 7 `publish-nuget.yml` runs start within seconds of tag push — ~3–5 min each
-2. `release-cli.yml` runs in parallel — builds binaries on 3 OSes — ~8–15 min
+Expected sequence (timings are estimates; advance only after verification):
+1. Each component tag starts its own `publish-nuget.yml` run, about 3–5 minutes each. Publish the seven packages across the dependency waves above, waiting for each prior wave's public verification.
+2. The CLI tag also starts `release-cli.yml` alongside its NuGet run — builds binaries on 3 OSes, about 8–15 minutes. Both must finish and verify before proceeding to downstream waves.
 3. `extension-publish.yml` auto-dispatches on `Extension-v*` tag push — ~10–15 min. Channel (pre-release vs stable) is inferred from the tag version (odd minor = pre-release, even minor = stable). Manual override available via `gh workflow run extension-publish.yml --ref Extension-v<version> -f channel=<stable|pre-release>`.
 4. `docs-release.yml` fires on the unified `v*` tag push (if pushed) — opens the generated-reference PR in ppds-docs. It opens a core API-baseline rollover PR only if baseline files change; otherwise record the verified no-op. Review any rollover before merging the public docs landing.
 
