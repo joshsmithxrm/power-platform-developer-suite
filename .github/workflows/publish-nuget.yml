@@ -126,6 +126,15 @@ jobs:
           fi
         done
 
+    - name: Setup Python for release input guard
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+
+    - name: Validate packages and public version vacancy before upload
+      shell: bash
+      run: python scripts/ci/verify_release_inputs.py nuget --tag "$GITHUB_REF_NAME" --directory ./nupkgs
+
     - name: List packages
       shell: bash
       run: ls -la ./nupkgs/
@@ -137,7 +146,7 @@ jobs:
       run: |
         for package in ./nupkgs/*.nupkg; do
           echo "Pushing $package"
-          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --no-symbols
         done
 
     - name: Push symbols to NuGet
@@ -145,9 +154,10 @@ jobs:
       env:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       run: |
+        shopt -s nullglob
         for package in ./nupkgs/*.snupkg; do
           echo "Pushing $package"
-          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
         done
       continue-on-error: true
 

@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
-using PPDS.Auth.Credentials;
-using PPDS.Auth.Discovery;
 using PPDS.Mcp.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 
@@ -37,12 +35,7 @@ public sealed class EnvSelectTool : McpToolBase
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
-            var profile = await Context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
-
-            // Use multi-layer resolution.
-            using var credentialStore = new NativeCredentialStore();
-            using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
-            var result = await resolver.ResolveAsync(environment, cancellationToken).ConfigureAwait(false);
+            var result = await Context.ResolveEnvironmentSelectionAsync(environment, cancellationToken).ConfigureAwait(false);
 
             if (!result.Success)
             {

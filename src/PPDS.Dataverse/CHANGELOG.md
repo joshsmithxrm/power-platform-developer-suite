@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-01
+
+### Changed
+
+- Refreshed Microsoft.Extensions dependencies to 10.0.14 and System.IdentityModel.Tokens.Jwt to 8.23.0 (#1501, #1502).
+- Updated SourceLink build tooling to 10.0.403 (#1498). Connection-pool library source and public APIs are unchanged; captured session/pool behavior in this release belongs to the CLI/MCP application layer.
+
 ## [1.3.2] - 2026-10-30
 
 ### Security
@@ -83,7 +90,9 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **Default `AcquireTimeout` of 120 s** — Connection acquisition from the pool waits up to 120 s, accommodating queuing on the DOP semaphore during large imports.
 - **Pool-managed concurrency** — Batch parallelism is capped at pool capacity via pool-queue blocking at `GetClientAsync()`, preventing oversubscription during throttling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.4.0...HEAD
+[1.4.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.2...Dataverse-v1.4.0
+[1.3.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.1...Dataverse-v1.3.2
 [1.3.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.3.0...Dataverse-v1.3.1
 [1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.2.0...Dataverse-v1.3.0
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.1.0...Dataverse-v1.2.0

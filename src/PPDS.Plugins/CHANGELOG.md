@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-01
+
+### Changed
+
+- Updated SourceLink build tooling from 10.0.401 to 10.0.403 (#1498). Attribute/enum source and the runtime contract are unchanged; this minor version aligns the coordinated release. Plugin deployment/diff fixes are CLI changes, not new library attribute behavior.
+
 ## [3.0.1] - 2026-10-30
 
 ### Changed
@@ -87,7 +93,9 @@ Promotes the `2.1.0-beta.1` annotation surface to stable, aligned with the broad
 - Full XML documentation
 - Comprehensive unit test suite
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v3.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v3.1.0...HEAD
+[3.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v3.0.1...Plugins-v3.1.0
+[3.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v3.0.0...Plugins-v3.0.1
 [3.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v2.0.0...Plugins-v3.0.0
 [2.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.1...Plugins-v2.0.0
 [1.1.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Plugins-v1.1.0...Plugins-v1.1.1

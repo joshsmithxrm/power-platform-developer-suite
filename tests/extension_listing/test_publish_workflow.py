@@ -32,7 +32,7 @@ def _load_workflow() -> dict:
 
 @pytest.fixture(scope="module")
 def publish_run_strings() -> list[str]:
-    """Return the `run:` strings for both publish steps.
+    """Return packaging commands; publishing uploads these exact VSIXs.
 
     Deferred to a fixture (not module-level helper) so a YAML parse error
     or shape change produces a test failure instead of a collection-time
@@ -40,9 +40,9 @@ def publish_run_strings() -> list[str]:
     """
     workflow = _load_workflow()
     steps = workflow["jobs"]["publish"]["steps"]
-    publish_steps = [s for s in steps if "name" in s and "Publish to VS Code Marketplace" in s["name"]]
+    publish_steps = [s for s in steps if "name" in s and "Package extension" in s["name"]]
     assert len(publish_steps) == 2, (
-        f"Expected 2 publish steps (pre-release + stable); found {len(publish_steps)}"
+        f"Expected 2 packaging steps (pre-release + stable); found {len(publish_steps)}"
     )
     return [s["run"] for s in publish_steps]
 
@@ -51,7 +51,7 @@ def publish_run_strings() -> list[str]:
 def test_publish_step_has_base_images_url_templated(
     publish_run_strings: list[str], index: int
 ) -> None:
-    """AC-24: each publish step's run command uses --baseImagesUrl with a
+    """AC-24: each package command fixes image URLs before exact-VSIX upload with a
     templated SHA expression. The SHA must be resolved at runtime, not
     hard-coded in the workflow source.
     """

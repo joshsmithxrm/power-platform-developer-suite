@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-cli-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     strategy:
@@ -84,6 +88,10 @@ jobs:
         run: mv ./publish/ppds.exe ./publish/${{ matrix.artifact }}
         shell: bash
 
+      - name: Verify native binary version before upload
+        shell: bash
+        run: python scripts/ci/verify_release_inputs.py binary --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --path ./publish/${{ matrix.artifact }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -98,6 +106,17 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout reviewed release inputs
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Setup Python for release input guard
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -135,52 +154,21 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      # Check if /release created a draft release (preferred flow)
-      - name: Check if draft release exists
-        id: check_release
+      - name: Validate release vacancy or owned draft and prepare curated notes
+        id: release-plan
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          RELEASE_JSON=$(gh release view "${{ steps.version.outputs.tag }}" --json isDraft,name 2>/dev/null || echo '{}')
-          if echo "$RELEASE_JSON" | jq -e '.isDraft == true' > /dev/null 2>&1; then
-            echo "is_draft=true" >> $GITHUB_OUTPUT
-            echo "Draft release found, will upload assets and publish"
-          else
-            echo "is_draft=false" >> $GITHUB_OUTPUT
-            echo "No draft release found, will create new release"
-          fi
+          python scripts/ci/verify_release_inputs.py cli-plan \
+            --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --changelog src/PPDS.Cli/CHANGELOG.md --directory ./release \
+            --output release-plan.json --notes release-notes.md
+          python -c 'import json,os; p=json.load(open("release-plan.json")); f=open(os.environ["GITHUB_OUTPUT"],"a"); f.write("existing_draft="+str(p["existing_draft"]).lower()+"\n"); f.close()'
 
-      # Draft flow: upload binaries to existing draft release
-      - name: Upload assets to draft release
-        if: steps.check_release.outputs.is_draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            ./release/ppds-win-x64.exe \
-            ./release/ppds-win-arm64.exe \
-            ./release/ppds-osx-x64 \
-            ./release/ppds-osx-arm64 \
-            ./release/ppds-linux-x64 \
-            ./release/checksums.sha256 \
-            --clobber
-
-      - name: Publish draft release
-        if: steps.check_release.outputs.is_draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release edit "${{ steps.version.outputs.tag }}" --draft=false
-          echo "Release published with binaries attached"
-
-      # Fallback flow: no pre-created draft (e.g. direct tag push).
-      # Create the release as a DRAFT with assets, then publish — required because
-      # this repo has immutable releases (assets must be attached before publish).
-      - name: Create draft release with assets
-        if: steps.check_release.outputs.is_draft == 'false'
+      # A known draft may resume only after matching ownership, notes and bytes.
+      - name: Create workflow-owned draft with curated notes
+        if: steps.release-plan.outputs.existing_draft != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -190,19 +178,32 @@ jobs:
             *-*) PRERELEASE_FLAG="--prerelease" ;;
           esac
           gh release create "${{ steps.version.outputs.tag }}" \
-            ./release/ppds-win-x64.exe \
-            ./release/ppds-win-arm64.exe \
-            ./release/ppds-osx-x64 \
-            ./release/ppds-osx-arm64 \
-            ./release/ppds-linux-x64 \
-            ./release/checksums.sha256 \
-            --draft \
-            --generate-notes \
+            --draft --verify-tag --target "$GITHUB_SHA" \
+            --notes-file release-notes.md \
             --title "PPDS CLI v${{ steps.version.outputs.version }}" \
             $PRERELEASE_FLAG
 
-      - name: Publish fallback release
-        if: steps.check_release.outputs.is_draft == 'false'
+      - name: Upload only missing validated assets without replacement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          asset_list=$(python -c 'import json; print("\n".join(json.load(open("release-plan.json"))["missing_assets"]))')
+          if [[ -n "$asset_list" ]]; then
+            mapfile -t assets <<< "$asset_list"
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}"
+          fi
+
+      - name: Verify complete draft after uploads and before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/ci/verify_release_inputs.py cli-plan
+          --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --changelog src/PPDS.Cli/CHANGELOG.md --directory ./release
+          --output complete-release-plan.json --notes release-notes.md --require-complete
+
+      - name: Publish verified workflow-owned draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

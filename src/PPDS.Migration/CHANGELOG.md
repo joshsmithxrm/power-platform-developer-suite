@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-01
+
+### Changed
+
+- Aligned with PPDS.Dataverse 1.4.0 in the coordinated release and refreshed direct Microsoft.Extensions dependencies to 10.0.14 (#1501, #1502).
+- Updated SourceLink build tooling to 10.0.403 (#1498). Migration source and public APIs are unchanged; this release carries dependency servicing and version alignment.
+
 ## [1.2.2] - 2026-10-30
 
 ### Security
@@ -66,7 +73,9 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **DI integration** — `AddDataverseMigration()` extension method.
 - **Security-first design** — Connection string redaction, no PII in logs.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.3.0...HEAD
+[1.3.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.2...Migration-v1.3.0
+[1.2.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.1...Migration-v1.2.2
 [1.2.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.2.0...Migration-v1.2.1
 [1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.1.0...Migration-v1.2.0
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0...Migration-v1.1.0

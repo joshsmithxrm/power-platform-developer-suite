@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-01
+
+### Changed
+
+- Aligned with PPDS.Dataverse 1.4.0 and its refreshed Microsoft.Extensions/JWT dependency graph in the coordinated release (#1501, #1502).
+- Updated SourceLink build tooling to 10.0.403 (#1498). SQL engine source and public APIs are unchanged; notebook/RPC target-isolation fixes are in CLI/Extension.
+
 ## [1.0.2] - 2026-10-30
 
 ### Security
@@ -65,6 +72,8 @@ First stable release. Consolidates features developed across `1.0.0-beta.1` and 
 - **FetchXML IntelliSense** — `FetchXmlCompletionEngine` provides cursor-aware completions (element names, attribute names, operators, filter types, boolean flags); wired through CLI daemon, TUI, and VS Code extension.
 - **Safety and protection** — DML safety guard with configurable thresholds and environment protection levels; `QueryExecutionException` with structured error codes for programmatic handling.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.1.0...HEAD
+[1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.2...Query-v1.1.0
+[1.0.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.1...Query-v1.0.2
 [1.0.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Query-v1.0.0...Query-v1.0.1
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Query-v1.0.0

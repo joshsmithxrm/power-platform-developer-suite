@@ -157,7 +157,7 @@ prerelease identifiers such as `beta.10`.
 
 Principles to apply when picking the next version:
 
-- **Most NuGet packages** (Auth, Cli, Dataverse, Mcp, Migration, Query) share a unified `1.x` lineage — the prerelease-to-stable cadence keeps them in lockstep at major/minor.
+- **Each NuGet package keeps its own version lineage.** Coordinated minor releases include all surfaces, but their major/minor numbers need not match. Resolve the actual public component versions and tags before selecting the next version.
 - **PPDS.Plugins has its own lineage** that pre-dates the unified lineage (first released as `1.0.0` in Jan 2026 before the other packages). It progresses independently — don't try to reconcile its version with the others. Whenever you would regress its major number, you've made a mistake.
 - **Strong-name rotation is a SemVer breaking change** (PublicKeyToken changes the assembly identity). Bump major on any package you re-sign with a new key — do not treat a key rotation as a minor or patch bump.
 - **PPDS.Extension** is not MinVer; version lives in `src/PPDS.Extension/package.json` and follows the odd/even-minor convention (odd = pre-release channel, even = stable).
@@ -246,8 +246,8 @@ git tag Migration-v<migration-version>
 git tag Query-v<query-version>
 git tag Plugins-v<plugins-version>
 
-# Extension (requires manual workflow dispatch with --ref Extension-v<version> —
-# push the tag for source-of-truth and as the --ref target)
+# Extension tag push automatically publishes its inferred channel.
+# Do not also dispatch a second publisher for the same version.
 git tag Extension-v<extension-version>
 
 # Verify tag prefixes BEFORE push — catches MinVer-prefix bugs early
@@ -255,11 +255,14 @@ git tag -l 'Auth-v*' | tail -3
 git tag -l 'Cli-v*' | tail -3
 # ...etc for each prefix
 
-# Push tags individually (batch --tags does NOT trigger GitHub Actions — see Gotcha 6)
-for tag in Auth-v<auth-version> Cli-v<cli-version> Dataverse-v<dataverse-version> Mcp-v<mcp-version> Migration-v<migration-version> Query-v<query-version> Plugins-v<plugins-version> Extension-v<extension-version>; do
-  git push origin "refs/tags/$tag"
-  sleep 3
-done
+# Push one tag at a time, waiting for each dependency wave's public verification:
+# 1. Auth, Dataverse, Plugins (independent roots may run concurrently)
+# 2. Query, Migration
+# 3. CLI (NuGet AND GitHub binaries)
+# 4. MCP
+# 5. Extension (same reviewed commit as CLI)
+git push origin "refs/tags/Auth-v<auth-version>"
+# Continue the reviewed version map only after the appropriate wave verifies.
 ```
 
 **Worked example** — verbatim from PR #785 (2026-04-17 prerelease):
@@ -316,13 +319,22 @@ Tags trigger different workflows:
 | `Cli-v*` | `publish-nuget.yml` + `release-cli.yml` | NuGet tool package + multi-platform binaries (win-x64/arm64, osx-x64/arm64, linux-x64) + draft GitHub release published |
 | `Extension-v*` | `extension-publish.yml` (auto-dispatches on tag push; channel inferred from odd/even minor) | VS Code Marketplace — matrix of 4 targets (win32-x64, linux-x64, darwin-x64, darwin-arm64). Manual override: `gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable`. |
 
-**Release-cli draft flow.** `release-cli.yml` prefers an existing **draft release** created ahead of time; if none exists, it falls back to creating one. For the cleanest path, create a draft release with notes pulled from the CLI CHANGELOG before pushing the `Cli-v*` tag:
+**Release-cli draft flow.** Let `release-cli.yml` own the draft, assets and final
+publication. It extracts the exact version's curated CLI CHANGELOG section and
+records the source commit and workflow run in the draft body. Do not pre-create a
+manual draft or use auto-generated notes. A retry can resume only that same run's
+owned draft with unchanged notes and verified existing asset hashes; it uploads
+only missing assets and never clobbers them. A published version, foreign draft,
+unknown digest or mismatched content stops for reconciliation.
 
-```bash
-gh release create Cli-v<cli-version> --draft --title "PPDS CLI v<cli-version>" --notes-file <(sed -n '/## \[<cli-version>\]/,/## \[/p' src/PPDS.Cli/CHANGELOG.md | head -n -1)
-```
-
-This avoids the "already has an immutable release for this tag" failure mode (Gotcha 1) in most cases. If you skip this, the workflow creates the draft itself — fine unless something else has created a draft already.
+Before uploading, `verify_release_inputs.py` checks NuGet IDs, versions,
+same-commit internal dependency versions and assembly source identity; Plugins
+also requires the repository public-key identity and forced cryptographic
+strong-name verification. Native CLI builds verify version/source identity. The
+Extension validates its manifest/lock, channel, VSIX identity and bundled CLI,
+then publishes that exact VSIX with `--packagePath`. Unexpected occupied public
+versions fail closed. These gates complement public verification after upload;
+they do not authorize publication or prove credentials are valid.
 
 Watch the runs:
 
@@ -330,11 +342,11 @@ Watch the runs:
 gh run list --limit 20 --json status,conclusion,createdAt,displayTitle,workflowName
 ```
 
-Expected sequence (typical timing):
-1. 7 `publish-nuget.yml` runs start within seconds of tag push — ~3–5 min each
-2. `release-cli.yml` runs in parallel — builds binaries on 3 OSes — ~8–15 min
+Expected sequence (timings are estimates; advance only after verification):
+1. Each component tag starts its own `publish-nuget.yml` run, about 3–5 minutes each. Publish the seven packages across the dependency waves above, waiting for each prior wave's public verification.
+2. The CLI tag also starts `release-cli.yml` alongside its NuGet run — builds binaries on 3 OSes, about 8–15 minutes. Both must finish and verify before proceeding to downstream waves.
 3. `extension-publish.yml` auto-dispatches on `Extension-v*` tag push — ~10–15 min. Channel (pre-release vs stable) is inferred from the tag version (odd minor = pre-release, even minor = stable). Manual override available via `gh workflow run extension-publish.yml --ref Extension-v<version> -f channel=<stable|pre-release>`.
-4. `docs-release.yml` fires on the unified `v*` tag push (if pushed) — opens paired PRs in ppds-docs and this repo.
+4. `docs-release.yml` fires on the unified `v*` tag push (if pushed) — opens the generated-reference PR in ppds-docs. It opens a core API-baseline rollover PR only if baseline files change; otherwise record the verified no-op. Review any rollover before merging the public docs landing.
 
 ### 10. Verify Publishes
 
@@ -506,11 +518,15 @@ HTTP 422: Validation Failed
 tag_name was used by an immutable release
 ```
 
-**Cause:** The workflow creates a draft release, then tries `gh release edit --draft=false` to publish it. If a draft release for that tag already exists (e.g., from a previous failed run, or a manually-created draft), the publish step fails because GitHub has marked it immutable after the draft was saved.
+**Diagnosis:** Inspect the exact tag, workflow run and public/draft release state.
+The input guard rejects already-published versions and drafts whose source,
+workflow ownership, notes or assets cannot be verified. A failed read is not
+proof that no release exists.
 
-**Fix:** Before re-running, check `gh release list --limit 10` for a pre-existing draft for that tag. Delete it with `gh release delete <tag>` and re-run the workflow via `gh run rerun <run-id>`.
-
-**Prevention:** Don't manually create GitHub releases. Let `release-cli.yml` own that. If a previous release for this tag partially succeeded, delete the draft before re-pushing.
+**Recovery:** Preserve existing tags/assets and the failed run. Resume a known
+owned draft only when the guard verifies it; otherwise obtain a deliberate
+recovery decision. Do not automatically delete a draft, move/re-push a tag or
+replace assets. Let the workflow own the release lifecycle.
 
 ### Gotcha 2: Extension publish — auto-dispatch on tag push
 
@@ -551,18 +567,18 @@ Previous releases have needed inline fixes:
 
 **Prevention:** Run full CI on the release branch BEFORE opening the release PR. Catch these on the release branch, not in the merge.
 
-### Gotcha 6: `git push --tags` does not trigger GitHub Actions workflows
+### Gotcha 6: Large tag batches suppress GitHub Actions events
 
 **Symptom:** After `git push origin --tags`, no `publish-nuget.yml` or `release-cli.yml` workflow runs appear.
 
-**Cause:** GitHub Actions does not fire `on: push: tags:` triggers for tags pushed in a single batch via `--tags`. This is a known GitHub platform limitation.
+**Cause:** GitHub does not create tag-push events when more than three tags are
+pushed at once. See [GitHub's push-event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push).
 
-**Fix:** Push tags individually with a small delay between each:
+**Fix:** Push tags individually in the dependency order from Step 8. A delay is
+not a substitute for waiting for the preceding wave's public verification:
 ```bash
-for tag in Auth-v<ver> Cli-v<ver> Dataverse-v<ver> Mcp-v<ver> Migration-v<ver> Query-v<ver> Plugins-v<ver> Extension-v<ver>; do
-  git push origin "refs/tags/$tag"
-  sleep 3
-done
+git push origin "refs/tags/Auth-v<auth-version>"
+# Continue the individually reviewed tags and verification gates from Step 8.
 ```
 
 ### Gotcha 7: MSYS2 path conversion strips `/p:` MSBuild properties
@@ -576,15 +592,11 @@ done
 ## Rollback / Recovery
 
 ### A tag published a broken package
-- **NuGet:** Unlist the version via the NuGet.org web UI (`https://www.nuget.org/packages/PPDS.<Package>/<version>/Delete`) OR via CLI:
-  ```bash
-  dotnet nuget delete PPDS.<Package> <version> \
-    --api-key "$NUGET_API_KEY" \
-    --source https://api.nuget.org/v3/index.json
-  ```
-  Requires the same `NUGET_API_KEY` secret CI uses. NuGet allows unlisting; hard-deletion requires support.
-- **GitHub release:** `gh release delete <tag>` and `git tag -d <tag> && git push origin :<tag>`.
-- **Extension:** VS Marketplace supports unlisting via the management portal. You cannot hard-delete.
+
+Stop downstream distribution and inspect the exact public artifacts and failed
+phase. Preserve successful immutable versions, tags and evidence. Propose a
+reviewed fix-forward patch. Deletion, unlisting or other exceptional recovery
+requires a separate, explicit decision; it is not an automatic release step.
 
 ### Fix-forward
 Bump the patch version (e.g., `1.0.0` → `1.0.1`), prepare a new CHANGELOG entry, and re-run this skill for the single affected package.
@@ -619,7 +631,7 @@ After all publishes verify:
 
 1. **Version bumps only via tags for NuGet packages.** Never edit `<Version>` in a `.csproj`.
 2. **Extension version lives in `package.json` only.** Must match `package-lock.json`.
-3. **Tags push individually with delay.** `git push --tags` does not trigger GitHub Actions workflows (see Gotcha 6). Push each tag separately with a small delay.
+3. **Push tags individually in dependency order.** Large tag batches suppress events (see Gotcha 6). Wait for public verification between dependency waves.
 4. **Monitor all workflow runs.** Don't assume success — verify each publish separately.
 5. **Stable releases require full verification.** Prereleases tolerate gotchas being caught post-publish; stable releases should not.
 6. **Package lineage is immutable.** PPDS.Plugins started at 1.0.0 stable in Jan 2026; never regress to an earlier major.

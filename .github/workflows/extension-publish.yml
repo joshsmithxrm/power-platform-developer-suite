@@ -50,6 +50,10 @@ jobs:
       - name: Run marketplace-listing AC tests
         run: pytest tests/extension_listing/ -v
 
+      - name: Reject an occupied Marketplace version before starting matrix
+        if: github.event_name == 'push' || !inputs.dry_run
+        run: python scripts/ci/verify_release_inputs.py marketplace-vacant --tag "$GITHUB_REF_NAME"
+
   publish:
     needs: preflight
     runs-on: ubuntu-latest
@@ -92,21 +96,16 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+      - name: Setup Python for release input guard
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
       - name: Resolve bundled CLI release
         id: resolve-cli
         run: |
-          cli_tag="$(git describe --tags --exact-match --match 'Cli-v*' "${{ steps.resolve-tag.outputs.sha }}" 2>/dev/null || true)"
-          if [[ -z "$cli_tag" ]]; then
-            echo "::error::Extension releases must point at a commit tagged with the intended Cli-v* release."
-            exit 1
-          fi
-          cli_version="${cli_tag#Cli-v}"
-          if [[ -z "$cli_version" || "$cli_version" == "$cli_tag" ]]; then
-            echo "::error::Could not parse a CLI version from tag '$cli_tag'."
-            exit 1
-          fi
-          echo "tag=$cli_tag" >> "$GITHUB_OUTPUT"
-          echo "version=$cli_version" >> "$GITHUB_OUTPUT"
+          python scripts/ci/verify_release_inputs.py resolve-cli --tag "$GITHUB_REF_NAME" --source "${{ steps.resolve-tag.outputs.sha }}" --output bundled-cli.json
+          python -c 'import json,os; f=open(os.environ["GITHUB_OUTPUT"],"a"); f.write("version="+json.load(open("bundled-cli.json"))["version"]+"\n"); f.close()'
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -167,18 +166,33 @@ jobs:
       - name: Package extension (pre-release)
         if: steps.channel.outputs.is_prerelease == 'true'
         working-directory: src/PPDS.Extension
-        run: npx vsce package --target ${{ matrix.target }} --pre-release
+        run: npx vsce package --target ${{ matrix.target }} --pre-release --out ppds-${{ matrix.target }}.vsix --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
 
       - name: Package extension (stable)
         if: steps.channel.outputs.is_prerelease != 'true'
         working-directory: src/PPDS.Extension
-        run: npx vsce package --target ${{ matrix.target }}
+        run: npx vsce package --target ${{ matrix.target }} --out ppds-${{ matrix.target }}.vsix --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
+
+      - name: Validate exact packaged VSIX before upload
+        run: >-
+          python scripts/ci/verify_release_inputs.py vsix
+          --tag "$GITHUB_REF_NAME"
+          --cli-version "${{ steps.resolve-cli.outputs.version }}"
+          --source "${{ steps.resolve-tag.outputs.sha }}"
+          --target "${{ matrix.target }}"
+          --channel "${{ steps.channel.outputs.is_prerelease }}"
+          --extension-root src/PPDS.Extension
+          --path src/PPDS.Extension/ppds-${{ matrix.target }}.vsix
+
+      - name: Recheck target vacancy before upload
+        if: github.event_name == 'push' || !inputs.dry_run
+        run: python scripts/ci/verify_release_inputs.py marketplace-vacant --tag "$GITHUB_REF_NAME" --target "${{ matrix.target }}"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v7
         with:
           name: extension-vsix-${{ matrix.target }}
-          path: src/PPDS.Extension/*.vsix
+          path: src/PPDS.Extension/ppds-${{ matrix.target }}.vsix
           retention-days: 30
 
       - name: Publish to VS Code Marketplace (pre-release)
@@ -186,7 +200,7 @@ jobs:
           steps.channel.outputs.is_prerelease == 'true' &&
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} --pre-release --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
+        run: npx vsce publish --packagePath ppds-${{ matrix.target }}.vsix --pre-release
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
 
@@ -195,7 +209,7 @@ jobs:
           steps.channel.outputs.is_prerelease != 'true' &&
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: src/PPDS.Extension
-        run: npx vsce publish --target ${{ matrix.target }} --baseImagesUrl https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/${{ steps.resolve-tag.outputs.sha }}/src/PPDS.Extension/media/
+        run: npx vsce publish --packagePath ppds-${{ matrix.target }}.vsix
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
 
@@ -227,12 +241,8 @@ jobs:
         shell: bash
         run: |
           sha="$(git rev-list -n 1 "$GITHUB_REF")"
-          cli_tag="$(git describe --tags --exact-match --match 'Cli-v*' "$sha" 2>/dev/null || true)"
-          if [[ -z "$cli_tag" ]]; then
-            echo "::error::Extension verification requires the co-located Cli-v* release tag."
-            exit 1
-          fi
-          echo "version=${cli_tag#Cli-v}" >> "$GITHUB_OUTPUT"
+          python scripts/ci/verify_release_inputs.py resolve-cli --tag "$GITHUB_REF_NAME" --source "$sha" --output bundled-cli.json
+          python -c 'import json,os; f=open(os.environ["GITHUB_OUTPUT"],"a"); f.write("version="+json.load(open("bundled-cli.json"))["version"]+"\n"); f.close()'
 
       - name: Verify all public Marketplace targets
         run: >-

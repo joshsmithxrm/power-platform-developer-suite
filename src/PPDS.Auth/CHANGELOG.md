@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-01
+
+### Changed
+
+- Refreshed Microsoft.Extensions dependencies to 10.0.14 and System.IdentityModel.Tokens.Jwt to 8.23.0 (#1501, #1502).
+- Updated SourceLink build tooling to 10.0.403 (#1498). Authentication source and public APIs are unchanged; the minor version aligns this coordinated release.
+
 ## [1.1.2] - 2026-10-30
 
 ### Security
@@ -68,7 +75,9 @@ First stable release. Consolidates features developed across the `1.0.0-beta.1` 
 - **`AuthenticationOutput` writes to stderr** — Authentication status messages are written to `Console.Error` (stderr) by default, keeping `stdout` clean for data consumers.
 - **`ProfileEncryption.Decrypt` error on non-Windows** — On macOS/Linux, attempting to decrypt a legacy `ENCRYPTED:`-prefixed profile value throws `AuthenticationException` with error code `Auth.LegacyEncryptedProfileUnsupported` rather than silently returning empty credentials.
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.1.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.2.0...HEAD
+[1.2.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.1.2...Auth-v1.2.0
+[1.1.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.1.1...Auth-v1.1.2
 [1.1.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.1.0...Auth-v1.1.1
 [1.1.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0...Auth-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Auth-v1.0.0
