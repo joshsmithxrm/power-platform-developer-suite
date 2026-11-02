@@ -54,7 +54,7 @@ public class ModelDrivenAppCommandE2ETests : CliE2ETestBase
     public override async Task DisposeAsync()
     {
         // Safety-net cleanup: remove test entity from both draft and published state.
-        await TryRemoveEntityAsync(TestEntity, publish: false);
+        await RunCleanupIfSafeAsync(() => TryRemoveEntityAsync(TestEntity, publish: false));
         await base.DisposeAsync();
     }
 
@@ -146,7 +146,7 @@ public class ModelDrivenAppCommandE2ETests : CliE2ETestBase
         finally
         {
             // Cleanup: remove from draft and publish to restore baseline state
-            await TryRemoveEntityAsync(TestEntity, publish: true);
+            await RunCleanupIfSafeAsync(() => TryRemoveEntityAsync(TestEntity, publish: true));
         }
     }
 
