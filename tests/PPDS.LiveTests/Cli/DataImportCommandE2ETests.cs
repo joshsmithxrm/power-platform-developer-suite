@@ -11,7 +11,7 @@ namespace PPDS.LiveTests.Cli;
 /// </summary>
 /// <remarks>
 /// Tier 1 tests validate option parsing and file existence (no credentials).
-/// Tier 2 tests perform a full schema -> export -> delete -> import round-trip
+/// Tier 2 tests perform a fixture export -> delete -> import round-trip
 /// against a live Dataverse environment and are marked DestructiveE2E.
 /// </remarks>
 public class DataImportCommandE2ETests : CliE2ETestBase
@@ -123,25 +123,9 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         var accountId = await LiveTestHelpers.CreateAccountAsync(Configuration, accountName);
         _createdAccountIds.Add(accountId);
 
-        // 2. Generate a schema scoped to just this account via filter.
-        var schemaPath = GenerateTempFilePath(".xml");
-        var schemaResult = await RunCliAsync(
-            "data", "schema",
-            "--entities", "account",
-            "--output", schemaPath,
-            "--filter", $"account:name = '{accountName}'",
-            "--profile", _profileName!);
-        schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
-
-        // 3. Export the data using that schema.
+        // Export only this creation-owned ID and fixed minimal fields.
         var zipPath = GenerateTempFilePath(".zip");
-        var exportResult = await RunCliAsync(
-            "data", "export",
-            "--schema", schemaPath,
-            "--output", zipPath,
-            "--profile", _profileName!);
-        exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
-        File.Exists(zipPath).Should().BeTrue("export should have produced a zip");
+        await ExportOwnedAccountAsync(accountId, zipPath, _profileName!);
 
         // 4. Delete the account so the import can recreate it. The id stays in
         // _createdAccountIds — DeleteAccountsAsync ignores not-found, so cleanup
@@ -174,22 +158,8 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         var accountId = await LiveTestHelpers.CreateAccountAsync(Configuration, accountName);
         _createdAccountIds.Add(accountId);
 
-        var schemaPath = GenerateTempFilePath(".xml");
-        var schemaResult = await RunCliAsync(
-            "data", "schema",
-            "--entities", "account",
-            "--output", schemaPath,
-            "--filter", $"account:name = '{accountName}'",
-            "--profile", _profileName!);
-        schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
-
         var zipPath = GenerateTempFilePath(".zip");
-        var exportResult = await RunCliAsync(
-            "data", "export",
-            "--schema", schemaPath,
-            "--output", zipPath,
-            "--profile", _profileName!);
-        exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
+        await ExportOwnedAccountAsync(accountId, zipPath, _profileName!);
 
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
 
@@ -224,22 +194,8 @@ public class DataImportCommandE2ETests : CliE2ETestBase
         var accountId = await LiveTestHelpers.CreateAccountAsync(Configuration, accountName);
         _createdAccountIds.Add(accountId);
 
-        var schemaPath = GenerateTempFilePath(".xml");
-        var schemaResult = await RunCliAsync(
-            "data", "schema",
-            "--entities", "account",
-            "--output", schemaPath,
-            "--filter", $"account:name = '{accountName}'",
-            "--profile", profileName);
-        schemaResult.ExitCode.Should().Be(0, $"schema failed: {schemaResult.StdErr}");
-
         var zipPath = GenerateTempFilePath(".zip");
-        var exportResult = await RunCliAsync(
-            "data", "export",
-            "--schema", schemaPath,
-            "--output", zipPath,
-            "--profile", profileName);
-        exportResult.ExitCode.Should().Be(0, $"export failed: {exportResult.StdErr}");
+        await ExportOwnedAccountAsync(accountId, zipPath, profileName);
 
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
 
@@ -254,6 +210,11 @@ public class DataImportCommandE2ETests : CliE2ETestBase
     #endregion
 
     #region Helper Methods
+
+    private Task<CliResult> ExportOwnedAccountAsync(Guid accountId, string zipPath, string profile)
+        => FixtureAccountExport.Create(_createdAccountIds, [accountId]).RunAsync(
+            GenerateTempFilePath(".xml"), GenerateTempFilePath(".pending.zip"), zipPath,
+            (args, token) => RunCliWithCancellationAsync(token, args), profile);
 
     private async Task EnsureProfileAsync()
     {
