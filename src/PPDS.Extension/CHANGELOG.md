@@ -6,14 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- Bind notebook runs independently to their selected environment and captured authentication identity, including concurrent SQL/FetchXML runs, cancellation, queued runs, completion, and conversion. Renaming or reordering profiles cannot redirect captured queries.
-- Attribute notebook outputs, errors, record links, exports, and query history to their executed environment. Preserve valid legacy notebooks with missing or partial environment metadata.
+## [1.8.0] - 2026-11-01
 
 ### Added
 
-- Notebook environment toolbar action and **Use session default** option, with in-memory acknowledgement before runs on Production or Unknown targets. This acknowledgement does not authorize DML.
+- Notebook environment toolbar action and **Use session default**, with in-memory acknowledgement before runs on Production or Unknown targets. This acknowledgement does not authorize DML.
+
+### Changed
+
+- Bundled the matching CLI 1.5.0 release, including bounded flow activation, form-write safeguards and plugin/web-resource reliability fixes. Update the Extension and bundled daemon together; missing or mismatched captured identity fails closed with recovery guidance.
+- Refreshed development/packaging tooling: `@vscode/vsce` 3.9.2 to 4.1.0, `@vscode/test-electron` 3.0.0 to 3.1.0, ESLint 10.5.0 to 10.13.0, typescript-eslint 8.70.0 to 8.72.1 and Stylelint 17.14.0 to 17.16.0 (#1494, #1455, #1451, #1454, #1496). Existing VS Code `^1.116.0` and Node 22 development requirements are retained.
+- This stable-channel release follows the even-minor convention. Per-cell environment overrides remain deferred; see the [coordinated notes and migration guidance](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md).
+
+### Fixed
+
+- Bound notebook runs independently to the selected environment and captured authentication identity during concurrent SQL/FetchXML runs, cancellation, queued execution, completion and conversion. Profile rename/reorder cannot redirect captured queries.
+- Attributed outputs, errors, record links, exports and query history to the executed environment; preserved valid legacy notebooks with missing or partial environment metadata.
 
 ## [1.6.2] - 2026-10-30
 
@@ -199,7 +207,9 @@ Complete ground-up rebuild of the extension. The new architecture uses a thin VS
 
 _Last stable release of the legacy architecture. See [archived repository](https://github.com/joshsmithxrm/power-platform-developer-suite/tree/archived) for full history._
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.6.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.8.0...HEAD
+[1.8.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.6.2...Extension-v1.8.0
+[1.6.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.6.1...Extension-v1.6.2
 [1.6.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.6.0...Extension-v1.6.1
 [1.6.0]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.1...Extension-v1.6.0
 [1.4.1]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Extension-v1.4.0...Extension-v1.4.1

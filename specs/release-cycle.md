@@ -1,7 +1,7 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-11-01
 **Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
@@ -68,6 +68,7 @@ All three paths lead to:
 | `release-cadence-check.yml` | Weekly cron, checks days since last release tag, opens check-in issue |
 | `/release` skill (existing) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
 | `verify_public_release.py` | Read-only post-publish verification through nuget.org, GitHub Releases, and the VS Code Marketplace |
+| `verify_release_inputs.py`, `inspect_release_assemblies.ps1` | Read-only pre-upload identity, dependency, signing, channel, vacancy and workflow-owned draft checks |
 | GitHub Milestones | Group PRs into minor release targets (v1.1.0, v1.2.0, ...) |
 
 ### Dependencies
@@ -277,6 +278,31 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 
 ---
 
+### Pre-upload artifact integrity
+
+The publishing workflows validate artifacts before uploading. NuGet identity,
+repository source, framework inventory and internal dependencies must agree with
+the checkout's unambiguous same-commit tags. Tool `.deps.json` project versions
+are not version authority: inspect the packaged DLL informational versions and
+source SHA instead. Plugins additionally requires the exact repository public
+key and successful Windows SDK `sn.exe -vf` verification. Missing tooling or
+verification errors fail closed; no signing credentials are read by the guard.
+
+Extension packaging pins image links to the release source, validates the VSIX
+manifest/lock/tag/channel and bundled CLI bytes/source, then publishes that exact
+archive via `--packagePath`. A stable Extension cannot bundle a prerelease CLI.
+Registry lookups are bounded, read-only and fail closed. The Marketplace version
+must be vacant before the matrix starts; each target is checked again before
+upload so a sibling's successful upload is not mistaken for target occupancy.
+
+CLI notes are extracted from one exact nonempty CHANGELOG version section;
+official repository `blob/main` links are pinned to the source SHA. A published
+or unowned GitHub release is never adopted. A draft can resume only for the same
+source/workflow run, notes and release channel, with matching existing asset
+digests. Upload only missing assets without replacement, then re-read and verify
+the complete draft inventory before making it public. Missing/changed digests or
+lookup failures stop for review; there is no automated rollback or repair.
+
 ## Acceptance Criteria
 
 | ID | Criterion | Test | Status |
@@ -313,6 +339,12 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 | AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
 | AC-31 | Cadence selection accepts production ISO-strict offsets, normalizes elapsed-time calculations to UTC, filters malformed release tags through the shared strict SemVer model, and fails loudly on invalid timestamps | `tests/ci/test_release_cadence_check.py::TestUtcAwareProductionTimestamps`, `tests/ci/test_release_cadence_check.py::TestStrictReleaseTagSelection` | ✅ |
 | AC-32 | CLI and Extension tag events run one serialized, CLI-keyed reconciliation: exact commit co-location satisfies the relationship, legacy labeled records migrate safely, later Extension tags comment/close matching alerts, and higher stable CLI tags create their replacement before superseding older alerts | `tests/ci/test_extension_corelease_check.py::TestIncident1375`, `tests/ci/test_extension_corelease_check.py::TestIncident1410`, `tests/ci/test_extension_corelease_check.py::TestConvergentReconciliation`, `tests/ci/test_extension_corelease_check.py::TestIssueApplication` | ✅ |
+| AC-33 | Before NuGet upload, validate the exact package/symbol identity and tag version, repository commit, expected framework payloads, and internal dependency versions against unambiguous same-commit tags; stable releases reject alpha internal dependencies or missing/unexpected graph entries | `tests/ci/test_verify_release_inputs.py::TestNugetInputs` | ✅ |
+| AC-34 | Plugins publication verifies the packaged net462 assembly's full public key against the repository public key and forces cryptographic strong-name verification; unsigned, public-only, wrong-key, tampered, missing-tool, and process failures stop before upload | `tests/ci/test_verify_release_inputs.py::TestPluginSignature` | ✅ |
+| AC-35 | Before VSIX upload, require one valid same-commit CLI tag and no prerelease CLI in a stable Extension; verify source manifest/lock/tag/channel, packaged identity/platform and CLI bytes/source, then publish exactly that VSIX | `tests/ci/test_verify_release_inputs.py::TestVsixInputs`, `tests/ci/test_verify_release_inputs.py::TestPublisherOrdering` | ✅ |
+| AC-36 | Publishing fails closed on occupied NuGet/Marketplace versions, malformed or incomplete registry responses, and lookup errors. Marketplace checks the entire version before starting its matrix and the exact target before upload; it never treats network failure as vacancy | `tests/ci/test_verify_release_inputs.py::TestVacancy` | ✅ |
+| AC-37 | CLI notes come from one nonempty exact-version CHANGELOG section. Only a draft with the same source/run, notes, channel and matching existing asset digests may resume missing uploads without clobbering; re-read and require complete matching assets before publication | `tests/ci/test_verify_release_inputs.py::TestCliReleasePlan` | ✅ |
+| AC-38 | All publisher guards precede external uploads, native CLI binaries report the exact tagged version and source before artifact upload, and guard failures never invoke publication or automated rollback | `tests/ci/test_verify_release_inputs.py::TestPublisherOrdering` | ✅ |
 
 ### Edge Cases
 

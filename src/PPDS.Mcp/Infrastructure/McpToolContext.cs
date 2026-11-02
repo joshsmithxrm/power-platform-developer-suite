@@ -26,7 +26,7 @@ namespace PPDS.Mcp.Infrastructure;
 /// - Getting or creating connection pools
 /// - Creating service providers with full DI for service access
 /// </remarks>
-public sealed class McpToolContext : IDisposable
+public sealed partial class McpToolContext : IDisposable
 {
     private readonly IMcpConnectionPoolManager _poolManager;
     private readonly ProfileStore _profileStore;
