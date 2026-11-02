@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auth inspection reports the actual session target after `--environment` overrides and allowed environment switches, matching subsequent operations.
 - Captured profile/target snapshots and pool identity prevent external default changes or reused profile names from redirecting in-flight operations.
 
+### Security
+
+- Rejected disallowed or malformed environment URLs before direct authenticated resolution. Name-based selection now uses discovery only, then enforces the session allowlist; final switching rechecks the resolved target.
+
 ### Limitations
 
 - Draft fingerprints are preflight checks, not atomic concurrency protection; avoid concurrent editors and inspect applied/unknown phases before retrying. General FormXML/layout authoring is outside this increment, and an unmanaged solution does not bypass locked managed properties.
