@@ -220,7 +220,7 @@ public sealed class PluginFixtureCleanupTests
         {
             var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Fixture.RunAsync(() => Task.CompletedTask));
             Assert.Same(primary, harness.Fixture.PreflightFailure);
-            Assert.Contains(nameof(Run_PreflightFailureSurvivesEvidenceAndReportingFailures), harness.Fixture.PreflightFailure.StackTrace);
+            Assert.Contains(nameof(Run_PreflightFailureSurvivesEvidenceAndReportingFailures), primary.StackTrace);
             Assert.DoesNotContain(secret, actual.ToString());
             Assert.Null(actual.InnerException);
             Assert.All(harness.Messages, message => Assert.DoesNotContain(secret, message));
