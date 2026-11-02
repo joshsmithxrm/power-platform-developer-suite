@@ -34,6 +34,7 @@ public class MetadataRelationshipCreateE2ETests : CliE2ETestBase
         // Account and contact are system entities present in every Dataverse env.
         var rawName = $"{Prefix}_acct_contact_{Guid.NewGuid():N}";
         var schemaName = rawName[..Math.Min(40, rawName.Length)];
+        TrackPossibleOwnedResource("relationship", schemaName);
 
         try
         {
@@ -55,11 +56,11 @@ public class MetadataRelationshipCreateE2ETests : CliE2ETestBase
         finally
         {
             // Best-effort cleanup; ignore exit code so a partial success still tears down.
-            await RunCliAsync(
+            await RunCleanupIfSafeAsync(() => RunCliAsync(
                 "metadata", "relationship", "delete",
                 "--solution", Solution,
                 "--name", schemaName,
-                "--force");
+                "--force"));
         }
     }
 }

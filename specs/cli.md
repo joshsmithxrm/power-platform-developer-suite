@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last Updated:** 2026-01-23
-**Code:** [src/PPDS.Cli/Commands/](../src/PPDS.Cli/Commands/)
+**Code:** src/PPDS.Cli/Commands/ | tests/PPDS.LiveTests/Cli/ | tests/PPDS.LiveTests/Infrastructure/FixtureProcessInterruption.cs
 **Surfaces:** CLI
 
 ---
@@ -465,6 +465,20 @@ User preferences stored in `~/.ppds/settings.json`:
 - [ ] Exit codes match documented meanings
 - [ ] Ctrl+C cancels long-running operations cleanly
 - [ ] Commands work with piped input/output
+
+### CLI fixture process interruption
+
+CLI E2E commands have a command deadline and optional caller cancellation. After successful process dispatch, an exception (including output initialization/drain failure) permanently marks that fixture instance as requiring manual review before attempting shutdown. Termination uses the shared fixture helper with a fresh 30-second stop-wait deadline independent of cancelled operation tokens. The wait remains bounded even if an adapter ignores cancellation. Kill/probe/wait/report failures do not replace the original operation failure or its causal stack. Caller cancellation remains cancellation; a command deadline remains a timeout, classified before shutdown.
+
+An observed parent exit does not prove every descendant exited or a Dataverse request rolled back. Remote outcome remains unknown. Subsequent CLI commands and automatic cleanup (including direct SDK and test-local finally paths) are prohibited for that instance, even after confirmed parent exit. Local files, isolated config and known cleanup ownership IDs are retained for manual recovery. Diagnostics record safe paths, failure types and stop outcomes, never raw command arguments, environment values or captured output. A command cancelled before launch does not enter this state. Normal nonzero CLI exits retain their complete CliResult.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-PROCESS-01 | Caller cancellation and command timeout retain their distinct primary outcome through bounded stop; stop uses a fresh 30-second deadline even when exit/drain ignores cancellation. | CliProcessShutdownTests.TimeoutKeepsPrimaryAndBoundsUnconfirmedStop, CallerCancellationPreservesExceptionAndStack | ✅ |
+| AC-PROCESS-02 | Mark unknown before stop; kill/probe/wait races and faults cannot replace primary failure, and confirmed exit never authorizes retry or cleanup. | CliProcessShutdownTests.QuarantinePrecedesStopAndBlocksFollowup; FixtureProcessInterruptionTests.ExitDuringKillPreservesPrimaryAndConfirmsExit, ConfirmedExitStillSuppressesCleanupAndPreservesPrimary | ✅ |
+| AC-PROCESS-03 | Every existing CLI cleanup path honors the instance gate before CLI/SDK cleanup or local deletion; retained ownership/config evidence survives and cleanup refusal cannot mask the test failure. | CliProcessShutdownTests.CleanupGateRetainsOwnedArtifactsAndIds, PluginCleanupSkipsAfterInterruptedBody, ExistingAccountDisposersSkipInjectedSdkCleanup, ModelDrivenAppDisposerSkipsCleanup, FinallyCleanupPreservesPrimaryAndRetainsCustomArtifact | ✅ |
+| AC-PROCESS-04 | Post-start initialization/output failures use bounded stop; normal output/nonzero exits and pre-start cancellation retain their behavior. | CliProcessShutdownTests.PostStartFailureIsPreserved, NativeChildTimeoutIsStopped, NativeChildNormalExitCapturesOutput, PreCancelledCommandDoesNotLaunch | ✅ |
+| AC-PROCESS-05 | Timeout/refusal/evidence diagnostics omit argument/secret/output contents; evidence failure cannot replace primary failure or clear the gate. | CliProcessShutdownTests.DiagnosticsOmitArgumentsAndEvidenceFailurePreservesPrimary | ✅ |
 
 ### Test Categories
 

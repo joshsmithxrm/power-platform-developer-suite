@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
+using PPDS.LiveTests.Infrastructure;
 using FluentAssertions;
 using Xunit;
 
@@ -39,6 +41,26 @@ public sealed class CliResult
 [Trait("Category", "Integration")]
 public abstract class CliE2ETestBase : IAsyncLifetime
 {
+    private readonly TimeProvider _timeProvider;
+    private readonly FixtureProcessInterruption _interruption;
+    private readonly Dictionary<string, Guid[]> _retainedCleanupIds = new(StringComparer.Ordinal);
+    private readonly object _evidenceGate = new();
+    private readonly HashSet<string> _ownedProfileNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> _possibleOwnedResources = new(StringComparer.Ordinal);
+    private string? _failureType;
+    private readonly object _admissionGate = new();
+    private bool _commandRunning;
+
+    // Per-instance offline seam: teardown regressions never construct an SDK client.
+    internal Func<LiveTestConfiguration, IEnumerable<Guid>, Task> DeleteAccountsAsync { get; set; }
+        = LiveTestHelpers.DeleteAccountsAsync;
+
+    /// <summary>An interrupted command has an unknown remote outcome, even after parent exit.</summary>
+    protected bool RequiresManualReview => _interruption.RequiresManualReview;
+
+    internal FixtureProcessStopEvidence? StopEvidence => _interruption.Evidence;
+    internal string InterruptionEvidencePath => Path.Combine(IsolatedConfigDir, "cli-interruption.json");
+
     /// <summary>
     /// Configuration containing credentials and connection details.
     /// </summary>
@@ -73,8 +95,12 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     /// <summary>
     /// Initializes a new instance of the CLI E2E test base.
     /// </summary>
-    protected CliE2ETestBase()
+    protected CliE2ETestBase() : this(TimeProvider.System) { }
+
+    internal CliE2ETestBase(TimeProvider timeProvider)
     {
+        _timeProvider = timeProvider;
+        _interruption = new FixtureProcessInterruption(timeProvider);
         Configuration = new Infrastructure.LiveTestConfiguration();
         // Create unique config directory per test instance to isolate profile stores
         IsolatedConfigDir = Path.Combine(Path.GetTempPath(), $"ppds-test-{Guid.NewGuid():N}");
@@ -131,6 +157,7 @@ public abstract class CliE2ETestBase : IAsyncLifetime
         CancellationToken cancellationToken,
         string[] args)
     {
+        EnsureCommandMayStart();
         cancellationToken.ThrowIfCancellationRequested();
         var startInfo = new ProcessStartInfo
         {
@@ -176,51 +203,155 @@ public abstract class CliE2ETestBase : IAsyncLifetime
             startInfo.ArgumentList.Add(arg);
         }
 
+        return await RunProcessAsync(startInfo, cancellationToken);
+    }
+
+    // Internal seam permits harmless local-process regressions without invoking CLI/authentication.
+    internal async Task<CliResult> RunProcessAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
+    {
+        EnsureCommandMayStart();
+        cancellationToken.ThrowIfCancellationRequested();
         using var process = new Process { StartInfo = startInfo };
         var stdOutBuilder = new StringBuilder();
         var stdErrBuilder = new StringBuilder();
-
-        process.OutputDataReceived += (_, e) =>
+        var outputGate = new object();
+        DataReceivedEventHandler output = (_, e) =>
         {
-            if (e.Data != null)
-                stdOutBuilder.AppendLine(e.Data);
+            if (e.Data != null) lock (outputGate) stdOutBuilder.AppendLine(e.Data);
         };
-
-        process.ErrorDataReceived += (_, e) =>
+        DataReceivedEventHandler error = (_, e) =>
         {
-            if (e.Data != null)
-                stdErrBuilder.AppendLine(e.Data);
+            if (e.Data != null) lock (outputGate) stdErrBuilder.AppendLine(e.Data);
         };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var commandTimeout = new CancellationTokenSource(CommandTimeout);
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(commandTimeout.Token, cancellationToken);
+        process.OutputDataReceived += output;
+        process.ErrorDataReceived += error;
         try
         {
-            await process.WaitForExitAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try
+            return await RunCommandAsync(() =>
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException) when (process.HasExited) { }
-            await process.WaitForExitAsync(CancellationToken.None);
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new TimeoutException(
-                $"CLI command timed out after {CommandTimeout.TotalSeconds}s: ppds {string.Join(" ", args)}");
+                // A genuine launch failure has no dispatched operation to terminate.
+                if (!process.Start()) throw new InvalidOperationException("CLI test process did not start.");
+                return new FixtureProcessInterruption.NativeFixtureProcess(process);
+            }, async token =>
+            {
+                // Reader initialization and final output drain are inside the interruption boundary.
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                await process.WaitForExitAsync(token);
+                lock (outputGate)
+                {
+                    return new CliResult
+                    {
+                        ExitCode = process.ExitCode,
+                        StdOut = stdOutBuilder.ToString(),
+                        StdErr = stdErrBuilder.ToString()
+                    };
+                }
+            }, cancellationToken);
         }
-
-        return new CliResult
+        finally
         {
-            ExitCode = process.ExitCode,
-            StdOut = stdOutBuilder.ToString(),
-            StdErr = stdErrBuilder.ToString()
-        };
+            process.OutputDataReceived -= output;
+            process.ErrorDataReceived -= error;
+        }
+    }
+
+    // Admission is atomic and occurs before dispatch. Fixtures are sequential; overlapping
+    // commands are rejected rather than allowing an interrupted command to race a new launch.
+    internal async Task<CliResult> RunCommandAsync(
+        Func<IFixtureProcess> startProcess, Func<CancellationToken, Task<CliResult>> operation, CancellationToken callerToken)
+    {
+        lock (_admissionGate)
+        {
+            EnsureCommandMayStart();
+            callerToken.ThrowIfCancellationRequested();
+            if (_commandRunning) throw new InvalidOperationException("This CLI fixture already has an active command.");
+            _commandRunning = true;
+        }
+        try
+        {
+            var process = startProcess();
+            return await ObserveDispatchedProcessAsync(process, operation, callerToken);
+        }
+        finally { lock (_admissionGate) _commandRunning = false; }
+    }
+
+    // No admission check is allowed here: every failure after dispatch must traverse stop handling.
+    private async Task<CliResult> ObserveDispatchedProcessAsync(
+        IFixtureProcess process, Func<CancellationToken, Task<CliResult>> operation, CancellationToken callerToken)
+    {
+        try
+        {
+            return await _interruption.ObserveAsync(process, async () =>
+            {
+                using var commandTimeout = new CancellationTokenSource(CommandTimeout, _timeProvider);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(commandTimeout.Token, callerToken);
+                try
+                {
+                    return await operation(linked.Token).WaitAsync(linked.Token);
+                }
+                catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested && commandTimeout.IsCancellationRequested)
+                {
+                    // Classify now, before stopping: a later caller cancellation cannot turn timeout into cancellation.
+                    // Never echo arguments: auth commands can contain credentials.
+                    throw new TimeoutException($"CLI command timed out after {CommandTimeout.TotalSeconds}s.", exception);
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            lock (_evidenceGate) _failureType = exception.GetType().FullName;
+            RetainInterruptionEvidence();
+            throw;
+        }
+    }
+
+    private void EnsureCommandMayStart()
+    {
+        if (RequiresManualReview)
+            throw new InvalidOperationException(
+                $"A prior CLI command was interrupted; refusing another command or cleanup. " +
+                $"Process/remote outcome requires manual review. Retained config: {IsolatedConfigDir}");
+    }
+
+    /// <summary>Gates existing CLI, SDK and local cleanup without replacing the interrupted test failure.</summary>
+    protected async Task<bool> RunCleanupIfSafeAsync(
+        Func<Task> cleanup, string? ownedTable = null, IEnumerable<Guid>? ownedIds = null)
+    {
+        if (await _interruption.RunCleanupIfSafeAsync(cleanup)) return true;
+        if (ownedTable != null && ownedIds != null)
+            lock (_evidenceGate) _retainedCleanupIds[ownedTable] = ownedIds.ToArray();
+        RetainInterruptionEvidence();
+        return false;
+    }
+
+    private void RetainInterruptionEvidence()
+    {
+        // Retain only safe ownership/stop metadata, never arguments, environment values, or output.
+        // Evidence/reporting failure cannot replace the primary exception or authorize cleanup.
+        try
+        {
+            lock (_evidenceGate)
+            {
+                var evidence = new
+                {
+                    requiresManualReview = true,
+                    failureType = _failureType,
+                    parentExitConfirmed = StopEvidence?.ExitConfirmed,
+                    remoteOutcome = "unknown",
+                    stopErrors = StopEvidence?.Errors,
+                    configDirectory = IsolatedConfigDir,
+                    ownedFiles = CreatedFiles.ToArray(),
+                    ownedProfiles = _ownedProfileNames.ToArray(),
+                    possibleOwnedResources = _possibleOwnedResources,
+                    ownedRecords = _retainedCleanupIds
+                };
+                File.WriteAllText(InterruptionEvidencePath, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }));
+            }
+        }
+        catch (Exception) { /* The retained directory and in-memory stop evidence remain available. */ }
+        try { Console.Error.WriteLine($"CLI fixture interrupted; automatic cleanup skipped. Manual review required. Retained config: {IsolatedConfigDir}"); }
+        catch (Exception) { /* Reporting must not mask the primary failure. */ }
     }
 
     /// <summary>
@@ -230,6 +361,7 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     {
         var name = $"e2e-test-{Guid.NewGuid():N}".Substring(0, 30);
         CreatedProfiles.Add(name);
+        lock (_evidenceGate) _ownedProfileNames.Add(name);
         return name;
     }
 
@@ -239,8 +371,25 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     protected string GenerateTempFilePath(string extension = ".xml")
     {
         var path = Path.Combine(Path.GetTempPath(), $"ppds-e2e-{Guid.NewGuid():N}{extension}");
-        CreatedFiles.Add(path);
+        TrackOwnedFile(path);
         return path;
+    }
+
+    /// <summary>Retains only an explicitly owned local artifact path, never its contents.</summary>
+    protected void TrackOwnedFile(string path)
+    {
+        lock (_evidenceGate) CreatedFiles.Add(path);
+    }
+
+    /// <summary>Records a fixture's generated resource name; existence remains unconfirmed after interruption.</summary>
+    protected void TrackPossibleOwnedResource(string kind, string name)
+    {
+        lock (_evidenceGate)
+        {
+            if (!_possibleOwnedResources.TryGetValue(kind, out var names))
+                _possibleOwnedResources[kind] = names = [];
+            names.Add(name);
+        }
     }
 
     /// <summary>
@@ -257,6 +406,12 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     /// </summary>
     public virtual Task DisposeAsync()
     {
+        if (RequiresManualReview)
+        {
+            RetainInterruptionEvidence();
+            return Task.CompletedTask;
+        }
+
         // Clean up created files
         foreach (var filePath in CreatedFiles)
         {
