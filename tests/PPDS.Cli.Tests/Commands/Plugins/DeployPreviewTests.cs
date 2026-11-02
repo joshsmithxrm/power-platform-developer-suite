@@ -102,6 +102,7 @@ public sealed class DeployPreviewTests
         Assert.Equal("failed", result.Status);
         Assert.True(result.DryRun);
         Assert.Equal(0, result.ImagesCreated + result.ImagesUpdated);
+        fixture.Service.Verify(s => s.ListImagesForStepAsync(fixture.StepId, CancellationToken.None), Times.Once);
         fixture.VerifyReadsOnly();
     }
 
