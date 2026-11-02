@@ -70,6 +70,17 @@ public static class ExportCommand
                 result.AddError("--page-parallel must be at least 0");
         });
 
+        var maxRecordsPerEntityOption = new Option<int?>("--max-records-per-entity")
+        {
+            Description = "Fail before writing if any entity exceeds this positive primary-row cap; requires paging cookies and disables count/partition reads and relationship/binary expansion (default: unlimited)"
+        };
+        maxRecordsPerEntityOption.Validators.Add(result =>
+        {
+            // Conversion errors are recorded after validators; GetValue would throw on nonnumeric input here.
+            if (result.Tokens.Count == 1 && int.TryParse(result.Tokens[0].Value, out var value) && value <= 0)
+                result.AddError("--max-records-per-entity must be at least 1");
+        });
+
         var pageParallelThresholdOption = new Option<int>("--page-parallel-threshold")
         {
             Description = "Minimum records before page-level parallelism activates",
@@ -110,6 +121,7 @@ public static class ExportCommand
             parallelOption,
             batchSizeOption,
             pageParallelOption,
+            maxRecordsPerEntityOption,
             pageParallelThresholdOption,
             outputFormatOption,
             dataFormatOption,
@@ -126,6 +138,7 @@ public static class ExportCommand
             var parallel = parseResult.GetValue(parallelOption);
             var batchSize = parseResult.GetValue(batchSizeOption);
             var pageParallel = parseResult.GetValue(pageParallelOption);
+            var maxRecordsPerEntity = parseResult.GetValue(maxRecordsPerEntityOption);
             var pageParallelThreshold = parseResult.GetValue(pageParallelThresholdOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var dataFormat = parseResult.GetValue(dataFormatOption);
@@ -134,7 +147,7 @@ public static class ExportCommand
 
             return await ExecuteAsync(
                 profile, environment, schema, output, parallel, batchSize,
-                pageParallel, pageParallelThreshold,
+                pageParallel, pageParallelThreshold, maxRecordsPerEntity,
                 outputFormat, dataFormat, verbose, debug, cancellationToken);
         });
 
@@ -150,6 +163,7 @@ public static class ExportCommand
         int batchSize,
         int pageParallel,
         int pageParallelThreshold,
+        int? maxRecordsPerEntity,
         OutputFormat outputFormat,
         ExportDataFormat dataFormat,
         bool verbose,
@@ -183,6 +197,7 @@ public static class ExportCommand
                 PageSize = batchSize,
                 PageLevelParallelism = pageParallel,
                 PageLevelParallelismThreshold = pageParallelThreshold,
+                MaxRecordsPerEntity = maxRecordsPerEntity,
                 Format = dataFormat
             };
 

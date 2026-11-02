@@ -7,7 +7,7 @@ namespace PPDS.LiveTests.Cli;
 
 /// <summary>
 /// End-to-end tests for the full data migration workflow:
-/// schema generation -> export -> import round-trip.
+/// fixture-scoped export -> import round-trip.
 /// Tests only run on .NET 8.0 since CLI is spawned with --framework net8.0.
 /// </summary>
 /// <remarks>
@@ -32,14 +32,13 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
     private string? _profileName;
 
     /// <summary>
-    /// The full round-trip pipeline runs three CLI invocations sequentially
-    /// (schema, export, import), so allow extra time.
+    /// The full round-trip pipeline runs export and import CLI invocations sequentially, so allow extra time.
     /// </summary>
     protected override TimeSpan CommandTimeout => TimeSpan.FromMinutes(5);
 
     [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
-    public async Task FullRoundTrip_SchemaExportImport_PreservesAccountData()
+    public async Task FullRoundTrip_FixtureExportImport_PreservesAccountData()
     {
         await EnsureProfileAsync();
 
@@ -48,29 +47,9 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
         var accountId = await LiveTestHelpers.CreateAccountAsync(Configuration, name);
         _createdAccountIds.Add(accountId);
 
-        // 2. Generate a filtered schema that targets only this account by name.
-        var schemaPath = GenerateTempFilePath(".xml");
-        var schemaResult = await RunCliAsync(
-            "data", "schema",
-            "--entities", "account",
-            "--output", schemaPath,
-            "--filter", $"account:name = '{name}'",
-            "--profile", _profileName!);
-
-        schemaResult.ExitCode.Should().Be(0, $"Schema generation failed: {schemaResult.StdErr}");
-        File.Exists(schemaPath).Should().BeTrue("Schema file should be created");
-
-        // 3. Export data using the filtered schema.
+        // 2-3. Export the captured fixture ID with only accountid/name.
         var zipPath = GenerateTempFilePath(".zip");
-        var exportResult = await RunCliAsync(
-            "data", "export",
-            "--schema", schemaPath,
-            "--output", zipPath,
-            "--profile", _profileName!);
-
-        exportResult.ExitCode.Should().Be(0, $"Export failed: {exportResult.StdErr}");
-        File.Exists(zipPath).Should().BeTrue("Export ZIP file should be created");
-        new FileInfo(zipPath).Length.Should().BeGreaterThan(0, "Export ZIP should have content");
+        await ExportOwnedAccountAsync(accountId, zipPath);
 
         // 4. Delete the source account so import has to recreate it.
         await LiveTestHelpers.DeleteAccountsAsync(Configuration, new[] { accountId });
@@ -103,29 +82,9 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
         var name = $"{_testPrefix}_Upsert_{Guid.NewGuid():N}";
         var accountId = await CreateAccountWithDescriptionAsync(name, "ORIGINAL");
 
-        // 2. Generate a filtered schema. By default, schema includes all attributes
-        // for an entity, so the description column will be captured.
-        var schemaPath = GenerateTempFilePath(".xml");
-        var schemaResult = await RunCliAsync(
-            "data", "schema",
-            "--entities", "account",
-            "--output", schemaPath,
-            "--filter", $"account:name = '{name}'",
-            "--profile", _profileName!);
-
-        schemaResult.ExitCode.Should().Be(0, $"Schema generation failed: {schemaResult.StdErr}");
-
-        // 3. Export the original record (description=ORIGINAL) to a ZIP.
+        // 2-3. Only this fixture exports description to verify Upsert restores it.
         var zipPath = GenerateTempFilePath(".zip");
-        var exportResult = await RunCliAsync(
-            "data", "export",
-            "--schema", schemaPath,
-            "--output", zipPath,
-            "--profile", _profileName!);
-
-        exportResult.ExitCode.Should().Be(0, $"Export failed: {exportResult.StdErr}");
-        File.Exists(zipPath).Should().BeTrue("Export ZIP file should be created");
-        new FileInfo(zipPath).Length.Should().BeGreaterThan(0, "Export ZIP should have content");
+        await ExportOwnedAccountAsync(accountId, zipPath, includeDescription: true);
 
         // 4. Modify the live record's description so we can verify Upsert restores it.
         await UpdateAccountDescriptionAsync(accountId, "MODIFIED");
@@ -151,6 +110,11 @@ public class DataMigrationWorkflowE2ETests : CliE2ETestBase
     }
 
     #region Helper Methods
+
+    private Task<CliResult> ExportOwnedAccountAsync(Guid accountId, string zipPath, bool includeDescription = false)
+        => FixtureAccountExport.Create(_createdAccountIds, [accountId], includeDescription).RunAsync(
+            GenerateTempFilePath(".xml"), GenerateTempFilePath(".pending.zip"), zipPath,
+            (args, token) => RunCliWithCancellationAsync(token, args), _profileName!);
 
     private async Task EnsureProfileAsync()
     {

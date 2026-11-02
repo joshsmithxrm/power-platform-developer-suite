@@ -2,11 +2,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Security;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -130,12 +132,26 @@ namespace PPDS.Migration.Export
 
             try
             {
+                if (options.MaxRecordsPerEntity.HasValue)
+                {
+                    if (options.MaxRecordsPerEntity <= 0 || options.PageSize <= 0)
+                        throw new ArgumentOutOfRangeException(nameof(options), "Bounded export requires positive row and page limits.");
+                    if (options.IncludeFileData || schema.Entities.Any(entity => entity.Relationships.Count != 0 ||
+                        entity.Fields.Any(field => field.IsFileColumn ||
+                            field.Type.Equals("image", StringComparison.OrdinalIgnoreCase) ||
+                            field.Type.Equals("binary", StringComparison.OrdinalIgnoreCase))))
+                        throw new InvalidOperationException("Bounded export does not permit relationship or binary/file expansion.");
+                    foreach (var entity in schema.Entities)
+                        ValidateBoundedFilter(entity.FetchXmlFilter);
+                }
+
                 // Pre-fetch approximate record counts for partition routing.
                 // Entities whose count query fails are surfaced via WarningCollector (F1);
                 // they will fall back to sequential export because recordCount=0 drops them below threshold.
                 var countFailures = new ConcurrentBag<string>();
-                var recordCounts = await GetEntityRecordCountsAsync(
-                    schema.Entities, countFailures, cancellationToken).ConfigureAwait(false);
+                var recordCounts = options.MaxRecordsPerEntity.HasValue
+                    ? new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+                    : await GetEntityRecordCountsAsync(schema.Entities, countFailures, cancellationToken).ConfigureAwait(false);
 
                 foreach (var failedEntity in countFailures)
                 {
@@ -183,6 +199,9 @@ namespace PPDS.Migration.Export
                             });
                         }
                     }).ConfigureAwait(false);
+
+                if (options.MaxRecordsPerEntity.HasValue && !errors.IsEmpty)
+                    throw new InvalidOperationException("A bounded entity export failed; no output artifact was written.");
 
                 // Export M2M relationships
                 progress.Report(new ProgressEventArgs
@@ -364,7 +383,13 @@ namespace PPDS.Migration.Export
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
+                    var remaining = options.MaxRecordsPerEntity.HasValue
+                        ? options.MaxRecordsPerEntity.Value - records.Count
+                        : int.MaxValue;
+                    var requestFetchXml = options.MaxRecordsPerEntity.HasValue
+                        ? BuildFetchXml(entitySchema, Math.Min(options.PageSize, remaining))
+                        : fetchXml;
+                    var pagedFetchXml = AddPaging(requestFetchXml, pageNumber, pagingCookie);
 
                     // E1: Acquire client per page, release before next iteration's await.
                     // CLAUDE.md NEVER: "Hold single pooled client for multiple queries."
@@ -373,6 +398,13 @@ namespace PPDS.Migration.Export
                     {
                         response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
                     }
+
+                    if (options.MaxRecordsPerEntity.HasValue &&
+                        (response.Entities.Count > remaining ||
+                         (response.MoreRecords && (response.Entities.Count == 0 || response.Entities.Count == remaining))))
+                        throw new InvalidOperationException("Bounded export exceeded its row budget or received an unsafe paging response; no rows were truncated.");
+                    if (options.MaxRecordsPerEntity.HasValue && response.MoreRecords && string.IsNullOrWhiteSpace(response.PagingCookie))
+                        throw new InvalidOperationException("Bounded export requires a nonempty paging cookie before continuation; simple paging is not supported.");
 
                     records.AddRange(response.Entities);
 
@@ -922,6 +954,8 @@ namespace PPDS.Migration.Export
         /// <returns>1 for sequential export, or N for partitioned export.</returns>
         public static int DeterminePartitionCount(long recordCount, ExportOptions options)
         {
+            if (options.MaxRecordsPerEntity.HasValue)
+                return 1;
             if (options.PageLevelParallelism == 1)
                 return 1;
 
@@ -1001,6 +1035,56 @@ namespace PPDS.Migration.Export
             }
 
             return fetch.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static void ValidateBoundedFilter(string? fragment)
+        {
+            if (string.IsNullOrWhiteSpace(fragment)) return;
+            const string error = "Bounded export permits only filter/condition/value XML; query expansion is not supported.";
+            XElement root;
+            try
+            {
+                using var source = new StringReader($"<root>{fragment}</root>");
+                using var reader = XmlReader.Create(source, new XmlReaderSettings
+                    { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+                root = XDocument.Load(reader).Root!;
+            }
+            catch (XmlException) { throw new InvalidOperationException(error); }
+
+            static bool HasUnexpectedNodes(XElement element) => element.Nodes().Any(node =>
+                node is not XElement && (node is not XText text || !string.IsNullOrWhiteSpace(text.Value)));
+
+            if (!root.HasElements || root.Elements().Any(element => element.Name != "filter") || HasUnexpectedNodes(root))
+                throw new InvalidOperationException(error);
+            foreach (var element in root.Descendants())
+            {
+                if (element.Name.Namespace != XNamespace.None) throw new InvalidOperationException(error);
+                switch (element.Name.LocalName)
+                {
+                    case "filter":
+                        var type = (string?)element.Attribute("type");
+                        if (element.Attributes().Any(attribute => attribute.Name != "type") ||
+                            (type != null && type != "and" && type != "or") || HasUnexpectedNodes(element) ||
+                            element.Elements().Any(child => child.Name != "filter" && child.Name != "condition"))
+                            throw new InvalidOperationException(error);
+                        break;
+                    case "condition":
+                        var attributeName = (string?)element.Attribute("attribute");
+                        if (string.IsNullOrEmpty(attributeName) || !LogicalNamePattern.IsMatch(attributeName) ||
+                            string.IsNullOrWhiteSpace((string?)element.Attribute("operator")) ||
+                            element.Attributes().Any(attribute => attribute.Name != "attribute" && attribute.Name != "operator" && attribute.Name != "value") ||
+                            HasUnexpectedNodes(element) || element.Elements().Any(child => child.Name != "value") ||
+                            (element.Attribute("value") != null && element.HasElements))
+                            throw new InvalidOperationException(error);
+                        break;
+                    case "value":
+                        if (element.HasAttributes || element.Nodes().Any(node => node is not XText))
+                            throw new InvalidOperationException(error);
+                        break;
+                    default:
+                        throw new InvalidOperationException(error);
+                }
+            }
         }
 
         internal const string NoConditionsSummary = "(filter — no conditions)";
