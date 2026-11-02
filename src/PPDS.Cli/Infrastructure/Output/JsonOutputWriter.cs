@@ -65,12 +65,17 @@ public sealed class JsonOutputWriter : IOutputWriter
 
     /// <inheritdoc />
     public void WriteSuccess<T>(T data)
+        => WriteSuccess(data, metadata: null);
+
+    // Additive command metadata preserves the existing version-1 data contract.
+    internal void WriteSuccess<T>(T data, object? metadata)
     {
         var output = new JsonResultEnvelope
         {
             Version = SchemaVersion,
             Success = true,
             Data = data,
+            Metadata = metadata,
             Timestamp = DateTime.UtcNow.ToString("O")
         };
 
@@ -170,6 +175,7 @@ public sealed class JsonOutputWriter : IOutputWriter
         public string? Version { get; set; }
         public bool Success { get; set; }
         public object? Data { get; set; }
+        public object? Metadata { get; set; }
         public JsonErrorDto? Error { get; set; }
         public List<JsonItemResultDto>? Results { get; set; }
         public string? Timestamp { get; set; }

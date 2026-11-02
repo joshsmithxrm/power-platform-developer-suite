@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-11-02
+
+### Changed
+
+- Prepared replacement for the immutable 3.1.0 release attempt so the coordinated assembly graph uses one reviewed source without moving tags. Retains SourceLink servicing below; attribute/enum source and strong-name identity are unchanged. Registration reset/diff repairs are CLI changes. Final source/version/publication approval remains pending.
+
 ## [3.1.0] - 2026-11-01
 
 ### Changed

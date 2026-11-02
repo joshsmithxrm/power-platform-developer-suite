@@ -7,6 +7,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -218,66 +219,6 @@ public static class ExtractCommand
     /// Merges deployment settings from existing config into fresh extracted config.
     /// Preserves: solution, runAsUser, description, deployment, asyncAutoDelete, and any unknown fields.
     /// </summary>
-    private static void MergeAssemblyConfig(PluginAssemblyConfig fresh, PluginRegistrationConfig existing)
-    {
-        var existingAssembly = existing.Assemblies.FirstOrDefault(a =>
-            a.Name.Equals(fresh.Name, StringComparison.OrdinalIgnoreCase));
-
-        if (existingAssembly == null)
-            return;
-
-        // Preserve assembly-level deployment settings (only if not set via CLI)
-        if (string.IsNullOrEmpty(fresh.Solution))
-            fresh.Solution = existingAssembly.Solution;
-
-        // Preserve unknown fields at assembly level
-        fresh.ExtensionData = existingAssembly.ExtensionData;
-
-        // Merge types
-        foreach (var freshType in fresh.Types)
-        {
-            var existingType = existingAssembly.Types.FirstOrDefault(t =>
-                t.TypeName.Equals(freshType.TypeName, StringComparison.OrdinalIgnoreCase));
-
-            if (existingType == null)
-                continue;
-
-            // Preserve unknown fields at type level
-            freshType.ExtensionData = existingType.ExtensionData;
-
-            // Merge steps - match by message + entity + stage (functional identity)
-            foreach (var freshStep in freshType.Steps)
-            {
-                var existingStep = existingType.Steps.FirstOrDefault(s =>
-                    s.Message.Equals(freshStep.Message, StringComparison.OrdinalIgnoreCase) &&
-                    s.Entity.Equals(freshStep.Entity, StringComparison.OrdinalIgnoreCase) &&
-                    s.Stage.Equals(freshStep.Stage, StringComparison.OrdinalIgnoreCase));
-
-                if (existingStep == null)
-                    continue;
-
-                // Preserve deployment settings from existing step
-                freshStep.Deployment ??= existingStep.Deployment;
-                freshStep.RunAsUser ??= existingStep.RunAsUser;
-                freshStep.Description ??= existingStep.Description;
-                freshStep.AsyncAutoDelete ??= existingStep.AsyncAutoDelete;
-
-                // Preserve unknown fields at step level
-                freshStep.ExtensionData = existingStep.ExtensionData;
-
-                // Merge images - match by name
-                foreach (var freshImage in freshStep.Images)
-                {
-                    var existingImage = existingStep.Images.FirstOrDefault(i =>
-                        i.Name.Equals(freshImage.Name, StringComparison.OrdinalIgnoreCase));
-
-                    if (existingImage == null)
-                        continue;
-
-                    // Preserve unknown fields at image level
-                    freshImage.ExtensionData = existingImage.ExtensionData;
-                }
-            }
-        }
-    }
+    private static void MergeAssemblyConfig(PluginAssemblyConfig fresh, PluginRegistrationConfig existing) =>
+        PluginExtractionMergeService.MergeAssemblyConfig(fresh, existing);
 }

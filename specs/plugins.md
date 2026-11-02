@@ -190,7 +190,7 @@ The implementation ([`PluginStepAttribute.cs:1-122`](../src/PPDS.Plugins/Attribu
 | `StepId` | string | null | ID for associating images with specific steps |
 | `AsyncAutoDelete` | bool | false | Auto-delete async job on success |
 | `Deployment` | PluginDeployment | ServerOnly | Deployment target (ServerOnly, Offline, Both) |
-| `RunAsUser` | string | null | Impersonation: "CallingUser", "System", GUID, email, or domain name |
+| `RunAsUser` | string | null | Impersonation: "CallingUser", GUID, email, or domain name; deployment rejects unsupported "System" shorthand |
 | `CanBeBypassed` | bool | true | Whether `BypassBusinessLogicExecution` can skip this step |
 | `CanUseReadOnlyConnection` | bool | false | Whether step can use read-only DB connection (perf optimization) |
 | `InvocationSource` | PluginInvocationSource | Parent | Pipeline invocation: Parent or Child |
@@ -559,6 +559,54 @@ public record ImageUpdateRequest(
 
 ---
 
+## Managed registration reconciliation
+
+Deploy reconciles the explicitly managed subset; it is not whole-object replacement.
+Optional omission preserves an existing value and is reported as unmanaged. Explicit
+nonsecret null/empty values below request resets. Removing an optional JSON property
+does not reset it. Explicit null acquiring reset meaning is a compatibility change.
+Property presence survives serialization/extraction and explicit annotation defaults
+are retained. Partial register/RPC callers preserve legacy null/empty placeholders;
+they use validated `resetFields` for text/all-attribute clears and supplied booleans
+for true/false changes. A reset and a supplied value for the same field conflict.
+
+| Field | Omitted on existing row | Explicit deploy reset/default |
+| --- | --- | --- |
+| runAsUser | Preserve | null/empty/CallingUser clears impersonation; GUID/domain/email must resolve uniquely; System shorthand is rejected |
+| filteringAttributes | Preserve | null/empty removes filtering; attribute sets ignore order/case/duplicates |
+| unsecureConfiguration, step/image description | Preserve | null/empty clears; nonempty text is preserved exactly |
+| asyncAutoDelete | Preserve | null/false writes false for async; true on synchronous is invalid |
+| canBeBypassed, canUseReadOnlyConnection | Preserve | null resets to true/false respectively; both supplied booleans are writes |
+| image attributes | Preserve | null/empty means all attributes through an explicit clear |
+| deployment, invocationSource, enabled, executionOrder | Managed defaults retained | ServerOnly, Parent, true, 1; invalid supplied values fail validation |
+| image alias/message property | Managed defaults retained | Image name / shared message-specific default; explicit empty is invalid in deploy |
+| secureConfiguration | Preserve | null preserves; non-null including empty writes a value, without unlink/delete or plaintext readback |
+
+Functional identity continues to include type/message/primary+secondary entity/stage/mode.
+Identity changes produce missing/orphaned rows. Extra images remain visible drift;
+empty/omitted image collections do not authorize independent deletion. `--clean`
+retains its orphan-step scope. Assembly/package contents, solutions and Custom APIs
+are outside this equality contract.
+
+Diff reads all pages and reports checked/unmanaged/unsupported/excluded coverage.
+Hidden rows have visible counts and default to incomplete comparison until
+`--include-hidden`; including them adds no write permission. A supplied secure
+value is unverifiable, not equal merely because a reference exists. Secure values
+and hashes are excluded; unsecure configuration differences are redacted.
+
+The JSON version-1 `data` assembly array is retained. Additive `metadata` carries
+`status`, `isComplete`, `hasDrift` and overall coverage; per-assembly coverage stays
+with each array item. Exit 0 means complete matching managed fields, 1 completed
+drift, and 2 incomplete/unverifiable comparison even when some drift is known.
+Specific authentication/connection/validation errors retain their existing codes.
+No unconditional whole-environment equality claim is made.
+
+Configuration and user preflight precede artifact writes; mutation-time checks
+remain necessary and do not form a transaction. Failure/cancellation reporting
+preserves completed results and distinguishes acknowledged from unknown writes;
+no rollback or blind retry is implied. Offline request/counter tests do not prove
+native server persistence.
+
 ## CLI Commands
 
 ### ppds plugins extract
@@ -588,18 +636,20 @@ ppds plugins deploy registrations.json --clean --dry-run
 
 | Option | Description |
 |--------|-------------|
-| `--clean` | Remove orphaned registrations |
+| `--clean` | Remove orphaned steps; does not independently prune images on retained steps |
 | `--dry-run` | Preview changes without applying |
 
 ### ppds plugins diff
 
-Compares local configuration against Dataverse environment.
+Compares managed registration fields against Dataverse environment state.
 
 ```bash
-ppds plugins diff registrations.json
+ppds plugins diff --config registrations.json
+ppds plugins diff --config registrations.json --include-hidden --output-format json
 ```
 
-Returns exit code 1 if drift detected (useful for CI/CD).
+Returns 0 for complete managed match, 1 for complete drift, and 2 for incomplete
+comparison. JSON status is in `metadata`; the existing `data` array remains.
 
 ### ppds plugins list
 
@@ -726,6 +776,8 @@ RPC endpoints support the Extension panel and other RPC clients. All endpoints u
 ---
 
 ## Extension Surface
+
+The existing registration forms use the shared partial-intent and RPC-field adapters. Update-form adapters are covered by helper/DTO contract tests; the current panel has no production step/image edit launcher. AC-86 covers payload semantics, and does not claim a reachable edit journey, rendered DOM validation, or a live RPC round trip.
 
 ### PluginsPanel
 
@@ -988,6 +1040,22 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 | AC-68 | The deploy/diff propagation wait has a configurable 90-second default deadline and retains elapsed time, attempts, and last command output on timeout; caller cancellation is distinct | `PropagationWaitTests.Poll_DeadlineRetainsLastResultAndAttempts`, `Poll_DeadlineCancelsInFlightCommand`, `Poll_CommandTimeoutRetainsDiagnostics`, `Poll_CallerCancellationRemainsCancellation`, `TimeoutConfiguration_IsBounded`, `TimeoutConfiguration_RejectsInvalidValues` | ✅ |
 | AC-69 | Destructive CLI fixture tests clean only the declared `PPDS.LiveTests.Fixtures` registrations using an empty types/allTypeNames config, reject unexpected inventory before mutation, require successful cleanup and structured zero-registration readback, retain the assembly, and preserve the primary failure when cleanup also fails | `PluginFixtureCleanupTests.Cleanup_UsesOnlyEmptyFixtureConfigAndPinnedTarget`, `Cleanup_RejectsForeignInventoryBeforeMutation`, `Cleanup_RejectsFailureAndResidualRegistrations`, `Run_PreservesPrimaryFailureAndReportsCleanupFailure`, `Run_PreservesPrimaryEvenWhenCleanupReportingFails` | ✅ |
 | AC-70 | Plugin fixture cleanup accepts only object JSON envelopes reporting success, disposes parsed responses when validation fails, rejects non-object inventory before mutation, and preserves the original test failure if teardown receives a non-object response | `PluginFixtureCleanupTests.Cleanup_RejectsNonObjectInventoryBeforeMutation`, `Run_PreservesPrimaryFailureWhenCleanupInventoryIsNotObject` | ✅ |
+| AC-71 | Deploy dry-run reads image inventory for matched existing steps in both package and assembly paths, counts existing images as updates and new images as creates, never queries placeholder step IDs or mutates registrations, and fails or cancels when image inventory cannot be read | `DeployPreviewTests.DryRun_ExistingAndNewImages_ReportsAccurateCountsWithoutWrites`, `DryRun_NewSteps_DoesNotReadImagesForPlaceholderIds`, `DryRun_ImageLookupFailure_DoesNotReportSuccessfulPlan`, `DryRun_ImageLookupCancellation_StopsPreview` | ✅ |
+| AC-72 | Deploy dry-run distinguishes reusing an existing type from registering a new type while keeping its summary counters scoped to steps and images | `DeployPreviewTests.DryRun_TypePreview_DistinguishesNewAndExistingTypes` | ✅ |
+| AC-73 | Configuration parsing retains supplied/omitted/null distinctions for managed optional step/image fields; omitted fields preserve existing rows and report unmanaged while explicit nonsecret resets follow the documented contract; no whole-object replacement is inferred. | `JsonPresence_RoundTripPreservesResetAndOmission_ExcludesSecurePlaintext`, `DeployOmission_DoesNotWriteOptionalFields`, `OmittedOptionalFields_PreserveAndDoNotCompare` | ✅ |
+| AC-74 | Deploy sends explicit clears for CallingUser impersonation, filtering attributes, ordinary descriptions/configuration and image all-attributes intent; explicit async false and nullable boolean default resets are real writes; server failures and cancellation retain accurate partial outcomes. | `Step_ExplicitReset_WritesNullsAndFalse`, `Image_ExplicitReset_WritesNulls`, `ExplicitNullableBooleanNulls_ResetToDocumentedDefaults`, `DeployFollowOnFailure_CountsAcknowledgedRow_AndCancellationRetainsPreviousAssembly` | ✅ |
+| AC-75 | One Application Service normalization path canonicalizes accepted enums, attribute sets, message-specific image defaults and user selectors for deploy/preview/diff; user resolution requires a unique stable ID and rejects missing/ambiguous/unsupported System shorthand. | `NormalizationAndIdentity_UseSameAliasesAndAttributeSets`, `UserResolution_RejectsAmbiguousAndMissing_ValidatesGuid_WithCancellation`, `UnsupportedSystemSelector_RejectsBeforeAnyWrite` | ✅ |
+| AC-76 | Partial CLI/register and RPC callers preserve omitted and legacy null/empty placeholders; explicit reset intent is validated, supplied booleans retain false, and CallingUser clears identity without erasing unrelated unsupported fields. | `PartialUpsert_PreservesFlagsStateModeRankAndImageOverrides`, `PartialUpdate_ResetIntentClearsOnlyRequestedFields`, `RpcLegacyPositionalArray_PreservesExplicitTargetAndProfile`, `RpcUpdateStep_EmptyStageAndModePreservePreOperationWithoutWrites` | ✅ |
+| AC-77 | Extraction, schema and serialization preserve explicit default/reset intent without dropping boolean defaults or restoring prior values over explicit resets; optional annotation omission does not silently clear out-of-band values. | `Extraction_PreservesExplicitDefaultsAndResets_WithoutResurrectingMergedValues`, `ResetAndFreshValuePrecedence_SurvivesMerge`, `CanonicalIdentityAliases_MergeEquivalentSettings`, `MalformedExistingJson_ReturnsSafeValidationError` | ✅ |
+| AC-78 | Comparison reads every managed nonsecret step/image field with nullable capability-aware DTOs; unreadable or unsupported requested fields cannot default into a clean match. | `ListReads_AllManagedNonsecretColumns_MapsValuesAndPages`, `MissingNonnullableReadValues_AreUnavailable_NotAssumedDefaults`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault` | ✅ |
+| AC-79 | Application-service drift uses the shared managed-state normalizer and functional identity, compares all requested applicable nonsecret settings and retains cancellation; missing/orphaned rows remain visible. | `ManagedProperties_ReportDifferences`, `ManagedFieldEquality_IsCheckedAndComplete`, `IdentityAliases_UseSharedCanonicalState`, `DuplicateImageNames_RetainMissingOrphanedAndUniqueImageDrift` | ✅ |
+| AC-80 | Comparison reports checked, intentionally unmanaged, unsupported/unverifiable fields and excluded records; unknown supplied registration properties cannot be silently verified, while documented metadata is outside server equality. | `KnownMetadataAndScope_DoNotInventServerEquality`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `IdentityCollision_IsIncompleteEvenWhenPositionalPairsMatch` | ✅ |
+| AC-81 | Secure null/omission preserves and is visibly excluded; supplied secure values are unknown/incomplete rather than verified by reference presence; secret values/hashes and unsecure configuration contents are absent from comparison output. | `SecureConfig_NullPreserves_EmptyStringWritesWithoutRetrievingValue`, `SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
+| AC-82 | Profile-free actual command JSON/text paths return 0 only for complete matching managed comparisons, 1 for completed drift and 2 for incomplete comparison including drift plus unknown coverage; existing specific errors retain their codes. | `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality`, `RealCommand_SpecificErrorsRetainPrecedence` | ✅ |
+| AC-83 | Paged comparison inventory reports total/hidden/excluded counts and offers a reversible include-hidden read option; visibility does not authorize new writes or deletes. | `ListReads_AllManagedNonsecretColumns_MapsValuesAndPages`, `HiddenInventory_IsCountedAndReversibleWithoutWrites`, `RealCommand_IncludeHidden_ReversesReadExclusion` | ✅ |
+| AC-84 | Retained-step extra images are visible drift and preserve existing step-only cleanup semantics; omitted/empty image lists do not authorize independent deletion, and no assembly/package/solution/Custom API equality is claimed. | `ExtraImages_AreDriftWithoutIndependentDeletion`, `KnownMetadataAndScope_DoNotInventServerEquality` | ✅ |
+| AC-85 | Preview and real deploy consume equivalent normalized intent, skip placeholder reads and remain cancellation-aware; offline request assertions are distinguished from untested native server persistence/convergence. | `DeployUserPreflight_FailureBeforeArtifactUpload_ForPreviewAndReal`, `UserPreflight_ValidatesAllAssembliesWithoutMutation_PropagatesCancellation`, `DryRun_NewSteps_DoesNotReadImagesForPlaceholderIds`, `DryRun_ImageLookupCancellation_StopsPreview` | ✅ |
+| AC-86 | Extension form submissions distinguish intentionally cleared optional fields from untouched placeholders, preserve explicit false and exact configuration text, and map parent/field names to actual registration/update RPC contracts without granting secret deletion or independent image cleanup. | `pluginFormFields.test.ts` (`Plugin form partial intent (AC-86)`; deliberate clears, explicit false, exact DTO/configuration and named RPC mappings) | ✅ |
 
 The live `Diff_AfterDeploy_ShowsNoDrift` assertion uses this tested wait helper and
 prints last exit/stdout/stderr with elapsed time and attempt count. Its timeout is

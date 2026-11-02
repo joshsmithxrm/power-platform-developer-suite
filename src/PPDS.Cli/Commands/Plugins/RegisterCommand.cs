@@ -420,6 +420,7 @@ public static class RegisterCommand
             DefaultValueFactory = _ => "pluginType"
         };
 
+        var resetFieldsOption = new Option<string[]>("--reset-fields") { Description = "Explicit nonsecret field resets", Arity = ArgumentArity.OneOrMore, AllowMultipleArgumentsPerToken = true };
         var command = new Command("step", "Register a processing step for a plugin type")
         {
             typeArgument,
@@ -431,6 +432,7 @@ public static class RegisterCommand
             filteringAttributesOption,
             nameOption,
             secureConfigOption,
+            resetFieldsOption,
             eventHandlerTypeOption,
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption,
@@ -445,8 +447,8 @@ public static class RegisterCommand
             var message = parseResult.GetValue(messageOption)!;
             var entity = parseResult.GetValue(entityOption)!;
             var stage = parseResult.GetValue(stageOption)!;
-            var mode = parseResult.GetValue(modeOption)!;
-            var rank = parseResult.GetValue(rankOption);
+            var mode = parseResult.GetResult(modeOption)?.Tokens.Count > 0 ? parseResult.GetValue(modeOption) : null;
+            int? rank = parseResult.GetResult(rankOption)?.Tokens.Count > 0 ? parseResult.GetValue(rankOption) : null;
             var filteringAttributes = parseResult.GetValue(filteringAttributesOption);
             var name = parseResult.GetValue(nameOption);
             var secureConfig = parseResult.GetValue(secureConfigOption);
@@ -456,7 +458,7 @@ public static class RegisterCommand
             var solution = parseResult.GetValue(PluginsCommandGroup.SolutionOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteStepAsync(typeName, message, entity, stage, mode, rank, filteringAttributes, name, secureConfig, eventHandlerType, profile, environment, solution, globalOptions, cancellationToken);
+            return await ExecuteStepAsync(typeName, message, entity, stage, mode, rank, filteringAttributes, name, secureConfig, eventHandlerType, profile, environment, solution, globalOptions, parseResult.GetValue(resetFieldsOption), cancellationToken);
         });
 
         return command;
@@ -467,8 +469,8 @@ public static class RegisterCommand
         string message,
         string entity,
         string stage,
-        string mode,
-        int rank,
+        string? mode,
+        int? rank,
         string? filteringAttributes,
         string? name,
         string? secureConfig,
@@ -477,6 +479,7 @@ public static class RegisterCommand
         string? environment,
         string? solution,
         GlobalOptionValues globalOptions,
+        string[]? resetFields,
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
@@ -484,7 +487,7 @@ public static class RegisterCommand
         try
         {
             // Normalize mode
-            var normalizedMode = mode.ToLowerInvariant() switch
+            var normalizedMode = mode?.ToLowerInvariant() switch
             {
                 "sync" => "Synchronous",
                 "async" => "Asynchronous",
@@ -557,12 +560,14 @@ public static class RegisterCommand
                 Message = message,
                 Entity = entity,
                 Stage = stage,
-                Mode = normalizedMode,
-                ExecutionOrder = rank,
                 FilteringAttributes = filteringAttributes,
                 SecureConfiguration = secureConfig
             };
 
+            if (normalizedMode != null) stepConfig.Mode = normalizedMode;
+            if (rank.HasValue) stepConfig.ExecutionOrder = rank.Value;
+            stepConfig.PreserveLegacyPlaceholders();
+            stepConfig.ResetFields = resetFields?.ToList() ?? [];
             var stepId = await registrationService.UpsertStepAsync(pluginType.Id, eventHandlerType, stepConfig, messageId.Value, filterId, solution, cancellationToken: cancellationToken);
 
             var result = new RegisterStepResult
@@ -630,12 +635,14 @@ public static class RegisterCommand
             Description = "Comma-separated list of attributes to include (all if not specified)"
         };
 
+        var resetFieldsOption = new Option<string[]>("--reset-fields") { Description = "Explicit image field resets (attributes, description)", Arity = ArgumentArity.OneOrMore, AllowMultipleArgumentsPerToken = true };
         var command = new Command("image", "Register an image for a processing step")
         {
             stepArgument,
             nameOption,
             typeOption,
             attributesOption,
+            resetFieldsOption,
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption,
             PluginsCommandGroup.SolutionOption
@@ -654,7 +661,7 @@ public static class RegisterCommand
             var solution = parseResult.GetValue(PluginsCommandGroup.SolutionOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteImageAsync(stepName, name, type, attributes, profile, environment, solution, globalOptions, cancellationToken);
+            return await ExecuteImageAsync(stepName, name, type, attributes, profile, environment, solution, globalOptions, parseResult.GetValue(resetFieldsOption), cancellationToken);
         });
 
         return command;
@@ -669,6 +676,7 @@ public static class RegisterCommand
         string? environment,
         string? solution,
         GlobalOptionValues globalOptions,
+        string[]? resetFields,
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
@@ -721,6 +729,8 @@ public static class RegisterCommand
                 Attributes = attributes
             };
 
+            imageConfig.PreserveLegacyPlaceholders();
+            imageConfig.ResetFields = resetFields?.ToList() ?? [];
             var imageId = await registrationService.UpsertImageAsync(step.Id, imageConfig, step.Message, cancellationToken);
 
             var result = new RegisterImageResult
@@ -853,10 +863,10 @@ public static class RegisterCommand
         public string Stage { get; set; } = string.Empty;
 
         [JsonPropertyName("mode")]
-        public string Mode { get; set; } = string.Empty;
+        public string? Mode { get; set; }
 
         [JsonPropertyName("rank")]
-        public int Rank { get; set; }
+        public int? Rank { get; set; }
 
         [JsonPropertyName("solution")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
