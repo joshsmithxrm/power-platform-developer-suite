@@ -526,11 +526,12 @@ public static class DeployCommand
                 Guid typeId;
                 if (dryRun)
                 {
-                    typeId = existingTypeMap.TryGetValue(typeConfig.TypeName, out var existing)
-                        ? existing.Id
+                    var typeExists = existingTypeMap.TryGetValue(typeConfig.TypeName, out var existing);
+                    typeId = typeExists
+                        ? existing!.Id
                         : Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
-                        Console.Error.WriteLine($"  [Dry-Run] Would register type: {typeConfig.TypeName}");
+                        Console.Error.WriteLine($"  [Dry-Run] Would {(typeExists ? "reuse" : "register")} type: {typeConfig.TypeName}");
                 }
                 else
                 {
@@ -619,9 +620,10 @@ public static class DeployCommand
                         else result.StepsUpdated++;
                     }
 
-                    // Deploy images (skip query in dry-run mode or for new steps since stepId doesn't exist)
+                    // Existing steps have real IDs in both modes. Read their image inventory so
+                    // preview counts match deployment; only new steps lack a queryable ID.
                     cancellationToken.ThrowIfCancellationRequested();
-                    var existingImages = dryRun || isNew
+                    var existingImages = isNew
                         ? []
                         : await service.ListImagesForStepAsync(stepId, cancellationToken);
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
