@@ -92,7 +92,7 @@ def test_bundle_is_pinned_to_co_release_cli_version(workflow: dict) -> None:
     steps = workflow["jobs"]["publish"]["steps"]
     resolve_cli = next(step for step in steps if step.get("id") == "resolve-cli")
     resolve_run = resolve_cli.get("run", "")
-    assert "git describe --tags --exact-match --match 'Cli-v*'" in resolve_run
+    assert "verify_release_inputs.py resolve-cli" in resolve_run
     assert "steps.resolve-tag.outputs.sha" in resolve_run
 
     bundle = next(step for step in steps if str(step.get("name", "")).startswith("Bundle CLI"))
