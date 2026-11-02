@@ -93,7 +93,7 @@ public class ViewMetadataCorrectnessTests
                     RelationshipType = "ManyToOne"
                 }).ToList()
             });
-            return new ViewService(pool.Object, metadata.Object, Mock.Of<IShakedownGuard>(), NullLogger<ViewService>.Instance);
+            return new ViewService(pool.Object, metadata.Object, Mock.Of<IShakedownGuard>(), NullLogger<ViewService>.Instance, ViewConfirmationCoverageTests.DevelopmentConfirmation());
         }
     }
 

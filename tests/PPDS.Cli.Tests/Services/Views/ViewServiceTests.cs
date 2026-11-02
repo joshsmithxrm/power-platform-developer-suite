@@ -378,7 +378,7 @@ public class ViewServiceTests
         meta.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([new EntitySummary { LogicalName = "account", DisplayName = "Account", SchemaName = "account", ObjectTypeCode = 1 }]);
 
-        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance);
+        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance, ViewConfirmationCoverageTests.DevelopmentConfirmation());
 
         await service.ReorderColumnsAsync("account", "My View", ["c", "a"]);
 
@@ -554,7 +554,7 @@ public class ViewServiceTests
                 .Callback<Entity, CancellationToken>((e, _) => { written = e; onUpdate?.Invoke(e); })
                 .Returns(Task.CompletedTask);
 
-        return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>());
+        return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>(), ViewConfirmationCoverageTests.DevelopmentConfirmation());
     }
 
     private static FaultException<OrganizationServiceFault> DataverseFault(int code, string message)

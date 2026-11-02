@@ -184,6 +184,24 @@ Adding a column ensures both its layout cell and its FetchXML projection exist. 
 
 Every XML write reads back the unpublished draft up to three times and compares every written XML field with the intended state. Formatting, XML attribute order and the platform-maintained root fetch savedqueryid annotation are ignored; query attributes, filters, links and ordering remain significant. Equivalent no-op writes are valid. A missing record or different draft raises View.UpdateNotPersisted. Unavailable verification raises View.VerificationFailed; the write may have applied, so inspect the draft before retrying or publishing. Verification confirms only the observed state and does not lock out subsequent writers.
 
+### Environment acknowledgement
+
+All nine writers enforce the shared [environment confirmation](./environment-confirmation.md) policy before acquiring a client, including no-op edits. The shakedown guard remains effective. Each CLI writer accepts `--confirm-env <resolved-url>`, separately from target selection, `--solution` and `--publish`; the acknowledgement and write use the same provider's captured profile/target. Read-only sessions always reject writing. Missing context fails closed. List/get remain acknowledgement-free.
+
+The existing four-parameter ViewService constructor remains available for readers; writers require the additional confirmation service. No IViewService method or result shape changes. Publication remains entity-scoped with the existing solution-before-publication order.
+
+### View writer safety acceptance criteria
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-29 | Every writer fails closed before client acquisition for absent context or denied confirmation. | ViewConfirmationCoverageTests.EveryWriter_FailsClosedBeforeClientAcquisition | ✅ |
+| AC-30 | Views use the real shared effective-protection policy, including overrides and read-only denial. | ViewConfirmationCoverageTests.RegisteredWriter_UsesSharedPolicy, PolicyUnavailable_FailsClosedBeforeClientAcquisition | ✅ |
+| AC-31 | All nine CLI adapters forward exact acknowledgement separately from profile/target/solution/publication; errors stay structured and reads need no acknowledgement. | ViewsCommandGroupTests.EveryMutation_ForwardsAcknowledgementAndOptions, EveryMutation_RejectsMismatchedTargetWithStructuredError, Reads_DoNotExposeAcknowledgement | ✅ |
+| AC-32 | Acknowledgement and writer share captured session/identity/target and policy; another scope or changed policy cannot authorize the write. | ViewConfirmationCoverageTests.Acknowledgement_IsScopedAndPolicyRechecked | ✅ |
+| AC-33 | Shakedown and cancellation stop all writers before client acquisition; read-only also denies no-op edits. | ViewConfirmationCoverageTests.EveryWriter_ShakedownAndCancellationStopBeforeClientAcquisition, EveryWriter_CancellationDuringPolicyReadStopsBeforeClientAcquisition, EveryWriter_ReadOnlyRejectsBeforeClientAcquisition | ✅ |
+| AC-34 | Authorized reads, XML/layout/managed handling, verification and solution-before-publication behavior retain existing results. | ViewServiceTests.GetAsync_DefaultsToPublishedRead, SetFetchXml_ManagedView_WriteRejected_ThrowsManagedComponentNotEditableWithGuidance, SetFetchXml_ReadBackFails_ReportsUnverifiedWrite; ViewMetadataCorrectnessTests.RelatedColumns_RoundTripDistinctIdentities, WriteVerification_RejectsIncorrectState; ViewConfirmationCoverageTests.RegisteredWriter_UsesSharedPolicy | ✅ |
+| AC-35 | Four-argument CLR constructor remains usable for reads and fails closed for writes; production DI resolves the guarded implementation. | ViewConfirmationCoverageTests.LegacyConstructor_PreservesSignatureAndReadAccess, RegisteredWriter_UsesSharedPolicy | ✅ |
+
 ### `--publish` Behavior
 
 After a successful mutation, calls `PublishXmlRequest` with `<importexportxml><entities><entity>{entityLogicalName}</entity></entities></importexportxml>`.
