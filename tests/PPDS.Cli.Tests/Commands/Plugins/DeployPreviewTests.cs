@@ -92,12 +92,15 @@ public sealed class DeployPreviewTests
     {
         using var fixture = new PreviewFixture(package: false, existingType: true, existingStep: true);
         fixture.Service.Setup(s => s.ListImagesForStepAsync(fixture.StepId, CancellationToken.None))
-            .ThrowsAsync(new InvalidOperationException("Image inventory unavailable"));
+            .ThrowsAsync(new InvalidOperationException("Image inventory unavailable; password=preview-secret-sentinel"));
 
         var result = await fixture.RunAsync();
 
         Assert.False(result.Success);
-        Assert.Contains("Image inventory unavailable", result.Error);
+        Assert.Equal("Plugin deployment operation failed; see retained acknowledged and unknown effects.", result.Error);
+        Assert.DoesNotContain("preview-secret-sentinel", result.Error);
+        Assert.Equal("failed", result.Status);
+        Assert.True(result.DryRun);
         Assert.Equal(0, result.ImagesCreated + result.ImagesUpdated);
         fixture.VerifyReadsOnly();
     }

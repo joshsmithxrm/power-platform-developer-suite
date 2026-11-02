@@ -27,7 +27,9 @@
       }
     }
   },
-  "required": ["assemblies"],
+  "required": [
+    "assemblies"
+  ],
   "additionalProperties": true,
   "$defs": {
     "assembly": {
@@ -40,7 +42,10 @@
         },
         "type": {
           "type": "string",
-          "enum": ["Assembly", "Nuget"],
+          "enum": [
+            "Assembly",
+            "Nuget"
+          ],
           "description": "Assembly type: 'Assembly' for classic DLL, 'Nuget' for NuGet package.",
           "default": "Assembly"
         },
@@ -76,7 +81,10 @@
           }
         }
       },
-      "required": ["name", "types"],
+      "required": [
+        "name",
+        "types"
+      ],
       "additionalProperties": true
     },
     "pluginType": {
@@ -95,7 +103,10 @@
           }
         }
       },
-      "required": ["typeName", "steps"],
+      "required": [
+        "typeName",
+        "steps"
+      ],
       "additionalProperties": true
     },
     "step": {
@@ -120,12 +131,20 @@
         },
         "stage": {
           "type": "string",
-          "enum": ["PreValidation", "PreOperation", "MainOperation", "PostOperation"],
+          "enum": [
+            "PreValidation",
+            "PreOperation",
+            "MainOperation",
+            "PostOperation"
+          ],
           "description": "Pipeline stage. MainOperation is for Custom API plugins."
         },
         "mode": {
           "type": "string",
-          "enum": ["Synchronous", "Asynchronous"],
+          "enum": [
+            "Synchronous",
+            "Asynchronous"
+          ],
           "description": "Execution mode.",
           "default": "Synchronous"
         },
@@ -135,30 +154,53 @@
           "default": 1
         },
         "filteringAttributes": {
-          "type": "string",
-          "description": "Comma-separated list of attributes that trigger this step (Update message only)."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Comma-separated list of attributes that trigger this step (Update message only). Omission preserves an existing value; explicit null resets to the documented default (deployment is always managed)."
         },
         "unsecureConfiguration": {
-          "type": "string",
-          "description": "Unsecure configuration string passed to plugin constructor. Safe for source control."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Unsecure configuration string passed to plugin constructor. Safe for source control. Omission preserves an existing value; explicit null resets to the documented default (deployment is always managed)."
         },
         "deployment": {
-          "type": "string",
-          "enum": ["ServerOnly", "Offline", "Both"],
-          "description": "Deployment target.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ServerOnly",
+            "Offline",
+            "Both",
+            null
+          ],
+          "description": "Deployment target. Omission preserves an existing value; explicit null resets to the documented default (deployment is always managed).",
           "default": "ServerOnly"
         },
         "runAsUser": {
-          "type": "string",
-          "description": "User context to run the plugin as. Use 'CallingUser' (default), 'System', or a systemuser GUID."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omission preserves impersonation. Null, empty or CallingUser clears it. GUID, domain or email selects one user. System is not supported."
         },
         "description": {
-          "type": "string",
-          "description": "Description of what this step does."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Description of what this step does. Omission preserves an existing value; explicit null resets to the documented default (deployment is always managed)."
         },
         "asyncAutoDelete": {
-          "type": "boolean",
-          "description": "For async steps, whether to delete the async job on successful completion.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "For async steps, whether to delete the async job on successful completion. Omission preserves an existing value; explicit null resets to the documented default (deployment is always managed).",
           "default": false
         },
         "stepId": {
@@ -171,9 +213,72 @@
           "items": {
             "$ref": "#/$defs/image"
           }
+        },
+        "canBeBypassed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Omission preserves; explicit null resets to true. Both boolean values are managed writes."
+        },
+        "canUseReadOnlyConnection": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Omission preserves; explicit null resets to false. Both boolean values are managed writes."
+        },
+        "invocationSource": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "Parent",
+            "Child",
+            "Internal",
+            "0",
+            "1",
+            "-1",
+            null
+          ],
+          "description": "Always managed; null/omitted defaults Parent."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "secureConfiguration": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "writeOnly": true,
+          "description": "Omitted/null preserves. Non-null including empty writes; never a generic reset or comparison value."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "filteringAttributes",
+              "unsecureConfiguration",
+              "description",
+              "runAsUser",
+              "asyncAutoDelete",
+              "canBeBypassed",
+              "canUseReadOnlyConnection"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Explicit reset intent, primarily for partial APIs. Cannot accompany a value for the same field. Secure configuration is excluded."
         }
       },
-      "required": ["message", "entity", "stage"],
+      "required": [
+        "message",
+        "entity",
+        "stage"
+      ],
       "additionalProperties": true
     },
     "image": {
@@ -185,20 +290,58 @@
           "description": "Name used to access the image in plugin context."
         },
         "entityAlias": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Entity alias for the image. Defaults to 'name' if not specified."
         },
         "imageType": {
           "type": "string",
-          "enum": ["PreImage", "PostImage", "Both"],
+          "enum": [
+            "PreImage",
+            "PostImage",
+            "Both"
+          ],
           "description": "Image type."
         },
         "attributes": {
-          "type": "string",
-          "description": "Comma-separated list of attributes to include. Null means all attributes (not recommended for performance)."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omission preserves an existing list; null or empty explicitly resets to all attributes."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omission preserves; null/empty clears; other text is exact."
+        },
+        "messagePropertyName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omitted/null infers message-specific default in deploy; empty is invalid."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "attributes",
+              "description"
+            ]
+          },
+          "uniqueItems": true
         }
       },
-      "required": ["name", "imageType"],
+      "required": [
+        "name",
+        "imageType"
+      ],
       "additionalProperties": true
     }
   }

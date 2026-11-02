@@ -235,6 +235,9 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    /// <summary>Resolves a run-as selector uniquely without reading secure configuration.</summary>
+    Task<Guid?> ResolveRunAsUserAsync(string? selector, CancellationToken cancellationToken = default);
+
     #region Create/Update Operations
 
     /// <summary>
@@ -495,7 +498,13 @@ public record StepUpdateRequest(
     string? Description = null,
     bool? CanBeBypassed = null,
     bool? CanUseReadOnlyConnection = null,
-    string? InvocationSource = null
+    string? InvocationSource = null,
+    string? UnsecureConfiguration = null,
+    string? RunAsUser = null,
+    bool? AsyncAutoDelete = null,
+    IReadOnlyList<string>? ResetFields = null,
+    string? Name = null,
+    string? Deployment = null
 );
 
 /// <summary>
@@ -505,7 +514,12 @@ public record StepUpdateRequest(
 /// <param name="Name">Image name.</param>
 public record ImageUpdateRequest(
     string? Attributes = null,
-    string? Name = null
+    string? Name = null,
+    string? Description = null,
+    string? EntityAlias = null,
+    string? MessagePropertyName = null,
+    IReadOnlyList<string>? ResetFields = null,
+    string? ImageType = null
 );
 
 /// <summary>

@@ -11,6 +11,7 @@ import type {
     PluginTreeNode,
 } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
+import { pluginFormFields, pluginImageChecks, pluginStepConfiguration } from './shared/plugin-form-fields.js';
 
 const vscode = getVsCodeApi<PluginsPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg));
@@ -816,25 +817,28 @@ function createFormActions(submitLabel: string, onSubmit: () => void, onCancel: 
 
 /** Messages that support filtering attributes. */
 const MESSAGES_SUPPORTING_FILTERING = new Set([
-    'create', 'update', 'delete', 'retrieve', 'retrievemultiple',
-    'associate', 'disassociate', 'merge', 'setstate', 'setstatedynamicentity',
+    'update', 'updatemultiple',
 ]);
 
 function showStepForm(parentTypeId?: string, existingStep?: Record<string, unknown>): void {
     const isUpdate = !!existingStep;
+    const changed = new Set<string>();
     const modal = createModal(isUpdate ? 'Update Step' : 'Register Step');
     const c = modal.content;
 
     // Message
     const messageInput = createTextInput(String(existingStep?.['message'] ?? ''));
+    messageInput.disabled = isUpdate;
     c.appendChild(createField('Message *', messageInput));
 
     // Primary Entity
     const primaryEntityInput = createTextInput(String(existingStep?.['primaryEntity'] ?? ''));
+    primaryEntityInput.disabled = isUpdate;
     c.appendChild(createField('Primary Entity *', primaryEntityInput));
 
     // Secondary Entity
     const secondaryEntityInput = createTextInput(String(existingStep?.['secondaryEntity'] ?? ''));
+    secondaryEntityInput.disabled = isUpdate;
     c.appendChild(createField('Secondary Entity', secondaryEntityInput));
 
     // Step Name
@@ -878,7 +882,7 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
     c.appendChild(createField('Deployment', deploymentSelect));
 
     // Unsecure Configuration
-    const unsecureConfigInput = createTextarea(String(existingStep?.['unsecureConfiguration'] ?? ''));
+    const unsecureConfigInput = createTextarea(pluginStepConfiguration(existingStep));
     c.appendChild(createField('Unsecure Configuration', unsecureConfigInput));
 
     // Secure Configuration (shows indicator if already set on existing step)
@@ -886,7 +890,7 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
     const secureConfigLabel = existingStep?.['hasSecureConfig']
         ? 'Secure Configuration (currently set — leave blank to keep)'
         : 'Secure Configuration';
-    c.appendChild(createField(secureConfigLabel, secureConfigInput));
+    if (!isUpdate) c.appendChild(createField(secureConfigLabel, secureConfigInput));
 
     // Async Auto Delete
     const asyncAutoDeleteCheck = createCheckbox(Boolean(existingStep?.['asyncAutoDelete'] ?? false));
@@ -899,6 +903,14 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
     // Can Use Read-Only Connection
     const readOnlyConnectionCheck = createCheckbox(Boolean(existingStep?.['canUseReadOnlyConnection'] ?? false));
     c.appendChild(createField('Can Use Read-Only Connection', readOnlyConnectionCheck));
+
+    for (const [key, input] of [
+        ['description', descriptionInput], ['filteringAttributes', filteringAttrsInput],
+        ['unsecureConfiguration', unsecureConfigInput], ['asyncAutoDelete', asyncAutoDeleteCheck],
+        ['canBeBypassed', canBeBypassedCheck], ['canUseReadOnlyConnection', readOnlyConnectionCheck],
+    ] as const) {
+        input.addEventListener('input', () => changed.add(key));
+    }
 
     // ── Conditional logic ────────────────────────────────────────────────────
 
@@ -927,9 +939,9 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
         if (!supportsFiltering) filteringAttrsInput.value = '';
     }
 
-    stageSelect.addEventListener('change', applyStageConstraints);
-    modeSelect.addEventListener('change', applyModeConstraints);
-    messageInput.addEventListener('input', applyMessageConstraints);
+    stageSelect.addEventListener('change', () => { applyStageConstraints(); changed.add('asyncAutoDelete'); });
+    modeSelect.addEventListener('change', () => { applyModeConstraints(); changed.add('asyncAutoDelete'); });
+    messageInput.addEventListener('input', () => { applyMessageConstraints(); changed.add('filteringAttributes'); });
 
     // Apply initial constraints
     applyStageConstraints();
@@ -950,25 +962,25 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
             return;
         }
 
-        const fields: Record<string, unknown> = {
+        const fields = pluginFormFields('step', {
             message: messageName,
             primaryEntity,
             secondaryEntity: secondaryEntityInput.value.trim(),
             name: stepNameInput.value.trim(),
-            description: descriptionInput.value.trim(),
+            description: descriptionInput.value,
             stage: stageSelect.value,
             mode: modeSelect.value,
             executionOrder: Number(executionOrderInput.value),
             filteringAttributes: filteringAttrsInput.value.trim(),
             deployment: deploymentSelect.value,
-            unsecureConfiguration: unsecureConfigInput.value.trim(),
+            unsecureConfiguration: unsecureConfigInput.value,
             asyncAutoDelete: asyncAutoDeleteCheck.checked,
             canBeBypassed: canBeBypassedCheck.checked,
             canUseReadOnlyConnection: readOnlyConnectionCheck.checked,
-        };
+        }, changed, isUpdate);
 
         // Only include secure config if something was typed
-        const secureConfigValue = secureConfigInput.value.trim();
+        const secureConfigValue = secureConfigInput.value;
         if (secureConfigValue) {
             fields['secureConfiguration'] = secureConfigValue;
         }
@@ -998,6 +1010,7 @@ function showStepForm(parentTypeId?: string, existingStep?: Record<string, unkno
 
 function showImageForm(parentStepId: string, existingImage?: Record<string, unknown>): void {
     const isUpdate = !!existingImage;
+    const changed = new Set<string>();
     const modal = createModal(isUpdate ? 'Update Image' : 'Register Image');
     const c = modal.content;
 
@@ -1011,13 +1024,14 @@ function showImageForm(parentStepId: string, existingImage?: Record<string, unkn
     const imageTypeRow = document.createElement('div');
     imageTypeRow.className = 'form-checkbox-row';
 
-    const preCheck = createCheckbox(Boolean(existingImage?.['imageTypePre'] ?? false));
+    const imageChecks = pluginImageChecks(existingImage?.['imageType']);
+    const preCheck = createCheckbox(imageChecks.pre);
     const preLabel = document.createElement('label');
     preLabel.className = 'form-checkbox-label';
     preLabel.textContent = 'Pre';
     preLabel.prepend(preCheck);
 
-    const postCheck = createCheckbox(Boolean(existingImage?.['imageTypePost'] ?? false));
+    const postCheck = createCheckbox(imageChecks.post);
     const postLabel = document.createElement('label');
     postLabel.className = 'form-checkbox-label';
     postLabel.textContent = 'Post';
@@ -1046,11 +1060,12 @@ function showImageForm(parentStepId: string, existingImage?: Record<string, unkn
     });
     entityAliasInput.addEventListener('input', () => {
         aliasModifiedByUser = true;
+        changed.add('entityAlias');
     });
 
     // Attributes
     const attributesInput = createTextarea(String(existingImage?.['attributes'] ?? ''));
-    c.appendChild(createField('Attributes * (comma-separated logical names)', attributesInput));
+    c.appendChild(createField('Attributes (comma-separated; blank means all)', attributesInput));
 
     // Description
     const descriptionInput = createTextInput(String(existingImage?.['description'] ?? ''));
@@ -1059,6 +1074,9 @@ function showImageForm(parentStepId: string, existingImage?: Record<string, unkn
     // Message Property Name
     const messagePropertyInput = createTextInput(String(existingImage?.['messagePropertyName'] ?? ''));
     c.appendChild(createField('Message Property Name (override auto-inferred)', messagePropertyInput));
+    attributesInput.addEventListener('input', () => changed.add('attributes'));
+    descriptionInput.addEventListener('input', () => changed.add('description'));
+    messagePropertyInput.addEventListener('input', () => changed.add('messagePropertyName'));
 
     // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -1074,20 +1092,15 @@ function showImageForm(parentStepId: string, existingImage?: Record<string, unkn
             nameInput.focus();
             return;
         }
-        if (!attributes) {
-            attributesInput.focus();
-            return;
-        }
-
-        const fields: Record<string, unknown> = {
+        const fields = pluginFormFields('image', {
             imageTypePre: preCheck.checked,
             imageTypePost: postCheck.checked,
             name,
             entityAlias: entityAliasInput.value.trim() || name,
             attributes,
-            description: descriptionInput.value.trim(),
+            description: descriptionInput.value,
             messagePropertyName: messagePropertyInput.value.trim(),
-        };
+        }, changed, isUpdate);
 
         if (isUpdate && existingImage) {
             vscode.postMessage({

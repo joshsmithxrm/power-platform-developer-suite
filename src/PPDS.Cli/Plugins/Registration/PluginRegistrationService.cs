@@ -352,6 +352,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStep.Fields.SupportedDeployment,
                 SdkMessageProcessingStep.Fields.ImpersonatingUserId,
                 SdkMessageProcessingStep.Fields.AsyncAutoDelete,
+                SdkMessageProcessingStep.Fields.CanBeBypassed,
+                SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection,
+                SdkMessageProcessingStep.Fields.InvocationSource,
+                SdkMessageProcessingStep.Fields.IsHidden,
                 SdkMessageProcessingStep.Fields.IsManaged),
             Criteria = new FilterExpression
             {
@@ -414,6 +418,32 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 ImpersonatingUserId = impersonatingUserRef?.Id,
                 ImpersonatingUserName = impersonatingUserName,
                 AsyncAutoDelete = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false,
+                CanBeBypassed = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanBeBypassed),
+                CanUseReadOnlyConnection = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection),
+                InvocationSource = e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource)?.Value switch
+                {
+                    0 => "Parent",
+                    1 => "Child",
+                    -1 => "Internal",
+                    int other => other.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    null => null
+                },
+                IsHidden = e.GetAttributeValue<BooleanManagedProperty>(SdkMessageProcessingStep.Fields.IsHidden)?.Value ?? false,
+                UnavailableProperties = new[]
+                {
+                    ("name", SdkMessageProcessingStep.Fields.Name),
+                    ("message", $"message.{SdkMessage.Fields.Name}"),
+                    ("stage", SdkMessageProcessingStep.Fields.Stage),
+                    ("mode", SdkMessageProcessingStep.Fields.Mode),
+                    ("enabled", SdkMessageProcessingStep.Fields.StateCode),
+                    ("executionOrder", SdkMessageProcessingStep.Fields.Rank),
+                    ("deployment", SdkMessageProcessingStep.Fields.SupportedDeployment),
+                    ("asyncAutoDelete", SdkMessageProcessingStep.Fields.AsyncAutoDelete),
+                    ("canBeBypassed", SdkMessageProcessingStep.Fields.CanBeBypassed),
+                    ("canUseReadOnlyConnection", SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection),
+                    ("invocationSource", SdkMessageProcessingStep.Fields.InvocationSource),
+                    ("isHidden", SdkMessageProcessingStep.Fields.IsHidden)
+                }.Where(p => !e.Contains(p.Item2)).Select(p => p.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase),
                 IsManaged = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false
             };
         }).ToList();
@@ -435,6 +465,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStepImage.Fields.EntityAlias,
                 SdkMessageProcessingStepImage.Fields.ImageType,
                 SdkMessageProcessingStepImage.Fields.Attributes1,
+                SdkMessageProcessingStepImage.Fields.MessagePropertyName,
+                SdkMessageProcessingStepImage.Fields.Description,
                 SdkMessageProcessingStepImage.Fields.IsManaged),
             Criteria = new FilterExpression
             {
@@ -456,6 +488,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             EntityAlias = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.EntityAlias),
             ImageType = MapImageTypeFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStepImage.Fields.ImageType)?.Value ?? 0),
             Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1),
+            MessagePropertyName = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.MessagePropertyName),
+            Description = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Description),
+            UnavailableProperties = new[]
+            {
+                ("name", SdkMessageProcessingStepImage.Fields.Name),
+                ("imageType", SdkMessageProcessingStepImage.Fields.ImageType),
+                ("entityAlias", SdkMessageProcessingStepImage.Fields.EntityAlias),
+                ("messagePropertyName", SdkMessageProcessingStepImage.Fields.MessagePropertyName)
+            }.Where(p => !e.Contains(p.Item2)).Select(p => p.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase),
             IsManaged = e.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false
         }).ToList();
     }
@@ -1286,6 +1327,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     {
         _guard.EnsureCanMutate("plugins.step.upsert");
 
+        var desired = PluginRegistrationNormalizer.NormalizeStep(stepConfig, stepConfig.OperationIntent);
+        Guid? impersonatingUserId = null;
+        if (desired.TryGetValue("runAsUser", out var runAsUser))
+            impersonatingUserId = await ResolveRunAsUserAsync((string?)runAsUser, cancellationToken);
+
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
         // Resolve the row to write:
@@ -1295,6 +1341,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var columns = new ColumnSet(
             SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
             SdkMessageProcessingStep.Fields.StateCode,
+            SdkMessageProcessingStep.Fields.Mode,
             SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
 
         Entity? existing;
@@ -1343,146 +1390,115 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             Name = stepConfig.Name,
             EventHandler = new EntityReference(
-                    string.Equals(eventHandlerType, "serviceEndpoint", StringComparison.OrdinalIgnoreCase) ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
-                    eventHandlerId),
+                string.Equals(eventHandlerType, "serviceEndpoint", StringComparison.OrdinalIgnoreCase) ? ServiceEndpoint.EntityLogicalName : PluginType.EntityLogicalName,
+                eventHandlerId),
             SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
-            Stage = (sdkmessageprocessingstep_stage)MapStageToValue(stepConfig.Stage),
-            Mode = (sdkmessageprocessingstep_mode)MapModeToValue(stepConfig.Mode),
-            Rank = stepConfig.ExecutionOrder,
-            SupportedDeployment = (sdkmessageprocessingstep_supporteddeployment)MapDeploymentToValue(stepConfig.Deployment),
-            InvocationSource = MapInvocationSourceToValue(stepConfig.InvocationSource)
+            Stage = (sdkmessageprocessingstep_stage)MapStageToValue((string)desired["stage"]!)
         };
-
+        if (existing == null || desired.ContainsKey("mode"))
+            entity.Mode = (sdkmessageprocessingstep_mode)MapModeToValue(PluginRegistrationNormalizer.NormalizeMode(stepConfig.OperationIntent == RegistrationOperationIntent.Patch && !stepConfig.IsSpecified("mode") ? null : stepConfig.Mode));
+        if (existing == null || desired.ContainsKey("executionOrder")) entity.Rank = stepConfig.ExecutionOrder;
+        if (desired.TryGetValue("asyncAutoDelete", out var requestedAutoDelete) && !desired.ContainsKey("mode") &&
+            (existing?.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Mode)?.Value ?? 0) != 1)
+        {
+            if (requestedAutoDelete is true) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "asyncAutoDelete=true requires Asynchronous mode.");
+            desired = desired.Where(p => p.Key != "asyncAutoDelete").ToDictionary(p => p.Key, p => p.Value);
+        }
         if (filterId.HasValue)
-        {
             entity.SdkMessageFilterId = new EntityReference(SdkMessageFilter.EntityLogicalName, filterId.Value);
-        }
-
-        if (!string.IsNullOrEmpty(stepConfig.FilteringAttributes))
+        if (desired.TryGetValue("deployment", out var deployment))
+            entity.SupportedDeployment = (sdkmessageprocessingstep_supporteddeployment)MapDeploymentToValue((string?)deployment);
+        if (desired.TryGetValue("invocationSource", out var invocationSource))
+            entity.InvocationSource = MapInvocationSourceToValue((string?)invocationSource);
+        foreach (var (configField, attribute) in new[]
         {
-            entity.FilteringAttributes = stepConfig.FilteringAttributes;
-        }
+            ("filteringAttributes", "filteringattributes"), ("unsecureConfiguration", "configuration"),
+            ("description", "description"), ("canBeBypassed", "canbebypassed"),
+            ("canUseReadOnlyConnection", "canusereadonlyconnection"), ("asyncAutoDelete", "asyncautodelete")
+        })
+            if (desired.TryGetValue(configField, out var value)) entity[attribute] = value;
+        if (desired.ContainsKey("runAsUser"))
+            entity[SdkMessageProcessingStep.Fields.ImpersonatingUserId] = impersonatingUserId.HasValue
+                ? new EntityReference(SystemUser.EntityLogicalName, impersonatingUserId.Value) : null;
 
-        if (!string.IsNullOrEmpty(stepConfig.UnsecureConfiguration))
+        var mutations = new PluginMutationJournal();
+        try
         {
-            entity.Configuration = stepConfig.UnsecureConfiguration;
-        }
-
-        if (!string.IsNullOrEmpty(stepConfig.Description))
-        {
-            entity.Description = stepConfig.Description;
-        }
-
-        if (stepConfig.CanBeBypassed.HasValue)
-        {
-            entity.CanBeBypassed = stepConfig.CanBeBypassed.Value;
-        }
-
-        if (stepConfig.CanUseReadOnlyConnection.HasValue)
-        {
-            entity.CanUseReadOnlyConnection = stepConfig.CanUseReadOnlyConnection.Value;
-        }
-
-        // Handle impersonating user (Run in User's Context)
-        if (!string.IsNullOrEmpty(stepConfig.RunAsUser) &&
-            !stepConfig.RunAsUser.Equals("CallingUser", StringComparison.OrdinalIgnoreCase))
-        {
-            Guid? impersonatingUserId = null;
-
-            if (Guid.TryParse(stepConfig.RunAsUser, out var parsedGuid))
+            Guid stepId;
+            if (existing != null)
             {
-                impersonatingUserId = parsedGuid;
+                stepId = existing.Id;
+                entity.Id = stepId;
+
+                // Handle secure configuration for existing step
+                if (stepConfig.SecureConfiguration != null)
+                {
+                    var existingSecureConfigRef = existing.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
+                    if (existingSecureConfigRef != null)
+                    {
+                        // Update existing secure config entity
+                        var secureConfigUpdate = new Entity(SecureConfigEntityName)
+                        {
+                            Id = existingSecureConfigRef.Id
+                        };
+                        secureConfigUpdate["secureconfig"] = stepConfig.SecureConfiguration;
+                        await mutations.RunAsync(SecureConfigEntityName, "update", "secureConfiguration", secureConfigUpdate.Id, () => UpdateAsync(secureConfigUpdate, client, cancellationToken), cancellationToken);
+                    }
+                    else
+                    {
+                        // Create new secure config entity and link to step
+                        var secureConfigEntity = new Entity(SecureConfigEntityName);
+                        secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
+                        var newSecureConfigId = await mutations.RunAsync(SecureConfigEntityName, "create", "secureConfiguration", null, () => CreateAsync(secureConfigEntity, client, cancellationToken), cancellationToken);
+                        entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, newSecureConfigId);
+                    }
+                }
+
+                await mutations.RunAsync(SdkMessageProcessingStep.EntityLogicalName, "update", "row", stepId, () => UpdateAsync(entity, client, cancellationToken), cancellationToken);
+
+                // Add to solution even on update (handles case where component exists but isn't in solution)
+                if (!string.IsNullOrEmpty(solutionName))
+                {
+                    await mutations.RunAsync(SdkMessageProcessingStep.EntityLogicalName, "associate", "solution", stepId, () => AddToSolutionAsync(stepId, ComponentTypeSdkMessageProcessingStep, solutionName, cancellationToken), cancellationToken);
+                }
+
+                // Handle state change for existing step if needed
+                var targetState = stepConfig.Enabled
+                    ? sdkmessageprocessingstep_statecode.Enabled
+                    : sdkmessageprocessingstep_statecode.Disabled;
+                var currentState = existing.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value ?? 0;
+                if ((stepConfig.OperationIntent == RegistrationOperationIntent.Deploy || stepConfig.IsSpecified("enabled")) && currentState != (int)targetState)
+                {
+                    await mutations.RunAsync(SdkMessageProcessingStep.EntityLogicalName, "setState", "state", stepId, () => SetStepStateAsync(stepId, targetState, client, cancellationToken), cancellationToken);
+                }
             }
             else
             {
-                // Resolve username to GUID (by domain name or email)
-                impersonatingUserId = await ResolveUserIdAsync(stepConfig.RunAsUser, client, cancellationToken);
-                if (impersonatingUserId == null)
+                // Handle secure configuration for new step
+                if (stepConfig.SecureConfiguration != null)
                 {
-                    throw new PpdsException(
-                        ErrorCodes.Plugin.UserNotFound,
-                        $"Could not resolve user '{stepConfig.RunAsUser}'. Specify a valid GUID, domain name, or email address.");
-                }
-            }
-
-            entity.ImpersonatingUserId = new EntityReference(SystemUser.EntityLogicalName, impersonatingUserId.Value);
-        }
-
-        // Async auto-delete (only applies to async steps)
-        if (stepConfig.AsyncAutoDelete == true && stepConfig.Mode == "Asynchronous")
-        {
-            entity.AsyncAutoDelete = true;
-        }
-
-        Guid stepId;
-        if (existing != null)
-        {
-            stepId = existing.Id;
-            entity.Id = stepId;
-
-            // Handle secure configuration for existing step
-            if (stepConfig.SecureConfiguration != null)
-            {
-                var existingSecureConfigRef = existing.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
-                if (existingSecureConfigRef != null)
-                {
-                    // Update existing secure config entity
-                    var secureConfigUpdate = new Entity(SecureConfigEntityName)
-                    {
-                        Id = existingSecureConfigRef.Id
-                    };
-                    secureConfigUpdate["secureconfig"] = stepConfig.SecureConfiguration;
-                    await UpdateAsync(secureConfigUpdate, client, cancellationToken);
-                }
-                else
-                {
-                    // Create new secure config entity and link to step
                     var secureConfigEntity = new Entity(SecureConfigEntityName);
                     secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
-                    var newSecureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, newSecureConfigId);
+                    var secureConfigId = await mutations.RunAsync(SecureConfigEntityName, "create", "secureConfiguration", null, () => CreateAsync(secureConfigEntity, client, cancellationToken), cancellationToken);
+                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, secureConfigId);
+                }
+
+                stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken, mutations);
+
+                // New steps are created enabled by default - disable if needed
+                if (!stepConfig.Enabled)
+                {
+                    await mutations.RunAsync(SdkMessageProcessingStep.EntityLogicalName, "setState", "state", stepId, () => SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Disabled, client, cancellationToken), cancellationToken);
                 }
             }
 
-            await UpdateAsync(entity, client, cancellationToken);
-
-            // Add to solution even on update (handles case where component exists but isn't in solution)
-            if (!string.IsNullOrEmpty(solutionName))
-            {
-                await AddToSolutionAsync(stepId, ComponentTypeSdkMessageProcessingStep, solutionName, cancellationToken);
-            }
-
-            // Handle state change for existing step if needed
-            var targetState = stepConfig.Enabled
-                ? sdkmessageprocessingstep_statecode.Enabled
-                : sdkmessageprocessingstep_statecode.Disabled;
-            var currentState = existing.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value ?? 0;
-            if (currentState != (int)targetState)
-            {
-                await SetStepStateAsync(stepId, targetState, client, cancellationToken);
-            }
+            return stepId;
         }
-        else
+        catch (Exception ex)
         {
-            // Handle secure configuration for new step
-            if (stepConfig.SecureConfiguration != null)
-            {
-                var secureConfigEntity = new Entity(SecureConfigEntityName);
-                secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
-                var secureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
-                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference(SecureConfigEntityName, secureConfigId);
-            }
-
-            stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
-
-            // New steps are created enabled by default - disable if needed
-            if (!stepConfig.Enabled)
-            {
-                await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Disabled, client, cancellationToken);
-            }
+            mutations.Attach(ex);
+            throw;
         }
-
-        return stepId;
     }
 
     /// <summary>
@@ -1500,13 +1516,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.image.upsert");
-        var defaultMessagePropertyName = GetDefaultImagePropertyName(messageName)
-            ?? throw new PpdsException(
-                ErrorCodes.Plugin.ImageNotSupported,
-                $"Message '{messageName}' does not support plugin images.");
-
-        // Use config-provided MessagePropertyName if present, otherwise use the auto-inferred default
-        var messagePropertyName = imageConfig.MessagePropertyName ?? defaultMessagePropertyName;
+        var desired = PluginRegistrationNormalizer.NormalizeImage(imageConfig, messageName, imageConfig.OperationIntent);
 
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
@@ -1530,30 +1540,27 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             SdkMessageProcessingStepId = new EntityReference(SdkMessageProcessingStep.EntityLogicalName, stepId),
             Name = imageConfig.Name,
-            EntityAlias = imageConfig.EntityAlias ?? imageConfig.Name,
-            ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue(imageConfig.ImageType),
-            MessagePropertyName = messagePropertyName
+            ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue((string)desired["imageType"]!)
         };
+        if (desired.TryGetValue("entityAlias", out var alias)) entity.EntityAlias = (string?)alias;
+        else if (existing == null) entity.EntityAlias = imageConfig.Name;
+        if (desired.TryGetValue("messagePropertyName", out var messageProperty))
+            entity.MessagePropertyName = (string?)messageProperty;
+        else if (existing == null)
+            entity.MessagePropertyName = GetDefaultImagePropertyName(messageName);
+        if (desired.TryGetValue("attributes", out var attributes)) entity["attributes"] = attributes;
+        if (desired.TryGetValue("description", out var description)) entity["description"] = description;
 
-        if (!string.IsNullOrEmpty(imageConfig.Attributes))
-        {
-            entity.Attributes1 = imageConfig.Attributes;
-        }
-
-        if (!string.IsNullOrEmpty(imageConfig.Description))
-        {
-            entity.Description = imageConfig.Description;
-        }
-
+        var mutations = new PluginMutationJournal();
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity, client, cancellationToken);
+            await mutations.RunAsync(SdkMessageProcessingStepImage.EntityLogicalName, "update", "row", existing.Id, () => UpdateAsync(entity, client, cancellationToken), cancellationToken);
             return existing.Id;
         }
         else
         {
-            return await CreateAsync(entity, client, cancellationToken);
+            return await mutations.RunAsync(SdkMessageProcessingStepImage.EntityLogicalName, "create", "row", null, () => CreateAsync(entity, client, cancellationToken), cancellationToken);
         }
     }
 
@@ -1581,108 +1588,86 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Step with ID '{stepId}' not found.");
         }
 
-        // Build update entity with only changed properties
+        var config = new PluginStepConfig
+        {
+            Name = request.Name, Deployment = request.Deployment,
+            Message = existingStep.GetAttributeValue<AliasedValue>("message.name")?.Value?.ToString() ?? string.Empty,
+            Stage = request.Stage ?? MapStageFromValue(existingStep.GetAttributeValue<OptionSetValue>("stage")?.Value ?? StagePostOperation),
+            FilteringAttributes = request.FilteringAttributes, Description = request.Description,
+            UnsecureConfiguration = request.UnsecureConfiguration, RunAsUser = request.RunAsUser,
+            AsyncAutoDelete = request.AsyncAutoDelete, CanBeBypassed = request.CanBeBypassed,
+            CanUseReadOnlyConnection = request.CanUseReadOnlyConnection, InvocationSource = request.InvocationSource
+        };
+        if (request.Mode != null) config.Mode = request.Mode;
+        if (request.Rank.HasValue) config.ExecutionOrder = request.Rank.Value;
+        config.PreserveLegacyPlaceholders();
+        config.ResetFields = request.ResetFields?.ToList() ?? [];
+        var desired = PluginRegistrationNormalizer.NormalizeStep(config, RegistrationOperationIntent.Patch);
         var entity = new SdkMessageProcessingStep { Id = stepId };
-        var hasChanges = false;
-
-        if (request.Mode != null)
+        if (request.Name != null)
         {
-            entity.Mode = (sdkmessageprocessingstep_mode)MapModeToValue(request.Mode);
-            hasChanges = true;
+            if (string.IsNullOrWhiteSpace(request.Name)) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Step name must not be empty.");
+            entity.Name = request.Name;
         }
-
-        if (request.Stage != null)
+        if (desired.TryGetValue("deployment", out var deployment)) entity.SupportedDeployment = (sdkmessageprocessingstep_supporteddeployment)MapDeploymentToValue((string?)deployment);
+        if (config.IsSpecified("stage") && !string.IsNullOrEmpty(request.Stage)) entity.Stage = (sdkmessageprocessingstep_stage)MapStageToValue((string)desired["stage"]!);
+        if (config.IsSpecified("mode")) entity.Mode = (sdkmessageprocessingstep_mode)MapModeToValue((string)desired["mode"]!);
+        if (request.Rank.HasValue) entity.Rank = request.Rank.Value;
+        if (desired.TryGetValue("invocationSource", out var invocationSource)) entity.InvocationSource = MapInvocationSourceToValue((string?)invocationSource);
+        var effectiveMode = !config.IsSpecified("mode")
+            ? MapModeFromValue(existingStep.GetAttributeValue<OptionSetValue>("mode")?.Value ?? 0)
+            : (string)desired["mode"]!;
+        foreach (var (field, attribute) in new[]
         {
-            entity.Stage = (sdkmessageprocessingstep_stage)MapStageToValue(request.Stage);
-            hasChanges = true;
-        }
-
-        if (request.Rank != null)
+            ("filteringAttributes", "filteringattributes"), ("description", "description"),
+            ("unsecureConfiguration", "configuration"), ("canBeBypassed", "canbebypassed"),
+            ("canUseReadOnlyConnection", "canusereadonlyconnection"), ("asyncAutoDelete", "asyncautodelete")
+        })
         {
-            entity.Rank = request.Rank.Value;
-            hasChanges = true;
+            if (!desired.TryGetValue(field, out var value)) continue;
+            if (field == "asyncAutoDelete" && effectiveMode != "Asynchronous")
+            {
+                if (value is true) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "asyncAutoDelete=true requires Asynchronous mode.");
+                continue;
+            }
+            entity[attribute] = value;
         }
-
-        if (request.FilteringAttributes != null)
+        if (desired.TryGetValue("runAsUser", out var selector))
         {
-            entity.FilteringAttributes = request.FilteringAttributes;
-            hasChanges = true;
+            var userId = await ResolveRunAsUserAsync((string?)selector, cancellationToken);
+            entity["impersonatinguserid"] = userId.HasValue ? new EntityReference(SystemUser.EntityLogicalName, userId.Value) : null;
         }
-
-        if (request.Description != null)
-        {
-            entity.Description = request.Description;
-            hasChanges = true;
-        }
-
-        if (request.CanBeBypassed != null)
-        {
-            entity.CanBeBypassed = request.CanBeBypassed.Value;
-            hasChanges = true;
-        }
-
-        if (request.CanUseReadOnlyConnection != null)
-        {
-            entity.CanUseReadOnlyConnection = request.CanUseReadOnlyConnection.Value;
-            hasChanges = true;
-        }
-
-        if (request.InvocationSource != null)
-        {
-            entity.InvocationSource = MapInvocationSourceToValue(request.InvocationSource);
-            hasChanges = true;
-        }
-
-        if (!hasChanges)
-        {
-            return; // Nothing to update
-        }
-
+        if (!entity.Attributes.Keys.Any(key => key != SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId)) return;
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await UpdateAsync(entity, client, cancellationToken);
     }
 
-    /// <summary>
-    /// Updates a step image with the specified changes.
-    /// </summary>
-    /// <param name="imageId">The image ID.</param>
-    /// <param name="request">The update request containing properties to change.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the image is managed and not customizable.</exception>
-    public async Task UpdateImageAsync(
-        Guid imageId,
-        ImageUpdateRequest request,
-        CancellationToken cancellationToken = default)
+    /// <summary>Updates supplied image fields without clearing unrelated registration settings.</summary>
+    public async Task UpdateImageAsync(Guid imageId, ImageUpdateRequest request, CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("plugins.image.update");
-        // Verify the image exists and check managed state
-        var existingImage = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
-        if (existingImage == null)
+        var existing = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
+        if (existing == null) throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Image with ID '{imageId}' not found.");
+        var config = new PluginImageConfig
         {
-            throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Image with ID '{imageId}' not found.");
-        }
-
-        // Build update entity with only changed properties
+            Name = request.Name ?? existing.GetAttributeValue<string>("name") ?? "Image",
+            Attributes = request.Attributes, Description = request.Description,
+            EntityAlias = request.EntityAlias, MessagePropertyName = request.MessagePropertyName
+        };
+        config.PreserveLegacyPlaceholders();
+        config.ResetFields = request.ResetFields?.ToList() ?? [];
+        // Update does not change type/message; normalize only the supplied optional field plan.
+        var desired = PluginRegistrationNormalizer.NormalizeImagePatch(config);
         var entity = new SdkMessageProcessingStepImage { Id = imageId };
-        var hasChanges = false;
-
-        if (request.Attributes != null)
-        {
-            entity.Attributes1 = request.Attributes;
-            hasChanges = true;
-        }
-
+        if (request.ImageType != null) entity.ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue(PluginRegistrationNormalizer.NormalizeImageType(request.ImageType));
         if (request.Name != null)
         {
+            if (string.IsNullOrWhiteSpace(request.Name)) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Image name must not be empty.");
             entity.Name = request.Name;
-            hasChanges = true;
         }
-
-        if (!hasChanges)
-        {
-            return; // Nothing to update
-        }
-
+        foreach (var (field, attribute) in new[] { ("attributes", "attributes"), ("description", "description"), ("entityAlias", "entityalias"), ("messagePropertyName", "messagepropertyname") })
+            if (desired.TryGetValue(field, out var value)) entity[attribute] = value;
+        if (!entity.Attributes.Keys.Any(key => key != SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId)) return;
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         await UpdateAsync(entity, client, cancellationToken);
     }
@@ -1693,8 +1678,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             ColumnSet = new ColumnSet(
                 SdkMessageProcessingStep.Fields.Name,
+                SdkMessageProcessingStep.Fields.Mode,
+                SdkMessageProcessingStep.Fields.Stage,
                 SdkMessageProcessingStep.Fields.IsManaged,
                 SdkMessageProcessingStep.Fields.IsCustomizable),
+            LinkEntities =
+            {
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SdkMessage.EntityLogicalName,
+                    SdkMessageProcessingStep.Fields.SdkMessageId, SdkMessage.Fields.SdkMessageId, JoinOperator.Inner)
+                { Columns = new ColumnSet(SdkMessage.Fields.Name), EntityAlias = "message" }
+            },
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -2287,6 +2280,28 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     #endregion
 
+    /// <summary>Resolves a run-as selector to one stable user identity; null means CallingUser.</summary>
+    public async Task<Guid?> ResolveRunAsUserAsync(string? selector, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            selector = PluginRegistrationNormalizer.NormalizeRunAsUser(selector);
+            if (selector == null) return null;
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            var resolved = await ResolveUserIdAsync(selector, client, cancellationToken);
+            return resolved ?? throw new PpdsException(ErrorCodes.Plugin.UserNotFound,
+                $"Could not resolve user '{selector}'; supply a valid systemuser GUID, domain name, or email address.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (PpdsException) { throw; }
+        catch (Exception ex)
+        {
+            throw new PpdsException(ExceptionMapper.Map(ex).Code,
+                "Plugin user context validation could not be completed.", ex);
+        }
+    }
+
     #region Private Helpers
 
     /// <summary>
@@ -2349,9 +2364,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         Entity entity,
         string? solutionName,
         IOrganizationService client,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PluginMutationJournal? mutations = null)
     {
-        var id = await CreateAsync(entity, client, cancellationToken);
+        var id = mutations == null
+            ? await CreateAsync(entity, client, cancellationToken)
+            : await mutations.RunAsync(entity.LogicalName, "create", "row", null, () => CreateAsync(entity, client, cancellationToken), cancellationToken);
 
         if (!string.IsNullOrEmpty(solutionName))
         {
@@ -2359,7 +2377,10 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
             if (componentType > 0)
             {
-                await AddToSolutionAsync(id, componentType, solutionName, cancellationToken);
+                if (mutations == null)
+                    await AddToSolutionAsync(id, componentType, solutionName, cancellationToken);
+                else
+                    await mutations.RunAsync(entity.LogicalName, "associate", "solution", id, () => AddToSolutionAsync(id, componentType, solutionName, cancellationToken), cancellationToken);
             }
         }
 
@@ -2586,16 +2607,22 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var query = new QueryExpression(SystemUser.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(SystemUser.Fields.SystemUserId),
-            TopCount = 1
+            TopCount = 2
         };
 
-        // Match by domain name OR internal email address
-        var filter = new FilterExpression(LogicalOperator.Or);
-        filter.AddCondition(SystemUser.Fields.DomainName, ConditionOperator.Equal, username);
-        filter.AddCondition(SystemUser.Fields.InternalEMailAddress, ConditionOperator.Equal, username);
-        query.Criteria.AddFilter(filter);
+        if (Guid.TryParse(username, out var userId))
+            query.Criteria.AddCondition(SystemUser.Fields.SystemUserId, ConditionOperator.Equal, userId);
+        else
+        {
+            var filter = new FilterExpression(LogicalOperator.Or);
+            filter.AddCondition(SystemUser.Fields.DomainName, ConditionOperator.Equal, username);
+            filter.AddCondition(SystemUser.Fields.InternalEMailAddress, ConditionOperator.Equal, username);
+            query.Criteria.AddFilter(filter);
+        }
 
         var result = await RetrieveMultipleAsync(query, client, cancellationToken);
+        if (result.Entities.Count > 1)
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue, "runAsUser matches multiple users; supply an explicit systemuser GUID.");
         return result.Entities.FirstOrDefault()?.Id;
     }
 
@@ -2681,6 +2708,12 @@ public sealed class PluginTypeInfo
 /// </summary>
 public sealed class PluginStepInfo
 {
+    /// <summary>Requested non-nullable values absent from the response; never infer equality from defaults.</summary>
+    public HashSet<string> UnavailableProperties { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool IsHidden { get; set; }
+    public bool? CanBeBypassed { get; set; }
+    public bool? CanUseReadOnlyConnection { get; set; }
+    public string? InvocationSource { get; set; }
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
@@ -2710,6 +2743,8 @@ public sealed class PluginStepInfo
 /// </summary>
 public sealed class PluginImageInfo
 {
+    public string? Description { get; set; }
+    public HashSet<string> UnavailableProperties { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? EntityAlias { get; set; }

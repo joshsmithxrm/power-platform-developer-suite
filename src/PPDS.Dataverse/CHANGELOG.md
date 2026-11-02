@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-02
+
+### Changed
+
+- Prepared replacement for the immutable 1.4.0 release attempt, preserving same-source dependency/assembly validation with the corrected CLI train. Retains the servicing changes below; connection-pool source/public APIs are unchanged. Final source/version/publication approval remains pending.
+
 ## [1.4.0] - 2026-11-01
 
 ### Changed

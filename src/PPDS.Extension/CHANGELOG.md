@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Plugin registration form payloads use the daemon's actual parent/field names and preserve intentional clear/false versus untouched settings. Shared form adapters hydrate actual image/configuration DTO fields; this does not add a step/image edit launcher.
 - Bound notebook runs independently to the selected environment and captured authentication identity during concurrent SQL/FetchXML runs, cancellation, queued execution, completion and conversion. Profile rename/reorder cannot redirect captured queries.
 - Attributed outputs, errors, record links, exports and query history to the executed environment; preserved valid legacy notebooks with missing or partial environment metadata.
 

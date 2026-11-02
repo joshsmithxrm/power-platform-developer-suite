@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Plugin deploy preview reads existing image inventory and distinguishes reused types. Explicit managed resets now clear requested ordinary settings, including CallingUser impersonation and async false, while omitted optional and partial-call settings are preserved (#1517, #1519).
+- Plugin diff compares managed execution/image settings and reports incomplete coverage with exit 2. Existing JSON `data[]` remains; additive `metadata` contains status/coverage. Secure values are unverifiable and excluded; unsecure configuration differences are redacted (#1520).
+- Registration preflight validates configured user identities before artifact upload. Extracted explicit defaults/resets survive serialization and merge; imperative step/image callers have explicit nonsecret reset intent.
 - Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics identify the actual secondary-entity requirement (#1360).
 - Plugin diff propagates cancellation through every drift-collection and comparison stage (#1317).
 - Web-resource creation reports missing or mismatched publisher-prefix warnings in structured results and stderr without renaming the resource. Missing-resource update guidance uses the literal `<file>` placeholder (#1236).

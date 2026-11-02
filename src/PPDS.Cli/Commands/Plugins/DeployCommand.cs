@@ -18,6 +18,7 @@ namespace PPDS.Cli.Commands.Plugins;
 /// </summary>
 public static class DeployCommand
 {
+    private const string InterruptedResultKey = "PPDS.InterruptedPluginDeployment";
     private static readonly JsonSerializerOptions JsonReadOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -88,9 +89,11 @@ public static class DeployCommand
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken,
         Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
-        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null)
+        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null,
+        IOutputWriter? outputWriter = null)
     {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var writer = outputWriter ?? ServiceFactory.CreateOutputWriter(globalOptions);
+        var results = new List<DeploymentResult>();
 
         try
         {
@@ -139,6 +142,7 @@ public static class DeployCommand
             cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(registrationService, config.Assemblies ?? [], cancellationToken);
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
             if (!globalOptions.IsJsonMode)
@@ -154,7 +158,6 @@ public static class DeployCommand
                 }
             }
 
-            var results = new List<DeploymentResult>();
 
             if (config.Assemblies != null)
             {
@@ -201,7 +204,7 @@ public static class DeployCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(results);
+                writer.WriteResult(new CommandResult<List<DeploymentResult>> { Success = results.All(r => r.Success), Data = results });
             }
             else
             {
@@ -211,18 +214,29 @@ public static class DeployCommand
                 var totalDeleted = results.Sum(r => r.StepsDeleted + r.ImagesDeleted);
 
                 Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
+                if (results.Any(r => !r.Success)) WriteRetainedOutcomes(results);
             }
 
             return results.Any(r => !r.Success) ? ExitCodes.Failure : ExitCodes.Success;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            throw;
+            if (GetInterruptedResult(ex) is { } interrupted && !results.Contains(interrupted)) results.Add(interrupted);
+            if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
+            writer.WriteResult(new CommandResult<List<DeploymentResult>>
+            {
+                Success = false, Data = results,
+                Error = new StructuredError(ErrorCodes.Operation.Cancelled,
+                    "Deployment cancelled. Acknowledged and unknown registration effects are retained; no rollback was attempted.")
+            });
+            return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
+            if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
             var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
-            writer.WriteError(error);
+            if (results.Count == 0) writer.WriteError(error);
+            else writer.WriteResult(new CommandResult<List<DeploymentResult>> { Success = false, Data = results, Error = error });
             return ExceptionMapper.ToExitCode(ex);
         }
     }
@@ -249,6 +263,7 @@ public static class DeployCommand
         foreach (var assembly in assemblies)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            PluginRegistrationPlanningService.ValidateAssembly(assembly, cancellationToken);
             var assemblyPath = ResolveAssemblyPath(assembly, configDir);
             if (assemblyPath == null || !File.Exists(assemblyPath))
             {
@@ -333,9 +348,11 @@ public static class DeployCommand
         var result = new DeploymentResult
         {
             AssemblyName = assemblyConfig.Name,
+            DryRun = dryRun,
             Success = true
         };
 
+        var calls = new PluginMutationJournal("call");
         var solution = solutionOverride ?? assemblyConfig.Solution;
         // Keep earlier per-step diagnostics even if a later operation also fails.
         var stepErrors = new List<string>();
@@ -359,6 +376,8 @@ public static class DeployCommand
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(service, [assemblyConfig], cancellationToken);
+
             // Deploy assembly or package based on type
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
@@ -380,7 +399,7 @@ public static class DeployCommand
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken);
+                    packageId = await calls.RunAsync("pluginpackage", "upsert", "package", null, () => service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
@@ -432,11 +451,8 @@ public static class DeployCommand
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    assemblyId = await service.UpsertAssemblyAsync(
-                        assemblyConfig.Name,
-                        assemblyBytes,
-                        solution,
-                        cancellationToken);
+                    assemblyId = await calls.RunAsync("pluginassembly", "upsert", "assembly", null,
+                        () => service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Assembly registered: {assemblyId}");
                 }
@@ -536,11 +552,8 @@ public static class DeployCommand
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    typeId = await service.UpsertPluginTypeAsync(
-                        assemblyId,
-                        typeConfig.TypeName,
-                        solution,
-                        cancellationToken);
+                    typeId = await calls.RunAsync("plugintype", "upsert", "type", null,
+                        () => service.UpsertPluginTypeAsync(assemblyId, typeConfig.TypeName, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Type registered: {typeConfig.TypeName}");
                 }
@@ -612,7 +625,7 @@ public static class DeployCommand
                     else
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken);
+                        stepId = await calls.RunAsync("sdkmessageprocessingstep", "upsert", "step", matchedEnvStep?.Id, () => service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken), cancellationToken);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
 
@@ -644,11 +657,8 @@ public static class DeployCommand
                         else
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            await service.UpsertImageAsync(
-                                stepId,
-                                imageConfig,
-                                stepConfig.Message,
-                                cancellationToken);
+                            await calls.RunAsync("sdkmessageprocessingstepimage", "upsert", "image", null,
+                                () => service.UpsertImageAsync(stepId, imageConfig, stepConfig.Message, cancellationToken), cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
@@ -681,7 +691,7 @@ public static class DeployCommand
                         else
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            await service.DeleteStepAsync(orphanStep.Id, cancellationToken);
+                            await calls.RunAsync("sdkmessageprocessingstep", "delete", "stepCleanup", orphanStep.Id, () => service.DeleteStepAsync(orphanStep.Id, cancellationToken), cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"    Deleted step: {orphanStep.Name}");
                             result.StepsDeleted++;
@@ -719,15 +729,22 @@ public static class DeployCommand
                 result.Success = false;
                 result.Error = string.Join("; ", stepErrors);
             }
+            cancellationToken.ThrowIfCancellationRequested();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            RetainFailedOutcomes(result, calls, ex);
+            result.Status = "cancelled";
+            result.ErrorCode = ErrorCodes.Operation.Cancelled;
+            result.Error = "Deployment cancelled; no rollback was attempted.";
+            ex.Data[InterruptedResultKey] = result;
             throw;
         }
         catch (Exception ex)
         {
-            result.Success = false;
-            result.Error = string.Join("; ", stepErrors.Append(ex.Message));
+            RetainFailedOutcomes(result, calls, ex);
+            var failure = ex is PpdsException known ? known.UserMessage : "Plugin deployment operation failed; see retained acknowledged and unknown effects.";
+            result.Error = string.Join("; ", stepErrors.Append(failure));
             if (ex is PpdsException ppdsException)
             {
                 result.ErrorCode = ppdsException.ErrorCode;
@@ -737,14 +754,53 @@ public static class DeployCommand
 
             if (!globalOptions.IsJsonMode)
             {
-                Console.Error.WriteLine($"  Error: {ex.Message}");
+                Console.Error.WriteLine($"  Error: {result.Error}");
                 if (!string.IsNullOrWhiteSpace(result.RecoveryGuidance))
                     Console.Error.WriteLine($"  Recovery: {result.RecoveryGuidance}");
             }
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var outcome in calls.Outcomes)
+            if (!result.Outcomes.Any(o => o.EventId == outcome.EventId)) result.Outcomes.Add(outcome);
+        result.Status = result.Success ? "completed" : "failed";
         return result;
+    }
+
+    private static void WriteRetainedOutcomes(IReadOnlyList<DeploymentResult> results)
+    {
+        if (results.Count == 0) return;
+        Console.Error.WriteLine("Retained deployment effects (no rollback was attempted):");
+        foreach (var result in results)
+        {
+            Console.Error.WriteLine($"  {result.AssemblyName}: {result.Status}; steps {result.StepsCreated} created, {result.StepsUpdated} updated, {result.StepsDeleted} deleted; images {result.ImagesCreated} created, {result.ImagesUpdated} updated.");
+            foreach (var outcome in result.Outcomes)
+                Console.Error.WriteLine($"    {outcome.Scope}/{outcome.Phase}: {outcome.Entity} {outcome.Operation} {outcome.RecordId} — {outcome.Outcome}");
+        }
+        Console.Error.WriteLine($"  Coverage: {results[0].OutcomeCoverage}");
+    }
+    internal static DeploymentResult? GetInterruptedResult(Exception exception) => exception.Data[InterruptedResultKey] as DeploymentResult;
+
+    private static void RetainFailedOutcomes(DeploymentResult result, PluginMutationJournal calls, Exception exception)
+    {
+        result.Success = false;
+        result.Status = "failed";
+        calls.Attach(exception);
+        foreach (var outcome in PluginMutationJournal.Read(exception))
+        {
+            if (result.Outcomes.Any(o => o.EventId == outcome.EventId)) continue;
+            result.Outcomes.Add(outcome);
+            if (outcome.Scope != "mutation" || outcome.Outcome != "acknowledged" || outcome.Phase != "row") continue;
+            if (outcome.Entity == "sdkmessageprocessingstep")
+            {
+                if (outcome.Operation == "create") result.StepsCreated++;
+                if (outcome.Operation == "update") result.StepsUpdated++;
+            }
+            if (outcome.Entity == "sdkmessageprocessingstepimage")
+            {
+                if (outcome.Operation == "create") result.ImagesCreated++;
+                if (outcome.Operation == "update") result.ImagesUpdated++;
+            }
+        }
     }
 
     /// <summary>
@@ -890,6 +946,21 @@ public static class DeployCommand
         [JsonPropertyName("recoveryGuidance")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? RecoveryGuidance { get; set; }
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "completed";
+
+        [JsonPropertyName("dryRun")]
+        public bool DryRun { get; set; }
+
+        [JsonPropertyName("partial")]
+        public bool Partial => !DryRun && !Success && (Outcomes.Any(o => o.Outcome == "acknowledged") || StepsCreated + StepsUpdated + StepsDeleted + ImagesCreated + ImagesUpdated + ImagesDeleted > 0);
+
+        [JsonPropertyName("outcomes")]
+        public List<PluginMutationOutcome> Outcomes { get; } = [];
+
+        [JsonPropertyName("outcomeCoverage")]
+        public string OutcomeCoverage => "Call-level registration outcomes; detailed step/image rows, secure configuration, solution and state phases when an upsert fails. Other internal suboperations and Custom APIs are not individually journaled.";
 
         [JsonPropertyName("stepsCreated")]
         public int StepsCreated { get; set; }

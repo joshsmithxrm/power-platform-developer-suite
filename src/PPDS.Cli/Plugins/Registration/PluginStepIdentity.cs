@@ -1,3 +1,4 @@
+using PPDS.Cli.Services.Plugins;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Registration;
@@ -87,7 +88,7 @@ public readonly record struct PluginStepIdentity(
         var token = (stage ?? string.Empty).Trim();
         try
         {
-            return PluginRegistrationService.MapStageFromValue(PluginRegistrationService.MapStageToValue(token));
+            return PluginRegistrationNormalizer.NormalizeStage(token.Length == 0 ? null : token);
         }
         catch
         {
@@ -104,7 +105,7 @@ public readonly record struct PluginStepIdentity(
         var token = (mode ?? string.Empty).Trim();
         try
         {
-            return PluginRegistrationService.MapModeFromValue(PluginRegistrationService.MapModeToValue(token));
+            return PluginRegistrationNormalizer.NormalizeMode(token.Length == 0 ? null : token);
         }
         catch
         {

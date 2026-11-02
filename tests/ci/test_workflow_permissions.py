@@ -41,6 +41,8 @@ WRITE_PERMISSION_REASONS = {
         "Preserve the existing documentation release PR write grant.",
     ("integration-tests.yml", "integration-tests", "id-token"):
         "Request OIDC tokens for the configured test environment.",
+    ("publish-nuget.yml", "publish", "id-token"):
+        "Exchange the reviewed component-tag publisher identity for a temporary NuGet key.",
     ("milestone-release-check.yml", "check-milestone-completion", "issues"):
         "Create or update milestone release tracking issues.",
     ("post-merge-release-check.yml", "patch-release-detection", "issues"):

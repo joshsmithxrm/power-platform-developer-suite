@@ -1070,8 +1070,7 @@ public class DeployCommandTests : IDisposable
                 return await File.ReadAllBytesAsync(path, cancellationToken);
             }
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                DeployCommand.ExecuteAsync(
+            Assert.Equal(ExitCodes.Failure, await DeployCommand.ExecuteAsync(
                     new FileInfo(_tempConfigFile),
                     profile: null,
                     environment: null,
@@ -1150,8 +1149,7 @@ public class DeployCommandTests : IDisposable
                 .ReturnsAsync([]);
             var customApis = new Mock<ICustomApiService>();
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                DeployCommand.ExecuteAsync(
+            Assert.Equal(ExitCodes.Failure, await DeployCommand.ExecuteAsync(
                     new FileInfo(_tempConfigFile),
                     profile: null,
                     environment: null,
