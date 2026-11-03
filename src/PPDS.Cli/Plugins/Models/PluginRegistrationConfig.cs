@@ -41,7 +41,7 @@ public sealed class PluginRegistrationConfig
     public string? Schema { get; set; }
 
     /// <summary>
-    /// Schema version for forward compatibility.
+    /// Registration contract: 1.0 preserves legacy optional omissions; 2.0 reconciles nonsecret defaults.
     /// </summary>
     [JsonPropertyName("version")]
     public string Version { get; set; } = "1.0";
@@ -143,6 +143,10 @@ public sealed class PluginRegistrationConfig
 /// </summary>
 public sealed class PluginAssemblyConfig
 {
+    /// <summary>Validated file operation intent, including assemblies with no configured steps.</summary>
+    [JsonIgnore]
+    public RegistrationOperationIntent OperationIntent { get; set; } = RegistrationOperationIntent.Patch;
+
     /// <summary>
     /// Assembly name (without extension).
     /// </summary>
@@ -245,8 +249,29 @@ public sealed class PluginTypeConfig
 /// <summary>
 /// Configuration for a single plugin step registration.
 /// </summary>
-public sealed class PluginStepConfig
+public sealed class PluginStepConfig : PluginConfigurationPresence
 {
+    private string? _name;
+    private string _message = string.Empty;
+    private string _entity = string.Empty;
+    private string? _secondaryEntity;
+    private string _stage = string.Empty;
+    private string _mode = "Synchronous";
+    private int _executionOrder = 1;
+    private string? _filteringAttributes;
+    private string? _unsecureConfiguration;
+    private string? _deployment;
+    private string? _runAsUser;
+    private bool? _canBeBypassed;
+    private bool? _canUseReadOnlyConnection;
+    private string? _invocationSource;
+    private string? _secureConfiguration;
+    private bool _enabled = true;
+    private string? _description;
+    private bool? _asyncAutoDelete;
+    private string? _stepId;
+    private List<PluginImageConfig> _images = [];
+
     /// <summary>
     /// Minimum valid execution order value in Dataverse.
     /// </summary>
@@ -262,37 +287,37 @@ public sealed class PluginStepConfig
     /// Auto-generated if not specified: "{TypeName}: {Message} of {Entity}".
     /// </summary>
     [JsonPropertyName("name")]
-    public string? Name { get; set; }
+    public string? Name { get => _name; set => Set(ref _name, value); }
 
     /// <summary>
     /// SDK message name (Create, Update, Delete, Retrieve, etc.).
     /// </summary>
     [JsonPropertyName("message")]
-    public string Message { get; set; } = string.Empty;
+    public string Message { get => _message; set => Set(ref _message, value); }
 
     /// <summary>
     /// Primary entity logical name. Use "none" for global messages.
     /// </summary>
     [JsonPropertyName("entity")]
-    public string Entity { get; set; } = string.Empty;
+    public string Entity { get => _entity; set => Set(ref _entity, value); }
 
     /// <summary>
     /// Secondary entity logical name for relationship messages (Associate, etc.).
     /// </summary>
     [JsonPropertyName("secondaryEntity")]
-    public string? SecondaryEntity { get; set; }
+    public string? SecondaryEntity { get => _secondaryEntity; set => Set(ref _secondaryEntity, value); }
 
     /// <summary>
     /// Pipeline stage: PreValidation, PreOperation, or PostOperation.
     /// </summary>
     [JsonPropertyName("stage")]
-    public string Stage { get; set; } = string.Empty;
+    public string Stage { get => _stage; set => Set(ref _stage, value); }
 
     /// <summary>
     /// Execution mode: Synchronous or Asynchronous.
     /// </summary>
     [JsonPropertyName("mode")]
-    public string Mode { get; set; } = "Synchronous";
+    public string Mode { get => _mode; set => Set(ref _mode, value); }
 
     /// <summary>
     /// Execution order when multiple plugins handle the same event.
@@ -300,99 +325,99 @@ public sealed class PluginStepConfig
     /// Default: 1.
     /// </summary>
     [JsonPropertyName("executionOrder")]
-    public int ExecutionOrder { get; set; } = 1;
+    public int ExecutionOrder { get => _executionOrder; set => Set(ref _executionOrder, value); }
 
     /// <summary>
     /// Comma-separated list of attributes that trigger this step (Update message only).
     /// </summary>
     [JsonPropertyName("filteringAttributes")]
-    public string? FilteringAttributes { get; set; }
+    public string? FilteringAttributes { get => _filteringAttributes; set => Set(ref _filteringAttributes, value); }
 
     /// <summary>
     /// Unsecure configuration string passed to plugin constructor.
     /// Safe for source control (never contains secrets).
     /// </summary>
     [JsonPropertyName("unsecureConfiguration")]
-    public string? UnsecureConfiguration { get; set; }
+    public string? UnsecureConfiguration { get => _unsecureConfiguration; set => Set(ref _unsecureConfiguration, value); }
 
     /// <summary>
     /// Deployment target: ServerOnly (default), Offline, or Both.
     /// </summary>
     [JsonPropertyName("deployment")]
-    public string? Deployment { get; set; }
+    public string? Deployment { get => _deployment; set => Set(ref _deployment, value); }
 
     /// <summary>
     /// User context to run the plugin as.
-    /// Use "CallingUser" (default), "System", a systemuser GUID,
+    /// Use "CallingUser" to clear impersonation, a systemuser GUID,
     /// a domain name (e.g., "user@domain.com"), or an email address.
     /// </summary>
     [JsonPropertyName("runAsUser")]
-    public string? RunAsUser { get; set; }
+    public string? RunAsUser { get => _runAsUser; set => Set(ref _runAsUser, value); }
 
     /// <summary>
     /// Whether this step can be bypassed via BypassBusinessLogicExecution.
-    /// Only written when false (non-default). Default (true) is omitted from JSON.
+    /// Omission preserves an existing value. Explicit null resets to true; both boolean values are written.
     /// </summary>
     [JsonPropertyName("canBeBypassed")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? CanBeBypassed { get; set; }
+    public bool? CanBeBypassed { get => _canBeBypassed; set => Set(ref _canBeBypassed, value); }
 
     /// <summary>
     /// Whether this step can use a read-only database connection for improved performance.
-    /// Only written when true (non-default). Default (false) is omitted from JSON.
+    /// Omission preserves an existing value. Explicit null resets to false; both boolean values are written.
     /// </summary>
     [JsonPropertyName("canUseReadOnlyConnection")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? CanUseReadOnlyConnection { get; set; }
+    public bool? CanUseReadOnlyConnection { get => _canUseReadOnlyConnection; set => Set(ref _canUseReadOnlyConnection, value); }
 
     /// <summary>
     /// Pipeline invocation source: Parent (default) or Child.
-    /// Only written when non-default (Child). Default (Parent) is omitted from JSON.
+    /// Deploy always manages this field; omitted/null defaults to Parent.
     /// </summary>
     [JsonPropertyName("invocationSource")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? InvocationSource { get; set; }
+    public string? InvocationSource { get => _invocationSource; set => Set(ref _invocationSource, value); }
 
     /// <summary>
     /// Secure configuration string passed to plugin constructor.
     /// Write-only at runtime — never extracted from assemblies, never stored in source control.
-    /// Provided separately at deploy time via CLI flags or environment variables.
+    /// Omitted/null preserves the existing value; any non-null string requests a write.
     /// </summary>
     [JsonPropertyName("secureConfiguration")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SecureConfiguration { get; set; }
+    public string? SecureConfiguration { get => _secureConfiguration; set => Set(ref _secureConfiguration, value); }
 
     /// <summary>
     /// Whether the step is enabled. Default is true.
     /// When false, the step is registered but disabled (won't execute).
     /// </summary>
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
 
     /// <summary>
     /// Description of what this step does.
     /// </summary>
     [JsonPropertyName("description")]
-    public string? Description { get; set; }
+    public string? Description { get => _description; set => Set(ref _description, value); }
 
     /// <summary>
     /// For async steps, whether to delete the async job on successful completion.
     /// Default is false (keep async job records).
     /// </summary>
     [JsonPropertyName("asyncAutoDelete")]
-    public bool? AsyncAutoDelete { get; set; }
+    public bool? AsyncAutoDelete { get => _asyncAutoDelete; set => Set(ref _asyncAutoDelete, value); }
 
     /// <summary>
     /// Step identifier for associating images with specific steps on multi-step plugins.
     /// </summary>
     [JsonPropertyName("stepId")]
-    public string? StepId { get; set; }
+    public string? StepId { get => _stepId; set => Set(ref _stepId, value); }
 
     /// <summary>
     /// Entity images registered for this step.
     /// </summary>
     [JsonPropertyName("images")]
-    public List<PluginImageConfig> Images { get; set; } = [];
+    public List<PluginImageConfig> Images { get => _images; set => Set(ref _images, value); }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
@@ -496,38 +521,45 @@ public sealed class CustomApiParameterConfig
 /// <summary>
 /// Configuration for a plugin step image (pre-image or post-image).
 /// </summary>
-public sealed class PluginImageConfig
+public sealed class PluginImageConfig : PluginConfigurationPresence
 {
+    private string _name = string.Empty;
+    private string _imageType = string.Empty;
+    private string? _attributes;
+    private string? _entityAlias;
+    private string? _description;
+    private string? _messagePropertyName;
+
     /// <summary>
     /// Name used to access the image in plugin context.
     /// </summary>
     [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
+    public string Name { get => _name; set => Set(ref _name, value); }
 
     /// <summary>
     /// Image type: PreImage, PostImage, or Both.
     /// </summary>
     [JsonPropertyName("imageType")]
-    public string ImageType { get; set; } = string.Empty;
+    public string ImageType { get => _imageType; set => Set(ref _imageType, value); }
 
     /// <summary>
-    /// Comma-separated list of attributes to include. Null means all attributes.
+    /// Comma-separated list of attributes to include. Omission preserves existing values; explicit null/empty resets to all attributes in deploy.
     /// </summary>
     [JsonPropertyName("attributes")]
-    public string? Attributes { get; set; }
+    public string? Attributes { get => _attributes; set => Set(ref _attributes, value); }
 
     /// <summary>
     /// Entity alias for the image. Defaults to Name if not specified.
     /// </summary>
     [JsonPropertyName("entityAlias")]
-    public string? EntityAlias { get; set; }
+    public string? EntityAlias { get => _entityAlias; set => Set(ref _entityAlias, value); }
 
     /// <summary>
     /// Description of this image's purpose. Stored as metadata in Dataverse.
     /// </summary>
     [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Description { get; set; }
+    public string? Description { get => _description; set => Set(ref _description, value); }
 
     /// <summary>
     /// The message property name that carries the entity.
@@ -535,7 +567,7 @@ public sealed class PluginImageConfig
     /// </summary>
     [JsonPropertyName("messagePropertyName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? MessagePropertyName { get; set; }
+    public string? MessagePropertyName { get => _messagePropertyName; set => Set(ref _messagePropertyName, value); }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.

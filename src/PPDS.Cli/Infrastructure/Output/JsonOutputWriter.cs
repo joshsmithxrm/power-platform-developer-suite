@@ -65,12 +65,24 @@ public sealed class JsonOutputWriter : IOutputWriter
 
     /// <inheritdoc />
     public void WriteSuccess<T>(T data)
+        => WriteSuccess(data, metadata: null);
+
+    // Additive command metadata preserves the existing version-1 data contract.
+    internal void WriteSuccess<T>(T data, object? metadata)
+        => WriteData(data, metadata, success: true);
+
+    // Incomplete verification is not a successful comparison; keep data[] intact.
+    internal void WriteComparison<T>(T data, object metadata, bool isComplete)
+        => WriteData(data, metadata, success: isComplete);
+
+    private void WriteData<T>(T data, object? metadata, bool success)
     {
         var output = new JsonResultEnvelope
         {
             Version = SchemaVersion,
-            Success = true,
+            Success = success,
             Data = data,
+            Metadata = metadata,
             Timestamp = DateTime.UtcNow.ToString("O")
         };
 
@@ -170,6 +182,7 @@ public sealed class JsonOutputWriter : IOutputWriter
         public string? Version { get; set; }
         public bool Success { get; set; }
         public object? Data { get; set; }
+        public object? Metadata { get; set; }
         public JsonErrorDto? Error { get; set; }
         public List<JsonItemResultDto>? Results { get; set; }
         public string? Timestamp { get; set; }

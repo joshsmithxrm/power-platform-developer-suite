@@ -148,6 +148,12 @@ public class DiffCommandTests : IDisposable
         string typeName,
         List<PluginStepInfo> envSteps)
     {
+        // These fixtures model readable enabled steps with the default invocation source.
+        foreach (var step in envSteps)
+        {
+            step.IsEnabled = true;
+            step.InvocationSource = "Parent";
+        }
         var mock = new Mock<IPluginRegistrationService>();
         mock.Setup(s => s.GetAssemblyByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PluginAssemblyInfo { Id = assemblyId, Name = "MyPlugin" });

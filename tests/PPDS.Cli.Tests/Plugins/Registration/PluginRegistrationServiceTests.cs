@@ -1065,7 +1065,7 @@ public class PluginRegistrationServiceTests
         // Assert
         Assert.NotNull(_updatedEntity);
         Assert.Equal(imageId, _updatedEntity!.Id);
-        Assert.Equal("name,accountnumber,statecode",
+        Assert.Equal("accountnumber,name,statecode",
             _updatedEntity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1));
     }
 
@@ -1308,7 +1308,12 @@ public class PluginRegistrationServiceTests
         var expectedStepId = Guid.NewGuid();
         var runAsUserId = Guid.NewGuid();
 
-        _retrieveMultipleResult = new EntityCollection();
+        _mockPooledClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase query, CancellationToken _) =>
+                ((QueryExpression)query).EntityName == SystemUser.EntityLogicalName
+                    ? new EntityCollection(new List<Entity> { new SystemUser { Id = runAsUserId } })
+                    : new EntityCollection());
         _createResult = expectedStepId;
 
         var stepConfig = new PluginStepConfig
@@ -1344,27 +1349,13 @@ public class PluginRegistrationServiceTests
         var expectedStepId = Guid.NewGuid();
         var resolvedUserId = Guid.NewGuid();
 
-        // Setup to return no existing step on first query, then return user on second query
-        var queryCount = 0;
+        // Lookup users by query shape: user validation precedes step writes and row lookup.
         _mockPooledClient
-            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                queryCount++;
-                if (queryCount == 1)
-                {
-                    // First query: check for existing step
-                    return new EntityCollection();
-                }
-                else
-                {
-                    // Second query: user lookup
-                    var userEntities = new EntityCollection();
-                    var user = new SystemUser { Id = resolvedUserId };
-                    userEntities.Entities.Add(user);
-                    return userEntities;
-                }
-            });
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase query, CancellationToken _) =>
+                ((QueryExpression)query).EntityName == SystemUser.EntityLogicalName
+                    ? new EntityCollection(new List<Entity> { new SystemUser { Id = resolvedUserId } })
+                    : new EntityCollection());
 
         _createResult = expectedStepId;
 
