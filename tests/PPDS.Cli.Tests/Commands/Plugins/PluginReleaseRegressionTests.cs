@@ -62,7 +62,8 @@ public class PluginReleaseRegressionTests
             var error = json.RootElement.GetProperty("error").GetString()!;
             Assert.Contains("acount", error);
             Assert.Contains("No SDK message filter", error);
-            Assert.Contains("cleanup rejected", error);
+            Assert.DoesNotContain("cleanup rejected", error);
+            Assert.Contains(result.Outcomes, o => o.Phase == "stepCleanup" && o.Outcome == "unknown" && o.RecordId == orphanId);
             mock.Verify(s => s.DeleteStepAsync(orphanId, It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
@@ -94,7 +95,7 @@ public class PluginReleaseRegressionTests
             .ReturnsAsync(new PluginAssemblyInfo { Id = assemblyId, Name = "Example" });
         mock.Setup(s => s.ListTypesForAssemblyAsync(assemblyId, cts.Token))
             .ReturnsAsync([new() { Id = first, TypeName = "First" }, new() { Id = second, TypeName = "Second" }]);
-        mock.Setup(s => s.ListStepsForTypeAsync(first, null, cts.Token))
+        mock.Setup(s => s.ListStepsForTypeAsync(first, new PluginListOptions(IncludeHidden: true), cts.Token))
             .Returns(() => { cts.Cancel(); return Task.FromCanceled<List<PluginStepInfo>>(cts.Token); });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -116,7 +117,7 @@ public class PluginReleaseRegressionTests
             .ReturnsAsync(new PluginAssemblyInfo { Id = assemblyId, Name = "Example" });
         mock.Setup(s => s.ListTypesForAssemblyAsync(assemblyId, cts.Token))
             .ReturnsAsync([new() { Id = typeId, TypeName = "Handler" }]);
-        mock.Setup(s => s.ListStepsForTypeAsync(typeId, null, cts.Token))
+        mock.Setup(s => s.ListStepsForTypeAsync(typeId, new PluginListOptions(IncludeHidden: true), cts.Token))
             .ReturnsAsync([new() { Id = stepId, Name = "existing", Message = "Update", PrimaryEntity = "account", Stage = "PostOperation", Mode = "Synchronous" }]);
         mock.Setup(s => s.ListImagesForStepAsync(stepId, cts.Token)).ReturnsAsync([]);
         mock.Setup(s => s.GetSdkMessageIdAsync("Create", cts.Token)).ReturnsAsync(messageId);

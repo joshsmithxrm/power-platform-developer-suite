@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -278,11 +278,12 @@ public partial class RpcMethodHandler
         bool? canBeBypassed = null,
         bool? canUseReadOnlyConnection = null,
         string? invocationSource = null,
-        bool asyncAutoDelete = false,
+        bool? asyncAutoDelete = null,
         string? secondaryEntity = null,
         string? solutionName = null,
         string? environmentUrl = null,
         string? profileName = null,
+        string[]? resetFields = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(eventHandlerId) || !Guid.TryParse(eventHandlerId, out var typeId))
@@ -321,8 +322,6 @@ public partial class RpcMethodHandler
                 Message = message,
                 Entity = entity,
                 Stage = stage,
-                Mode = mode,
-                ExecutionOrder = executionOrder,
                 FilteringAttributes = filteringAttributes,
                 Description = description,
                 UnsecureConfiguration = unsecureConfiguration,
@@ -336,6 +335,10 @@ public partial class RpcMethodHandler
                 SecondaryEntity = secondaryEntity
             };
 
+            if (mode != null) stepConfig.Mode = mode;
+            stepConfig.ExecutionOrder = executionOrder;
+            stepConfig.PreserveLegacyPlaceholders();
+            stepConfig.ResetFields = resetFields?.ToList() ?? [];
             var stepId = await registrationService.UpsertStepAsync(typeId, eventHandlerType, stepConfig, messageId, filterId, solutionName, cancellationToken: ct);
 
             return new PluginsRegisterResponse { Id = stepId.ToString() };
@@ -355,6 +358,9 @@ public partial class RpcMethodHandler
         string? messageName = null,
         string? environmentUrl = null,
         string? profileName = null,
+        string? description = null,
+        string? messagePropertyName = null,
+        string[]? resetFields = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(stepId) || !Guid.TryParse(stepId, out var parsedStepId))
@@ -382,9 +388,13 @@ public partial class RpcMethodHandler
                 Name = name,
                 ImageType = imageType,
                 Attributes = attributes,
-                EntityAlias = entityAlias
+                EntityAlias = entityAlias,
+                Description = description,
+                MessagePropertyName = messagePropertyName
             };
 
+            imageConfig.PreserveLegacyPlaceholders();
+            imageConfig.ResetFields = resetFields?.ToList() ?? [];
             var imageId = await registrationService.UpsertImageAsync(parsedStepId, imageConfig, resolvedMessageName, ct);
 
             return new PluginsRegisterResponse { Id = imageId.ToString() };
@@ -407,6 +417,12 @@ public partial class RpcMethodHandler
         string? invocationSource = null,
         string? environmentUrl = null,
         string? profileName = null,
+        string? name = null,
+        string? deployment = null,
+        string? unsecureConfiguration = null,
+        string? runAsUser = null,
+        bool? asyncAutoDelete = null,
+        string[]? resetFields = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
@@ -424,8 +440,15 @@ public partial class RpcMethodHandler
                 Description: description,
                 CanBeBypassed: canBeBypassed,
                 CanUseReadOnlyConnection: canUseReadOnlyConnection,
-                InvocationSource: invocationSource
-            );
+                InvocationSource: invocationSource)
+            {
+                UnsecureConfiguration = unsecureConfiguration,
+                RunAsUser = runAsUser,
+                AsyncAutoDelete = asyncAutoDelete,
+                ResetFields = resetFields,
+                Name = name,
+                Deployment = deployment
+            };
 
             await registrationService.UpdateStepAsync(stepId, request, ct);
 
@@ -443,6 +466,11 @@ public partial class RpcMethodHandler
         string? name = null,
         string? environmentUrl = null,
         string? profileName = null,
+        string? imageType = null,
+        string? description = null,
+        string? entityAlias = null,
+        string? messagePropertyName = null,
+        string[]? resetFields = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var imageId))
@@ -454,8 +482,14 @@ public partial class RpcMethodHandler
 
             var request = new ImageUpdateRequest(
                 Attributes: imageAttributes,
-                Name: name
-            );
+                Name: name)
+            {
+                Description = description,
+                EntityAlias = entityAlias,
+                MessagePropertyName = messagePropertyName,
+                ResetFields = resetFields,
+                ImageType = imageType
+            };
 
             await registrationService.UpdateImageAsync(imageId, request, ct);
 

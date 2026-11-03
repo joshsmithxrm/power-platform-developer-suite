@@ -15,6 +15,7 @@ import type {
     PluginEntityChild,
 } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
+import { pluginRpcFields } from './webview/shared/plugin-form-fields.js';
 
 export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, PluginsPanelHostToWebview> {
     private static instances: PluginsPanel[] = [];
@@ -440,7 +441,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
     }
 
     private async handleRegister(message: Extract<PluginsPanelWebviewToHost, { command: 'registerEntity' }>): Promise<void> {
-        const { entityType, fields } = message;
+        const { entityType, fields, parentId } = message;
 
         try {
             await vscode.window.withProgress(
@@ -464,10 +465,10 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                             );
                             break;
                         case 'step':
-                            await this.daemon.pluginsRegisterStep(fields, this.environmentUrl, this.profileName);
+                            await this.daemon.pluginsRegisterStep(pluginRpcFields('step', fields, parentId), this.environmentUrl, this.profileName);
                             break;
                         case 'image':
-                            await this.daemon.pluginsRegisterImage(fields, this.environmentUrl, this.profileName);
+                            await this.daemon.pluginsRegisterImage(pluginRpcFields('image', fields, parentId), this.environmentUrl, this.profileName);
                             break;
                         case 'serviceEndpoint':
                             await this.daemon.serviceEndpointsRegister(fields, this.environmentUrl, this.profileName);
@@ -506,10 +507,10 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                             );
                             break;
                         case 'step':
-                            await this.daemon.pluginsUpdateStep(id, fields, this.environmentUrl, this.profileName);
+                            await this.daemon.pluginsUpdateStep(id, pluginRpcFields('step', fields, undefined, true), this.environmentUrl, this.profileName);
                             break;
                         case 'image':
-                            await this.daemon.pluginsUpdateImage(id, fields, this.environmentUrl, this.profileName);
+                            await this.daemon.pluginsUpdateImage(id, pluginRpcFields('image', fields, undefined, true), this.environmentUrl, this.profileName);
                             break;
                         case 'serviceEndpoint':
                             await this.daemon.serviceEndpointsUpdate(id, fields, this.environmentUrl, this.profileName);
