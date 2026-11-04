@@ -639,7 +639,9 @@ public static class EntityCommand
     }
 
     /// <summary>Creates the 'entity delete' subcommand.</summary>
-    public static Command CreateDeleteCommand()
+    public static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = CreateEntityArgument();
 
@@ -659,7 +661,7 @@ public static class EntityCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -689,7 +691,7 @@ public static class EntityCommand
 
             return await ExecuteDeleteAsync(
                 solution, entity, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -703,17 +705,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -724,7 +729,7 @@ public static class EntityCommand
                 Console.Error.WriteLine();
             }
 
-            // Always do a dry-run first to show dependencies
+            // Validate required inputs before preview or confirmation; this does not discover dependencies.
             var dryRunRequest = new DeleteTableRequest
             {
                 SolutionUniqueName = solution,
@@ -738,11 +743,11 @@ public static class EntityCommand
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(new { entity, dryRun = true });
+                    writer.WriteSuccess(new { entity, dryRun = true, preview = MetadataDeletePreview.InputOnly });
                 }
                 else
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
                 }
 
                 return ExitCodes.Success;

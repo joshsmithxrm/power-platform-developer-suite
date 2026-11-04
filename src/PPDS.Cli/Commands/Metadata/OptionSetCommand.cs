@@ -466,7 +466,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'delete' subcommand for a global option set.
     /// </summary>
-    public static Command CreateDeleteCommand()
+    public static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -488,7 +490,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -516,7 +518,7 @@ public static class OptionSetCommand
 
             return await ExecuteDeleteAsync(
                 solution, name, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -530,17 +532,20 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -551,7 +556,7 @@ public static class OptionSetCommand
                 Console.Error.WriteLine();
             }
 
-            // Dry-run first
+            // Validate required inputs only; target existence and dependencies are not queried.
             var dryRunRequest = new DeleteGlobalChoiceRequest
             {
                 SolutionUniqueName = solution,
@@ -565,11 +570,11 @@ public static class OptionSetCommand
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(new { name, dryRun = true });
+                    writer.WriteSuccess(new { name, dryRun = true, preview = MetadataDeletePreview.InputOnly });
                 }
                 else
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
                 }
 
                 return ExitCodes.Success;
@@ -965,7 +970,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'remove-option' subcommand.
     /// </summary>
-    public static Command CreateRemoveOptionCommand()
+    public static Command CreateRemoveOptionCommand() => CreateRemoveOptionCommand(null);
+
+    internal static Command CreateRemoveOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -997,7 +1004,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate that the target option exists, without removing it",
+            Description = MetadataDeletePreview.OptionExistenceHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -1043,7 +1050,7 @@ public static class OptionSetCommand
 
             return await ExecuteRemoveOptionAsync(
                 solution, name, value, label, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -1059,18 +1066,21 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
         var target = value.HasValue ? $"value {value}" : $"label '{label}'";
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -1128,15 +1138,12 @@ public static class OptionSetCommand
 
             await authoringService.DeleteOptionValueAsync(request, ct: cancellationToken);
 
+            if (dryRun && !globalOptions.IsJsonMode) MetadataDeletePreview.OptionExistence.WriteDiagnostic();
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, removed = !dryRun, dryRun });
+                writer.WriteSuccess(new { optionSetName = name, removed = !dryRun, dryRun, preview = dryRun ? MetadataDeletePreview.OptionExistence : null });
             }
-            else if (dryRun)
-            {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. Option exists and can be removed.");
-            }
-            else
+            else if (!dryRun)
             {
                 Console.Error.WriteLine($"Option ({target}) removed from '{name}'.");
             }

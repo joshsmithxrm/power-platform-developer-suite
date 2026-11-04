@@ -460,7 +460,9 @@ public static class RelationshipCommandGroup
         }
     }
 
-    internal static Command CreateDeleteCommand()
+    internal static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -482,7 +484,7 @@ public static class RelationshipCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -510,7 +512,7 @@ public static class RelationshipCommandGroup
 
             return await ExecuteDeleteAsync(
                 solution, name, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -524,17 +526,20 @@ public static class RelationshipCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -545,7 +550,7 @@ public static class RelationshipCommandGroup
                 Console.Error.WriteLine();
             }
 
-            // Dry-run first
+            // Validate required inputs only; target existence and dependencies are not queried.
             var dryRunRequest = new DeleteRelationshipRequest
             {
                 SolutionUniqueName = solution,
@@ -559,11 +564,11 @@ public static class RelationshipCommandGroup
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(new { name, dryRun = true });
+                    writer.WriteSuccess(new { name, dryRun = true, preview = MetadataDeletePreview.InputOnly });
                 }
                 else
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
                 }
 
                 return ExitCodes.Success;
