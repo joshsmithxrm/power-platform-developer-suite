@@ -247,14 +247,9 @@ public class FormXmlEditorTests
         FormXmlEditor.AddField(formXml, "Details", "field_c", classId, "C");
 
         var orderedFields = new List<string> { "field_c", "field_a" }; // field_b omitted
-        var classIds = new Dictionary<string, string>
-        {
-            ["field_a"] = classId,
-            ["field_c"] = classId,
-        };
-
         // Act
-        var result = FormXmlEditor.ReorderFields(formXml, "Details", orderedFields, classIds);
+        var result = FormXmlEditor.ReorderFields(formXml, "Details", orderedFields,
+            _ => throw new InvalidOperationException("Existing cells must not need metadata resolution."));
 
         // Assert
         var controls = result.Descendants("control")
@@ -539,7 +534,7 @@ public class FormXmlEditorTests
 
         var result = FormXmlEditor.ReorderFields(formXml, "Details",
             new List<string> { "field_b", "field_a" },
-            new Dictionary<string, string> { ["field_a"] = classId, ["field_b"] = classId });
+            _ => throw new InvalidOperationException("Existing cells must not need metadata resolution."));
 
         result.Descendants("control")
             .Where(c => (string?)c.Attribute("classid") == ClassIdResolver.SubgridClassId)

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Form `add-field` and newly created `reorder-fields` controls use the resolved metadata logical name for bindings and control IDs regardless of input casing. Existing controls and label behavior are preserved; invalid new-field requests are rejected before writes even for sections without rows (#1527).
+
 ## [1.5.0] - 2026-11-01
 
 ### Added

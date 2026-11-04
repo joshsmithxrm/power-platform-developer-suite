@@ -29,7 +29,7 @@ public sealed class FormAuthoringTests
     {
         using var h = new Harness { Managed = managed };
         var before = XDocument.Parse(h.Draft);
-        var result = await h.Service.AddFieldDraftAsync(h.Request());
+        var result = await h.Service.AddFieldDraftAsync(h.Request() with { FieldLogicalName = "TELEPHONE1" });
         result.Status.Should().Be("saved-unpublished");
         result.DraftVerification.Status.Should().Be("succeeded");
         result.DraftHash.Should().Be(FormService.ComputeDraftHash(h.Draft));
@@ -38,6 +38,9 @@ public sealed class FormAuthoringTests
         XNode.DeepEquals(before.Descendants("parameters").Single(), after.Descendants("parameters").Single()).Should().BeTrue();
         after.Root!.Attribute("headerdensity")!.Value.Should().Be("HighWithControls");
         after.Descendants("control").Count(c => (string?)c.Attribute("datafieldname") == "telephone1").Should().Be(1);
+        after.Descendants("control").Single(c => (string?)c.Attribute("datafieldname") == "telephone1")
+            .Attribute("id")!.Value.Should().Be("telephone1");
+        result.FieldLogicalName.Should().Be("telephone1");
         h.Writes.Should().Be(1);
         h.Publications.Should().Be(0);
         h.Published.Should().Be(TimelineFormFixture.Xml);
