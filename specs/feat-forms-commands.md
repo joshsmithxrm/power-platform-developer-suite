@@ -1,7 +1,7 @@
 # Form Management Commands
 
 **Status:** Draft
-**Last Updated:** 2026-10-29
+**Last Updated:** 2026-11-03
 **Code:** [src/PPDS.Cli/Commands/Forms/](../src/PPDS.Cli/Commands/Forms/) | [src/PPDS.Cli/Services/Forms/](../src/PPDS.Cli/Services/Forms/) | [src/PPDS.Cli/Resources/Schemas/](../src/PPDS.Cli/Resources/Schemas/)
 **Surfaces:** CLI
 
@@ -144,6 +144,8 @@ The schema's `FormGuidType` permits both braced and unbraced GUIDs (`\{?...\}?`)
 Validation failure produces a `PpdsValidationException` with `FormErrorCodes.InvalidFormXml` and an error message that includes the failing element name and the line/position.
 
 ### classid Resolution for add-field
+
+Column lookup for `add-field` and newly created `reorder-fields` cells is case-insensitive. New controls use the resolved metadata `LogicalName` exactly for both `datafieldname` and control `id`. Existing cells retain their IDs, bindings, labels and properties when moved. Existing display label, duplicate, movement and omission rules still apply.
 
 `FormService` resolves classid by calling `IMetadataQueryService.GetAttributesAsync(entityLogicalName)`, locating the attribute whose `LogicalName` matches the requested column, and reading its `AttributeType` (a `string`, e.g. `"String"`, `"Picklist"`). `AttributeMetadataDto.AttributeType` is a string — there is no `AttributeTypeCode` enum on the DTO — so `ClassIdResolver` keys off the string value. The mapping is:
 
@@ -643,6 +645,15 @@ This preserves typed checks on known parameters and structure elsewhere in the f
 | 2026-06-12 | `forms remove-subgrid --label` now accepts a GUID (control `id`) in addition to a label. `ElementMatches` corrected: element `id` attribute is compared as a brace-normalised string rather than re-parsed as a Guid, so pre-existing forms with non-canonical `id` values can still be matched by ID. |
 | 2026-06-12 | `forms get` gains `--raw` flag (writes raw `formxml` to stdout) and now shows element names in the text-mode tree output (`Label [name]` format). `FormDetail` gains `FormXml?`, `TabDetail` gains `Name`, `SectionDetail` gains `Name`, `SubgridDetail.Id` (Guid) replaced by `Name` (string, the control `id` attribute). |
 | 2026-06-12 | Tab/section `name` attribute now generated as `tab_<sanitized_label>` / `section_<sanitized_label>` instead of a GUID (passes Dataverse designer name validation). Subgrid `control.id` now set to `subgrid_<sanitized_label>`; `uniqueid` GUID attribute added for Dataverse use. Name uniqueness enforced on add: `DuplicateTabName`, `DuplicateSectionName`, `DuplicateSubgridName`. `--tab`/`--section`/`--label` (subgrid) now match by label OR `name` attribute (no GUID detection). |
+
+## Canonical new field bindings (#1527)
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-48 | Case-insensitive add-field lookup emits the metadata LogicalName for new control ID and binding, retaining metadata display labels and duplicate additions. | FormFieldBindingTests.Add_UsesMetadataLogicalName, Add_DuplicatesRemainAllowed | ✅ |
+| AC-49 | Reorder creates missing cells with metadata LogicalName, preserves existing cells/IDs/properties and non-field controls, and retains omission, movement and label behavior. | FormFieldBindingTests.Reorder_CanonicalizesOnlyNewCells, Reorder_ExistingFieldNeedsNoSupportedMetadata | ✅ |
+| AC-50 | Unknown or unsupported new fields and empty requests fail without Update, solution association or publication, including rowless sections. A valid reorder of a rowless section leaves the section empty. | FormFieldBindingTests.InvalidFields_DoNotWrite, Reorder_RowlessInvalidField_DoesNotWrite, Reorder_RowlessValidField_PreservesNoNewCellBehavior | ✅ |
+| AC-51 | Normal CLI parsing and action invoke the common service and produce canonical new bindings. Existing MCP draft authoring uses the metadata logical name. | FormFieldBindingCommandTests.Command_UsesRealService, FormAuthoringTests.AddField_ManagedOrUnmanaged_PreservesTimelineAndPriorDraftWithoutPublishing | ✅ |
 
 ## Safe MCP authoring surface
 
