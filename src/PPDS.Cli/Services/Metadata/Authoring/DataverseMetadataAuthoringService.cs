@@ -1280,7 +1280,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 "Provide --value or --solution to determine the option value.",
                 "Value");
 
-        var existingReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        var existingReasons = await ReadStatusReasonsAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
         var existingValues = existingReasons.Select(r => r.Value).ToList();
 
         int? optionPrefix = null;
@@ -1332,7 +1332,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
+    public Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
+        => ReadStatusReasonsAsync(entityLogicalName, retrieveAsIfPublished: false, ct);
+
+    // Allocation needs draft values, while public lists and existing target resolution remain published.
+    private async Task<IReadOnlyList<StatusReasonInfo>> ReadStatusReasonsAsync(
+        string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField, "EntityLogicalName is required.", "EntityLogicalName");
@@ -1342,7 +1347,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var retrieveRequest = new RetrieveAttributeRequest
         {
             EntityLogicalName = entityLogicalName,
-            LogicalName = "statuscode"
+            LogicalName = "statuscode",
+            RetrieveAsIfPublished = retrieveAsIfPublished
         };
 
         OrganizationResponse retrieveResponse;
@@ -1561,7 +1567,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     #region Local Column Options (#1161)
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+    public Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+        => ReadColumnOptionsAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: false, ct);
+
+    // Keep draft-aware allocation separate from published list/update/remove semantics.
+    private async Task<IReadOnlyList<ColumnOptionInfo>> ReadColumnOptionsAsync(
+        string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         _validator.ValidateRequiredString(entityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(columnLogicalName, "ColumnLogicalName");
@@ -1571,7 +1582,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var retrieveRequest = new RetrieveAttributeRequest
         {
             EntityLogicalName = entityLogicalName,
-            LogicalName = columnLogicalName
+            LogicalName = columnLogicalName,
+            RetrieveAsIfPublished = retrieveAsIfPublished
         };
 
         OrganizationResponse retrieveResponse;
@@ -1630,7 +1642,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide an explicit value or --solution to derive the option value.", "Value");
 
-        var existing = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var existing = await ReadColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
         var existingValues = existing.Select(o => o.Value).ToList();
 
         int? optionPrefix = null;
@@ -2119,9 +2131,19 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         try
         {
             var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(
-                new RetrieveAttributeRequest { EntityLogicalName = entityLogicalName, LogicalName = attributeLogicalName },
+                new RetrieveAttributeRequest
+                {
+                    EntityLogicalName = entityLogicalName,
+                    LogicalName = attributeLogicalName,
+                    // The inserted option and other pending changes may not yet be published.
+                    RetrieveAsIfPublished = true
+                },
                 ct).ConfigureAwait(false);
             attribute = retrieveResponse.AttributeMetadata;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
