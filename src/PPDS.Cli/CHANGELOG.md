@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `views reorder-columns` now requires every existing column exactly once and rejects empty, partial, unknown or duplicate names before writing. Reordering preserves cell metadata and other layout content; use `views remove-column` for removal (#1533).
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
