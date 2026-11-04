@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-11-03
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -267,7 +267,7 @@ Task ReactivateKeyAsync(ReactivateKeyRequest request, CancellationToken ct = def
 
 ### Validation
 
-All authoring operations perform local validation before making SDK calls. In dry-run mode, validation runs but the SDK call is skipped.
+All authoring operations perform local validation before making SDK calls. In dry-run mode, mutation SDK calls are skipped; some operations still retrieve metadata for validation. Schema deletes validate required strings only, while global/local option removal resolves the target option.
 
 | Rule | Applies To | Error |
 |------|-----------|-------|
@@ -325,7 +325,7 @@ The `PublishXml` payload for entities:
 Schema delete operations follow the truncate safety pattern:
 
 **CLI interactive mode (no `--force`):**
-1. Automatic dry-run executes first — reports dependencies (relationships, keys, columns that will cascade). This happens regardless of whether `--dry-run` was passed; the explicit `--dry-run` flag gives the same report and then exits without prompting.
+1. Automatic dry-run executes first — validates required input strings only, without retrieving the target or its dependencies. This happens regardless of whether `--dry-run` was passed; the explicit flag reports this limited scope and exits without prompting. It does not establish whether deletion will succeed.
 2. Displays warning: "This will permanently delete {type} '{name}'. All data in this {type} will be lost. This operation cannot be undone."
 3. Prompts for exact confirmation text: `DELETE TABLE account` or `DELETE COLUMN account.statuscode`
 4. Exact case-sensitive string match required
@@ -528,7 +528,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set (local path is now load-bearing for #1161 — AC-55) | `MetadataAuthoringServiceTests.AddOptionValueAsync_GlobalAndLocal_InsertsViaInsertOptionValue` | ❌ |
 | AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |
 | AC-10 | `ReactivateKeyAsync` retries a failed key index creation | — | ❌ |
-| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting | `MetadataAuthoringServiceTests.DeleteTableAsync_DryRun_DoesNotCallSdk` | ✅ |
+| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting — **not implemented**; the existing no-SDK test proves input-only validation, not discovery | — | ❌ |
 | AC-12 | Validation rejects invalid schema names (spaces, special chars, wrong prefix) | `SchemaValidatorTests.ValidateSchemaName_InvalidChars_Throws` | ✅ |
 | AC-13 | Validation rejects schema names that don't match solution publisher prefix | `SchemaValidatorTests.ValidateSchemaPrefix_WrongPrefix_Throws` | ✅ |
 | AC-14 | Successful authoring operations invalidate relevant `CachedMetadataProvider` entries | `CacheInvalidationTests.CreateColumn_InvalidatesEntityCache_Scoped` | ✅ |
@@ -584,12 +584,25 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
 | AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
+### Delete preview scope (#1532)
+
+The current CLI schema-delete preview validates required input strings only. It does not retrieve the target, dependencies, managed-component restrictions, or server delete permissions. A successful preview is not assurance that deletion can succeed. Global and local option-removal previews additionally retrieve metadata and resolve the target option; they still do not check dependencies or deletion feasibility. No preview performs writes. Status-reason removal and the deprecated `choice remove-option` have no dry-run option; this change does not add one.
+
+Successful previews retain their existing output envelope and fields and add `preview` with `validationScope` (`input-only` or `option-existence`), `targetExistenceChecked`, `dependenciesChecked: false`, and `deletionFeasibilityChecked: false`. Text diagnostics and help communicate the same limits. Successful canonical JSON previews keep stderr empty; deprecated aliases retain only their existing deprecation diagnostic. Real deletion behavior and confirmation are unchanged. Full dependency discovery remains unimplemented; the unused `DeleteDryRunResult`/`DependencyInfo` types are not evidence of discovery.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-66 | All five canonical schema-delete commands and three deprecated aliases describe input-only validation, unchecked target existence/dependencies/deletion feasibility in dry-run help and stderr; successful JSON retains existing envelope/fields and adds explicit unchecked preview scope | `MetadataDeletePreviewTests.SchemaDelete_ReportsInputOnlyScopeWithoutSdkCalls`, `PreviewHelp_StatesLimitations` | ✅ |
+| AC-67 | Global/local option-removal previews report resolved target existence, but never claim removability or checked dependencies; additive JSON scope and help agree; SDK calls remain read-only | `MetadataDeletePreviewTests.OptionRemoval_ReportsExistenceOnlyAndNeverWrites`, `PreviewHelp_StatesLimitations` | ✅ |
+| AC-68 | Real validation failures (including missing option) remain errors with existing exit/envelope contracts and never emit a successful preview; no preview writes | `MetadataDeletePreviewTests.MissingOption_RemainsValidationFailure`, `SchemaDelete_MissingInput_RemainsValidationFailure` | ✅ |
+| AC-69 | Preview changes preserve real forced-delete requests, result fields and confirmation behavior; canonical/deprecated paths share the execute implementation | `MetadataDeletePreviewTests.SchemaDelete_RealFlowRetainsDeleteResult`, `SchemaDelete_WithoutForceStillRequiresConfirmation` | ✅ |
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
 | Create table with duplicate schema name | `SchemaName` already exists | `PpdsException` with `DUPLICATE_SCHEMA_NAME` |
-| Delete table with dependent relationships | Table has 1:N relationships | Dry-run reports dependencies; delete cascades |
+| Delete table with dependent relationships | Table has 1:N relationships | Dry-run validates input only; the server decides whether a real delete succeeds |
 | Create column on non-existent entity | `EntityLogicalName` not found | `PpdsException` with `ENTITY_NOT_FOUND` |
 | Create key exceeding 10-key limit | Entity already has 10 keys | `PpdsException` with `KEY_LIMIT_EXCEEDED` |
 | Create key with invalid column type | Key attribute is Image type | `PpdsException` with `INVALID_KEY_ATTRIBUTE` |
@@ -727,7 +740,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 ### Recovery Strategies
 
 - **Validation errors:** Fix input and retry — all validation errors include the specific field and constraint that failed
-- **Dependency conflicts:** Use `--dry-run` first to discover dependencies, then resolve or accept cascade behavior
+- **Dependency conflicts:** Inspect and resolve dependencies separately before deletion. The current CLI delete dry-run does not discover them
 - **Managed component errors:** Cannot modify managed components directly — create unmanaged customizations in the target solution
 
 ---
@@ -778,7 +791,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 **Context:** Schema deletes are destructive and irreversible. Need a confirmation mechanism.
 
-**Decision:** Follow the truncate pattern: `--dry-run` for impact preview, interactive confirmation with exact typed text, `--force` to skip, `CONFIRMATION_REQUIRED` error in non-interactive mode.
+**Decision:** Follow the truncate pattern: `--dry-run` for the limited validation described above, interactive confirmation with exact typed text, `--force` to skip, `CONFIRMATION_REQUIRED` error in non-interactive mode.
 
 **Rationale:** Consistency — users who've used `ppds truncate` already understand this pattern. The typed confirmation text (e.g., `DELETE TABLE account`) forces acknowledgment of exactly what's being destroyed. MCP surfaces don't expose delete at all, matching the existing read-only + non-destructive MCP design.
 
@@ -850,6 +863,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 | Date | Change |
 |------|--------|
+| 2026-11-03 | #1532: document actual delete-preview scope, remove CLI dependency/removability assurances, add additive JSON scope and AC-66–AC-69. Correct AC-11 to incomplete: dependency discovery is still unimplemented. |
 | 2026-03-31 | Initial spec |
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |

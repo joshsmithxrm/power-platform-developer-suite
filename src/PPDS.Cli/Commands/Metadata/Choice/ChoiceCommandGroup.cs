@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.CommandLine;
 using PPDS.Cli.Infrastructure;
 
@@ -161,7 +162,9 @@ public static class ChoiceCommandGroup
         return command;
     }
 
-    internal static Command CreateDeleteCommand()
+    internal static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -183,7 +186,7 @@ public static class ChoiceCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -212,7 +215,7 @@ public static class ChoiceCommandGroup
             DeprecationWarning.Write("ppds metadata choice delete", "ppds metadata optionset delete");
             return await Metadata.OptionSetCommand.ExecuteDeleteAsync(
                 solution, name, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;

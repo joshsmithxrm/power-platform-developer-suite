@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.CommandLine;
 using PPDS.Cli.Infrastructure;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -212,7 +213,9 @@ public static class TableCommandGroup
         return command;
     }
 
-    internal static Command CreateDeleteCommand()
+    internal static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -234,7 +237,7 @@ public static class TableCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -263,7 +266,7 @@ public static class TableCommandGroup
             DeprecationWarning.Write("ppds metadata table delete", "ppds metadata entity delete");
             return await Metadata.EntityCommand.ExecuteDeleteAsync(
                 solution, entity, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
