@@ -2,6 +2,12 @@
 
 How PRs get merged into `main`. Operational reference for maintainers.
 
+For contributor work, apply the shared [contributor lifecycle](CONTRIBUTOR-LIFECYCLE.md)
+before choosing the landing PR. Prefer the original PR when practical; verify the
+actual proposed squash author/message and resulting credit, and name the owners
+of contributor communication and source-PR disposition. Auto-merge eligibility
+does not waive these applicable checks or grant communication permission.
+
 ## Auto-Merge
 
 Auto-merge is **enabled at the repo level** (`allow_auto_merge: true`). It does not bypass branch protection or skip required reviews — it only removes the "human clicks merge when CI goes green" step.
