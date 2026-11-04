@@ -28,6 +28,13 @@ Include `Closes #NNN` for each issue this PR resolves. If you do not know the is
 
 ### Step 3: Pre-PR Self-Review
 
+Apply the shared [contributor lifecycle](../../../docs/CONTRIBUTOR-LIFECYCLE.md)
+and complete the applicable provenance checklist. Before any later authorized
+merge, validate the actual proposed squash author/message against the current
+landing head; do not infer credit from retained branch history. Assign named
+communication/disposition owners and prepare the exact reply/decision when sending
+or closure requires permission. A draft is not sent communication or merge approval.
+
 Dispatch the `code-reviewer` agent against `git diff origin/main...HEAD`. See REFERENCE.md §2 for inputs and finding triage. DEFECTs must be fixed before opening. Skip with `--no-self-review`.
 
 ### Step 4: Create PR (Draft)

@@ -22,6 +22,10 @@ Agent tool, `/review`, `/verify`, `/qa`, `/debug`, `/gates`.
 ## Process
 
 ### Step 1: Read & Analyze Plan
+- Apply the shared [contributor lifecycle](../../../docs/CONTRIBUTOR-LIFECYCLE.md):
+  prefer the original contributor PR when practical; record any incorporation
+  reason/source/head and name communication/disposition owners before work lands.
+  The explicit no-contribution path needs no invented contributor or extra approval.
 - Identify phases, dependencies, parallelization opportunities (sequential vs. parallel).
 - **Findings reconciliation:** Cross-reference every finding ID (CC-01, V-15) from any findings doc against plan text; report gaps.
 - **Shared-infrastructure scan:** Identify files in multiple phases; flag conflicts (must serialize or designate owner). See REFERENCE.md §5.
