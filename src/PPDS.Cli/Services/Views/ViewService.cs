@@ -910,19 +910,54 @@ public class ViewService : IViewService
 
     internal static XDocument ReorderCells(XDocument layout, IReadOnlyList<string> orderedAttributes)
     {
-        var row = layout.Descendants("row").FirstOrDefault();
-        if (row == null) return layout;
+        var ordered = ValidateColumnOrder(orderedAttributes);
+        var rows = layout.Descendants("row").ToList();
+        if (rows.Count != 1)
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                "Reordering requires a layout with exactly one row.");
 
-        var existingCells = row.Elements("cell").ToList();
-        var reordered = orderedAttributes
-            .Select(attr => existingCells.FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), attr, StringComparison.OrdinalIgnoreCase)))
-            .Where(c => c != null)
-            .ToList();
+        var existingCells = rows[0].Elements("cell").ToList();
+        var cellsByName = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cell in existingCells)
+        {
+            var name = (string?)cell.Attribute("name");
+            if (string.IsNullOrWhiteSpace(name) || name != name.Trim() || !cellsByName.TryAdd(name, cell))
+                throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                    "Reordering requires nonempty, unique column names in the layout.");
+        }
+        if (existingCells.Count == 0)
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                "Reordering requires a layout containing columns.");
 
-        foreach (var cell in existingCells) cell.Remove();
-        foreach (var cell in reordered) row.Add(cell!);
+        if (ordered.Count != existingCells.Count || ordered.Any(name => !cellsByName.ContainsKey(name)))
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "Column order must contain every existing column exactly once. Use remove-column to remove a column.");
+
+        // Validate the entire permutation before changing the document. Replace only cell slots,
+        // retaining comments, other child nodes, and each cell's original name and metadata.
+        var reordered = ordered.Select(name => new XElement(cellsByName[name])).ToList();
+        for (var i = 0; i < existingCells.Count; i++)
+            existingCells[i].ReplaceWith(reordered[i]);
 
         return layout;
+    }
+
+    internal static IReadOnlyList<string> ValidateColumnOrder(IReadOnlyList<string> orderedAttributes)
+    {
+        if (orderedAttributes == null || orderedAttributes.Count == 0)
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "Column order must contain every existing column exactly once.");
+
+        var ordered = new List<string>(orderedAttributes.Count);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in orderedAttributes)
+        {
+            if (string.IsNullOrWhiteSpace(attribute) || !names.Add(attribute.Trim()))
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                    "Column order cannot contain empty or duplicate names.");
+            ordered.Add(attribute.Trim());
+        }
+        return ordered;
     }
 
     internal static XDocument SetOrderElements(XDocument fetch, IReadOnlyList<ViewSortOrder> sorts)

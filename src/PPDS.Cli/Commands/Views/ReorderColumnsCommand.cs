@@ -8,7 +8,7 @@ using PPDS.Cli.Services.Views;
 namespace PPDS.Cli.Commands.Views;
 
 /// <summary>
-/// Set the authoritative column order for a view.
+/// Reorder every existing column in a view without removing columns.
 /// </summary>
 public static class ReorderColumnsCommand
 {
@@ -22,12 +22,12 @@ public static class ReorderColumnsCommand
 
         var columnsOption = new Option<string>("--columns")
         {
-            Description = "[Required] Comma-separated list of attribute names in desired order. Columns not in the list are dropped.",
+            Description = "[Required] Comma-separated list of every existing column exactly once, in desired order (case-insensitive).",
             Required = true
         };
 
         var command = new Command("reorder-columns",
-            "Set the authoritative column order for a view. Columns not listed are dropped.")
+            "Reorder every existing column exactly once. Use remove-column to remove a column.")
         {
             ViewsCommandGroup.ProfileOption,
             ViewsCommandGroup.EnvironmentOption,
@@ -39,6 +39,20 @@ public static class ReorderColumnsCommand
         };
 
         GlobalOptions.AddToCommand(command);
+
+        command.Validators.Add(result =>
+        {
+            var columns = result.GetValue(columnsOption);
+            if (columns == null) return; // Required-option validation reports a missing value.
+            try
+            {
+                ViewService.ValidateColumnOrder(columns.Split(','));
+            }
+            catch (PpdsException ex)
+            {
+                result.AddError(ex.UserMessage);
+            }
+        });
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -53,7 +67,7 @@ public static class ReorderColumnsCommand
             var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
             var ordered = columnsRaw
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Split(',', StringSplitOptions.TrimEntries)
                 .ToList();
 
             try
