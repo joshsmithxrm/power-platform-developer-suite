@@ -13,7 +13,10 @@ namespace PPDS.Cli.Commands.Forms;
 /// </summary>
 public static class GetCommand
 {
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity")
         {
@@ -59,7 +62,7 @@ public static class GetCommand
             var environment = parseResult.GetValue(FormsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, unpublished, raw, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, unpublished, raw, profile, environment, globalOptions, cancellationToken, providerFactory);
         });
 
         return command;
@@ -73,19 +76,22 @@ public static class GetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await providerFactory(profile, environment, globalOptions, cancellationToken);
 
             var formService = serviceProvider.GetRequiredService<IFormService>();
 
