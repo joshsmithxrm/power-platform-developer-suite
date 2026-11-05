@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Form XML raw get/set roundtrips accept repeated reusable `customControl` type IDs at their schema-defined path. Instance GUID uniqueness and schema validation remain enforced; set-xml help now distinguishes instance IDs from reusable type IDs (#1541).
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
