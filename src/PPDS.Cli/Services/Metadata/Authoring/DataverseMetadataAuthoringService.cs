@@ -306,8 +306,6 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             };
         }
 
-        reporter?.ReportPhase("Creating column", request.SchemaName);
-
         // #1161: derive values for local Choice options supplied as label-only (no explicit value).
         await DeriveLocalOptionValuesAsync(request, ct).ConfigureAwait(false);
 
@@ -321,6 +319,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         };
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        if (attribute is EnumAttributeMetadata { OptionSet: { IsGlobal: true } reference })
+        {
+            reporter?.ReportPhase("Resolving global choice", reference.Name);
+            reference.Name = await ResolveGlobalChoiceNameAsync(client, reference.Name, ct).ConfigureAwait(false);
+        }
+
+        reporter?.ReportPhase("Creating column", request.SchemaName);
         var response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
@@ -1973,6 +1978,46 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             attr.DefaultValue = request.DefaultValue.Value != 0;
 
         return attr;
+    }
+
+    private static async Task<string> ResolveGlobalChoiceNameAsync(IPooledClient client, string name, CancellationToken ct)
+    {
+        OptionSetMetadataBase[] definitions;
+        try
+        {
+            var response = await client.ExecuteAsync(
+                new RetrieveAllOptionSetsRequest { RetrieveAsIfPublished = true }, ct).ConfigureAwait(false);
+            definitions = (response as RetrieveAllOptionSetsResponse)?.OptionSetMetadata
+                ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    "Dataverse did not return the global choice definitions.");
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException
+            && ExceptionMapper.Map(ex).Code == ErrorCodes.Operation.Internal)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Could not retrieve the global choices: {ex.Message}", ex);
+        }
+
+        var matches = definitions.Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var exact = matches.Where(d => string.Equals(d.Name, name, StringComparison.Ordinal)).ToArray();
+        var candidates = exact.Length > 0 ? exact : matches;
+        if (candidates.Length == 0)
+            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
+                $"Global choice '{name}' was not found. List the available choices with 'ppds metadata optionsets'.",
+                nameof(CreateColumnRequest.OptionSetName));
+        if (candidates.Length > 1)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Global choice '{name}' matched multiple definitions. Check the exact stored name.",
+                nameof(CreateColumnRequest.OptionSetName));
+
+        var selected = candidates[0];
+        if (selected is not OptionSetMetadata || selected.IsGlobal == false
+            || selected.OptionSetType is not (null or OptionSetType.Picklist))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"'{selected.Name}' is not a global picklist that can be attached to a Choice or Choices column.",
+                nameof(CreateColumnRequest.OptionSetName));
+
+        return selected.Name;
     }
 
     private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request)

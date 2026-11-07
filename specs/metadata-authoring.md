@@ -584,6 +584,17 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
 | AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
+### Global choice names on column creation (#1535)
+
+When creating a Choice or Choices column that references a global choice, resolve its stored name from the target environment after input validation and dry run. An exact ordinal match takes precedence. Otherwise one ordinal case-insensitive match supplies the canonical name. The column carries a minimal global reference using that name. Public metadata queries continue to return the published view. The authoring lookup includes unpublished choices and incurs one extra catalog read per global attachment.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-78 | Single- and multi-select global references use the stored metadata name verbatim. A unique exact name wins over other case variants. CLI choice flags preserve the supplied spelling and the service preserves the caller DTO. | `GlobalChoiceReferenceTests.Attach_UsesCanonicalName`, `ExactName_WinsOverCaseVariant`, `CliFlags_PreserveInputSpelling` | ✅ |
+| AC-79 | An absent or ambiguous global name or incompatible definition produces a validation error before column creation. Duplicate exact matches are ambiguous. | `GlobalChoiceReferenceTests.UnresolvableName_StopsBeforeCreate`, `IncompatibleChoice_StopsBeforeCreate` | ✅ |
+| AC-80 | The lookup uses fresh unpublished metadata from the caller's pool, propagates cancellation and coded failures, reports SDK errors, and avoids create, publish and cache invalidation on failure. | `GlobalChoiceReferenceTests.ConsecutiveCreates_ReadCurrentCatalog`, `LookupFailure_StopsBeforeCreate`, `InvalidCatalog_StopsBeforeCreate` | ✅ |
+| AC-81 | Existing local, non-choice, validation, dry-run and safety-guard paths perform their established operations without a global-choice lookup. Publish and cache invalidation follow successful creation. | `GlobalChoiceReferenceTests.UnrelatedPath_SkipsCatalog`, `DryRunAndInputErrors_SkipCatalog`, `Guard_PrecedesAllLookups`, `Attach_UsesCanonicalName` | ✅ |
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
@@ -854,6 +865,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
 | 2026-06-10 | `entity` authoring verbs accept positional `<entity>` alongside `--entity` (#1208) — amended the #1160 Form A decision (Form B accepted additively), rewrote the §"CLI Surface" rationale, added AC-61/AC-62. `attribute`/`key` unchanged. |
+| 2026-11-07 | Resolve global choice references during column creation using the target environment's stored name (#1535, AC-78 through AC-81). |
 
 ---
 
