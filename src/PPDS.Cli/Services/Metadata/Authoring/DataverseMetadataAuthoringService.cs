@@ -364,22 +364,23 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         reporter?.ReportPhase("Retrieving existing column metadata");
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
-        // Retrieve existing attribute to get its type
         var retrieveRequest = new RetrieveAttributeRequest
         {
             EntityLogicalName = request.EntityLogicalName,
             LogicalName = request.ColumnLogicalName
         };
-        var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
-        var existingAttr = retrieveResponse.AttributeMetadata;
+        AttributeMetadata existingAttr;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            var response = (RetrieveAttributeResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+            existingAttr = response.AttributeMetadata;
+        }
 
         var primaryIdLabels = existingAttr.GetType() == typeof(AttributeMetadata)
             && existingAttr.AttributeType == AttributeTypeCode.Uniqueidentifier
             && existingAttr.IsPrimaryId == true;
         if (primaryIdLabels)
-            await ValidatePrimaryIdLabelUpdateAsync(client, request, existingAttr, ct).ConfigureAwait(false);
+            await ValidatePrimaryIdLabelUpdateAsync(request, existingAttr, ct).ConfigureAwait(false);
 
         reporter?.ReportPhase("Updating column", request.ColumnLogicalName);
 
@@ -415,7 +416,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (primaryIdLabels)
             sdkRequest.MergeLabels = true; // The request carries only LCID 1033. Preserve other translations.
 
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
@@ -2244,8 +2248,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         return attr;
     }
 
-    private static async Task ValidatePrimaryIdLabelUpdateAsync(
-        IPooledClient client, UpdateColumnRequest request, AttributeMetadata attribute, CancellationToken ct)
+    private async Task ValidatePrimaryIdLabelUpdateAsync(
+        UpdateColumnRequest request, AttributeMetadata attribute, CancellationToken ct)
     {
         if (request.DisplayName == null && request.Description == null)
             throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
@@ -2261,19 +2265,22 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         // Address GUIDs can also have IsPrimaryId set. Verify the table's actual key before writing.
         string? primaryId;
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            var response = await client.ExecuteAsync(new RetrieveEntityRequest
+            try
             {
-                LogicalName = request.EntityLogicalName,
-                EntityFilters = EntityFilters.Entity
-            }, ct).ConfigureAwait(false);
-            primaryId = (response as RetrieveEntityResponse)?.EntityMetadata?.PrimaryIdAttribute;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Could not retrieve the primary ID of '{request.EntityLogicalName}': {ex.Message}", ex);
+                var response = await client.ExecuteAsync(new RetrieveEntityRequest
+                {
+                    LogicalName = request.EntityLogicalName,
+                    EntityFilters = EntityFilters.Entity
+                }, ct).ConfigureAwait(false);
+                primaryId = (response as RetrieveEntityResponse)?.EntityMetadata?.PrimaryIdAttribute;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    $"Could not retrieve the primary ID of '{request.EntityLogicalName}': {ex.Message}", ex);
+            }
         }
 
         if (!string.Equals(primaryId, request.ColumnLogicalName, StringComparison.OrdinalIgnoreCase)
