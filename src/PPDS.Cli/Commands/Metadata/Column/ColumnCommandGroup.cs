@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Dataverse.Metadata;
@@ -25,7 +26,7 @@ public static class ColumnCommandGroup
         return command;
     }
 
-    internal static Command CreateCreateCommand()
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -195,7 +196,7 @@ public static class ColumnCommandGroup
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
                 dateTimeBehavior, optionSetName, options, defaultValue,
                 trueLabel, falseLabel, maxSizeInKB, dryRun, publish: false,
-                profileVal, environmentVal, globalOptions, cancellationToken);
+                profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;

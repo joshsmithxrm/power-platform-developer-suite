@@ -1,4 +1,5 @@
-using System.CommandLine;
+using System.CommandLine.Invocation;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -7,9 +8,11 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Auth.Credentials;
 using PPDS.Cli.Commands.Metadata.Attribute;
+using PPDS.Cli.Commands.Metadata.Column;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
+using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
@@ -31,14 +34,30 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
     private readonly List<string> _queries = [];
     private readonly DataverseMetadataAuthoringService _service;
     private OptionSetMetadataBase[] _catalog = [Choice(Stored)];
+    private readonly List<string> _leaseEvents = [];
+    private int _leaseCount;
+    private Exception? _checkoutFailure;
     private Exception? _lookupFailure;
     private OrganizationResponse? _invalidResponse;
     private bool _returnNullResponse;
 
     public GlobalChoiceReferenceTests()
     {
+        _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(CheckOutClient);
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
+            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+    }
+
+    private IPooledClient CheckOutClient()
+    {
+        var lease = ++_leaseCount;
+        _leaseEvents.Add($"checkout {lease}");
+        if (_checkoutFailure != null && _queries.Contains("publisher"))
+            throw _checkoutFailure;
+
         var client = new Mock<IPooledClient>();
-        _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(client.Object);
+        client.Setup(c => c.DisposeAsync()).Callback(() => _leaseEvents.Add($"dispose {lease}"))
+            .Returns(ValueTask.CompletedTask);
         client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), _cancellation.Token))
             .Returns<QueryBase, CancellationToken>((query, _) =>
             {
@@ -54,6 +73,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
             .Returns<OrganizationRequest, CancellationToken>((request, _) =>
             {
                 _requests.Add(request);
+                _leaseEvents.Add($"{request.RequestName} {lease}");
                 OrganizationResponse response = request switch
                 {
                     RetrieveAllOptionSetsRequest when _lookupFailure != null => throw _lookupFailure,
@@ -72,8 +92,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
                 };
                 return Task.FromResult(response);
             });
-        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
-            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+        return client.Object;
     }
 
     [Theory, Trait("AC", "AC-78"), Trait("AC", "AC-81")]
@@ -183,40 +202,96 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
         Assert.Equal(2, _requests.OfType<RetrieveAllOptionSetsRequest>().Count());
     }
 
+    [Fact, Trait("AC", "AC-80")]
+    public async Task CatalogLease_IsReturnedBeforeCreateCheckout()
+    {
+        await CreateAsync(Request(SchemaColumnType.Choice, Stored));
+        Assert.Equal(new[]
+        {
+            "checkout 1", "dispose 1", // existing solution and publisher queries
+            "checkout 2", "RetrieveAllOptionSets 2", "dispose 2",
+            "checkout 3", "CreateAttribute 3", "dispose 3"
+        }, _leaseEvents);
+    }
+
+    [Fact, Trait("AC", "AC-81")]
+    public async Task Publish_ObtainsLeaseAfterCreateLeaseIsReturned()
+    {
+        _cache.Setup(c => c.InvalidateEntity("account")).Callback(() => _leaseEvents.Add("invalidate"));
+        await CreateAsync(Request(SchemaColumnType.Choice, Stored, publish: true));
+        Assert.Equal(new[]
+        {
+            "checkout 1", "dispose 1",
+            "checkout 2", "RetrieveAllOptionSets 2", "dispose 2",
+            "checkout 3", "CreateAttribute 3", "dispose 3",
+            "invalidate", "checkout 4", "PublishXml 4", "dispose 4"
+        }, _leaseEvents);
+    }
+
+    [Theory, Trait("AC", "AC-80")]
+    [InlineData("timeout", ErrorCodes.Connection.Timeout)]
+    [InlineData("configuration", ErrorCodes.Validation.InvalidValue)]
+    [InlineData("missing-argument", ErrorCodes.Validation.RequiredField)]
+    public async Task CatalogCheckoutFailure_IsCodedAndSkipsCreate(string kind, string expectedCode)
+    {
+        _checkoutFailure = kind switch
+        {
+            "timeout" => new TimeoutException("Synthetic checkout timeout."),
+            "configuration" => new ConfigurationException("Synthetic invalid pool configuration."),
+            "missing-argument" => new ArgumentNullException("syntheticArgument"),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        var wrapped = await Assert.ThrowsAsync<PpdsException>(() => CreateAsync(Request(SchemaColumnType.Choices, Stored, publish: true)));
+        Assert.Equal(expectedCode, wrapped.ErrorCode);
+        Assert.Same(_checkoutFailure, wrapped.InnerException);
+        Assert.Equal(ExceptionMapper.ToExitCode(_checkoutFailure), ExceptionMapper.ToExitCode(wrapped));
+        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2" }, _leaseEvents);
+        Assert.Empty(_requests);
+        _cache.VerifyNoOtherCalls();
+    }
+
     [Theory, Trait("AC", "AC-80")]
     [InlineData("sdk")]
     [InlineData("auth")]
+    [InlineData("custom-auth-code")]
+    [InlineData("expired")]
     [InlineData("permission")]
     [InlineData("connection")]
     [InlineData("throttle")]
     [InlineData("timeout")]
     [InlineData("cancel")]
     [InlineData("coded")]
+    [InlineData("validation")]
     public async Task LookupFailure_StopsBeforeCreate(string kind)
     {
         _lookupFailure = kind switch
         {
             "auth" => new AuthenticationException("Synthetic credential fault"),
+            "custom-auth-code" => new AuthenticationException("Synthetic credential fault", "Synthetic.ProviderCode"),
+            "expired" => new DataverseAuthenticationException("Synthetic token expiry", true),
             "permission" => new DataverseAuthenticationException("Synthetic access fault", false),
             "connection" => new DataverseConnectionException("Synthetic connection fault"),
             "throttle" => new ServiceProtectionException("Synthetic throttling"),
             "timeout" => new TimeoutException("Synthetic timeout"),
             "cancel" => new OperationCanceledException(_cancellation.Token),
+            "validation" => new MetadataValidationException(MetadataErrorCodes.InvalidConstraint, "Synthetic metadata constraint"),
             "coded" => new PpdsException("Synthetic.Code", "Synthetic coded fault"),
             _ => new InvalidOperationException("Synthetic SDK fault")
         };
         var failure = await Record.ExceptionAsync(() => CreateAsync(Request(SchemaColumnType.Choice, Stored, publish: true)));
-        if (kind == "sdk")
+        if (kind is "cancel" or "coded" or "validation")
         {
-            var wrapped = Assert.IsType<PpdsException>(failure);
-            Assert.Equal(MetadataErrorCodes.SdkOperationFailed, wrapped.ErrorCode);
-            Assert.Same(_lookupFailure, wrapped.InnerException);
+            Assert.Same(_lookupFailure, failure);
         }
         else
         {
-            Assert.Same(_lookupFailure, failure);
-            Assert.Equal(ExceptionMapper.Map(_lookupFailure).Code, ExceptionMapper.Map(failure!).Code);
-            Assert.Equal(ExceptionMapper.ToExitCode(_lookupFailure), ExceptionMapper.ToExitCode(failure!));
+            var wrapped = Assert.IsAssignableFrom<PpdsException>(failure);
+            var expectedCode = kind == "sdk" ? MetadataErrorCodes.SdkOperationFailed : ExceptionMapper.Map(_lookupFailure).Code;
+            Assert.Equal(expectedCode, wrapped.ErrorCode);
+            if (_lookupFailure is DataverseAuthenticationException auth)
+                Assert.Equal(auth.RequiresReauthentication, Assert.IsType<PpdsAuthException>(wrapped).RequiresReauthentication);
+            Assert.Same(_lookupFailure, wrapped.InnerException);
+            Assert.Equal(ExceptionMapper.ToExitCode(_lookupFailure), ExceptionMapper.ToExitCode(wrapped));
         }
         AssertLookupOnly();
     }
@@ -286,20 +361,40 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
     }
 
     [Theory, Trait("AC", "AC-78")]
-    [InlineData("--choice")]
-    [InlineData("--option-set-name")]
-    public void CliFlags_PreserveInputSpelling(string flag)
+    [InlineData(false, "--choice")]
+    [InlineData(false, "--option-set-name")]
+    [InlineData(true, "--option-set-name")]
+    public async Task CliActions_PreserveSpellingAndAttachStoredName(bool deprecatedColumn, string flag)
     {
-        var command = AttributeCommandGroup.CreateCreateCommand();
+        const string input = "New_sErViCeType";
+        var adapter = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
+        CreateColumnRequest? captured = null;
+        adapter.Setup(s => s.CreateColumnAsync(It.IsAny<CreateColumnRequest>(), null, _cancellation.Token))
+            .Returns((CreateColumnRequest dto, IMetadataAuthoringProgressReporter? reporter, CancellationToken ct) =>
+            {
+                captured = dto;
+                return _service.CreateColumnAsync(dto, reporter, ct);
+            });
+
+        Task<ServiceProvider> Provider(CancellationToken _) =>
+            Task.FromResult(new ServiceCollection().AddSingleton(adapter.Object).BuildServiceProvider());
+        var command = deprecatedColumn
+            ? ColumnCommandGroup.CreateCreateCommand(Provider)
+            : AttributeCommandGroup.CreateCreateCommand(Provider);
         var parsed = command.Parse(["--solution", "TestSolution", "--entity", "account", "--name", "new_TestField",
-            "--display-name", "Test", "--type", "Choice", flag, Stored]);
+            "--display-name", "Test", "--type", "Choice", flag, input, "--output-format", "Json"]);
         Assert.Empty(parsed.Errors);
-        Assert.Equal(Stored, parsed.GetValue((Option<string?>)command.Options.Single(option => option.Name == flag)));
+        var action = Assert.IsAssignableFrom<AsynchronousCommandLineAction>(parsed.Action);
+        Assert.Equal(ExitCodes.Success, await action.InvokeAsync(parsed, _cancellation.Token));
+        Assert.Equal(input, captured!.OptionSetName);
+        var create = Assert.Single(_requests.OfType<CreateAttributeRequest>());
+        Assert.Equal(Stored, Assert.IsType<PicklistAttributeMetadata>(create.Attribute).OptionSet.Name);
     }
 
     private void AssertLookupOnly()
     {
         Assert.True(Assert.IsType<RetrieveAllOptionSetsRequest>(Assert.Single(_requests)).RetrieveAsIfPublished);
+        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2", "RetrieveAllOptionSets 2", "dispose 2" }, _leaseEvents);
         _cache.VerifyNoOtherCalls();
     }
 

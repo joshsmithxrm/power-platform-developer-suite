@@ -15,6 +15,7 @@ using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Resilience;
 using SdkCascadeType = Microsoft.Xrm.Sdk.Metadata.CascadeType;
 using SdkCreateOneToManyRequest = Microsoft.Xrm.Sdk.Messages.CreateOneToManyRequest;
 using SdkCreateManyToManyRequest = Microsoft.Xrm.Sdk.Messages.CreateManyToManyRequest;
@@ -318,15 +319,18 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         if (attribute is EnumAttributeMetadata { OptionSet: { IsGlobal: true } reference })
         {
             reporter?.ReportPhase("Resolving global choice", reference.Name);
-            reference.Name = await ResolveGlobalChoiceNameAsync(client, reference.Name, ct).ConfigureAwait(false);
+            reference.Name = await ResolveGlobalChoiceNameAsync(reference.Name, ct).ConfigureAwait(false);
         }
 
         reporter?.ReportPhase("Creating column", request.SchemaName);
-        var response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        CreateAttributeResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (CreateAttributeResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
 
@@ -1980,22 +1984,31 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         return attr;
     }
 
-    private static async Task<string> ResolveGlobalChoiceNameAsync(IPooledClient client, string name, CancellationToken ct)
+    private async Task<string> ResolveGlobalChoiceNameAsync(string name, CancellationToken ct)
     {
         OptionSetMetadataBase[] definitions;
         try
         {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
             var response = await client.ExecuteAsync(
                 new RetrieveAllOptionSetsRequest { RetrieveAsIfPublished = true }, ct).ConfigureAwait(false);
             definitions = (response as RetrieveAllOptionSetsResponse)?.OptionSetMetadata
                 ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
                     "Dataverse did not return the global choice definitions.");
         }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException
-            && ExceptionMapper.Map(ex).Code == ErrorCodes.Operation.Internal)
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
         {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Could not retrieve the global choices: {ex.Message}", ex);
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
+            if (exitCode == ExitCodes.AuthError)
+                throw new PpdsAuthException(error.Code, error.Message, ex)
+                {
+                    RequiresReauthentication = ex is DataverseAuthenticationException { RequiresReauthentication: true }
+                };
+
+            var code = exitCode is ExitCodes.ConnectionError or ExitCodes.InvalidArguments
+                ? error.Code
+                : MetadataErrorCodes.SdkOperationFailed;
+            throw new PpdsException(code, $"Could not retrieve the global choices: {error.Message}", ex);
         }
 
         var matches = definitions.Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
