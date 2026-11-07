@@ -375,12 +375,20 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
         var existingAttr = retrieveResponse.AttributeMetadata;
 
+        var primaryIdLabels = existingAttr.GetType() == typeof(AttributeMetadata)
+            && existingAttr.AttributeType == AttributeTypeCode.Uniqueidentifier
+            && existingAttr.IsPrimaryId == true;
+        if (primaryIdLabels)
+            await ValidatePrimaryIdLabelUpdateAsync(client, request, existingAttr, ct).ConfigureAwait(false);
+
         reporter?.ReportPhase("Updating column", request.ColumnLogicalName);
 
         // #1009: re-sending the retrieved AttributeMetadata silently drops RequiredLevel
         // changes on the wire. Build a fresh, minimal attribute of the same SDK type
         // and copy only the fields the caller explicitly asked to change.
-        var updateAttr = CreateUpdateAttribute(existingAttr);
+        var updateAttr = primaryIdLabels ? new AttributeMetadata() : CreateUpdateAttribute(existingAttr);
+        updateAttr.LogicalName = existingAttr.LogicalName;
+        updateAttr.SchemaName = existingAttr.SchemaName;
 
         if (request.DisplayName != null)
             updateAttr.DisplayName = new Label(request.DisplayName, 1033);
@@ -403,6 +411,9 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             Attribute = updateAttr,
             SolutionUniqueName = request.SolutionUniqueName
         };
+
+        if (primaryIdLabels)
+            sdkRequest.MergeLabels = true; // The request carries only LCID 1033. Preserve other translations.
 
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
@@ -1280,7 +1291,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 "Provide --value or --solution to determine the option value.",
                 "Value");
 
-        var existingReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        var existingReasons = await ReadStatusReasonsAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
         var existingValues = existingReasons.Select(r => r.Value).ToList();
 
         int? optionPrefix = null;
@@ -1332,7 +1343,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
+    public Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
+        => ReadStatusReasonsAsync(entityLogicalName, retrieveAsIfPublished: false, ct);
+
+    // Allocation needs draft values, while public lists and existing target resolution remain published.
+    private async Task<IReadOnlyList<StatusReasonInfo>> ReadStatusReasonsAsync(
+        string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField, "EntityLogicalName is required.", "EntityLogicalName");
@@ -1342,7 +1358,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var retrieveRequest = new RetrieveAttributeRequest
         {
             EntityLogicalName = entityLogicalName,
-            LogicalName = "statuscode"
+            LogicalName = "statuscode",
+            RetrieveAsIfPublished = retrieveAsIfPublished
         };
 
         OrganizationResponse retrieveResponse;
@@ -1561,7 +1578,12 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     #region Local Column Options (#1161)
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+    public Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
+        => ReadColumnOptionsAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: false, ct);
+
+    // Keep draft-aware allocation separate from published list/update/remove semantics.
+    private async Task<IReadOnlyList<ColumnOptionInfo>> ReadColumnOptionsAsync(
+        string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         _validator.ValidateRequiredString(entityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(columnLogicalName, "ColumnLogicalName");
@@ -1571,7 +1593,8 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var retrieveRequest = new RetrieveAttributeRequest
         {
             EntityLogicalName = entityLogicalName,
-            LogicalName = columnLogicalName
+            LogicalName = columnLogicalName,
+            RetrieveAsIfPublished = retrieveAsIfPublished
         };
 
         OrganizationResponse retrieveResponse;
@@ -1630,7 +1653,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide an explicit value or --solution to derive the option value.", "Value");
 
-        var existing = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
+        var existing = await ReadColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
         var existingValues = existing.Select(o => o.Value).ToList();
 
         int? optionPrefix = null;
@@ -2119,9 +2142,19 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         try
         {
             var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(
-                new RetrieveAttributeRequest { EntityLogicalName = entityLogicalName, LogicalName = attributeLogicalName },
+                new RetrieveAttributeRequest
+                {
+                    EntityLogicalName = entityLogicalName,
+                    LogicalName = attributeLogicalName,
+                    // The inserted option and other pending changes may not yet be published.
+                    RetrieveAsIfPublished = true
+                },
                 ct).ConfigureAwait(false);
             attribute = retrieveResponse.AttributeMetadata;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
@@ -2233,9 +2266,48 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         return attr;
     }
 
+    private static async Task ValidatePrimaryIdLabelUpdateAsync(
+        IPooledClient client, UpdateColumnRequest request, AttributeMetadata attribute, CancellationToken ct)
+    {
+        if (request.DisplayName == null && request.Description == null)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "A primary ID update requires a display name or description.");
+
+        if (request is not
+            {
+                RequiredLevel: null, MaxLength: null, MinValue: null, MaxValue: null, Precision: null,
+                Format: null, IsAuditEnabled: null, IsSecured: null, IsValidForAdvancedFind: null, AutoNumberFormat: null
+            })
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "A primary ID update supports only the display name and description. Remove the other column settings.");
+
+        // Address GUIDs can also have IsPrimaryId set. Verify the table's actual key before writing.
+        string? primaryId;
+        try
+        {
+            var response = await client.ExecuteAsync(new RetrieveEntityRequest
+            {
+                LogicalName = request.EntityLogicalName,
+                EntityFilters = EntityFilters.Entity
+            }, ct).ConfigureAwait(false);
+            primaryId = (response as RetrieveEntityResponse)?.EntityMetadata?.PrimaryIdAttribute;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Could not retrieve the primary ID of '{request.EntityLogicalName}': {ex.Message}", ex);
+        }
+
+        if (!string.Equals(primaryId, request.ColumnLogicalName, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(primaryId, attribute.LogicalName, StringComparison.OrdinalIgnoreCase))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Table metadata does not identify '{request.ColumnLogicalName}' as the primary ID of '{request.EntityLogicalName}'.",
+                nameof(request.ColumnLogicalName));
+    }
+
     private static AttributeMetadata CreateUpdateAttribute(AttributeMetadata existingAttr)
     {
-        AttributeMetadata fresh = existingAttr switch
+        return existingAttr switch
         {
             StringAttributeMetadata => new StringAttributeMetadata(),
             MemoAttributeMetadata => new MemoAttributeMetadata(),
@@ -2256,10 +2328,6 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 $"Unsupported attribute type for update: {existingAttr.GetType().Name}",
                 "ColumnType")
         };
-
-        fresh.LogicalName = existingAttr.LogicalName;
-        fresh.SchemaName = existingAttr.SchemaName;
-        return fresh;
     }
 
     private static void ApplyTypeSpecificUpdates(AttributeMetadata attr, UpdateColumnRequest request)
